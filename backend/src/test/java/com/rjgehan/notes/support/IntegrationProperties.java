@@ -26,6 +26,9 @@ public final class IntegrationProperties {
 		properties.put("notes.allowed-hosts", "localhost");
 		properties.put("notes.identity.allow-default", "true");
 		properties.put("notes.security.require-tailscale-interface", "false");
+		// No ntfy.json and no backup status, whatever this machine has under /data (ROADMAP item 38).
+		properties.put("notes.secrets-dir", "target/no-secrets");
+		properties.put("notes.backup.status-file", "target/no-backup-state/status.json");
 		return properties;
 	}
 

@@ -285,6 +285,26 @@ public class GitStore implements DisposableBean {
 		return (head != null) ? head.name() : null;
 	}
 
+	/**
+	 * The number of commits reachable from {@code head} ({@code git rev-list --count}), for the status page. A read
+	 * with its own walker, like every read; it parses every commit, so callers cache it per {@code HEAD}.
+	 */
+	public long commitCount(String head) throws IOException {
+		Git current = this.git;
+		if (current == null) {
+			return 0;
+		}
+		try (RevWalk walk = new RevWalk(current.getRepository())) {
+			walk.setRetainBody(false);
+			walk.markStart(walk.parseCommit(ObjectId.fromString(head)));
+			long count = 0;
+			for (RevCommit ignored : walk) {
+				count++;
+			}
+			return count;
+		}
+	}
+
 	/** The repository the app manages, for tests and diagnostics. */
 	Repository repository() {
 		Git current = this.git;

@@ -53,9 +53,13 @@ services:
       # ---- Mirror of the vault's history to a private GitHub repository (ROADMAP item 2, DEPLOY.md "Mirror"):
       NOTES_MIRROR_URL: ${NOTES_MIRROR_URL:-}   # https://github.com/<you>/<repo>.git; empty = no mirror
       NOTES_MIRROR_TOKEN_FILE: /run/secrets/mirror_token
+      # App-error alerts (ROADMAP item 38) are on when /data/secrets/ntfy.json exists (DEPLOY.md "App alerts").
     secrets: [mirror_token]
     volumes:
       - notes-data:/data
+      # The last backup run's status.json, read-only, for the status page (ROADMAP item 38). Host cron writes it
+      # elsewhere: set NOTES_BACKUP_STATE to that directory (DEPLOY.md "Host cron instead of backup-scheduler").
+      - ${NOTES_BACKUP_STATE:-backup-state}:/backup-state:ro
     mem_limit: 1g
     stop_grace_period: 45s
     labels:
@@ -142,7 +146,7 @@ volumes:
   notes-data:
     external: true
   backup-cache: {}                              # restic's cache; disposable
-  backup-state: {}
+  backup-state: {}                              # backup-scheduler writes status.json; notes reads it (ro)
 
 secrets:                                        # files under deploy/secrets/ (gitignored, mode 600); DEPLOY.md "Backups", "Mirror"
   restic_password:

@@ -57,6 +57,23 @@ class GitStoreTest {
 	}
 
 	@Test
+	void commitsAreCountedFromHead() throws Exception {
+		GitStore git = store(Map.of());
+		git.openOrInit();
+		try {
+			String first = commitFile(git, this.vault, "a.md", "a").id();
+			commitFile(git, this.vault, "b.md", "b");
+			String third = commitFile(git, this.vault, "a.md", "a2").id();
+			assertThat(git.commitCount(third)).isEqualTo(3);
+			assertThat(git.commitCount(first)).isEqualTo(1);
+			assertThat(git.head()).isEqualTo(third);
+		}
+		finally {
+			git.close();
+		}
+	}
+
+	@Test
 	void staleLocksAreRemovedAndCommitsWork() throws Exception {
 		GitStore first = store(Map.of());
 		first.openOrInit();

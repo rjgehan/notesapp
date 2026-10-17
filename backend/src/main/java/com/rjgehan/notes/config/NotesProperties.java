@@ -29,6 +29,9 @@ public record NotesProperties(
 		@DefaultValue Security security,
 		@DefaultValue TailscaleWatchdog tailscaleWatchdog,
 		@DefaultValue Mirror mirror,
+		@DefaultValue Alerts alerts,
+		@DefaultValue Backup backup,
+		@DefaultValue("/data/secrets") Path secretsDir,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
 				"yml" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
@@ -59,6 +62,26 @@ public record NotesProperties(
 			@DefaultValue("10m") Duration delay,
 			@DefaultValue("1h") Duration maxDelay,
 			@DefaultValue("60s") Duration timeout) {
+	}
+
+	/**
+	 * App-error alerts (DESIGN §5.18, ROADMAP item 38): the stable log markers pushed to ntfy when
+	 * {@code <secrets-dir>/ntfy.json} configures it. A marker is sent at most once per {@code repeatAfter} (repeats are
+	 * summed up in one follow-up), and at most {@code maxPerHour} alerts are sent in any hour.
+	 */
+	public record Alerts(
+			@DefaultValue("1h") Duration repeatAfter,
+			@DefaultValue("10") int maxPerHour) {
+	}
+
+	/**
+	 * The nightly backups as the status page shows them (ROADMAP items 1 and 38): {@code statusFile} is the backup
+	 * run's {@code status.json}, mounted read-only from the {@code backup-state} volume; a last success older than
+	 * {@code staleAfter} is shown as stale.
+	 */
+	public record Backup(
+			@DefaultValue("/backup-state/status.json") Path statusFile,
+			@DefaultValue("36h") Duration staleAfter) {
 	}
 
 	public record Watcher(

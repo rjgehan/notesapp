@@ -54,9 +54,13 @@ public class CommitBatcher implements SmartLifecycle {
 
 	private static final Duration SHUTDOWN_WAIT = Duration.ofSeconds(20);
 
-	/** What {@code /api/status} shows about history. */
+	/**
+	 * What {@code /api/status} shows about history; the two counters (commits made and failed commit attempts, during
+	 * this server run) are for the status page.
+	 */
 	public record Status(int pendingPaths, @Nullable Instant nextCommitAt, @Nullable Instant lastCommitAt,
-			@Nullable String lastError, @Nullable Instant failingSince, boolean importing) {
+			@Nullable String lastError, @Nullable Instant failingSince, boolean importing, long commitsThisRun,
+			long failedCommitsThisRun) {
 	}
 
 	private final GitStore git;
@@ -95,6 +99,10 @@ public class CommitBatcher implements SmartLifecycle {
 	private @Nullable String lastError;
 
 	private @Nullable Instant lastCommitAt;
+
+	private long commitsThisRun;
+
+	private long failedCommitsThisRun;
 
 	private boolean importing;
 
@@ -309,6 +317,9 @@ public class CommitBatcher implements SmartLifecycle {
 
 	/** Publishes {@code history.committed} for a commit made outside the batcher (the startup bootstrap commit). */
 	public void publishCommitted(GitStore.Commit commit) {
+		synchronized (this.state) {
+			this.commitsThisRun++;
+		}
 		List<String> paths = commit.paths();
 		boolean truncated = paths.size() > HistoryCommittedEvent.MAX_PATHS;
 		this.hub.publish(new HistoryCommittedEvent(commit.id(), commit.subject(), commit.author().name(),
@@ -325,7 +336,7 @@ public class CommitBatcher implements SmartLifecycle {
 	public Status status() {
 		synchronized (this.state) {
 			return new Status(this.pending.size(), nextCommitAt(), this.lastCommitAt, this.lastError,
-					this.failingSince, this.importing);
+					this.failingSince, this.importing, this.commitsThisRun, this.failedCommitsThisRun);
 		}
 	}
 
@@ -532,6 +543,7 @@ public class CommitBatcher implements SmartLifecycle {
 			Instant now = this.clock.instant();
 			firstFailure = this.failures == 0;
 			this.failures++;
+			this.failedCommitsThisRun++;
 			if (firstFailure) {
 				this.failingSince = now;
 			}

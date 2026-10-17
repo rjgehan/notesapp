@@ -332,6 +332,11 @@ public class VaultFs {
 		return Files.getFileStore(this.root).getUsableSpace();
 	}
 
+	/** The size of the vault's filesystem, for the status page. */
+	public long totalSpace() throws IOException {
+		return Files.getFileStore(this.root).getTotalSpace();
+	}
+
 	private Path newTempPath() throws IOException {
 		Files.createDirectories(this.tmpDir);
 		return this.tmpDir.resolve(UUID.randomUUID() + ".tmp");
