@@ -166,10 +166,14 @@ NotesApp/                              (monorepo; branch main)
 ├── docs/
 │   ├── DESIGN.md, API.md, ROADMAP.md  architect
 │   └── DEPLOY.md                      WP-Infra: homeserver runbook
+├── scripts/
+│   └── third-party-notices.mjs        regenerates THIRD_PARTY_NOTICES.md from the lockfile and Maven (no npm deps)
 ├── Dockerfile                         WP-Infra  3 stages: node build, maven build, JRE runtime
 ├── .dockerignore                      WP-Infra
 ├── .gitignore, .gitattributes         WP-Infra  (root level; backend/ keeps its own)
 ├── README.md                          WP-Infra
+├── LICENSE                            GPL-3.0-only, the unmodified GNU text (ROADMAP item 6 decision, 2026-10-17)
+├── THIRD_PARTY_NOTICES.md             generated: shipped third-party packages and their licences
 └── dev-vault/                         gitignored; local vault used by the backend's dev profile
 ```
 

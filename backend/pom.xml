@@ -15,7 +15,12 @@
 	<description>Self-hosted Obsidian-style notes</description>
 	<url/>
 	<licenses>
-		<license/>
+		<license>
+			<name>GPL-3.0-only</name>
+			<url>https://www.gnu.org/licenses/gpl-3.0.txt</url>
+			<distribution>repo</distribution>
+			<comments>GNU General Public License, version 3 only (the repository's LICENSE file)</comments>
+		</license>
 	</licenses>
 	<developers>
 		<developer/>
