@@ -262,7 +262,7 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
 
 - `readOnly` is `true` when the file on disk was written by a newer version of the app or fails validation. The server then serves what it could read plus defaults, and refuses writes (DESIGN §5.12).
 - Fields in the file that this version does not know are **preserved** on write.
-- Per-device preferences (theme, spellcheck, autocorrect, remote images) are not vault settings; the client keeps them in `localStorage`.
+- Per-device preferences (theme, spellcheck, autocorrect, remote images, Live Preview syntax visibility) are not vault settings; the client keeps them in `localStorage`.
 
 ### `PUT /api/settings`
 
@@ -298,6 +298,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `autoUpdateLinks` | The default for `MoveRequest.updateLinks`. |
 | `excludedPaths` | Excluded from search results (§12.1) and from unlinked mentions (§11.2). |
 | `dailyNotes.*`, `templates.*` | See §15.2 and §15.4. |
+| `editor.defaultMode` | How notes open: `edit` in the editor (Live Preview, DESIGN §6.6.1), `read` in the reading view. Source mode and lock editing are per-note choices on the client. |
 | `editor.*` | UI preferences that apply on all devices. `strictLineBreaks: false` (the default, as in Obsidian) renders a single newline as a line break in reading view. |
 
 ---

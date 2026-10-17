@@ -38,7 +38,7 @@ NotesApp is a self-hosted, single-user notes web app modelled closely on Obsidia
 - Tabs and split panes.
 - Rich Markdown: Mermaid, math, callouts, code syntax highlighting in reading view. (`==highlight==` and `%%comments%%` are core Obsidian syntax and are in v1, §6.7.)
 - Nightly or offsite backups. Git history inside the volume plus the manual backup of §7.9 are the only safety nets in v1 (see goal 2).
-- Obsidian-style Live Preview (WYSIWYG) editing. v1 uses styled source mode plus a separate reading view.
+- Obsidian-style Live Preview (WYSIWYG) editing. v1 uses styled source mode plus a separate reading view. (Being built as ROADMAP item 10: §6.6.1.)
 - Multiple users, permissions, app-level login. The tailnet is the auth boundary.
 - Plugins, Canvas, Dataview-style queries, publishing.
 
@@ -1022,7 +1022,9 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | | `readableLineLength` | `true` |
 | | `strictLineBreaks` | `false` (as in Obsidian, a single newline renders as a line break in reading view) |
 
-**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on) and `loadRemoteImages` (default on). They are edited under Settings, "This device".
+**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on), `loadRemoteImages` (default on) and `syntaxVisibility` (`hide-all`, the default, or `reveal-at-cursor`: how Live Preview shows Markdown markup, §6.6.1). They are edited under Settings, "This device".
+
+`editor.defaultMode` keeps its two values: `edit` now opens notes in Live Preview, `read` in the reading view (§6.6.1). No enum value was added, so the settings `schemaVersion` is unchanged.
 
 ### 5.13 Identity
 
@@ -1322,7 +1324,7 @@ frontend/src/
 │   └── applyEvents.ts        SSE event → cache patches / invalidations (§6.3)
 ├── state/
 │   ├── ui.ts                 zustand: sidebars, active panel tabs, overlays, drawer, sheet, widths, desktop search query
-│   ├── prefs.ts              per-device preferences (theme, spellcheck, autocorrect, loadRemoteImages) in localStorage
+│   ├── prefs.ts              per-device preferences (theme, spellcheck, autocorrect, loadRemoteImages, syntaxVisibility) in localStorage
 │   ├── buildCheck.ts         compares X-Notes-Build / hello.buildSha with import.meta.env.VITE_BUILD_SHA (§6.18)
 │   └── clientId.ts           per-page-load id (crypto.randomUUID, getRandomValues fallback)
 ├── extensions/               EXTENSION POINTS (§6.8): registerView, registerPage, registerPanel, registerCommand,
@@ -1330,7 +1332,7 @@ frontend/src/
 ├── views/                    FILE-TYPE → VIEW REGISTRY (§6.8)
 │   ├── registry.ts
 │   ├── FileView.tsx          route target: picks descriptor, lazy-loads it, error boundary
-│   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, mode toggle, save status), PropertiesTable.tsx
+│   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, source and lock toggles, save status), PropertiesTable.tsx
 │   ├── ImageView.tsx, PdfView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
 ├── editor/
 │   ├── obsidianSyntax.ts     Lezer inline extension (WikiLink, Embed, Hashtag, Highlight ==x==, Comment %%x%%)
@@ -1340,6 +1342,8 @@ frontend/src/
 │   ├── smartPunctuation.ts   input filter that undoes iOS smart quotes and dashes in frontmatter and code
 │   ├── unresolved.ts         decoration for links the client resolver cannot resolve
 │   ├── outline.ts            headings from the live Lezer tree (Outline panel, [[# completion)
+│   ├── livePreview/          Live Preview (§6.6.1): model.ts (markup from the Lezer tree), decorations.ts, widgets.ts,
+│   │                         index.ts (the extension: view plugin, atomic ranges, cursor and deletion rules, link clicks)
 │   ├── NoteEditor.tsx        React host for an EditorView
 │   ├── historyDiff.ts        unifiedMergeView for history and conflict compare (lazy)
 │   ├── remote.ts             applyRemoteText() (minimal diff, composition-safe)
@@ -1394,13 +1398,14 @@ There is no `['resolve']` query: link resolution runs on the client over the tre
 
 - sidebar open flags and widths (persisted to localStorage);
 - the active left tab (`files | search | tags`) and right tab (`backlinks | outline | history`);
+- the mode chosen per file in this page load (`noteModes`, §6.6.1), re-keyed on moves;
 - the desktop search panel's query (desktop search never changes the route, §6.4);
 - overlay flags (switcher, palette, prompt, confirm, template picker);
 - the mobile drawer and sheet state;
 - the SSE connection status and the `caughtUp` flag;
 - the global save summary.
 
-Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `state/prefs.ts` (§5.12).
+Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax visibility) live in `state/prefs.ts` (§5.12).
 
 **`DocumentSession`** (one per open text file, outside React, in a ref-counted registry) holds the editing state. Its state machine is in §6.10. Views use `useTextDocument(path)`.
 
@@ -1448,7 +1453,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | Route | View |
 |---|---|
 | `/` | `HomePage`. If `dailyNotes.openOnStartup`, open today's note. Otherwise open the last-opened path (`localStorage notesapp:lastPath`) if it still exists, then `Welcome.md`, then an empty state with "New note" and "Today". |
-| `/n/<path>` | `FileView`. The registry picks the view. `#<heading text>` scrolls to the heading. `?line=N` scrolls to 0-based line `N` (a search hit), flashes it, and highlights the terms of `&q=`. `?mode=read` forces the reading view. |
+| `/n/<path>` | `FileView`. The registry picks the view. `#<heading text>` scrolls to the heading. `?line=N` scrolls to 0-based line `N` (a search hit), flashes it, and highlights the terms of `&q=`. `?mode=read` forces the reading view. The other modes (Live Preview, source, locked) are chosen per note, §6.6.1. |
 | `/search?q=…` | Search page, **phones only**. On desktop the search panel keeps its query in zustand and never changes the route, so typing in it never navigates away from the open note. |
 | `/trash` | Trash page |
 | `/settings`, `/settings/<section>` | Settings page (lazy) |
@@ -1477,15 +1482,16 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
     ├ <LeftSidebar>           tabs: <FileExplorer/> | <SearchPanel/> | <TagsPanel/> + registered left panels
     │                         (phone: inside <Drawer>, whose footer holds Settings, Trash and the theme toggle)
     ├ <Workspace>
-    │   ├ <TopBar/>           phone/tablet: ☰, title (+ connection dot), switcher/search button, mode toggle, ⋯ menu
+    │   ├ <TopBar/>           phone/tablet: ☰, title (+ connection dot), switcher/search button, lock toggle, ⋯ menu
+    │   │                     (⋯ has Source mode and Reading view for notes)
     │   └ <WorkspaceScroll>   THE scroll container: the title and properties scroll away with the text, as in Obsidian
     │       ├ <ConflictBanner/>  (sticky; only in conflict/deleted states)
     │       └ <Routes> → <FileView path> | registered pages
     │             └ registry view, e.g. <MarkdownView>
-    │                  ├ <NoteHeader>  <InlineTitle/> (edit = rename) · <SaveStatus/> · mode toggle · ⋯
+    │                  ├ <NoteHeader>  <InlineTitle/> (edit = rename) · <SaveStatus/> · source toggle · lock toggle
     │                  │               (phone: only <InlineTitle/>; the TopBar already has the rest)
     │                  ├ <PropertiesTable/> (reading mode, if frontmatter)
-    │                  └ <NoteEditor/> (CodeMirror sized to its content) | <ReadingView/>
+    │                  └ <NoteEditor/> (CodeMirror sized to its content: Live Preview, source or locked) | <ReadingView/>
     ├ <RightSidebar>          tabs: <BacklinksPanel/> | <OutlinePanel/> | <HistoryPanel/> (lazy) + registered right panels
     │                         (phone: <BottomSheet>)
     ├ <StatusBar/>            desktop: <ConnectionIndicator/> · save summary · history warning · words/chars · backlink count
@@ -1505,14 +1511,15 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | 4 | `search({top: true})` | In-note find and replace panel (`Mod-F`) |
 | 5 | `EditorView.lineWrapping`, `placeholder('Start writing…')` | |
 | 6 | `yamlFrontmatter({content: markdown({base: markdownLanguage, codeLanguages: languages, extensions: [ObsidianSyntax], completeHTMLTags: false})})` | GFM, frontmatter, lazily loaded fence grammars, and the WikiLink, Embed, Hashtag, Highlight (`==x==`) and Comment (`%%x%%`) nodes. The tag and wikilink rules use the shared patterns of `features/syntax.ts` (API.md §15.6), including `\|` as the alias separator. |
-| 7 | `syntaxHighlighting(obsidianHighlight)` + `lineClassPlugin` | Styled source mode: heading sizes, faint `#`/`**`/backtick marks, code-block and quote backgrounds, a highlight background for `==x==`, faint `%%comments%%`. Nothing is hidden. |
+| 7 | `syntaxHighlighting(obsidianHighlight)` + `lineClassPlugin` | Styled source mode: heading sizes, faint `#`/`**`/backtick marks, code-block and quote backgrounds, a highlight background for `==x==`, faint `%%comments%%`. Nothing is hidden. Live Preview builds on the same styling. |
+| 7a | `livePreview(config)`, in Live Preview and locked mode only | Hides or replaces the markup (§6.6.1). Source mode leaves it out, so source mode is exactly item 7. |
 | 8 | `autocompletion({override: [wikilinkSource, headingSource, tagSource], icons: false})` | **`[[`** gives notes and aliases, pre-ranked with fuzzysort, with `filter: false` and **no `validFor`**: CodeMirror honours `validFor` only when it filters itself, so with both set the list froze after the first keystroke. The source re-runs on every keystroke and returns at most 50 options. The inserted text is `linkText(P, source, settings.newLinkFormat, style)` (§5.5.7), so two notes with the same name get a path-qualified link. With `useWikilinks: false`, the typed `[[query` is replaced by a Markdown link `[display](encodedPath)`. **`[[#`** and **`[[ThisNote#`** give headings from the open note's live Lezer tree; **`[[Other#`** uses `['meta', path]`. **`#`** gives tags. Completions use a custom `apply` that swallows the auto-inserted `]]`. |
 | 9 | `clickNavigation(nav)` + `unresolvedLinks` | `Mod`+click follows a link or tag (Shift adds nothing in v1, because there are no panes). A `ViewPlugin` marks wikilinks and internal Markdown links that the client resolver cannot resolve with `cm-unresolved` (faded), as Obsidian does. |
 | 10 | `pasteAndDrop(uploader, notePath)` | Image or PDF paste and drop, inserted at the **current selection** (which CodeMirror keeps after blur). While a file uploads, an "Uploading name…" **widget** marks its place: a position in the editor state, never document text, so autosave, drafts and other devices never see a placeholder and a tab killed mid-upload leaves nothing in the note. `AttachmentResult.markdown` (already in the configured link style) is inserted at the widget's mapped position, in the files' order, or the widget is removed on failure. Uploads in flight count as unsaved work (the `beforeunload` prompt, the new-build reload). Uploads send an `Idempotency-Key`. Internal explorer drag (`application/x-notesapp-path`) inserts a link built with `linkText`. |
 | 11 | `EditorView.contentAttributes` | `spellcheck` and `autocorrect` from the per-device preferences (§5.12), `autocapitalize=sentences`, `enterkeyhint=enter` |
 | 12 | `smartPunctuationGuard` | An input transaction filter for iOS Smart Punctuation, which WebKit reportedly ties to `spellcheck` (to be confirmed on the device, smoke item 22). Inside frontmatter, fenced or inline code, and for `--`/`---` at the start of a line, it reverts the substitutions: `—` back to `--`, curly double quotes to `"`, curly single quotes to `'`. Otherwise iOS would silently break frontmatter delimiters, YAML strings and `"[[Link]]"` property values. |
 | 13 | `EditorView.scrollMargins` + `cursorScrollMargin` | Keeps the caret clear of the sticky banner and the toolbar |
-| 14 | `EditorState.readOnly` / `EditorView.editable` | For `lossy` files |
+| 14 | `EditorState.readOnly` / `EditorView.editable` | For `lossy` files, and for locked Live Preview |
 | 15 | Keymap, highest first | `Prec.highest`: `Mod-Alt-ArrowLeft` / `Mod-Alt-ArrowRight` (navigate back and forward; CodeMirror's `defaultKeymap` binds `Alt-ArrowLeft/Right` to syntax-wise cursor moves outside macOS). Then the app keymap (`Mod-s` flush, `Mod-Enter` follow, `Mod-l` toggle checkbox, `Mod-b`, `Mod-i`, `Mod-k`), then `closeBracketsKeymap`, `completionKeymap`, `searchKeymap`, `historyKeymap`, `defaultKeymap`, `indentWithTab` (`Esc` then `Tab` leaves the editor, §6.14) |
 | 16 | `EditorView.updateListener` | Calls `session.markDirty()` on `docChanged` when the transaction is not annotated `Transaction.remote` |
 
@@ -1532,6 +1539,66 @@ The document is always **LF-only**; there is no `lineSeparator` facet. CRLF file
 **Remote updates.** `applyRemoteText(view, text)` takes the remote content **after** LF normalization and turns `@codemirror/merge` `diff()` output into a minimal change set annotated `Transaction.remote` and `addToHistory: false`, which preserves the cursor, scroll position and undo history. If `view.composing` is true (iOS autocorrect or IME), it retries on `compositionend`, or at the latest after 300 ms.
 
 **Server offsets in CRLF files.** Offsets from the server (backlink mentions, `NoteMeta.links`, search lines) count `\r\n` as two code units. For a session with `eol: 'crlf'`, `features/eol.ts` maps a server offset to a document offset by subtracting the number of `\r\n` pairs before it. A lone `\r` is one position on both sides and needs no mapping.
+
+### 6.6.1 Live Preview (ROADMAP 10)
+
+Notes render as you type, in the one editor. Live Preview is a set of CodeMirror decorations over the editor of §6.6, so the editor's text stays the file, byte for byte: drafts, autosave, conflicts, history, completion, search and remote updates work unchanged, and decorations never change the document. Item 10 lands in steps; this subsection describes what is built so far (10a, first step: modes, inline rendering and the cursor rules). Tables, typing shortcuts, the formatting toolbar and rich paste (rest of 10a), embeds, frontmatter, footnotes, comments, code fences and the reading view becoming `locked` (10b), and the iPhone and long-note passes (10c) are still to come.
+
+**Modes.** `features/noteMode.ts` resolves the open file's mode (`ViewMode`, `state/ui.ts`):
+
+| Mode | What shows |
+|---|---|
+| `live` | Live Preview, editable. The default for every note: `settings.editor.defaultMode: edit` means Live Preview. |
+| `source` | The styled source mode of §6.6, unchanged (the Live Preview extension is simply not installed). |
+| `locked` | Live Preview, read-only: `EditorState.readOnly` and `EditorView.editable` are off, the content is focusable (`tabindex=0`) for keyboard reading, nothing is revealed, and links follow on a plain click. Checkboxes still toggle, as in the reading view. |
+| `read` | The v1 reading view (§6.7), until 10b replaces it with `locked`. `settings.editor.defaultMode: read` and `?mode=read` still open it. |
+
+- The mode is chosen **per file for the page load** (`useUi.noteModes`), so switching one note to source leaves the others in Live Preview. A choice equal to the default is forgotten. Moves re-key the choices (`rekeyNoteModes`, from `onEntryMoved`, for files and folders). A note this tab has just created (`editingNew`) opens in the editor even when its mode or the default would not, keeping a choice of source mode.
+- **Mod-E** (`editor.toggleMode`, "Lock or unlock editing") locks a note being edited and unlocks it into Live Preview; from the reading view it goes back to editing. `editor.toggleSource` switches Live Preview and source (a locked note opens in source), and `editor.toggleReading` toggles the reading view (transitional, removed in 10b). Desktop: the note header has a source toggle and a lock toggle (`aria-pressed`). Phone and tablet: the TopBar has the lock toggle, and ⋯ has "Source mode" / "Live Preview" and "Reading view".
+- The editor remounts on a mode change, as in v1: the `EditorState` lives in the session, so undo survives, and the scroll position maps through the top line (§6.7).
+- **Registry.** `FileViewProps.mode` and `FileViewDescriptor.modes` use `ViewMode` (`edit`, `read`, `live`, `source`, `locked`). The `markdown` view declares `['live', 'source', 'locked', 'read']`; other views keep `edit` and `read`. `viewModeFor(mode, modes)` maps a mode onto a view that lacks it (an editing mode to `edit`, `locked` to `read`, else the first mode).
+
+**Syntax visibility** is the per-device preference `syntaxVisibility` (§5.12, Settings, "This device"):
+
+- `hide-all` (default): markup stays hidden even under the cursor; the cursor rules below make editing work without seeing it.
+- `reveal-at-cursor` (Typora style): while the editor has focus, the markup of every element touching a selection shows (headings and quotes: their line; list markers: the marker; inline elements: the whole element).
+- In both, the markup of an element shows when a selection **end** lies inside its hidden markup (a search match in a link's URL, a command's caret), and while autocompletion is open, the inline element at the cursor shows (the `[[` link being typed). Elements without visible text (`[[]]`, `[](url)`, reference links) are never hidden.
+
+**How it is built** (`editor/livePreview/`, wired by `NoteEditor`'s `preview` prop through `EditorHooks.livePreview`):
+
+- `model.ts` walks the Lezer tree of §6.6 (#6) over the requested ranges and returns **elements**: the element's range, its visible text, a reveal range, line classes, and **pieces**, the markup to replace. Each piece is hidden or a widget and has a role for the cursor rules: `prefix` (block markup at a line start), `open`, `close` (formatting that typing continues), `close-link` (links and inline code, which typing does not extend), `inner` and `block`. Code, HTML, comments, frontmatter, embeds, images and tables are skipped.
+- `decorations.ts` turns the elements of the **visible ranges** into replace, widget, mark and line decorations, plus the **atomic ranges**: prefix chains (from the line start when only blanks precede them), adjacent inline pieces merged into one run, and block widgets. `index.ts` holds the `ViewPlugin`, which rebuilds on document, viewport, selection, focus, tree, completion and configuration changes, and provides `EditorView.atomicRanges`. No replaced range crosses a line break, so a view plugin may provide them.
+- `widgets.ts`: bullets (`•`, `◦`, `▪` by depth), task checkboxes, horizontal rules, and the " > " of a heading link.
+
+**What renders** (so far):
+
+| Element | Live Preview |
+|---|---|
+| ATX headings | Sized as in source mode; the `#`s (and a closing sequence) hidden. `#` without a space after it is not hidden (a line-start `#tag` is typed through it). Setext underlines stay visible. |
+| `**bold**`, `*italic*`, `~~strike~~`, `==highlight==`, `` `code` `` | Styled; the markers hidden |
+| `[[Note]]`, `[[Note\|alias]]`, `[[Note#Heading]]`, `[[#Heading]]` | The target, the alias, "Note > Heading", "Heading", as in the reading view; unresolved links stay dimmed (`cm-unresolved`) |
+| `[text](url)`, `<url>`, bare URLs | The text or address, as a link |
+| `- `, `* `, `+ ` bullets | A bullet widget that also replaces the indentation (`(depth + 1) × 1.6em`, the reading view's indent); wrapped lines hang under the text (`cm-lp-indent`) |
+| `- [ ]` and `- [x]` tasks | A checkbox widget in place of the bullet and the box; done tasks are muted |
+| Numbered items, numbered tasks | The number stays text (muted); a task box after it becomes a checkbox |
+| `>` quotes | The `>` (and one space) hidden; the quote bar is source mode's `cm-quote-line` |
+| `---`, `***`, `___` | A horizontal rule widget |
+
+**Cursor and editing rules** (hide-all; in reveal-at-cursor the element at the cursor shows its markup, so plain editing applies):
+
+- **Atomic markup.** Arrow keys step over hidden markup, stopping once at each edge of an inline run: from inside `**bold|**`, → leaves the formatting (`**bold**|`), and ← from after it enters it. This stop is how you step into or out of formatting from the keyboard.
+- **Block prefixes.** A cursor never rests in front of a line's hidden prefix (a transaction filter moves it to where the text starts), so typing never breaks a heading, bullet, task or quote. ArrowLeft (or a word left) where the text starts goes to the end of the line before. Enter where a heading's text starts opens a line above it and keeps the heading.
+- **Clicks** at the edge of hidden inline markup land where a word processor puts the caret: in front of opening markers (typing stays outside), **inside closing formatting markers** (typing at the end of bold text continues in bold), and **after** the closing markers of links and code (typing after a link does not extend it). Between a link and bold text, the caret lands between them.
+- **Backspace and Delete** next to hidden markup delete the letter beyond it, never a marker (also Ctrl/Alt-Backspace and -Delete, by word). After Backspace at the end of formatting the caret stays inside it; after a link it stays after the link. With nothing before the markup on its line, Backspace acts where the text starts (the Markdown keymap removes list or quote markup, or the line joins the one before). Delete at the end of a non-empty line joins the next line's text without its hidden block markup.
+- **No empty formatting.** A deletion (`delete.*` user events) that removes all the text of bold, italic, strikethrough, highlight, code or a link also removes its markers, innermost first, in the same transaction (one undo step), so `**b**` never becomes `****`, which Markdown reads as a rule.
+- Typed Markdown still closes as typed: these rules apply to selection changes and deletions, never to text input, so typing `**b** c` gives exactly that.
+
+**Links and checkboxes.**
+
+- Rendered links (`cm-lp-link`) and tags follow on a **tap** (the last `pointerdown` was touch; the tap's `mousedown` is consumed so the caret and the keyboard stay put), on a plain click in a **locked** note (not when the click ends a text selection), or on **Mod-click** while editing; a plain click while editing places the caret, to edit the link's text. `followLink()` (`editorCommands.ts`) is shared with Mod-click on raw text and `Mod-Enter`.
+- External links open with `window.open(url, '_blank', 'noopener,noreferrer')`, and only for the schemes the reading view's sanitizer keeps (`http`, `https`, `ftp`, `mailto`, `tel`, `callto`, `sms`, `xmpp`, `matrix`, `//host`): a `javascript:` link in a note never runs.
+- A **checkbox** tap (the whole box, indent included, is the target) changes only the character between its brackets (`[ ]` → `[x]`, `[x]` or `[X]` → `[ ]`) as a normal edit (`input.toggle`), so it autosaves. The position is read from the widget at tap time, from the current document, so no stale-line check is needed. Boxes are disabled while the session cannot be written (lossy or read-only files).
+- In a locked note the editing commands do nothing: `toggleBold`, `toggleCheckbox`, the link and rule commands and `insertWikilink` check `state.readOnly` (palette and toolbar run them on the active editor), and the mobile toolbar already hides on read-only editors.
 
 ### 6.7 Reading view
 
@@ -1567,14 +1634,15 @@ The pipeline is `render/render.ts` from the research, verified:
 
 ```ts
 // views/registry.ts (re-exported from extensions/)
-export interface FileViewProps  { path: string; entry: FileEntry; mode: 'edit' | 'read' }
+export type ViewMode = 'edit' | 'read' | 'live' | 'source' | 'locked';  // notes: live | source | locked | read (§6.6.1)
+export interface FileViewProps  { path: string; entry: FileEntry; mode: ViewMode }
 export interface EmbedProps     { path: string; entry: FileEntry; subpath?: string; display?: string; sourcePath: string; depth: number }
 export interface FileViewDescriptor {
   id: string;                                   // 'markdown' | 'image' | 'pdf' | 'media' | 'text' | 'unsupported' | later 'sheet' | 'excalidraw' | 'tasks' | 'canvas'
   match(entry: FileEntry): number;              // 0 = no match; highest wins. Convention: length of the matched suffix (".excalidraw.md" beats ".md")
   icon: LucideIcon;
   textual: boolean;                             // true → content via DocumentSession over GET/PUT /api/files (versioned, autosave, conflicts, live sync)
-  modes: Array<'edit' | 'read'>;                // which toggles the header shows
+  modes: ViewMode[];                            // which toggles the header shows; another mode maps to the nearest (viewModeFor)
   load(): Promise<{ default: ComponentType<FileViewProps> }>;            // lazy chunk
   loadEmbed?(): Promise<{ default: ComponentType<EmbedProps> }>;         // for ![[file]] in reading view
   create?: { label: string; extension: string; initialContent(): string }; // adds "New <label>" to explorer menu + palette
@@ -1599,11 +1667,13 @@ export function registerEventHandler(name: string, fn: (data: unknown, eventId: 
 
 All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and built-in commands are registered through these same functions (`extensions/builtins.ts`), which proves the APIs before the first extension needs them.
 
+ROADMAP 10 widened the view mode from `'edit' | 'read'` to `ViewMode`, so the `markdown` view can declare its Live Preview, source and locked modes (§6.6.1). Views that declare only `edit` and `read` are unaffected: `FileView` maps the chosen mode onto a view's own modes with `viewModeFor`.
+
 **v1 registrations.**
 
 | id | match | textual | Notes |
 |---|---|---|---|
-| `markdown` | `.md` (3) | yes | Editor and reading view |
+| `markdown` | `.md` (3) | yes | Live Preview, source and locked editor, and the reading view (§6.6.1) |
 | `text` | other `kind:"text"` (2) | yes | Plain CodeMirror editor (JSON language for `.json`) with the same autosave and conflict handling |
 | `image` | `kind:"image"` (2) | no | Zoomable `<img>` |
 | `pdf` | `kind:"pdf"` (2) | no | `<iframe>` plus an "Open in new tab" link |
@@ -1806,7 +1876,9 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 | `file.reveal` | Reveal current file in explorer | |
 | `file.copyLink` | Copy link to current file | |
 | `file.download` | Download current file | |
-| `editor.toggleMode` | Toggle reading/editing view | `Mod-E` |
+| `editor.toggleMode` | Lock or unlock editing (from the reading view: back to editing) | `Mod-E` |
+| `editor.toggleSource` | Toggle Live Preview/source mode | |
+| `editor.toggleReading` | Toggle reading view (until 10b replaces it with locked) | |
 | `editor.save` | Save now | `Mod-S` |
 | `editor.followLink` | Follow link under cursor | `Mod-Enter` |
 | `editor.toggleCheckbox` | Toggle checklist status | `Mod-L` |
@@ -1834,7 +1906,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 | Context | Keys |
 |---|---|
 | Global | The command hotkeys above. `Esc` closes the topmost overlay or the drawer. `Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,` and `Mod-Alt-←/→` work even while the editor has focus. |
-| Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`. **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. |
+| Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`. In Live Preview, `Backspace`, `Delete` (and by word), `ArrowLeft` and `Enter` follow the cursor rules of §6.6.1. **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. |
 | Explorer (focused) | `↑/↓` move; `←/→` collapse and expand; `Enter` opens; `F2` renames; `Delete` deletes (with confirmation); `Mod-Alt-N` creates a new note in the focused folder |
 | Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Esc` |
 | Conflict banner | Buttons reachable with `Tab`; `Esc` dismisses Compare |
@@ -1867,7 +1939,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 **iOS and touch specifics:**
 
 - **Viewport.** The shell is pinned to the visual viewport through `--vvh` and `--vv-top`, set by `installViewportVars` (research sketch). **`WorkspaceScroll` is the only scroller**, on every breakpoint: CodeMirror sizes to its content (`.cm-editor {height: auto}`, `.cm-scroller {overflow: visible}`), which CM6 supports, still virtualizing against the scroll parent. The inline title and properties therefore scroll away with the text instead of staying pinned above it, which matters when the keyboard leaves only 350–400 px. `html, body {overflow: hidden; overscroll-behavior: none}` turns off the page bounce and pull-to-refresh; ⋯ has a **Reload** item instead.
-- **Keyboard open.** `mobileViewport.ts` sets a `keyboard-open` flag when `visualViewport.height < 0.75 × innerHeight`. While it is set, the TopBar collapses (it slides away and returns when the keyboard closes), leaving the space to the text and the toolbar. On phones, `NoteHeader` shows only the inline title, because the TopBar already has the save status, the mode toggle and ⋯.
+- **Keyboard open.** `mobileViewport.ts` sets a `keyboard-open` flag when `visualViewport.height < 0.75 × innerHeight`. While it is set, the TopBar collapses (it slides away and returns when the keyboard closes), leaving the space to the text and the toolbar. On phones, `NoteHeader` shows only the inline title, because the TopBar already has the save status, the lock toggle and ⋯ (with Source mode and Reading view).
 - **Safe areas.** `env(safe-area-inset-*)` padding on the TopBar, the drawer, the sheet and the toolbar, and `padding-inline: max(16px, env(safe-area-inset-left), env(safe-area-inset-right))` on the editor content and the reading view, so text never runs under the notch or Dynamic Island in landscape.
 - **MobileToolbar.** The last grid row, so it sits right above the keyboard, on `(pointer: coarse)`.
   - It is **always mounted**; a CSS class shows it from a debounced (150 ms) "editor focused or toolbar in use" state. Unmounting it on blur would remove a button before its click is delivered.
@@ -2467,6 +2539,7 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 22. iPhone: type frontmatter (`---`, `tags: ["a"]`, `"[[Link]]"`) and a code span with quotes; nothing is turned into an em dash or curly quotes.
 23. Deploy a new build while a tab is open on each device: the indicator shows Reconnecting and then Live within about a minute, a clean tab reloads itself to the new build, and a dirty tab shows the reload banner and saves after reconnecting.
 24. Open the app from a tagged device or a non-allowed login: it gets 403. `docker compose config` shows both volumes as `external: true`.
+25. Live Preview (§6.6.1), both devices and both syntax-visibility settings: headings, formatting, links, bullets, tasks, quotes and rules render without markup. Click (or tap) at the end of bold text and type: the text is bold. Backspace at the end of bold text and after a link deletes a letter. Type right after a link: the link does not grow. Tap a checkbox: only `[ ]`/`[x]` changes in the file. Tap a link on the iPhone, Mod-click it on rgpc, click it in a locked note: it opens. Mod-E locks and unlocks; the source toggle shows the unchanged Markdown. iPhone: selection handles next to hidden markup and widgets behave (10c follows up on anything odd).
 
 ---
 
