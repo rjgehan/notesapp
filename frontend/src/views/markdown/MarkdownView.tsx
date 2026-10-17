@@ -1,4 +1,5 @@
-// The `markdown` view (DESIGN §6.8): the note editor and the reading view over one DocumentSession.
+// The `markdown` view (DESIGN §6.8): the note editor (Live Preview, source or locked, §6.6.1) and
+// the reading view over one DocumentSession.
 import { EditorView } from '@codemirror/view';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useLocation } from 'react-router';
@@ -8,7 +9,7 @@ import { findHeading, headingsFromState } from '../../editor/outline';
 import { NoteEditor } from '../../editor/NoteEditor';
 import { setSearchHighlight } from '../../editor/searchHighlight';
 import { wantsNoteFocus } from '../../features/focus';
-import { setNoteMode, setTopLineProbe, takePendingModeLine } from '../../features/noteMode';
+import { setTopLineProbe, takePendingModeLine, toggleNoteMode } from '../../features/noteMode';
 import { useNoteScroll } from '../../features/noteScroll';
 import { highlightTerms } from '../../features/searchTerms';
 import { ReadingView } from '../../render/ReadingView';
@@ -50,21 +51,23 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
   const query = params.get('q') ?? '';
   const terms = useMemo(() => highlightTerms(query), [query]);
   const targetLine = useRef<number | null>(null);
+  // Live Preview, source and locked are all the editor; `read` is the v1 reading view.
+  const editing = mode !== 'read';
 
   // Where the newly shown mode should scroll: the mode switch's line, else a search hit's line.
   // Child views schedule the scroll in an animation frame, after this has run.
   useLayoutEffect(() => {
     const line = takePendingModeLine();
     if (line !== null) targetLine.current = line;
-    if (mode === 'edit') reading.current = null;
+    if (editing) reading.current = null;
     else editorView.current = null;
-  }, [mode]);
+  }, [editing]);
 
   useLayoutEffect(() => {
     setTopLineProbe(() => {
       const el = scroller.current;
       if (!el) return null;
-      if (mode === 'edit' && editorView.current) {
+      if (editing && editorView.current) {
         const v = editorView.current;
         const block = v.lineBlockAtHeight(el.getBoundingClientRect().top - v.documentTop);
         return v.state.doc.lineAt(block.from).number - 1;
@@ -72,7 +75,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
       return reading.current ? topVisibleLine(reading.current, el) : null;
     });
     return () => setTopLineProbe(null);
-  }, [mode, scroller]);
+  }, [editing, scroller]);
 
   useEffect(() => () => clearHighlights.current(), []);
 
@@ -86,7 +89,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
     const line = modeLine ?? hitLine;
     clearHighlights.current();
     clearHighlights.current = () => {};
-    if (mode === 'edit' && editorView.current) {
+    if (editing && editorView.current) {
       const v = editorView.current;
       if (heading && modeLine === null) {
         const h = findHeading(headingsFromState(v.state), heading);
@@ -95,7 +98,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
       if (line !== null) scrollEditorToLine(v, line);
       // A search hit flashes its line and highlights the query's terms.
       if (hitLine !== null) v.dispatch({ effects: setSearchHighlight.of({ terms, line: hitLine }) });
-    } else if (mode === 'read' && reading.current) {
+    } else if (!editing && reading.current) {
       const container = reading.current;
       if (heading && modeLine === null) {
         const blocks = [...container.querySelectorAll<HTMLElement>('[data-heading]')].filter((el) => !el.closest('[data-embed-root]'));
@@ -110,7 +113,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
         }
       }
     }
-  }, [mode, heading, lineParam, terms]);
+  }, [editing, heading, lineParam, terms]);
 
   // Heading links within the same note change only the hash; another hit changes only `?line=`.
   // Following the same link again is a new navigation (a new location key) and scrolls again.
@@ -119,10 +122,10 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
     if (!ready || (!heading && lineParam === null)) return;
     scrollToTarget();
     if (wantsNoteFocus()) {
-      if (mode === 'edit') editorView.current?.focus();
+      if (editing) editorView.current?.focus();
       else reading.current?.focus({ preventScroll: true });
     }
-  }, [heading, lineParam, ready, scrollToTarget, mode, location.key]);
+  }, [heading, lineParam, ready, scrollToTarget, editing, location.key]);
 
   // Outline clicks scroll by source line (exact, and repeatable).
   const scrollRequest = useNoteScroll();
@@ -134,16 +137,12 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
     scrollToTarget();
   }, [scrollRequest, ready, session, scrollToTarget]);
 
-  const toggle = () => setNoteMode(mode === 'edit' ? 'read' : 'edit');
-
   return (
     <div className={`markdown-view${settings.editor.readableLineLength ? ' is-readable' : ''}`} data-mode={mode}>
       <NoteHeader
         path={session.path}
         snapshot={snapshot}
         mode={mode}
-        modes={['edit', 'read']}
-        onToggleMode={toggle}
         editable={!NOT_RENAMEABLE.has(snapshot.status) && !snapshot.lossy}
       />
       {snapshot.status === 'loading' ? (
@@ -161,11 +160,12 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
             Try again
           </button>
         </div>
-      ) : mode === 'edit' ? (
+      ) : editing ? (
         <NoteEditor
           session={session}
           readOnly={snapshot.status === 'readonly' || snapshot.lossy}
-          onToggleMode={toggle}
+          preview={mode === 'source' ? undefined : mode === 'locked' ? 'locked' : 'live'}
+          onToggleMode={toggleNoteMode}
           onView={(v) => {
             editorView.current = v;
             requestAnimationFrame(scrollToTarget);

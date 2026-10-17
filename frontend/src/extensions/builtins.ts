@@ -36,7 +36,7 @@ import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../feat
 import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
 import { navigateTo, openSearch } from '../features/navigation';
-import { toggleNoteMode } from '../features/noteMode';
+import { toggleNoteMode, toggleReadingView, toggleSourceMode } from '../features/noteMode';
 import { basenameOf, folderOf, isNotePath } from '../features/paths';
 import { promptText } from '../state/dialogs';
 import { toggleTheme } from '../state/prefs';
@@ -121,7 +121,7 @@ export function registerBuiltins(): void {
     match: (e) => (e.path.toLowerCase().endsWith('.md') ? 3 : 0),
     icon: FileText,
     textual: true,
-    modes: ['edit', 'read'],
+    modes: ['live', 'source', 'locked', 'read'],
     load: () => import('../views/markdown/MarkdownView'),
     loadEmbed: () => import('../render/NoteEmbed'),
     create: { label: 'note', extension: 'md', initialContent: () => '' },
@@ -216,7 +216,10 @@ export function registerBuiltins(): void {
   });
 
   // ---------- editor ----------
-  registerCommand({ id: 'editor.toggleMode', name: 'Toggle reading/editing view', hotkey: 'Mod-e', run: toggleNoteMode, when: (c) => c.activePath !== null && isNotePath(c.activePath) });
+  const onNote = (c: { activePath: string | null }) => c.activePath !== null && isNotePath(c.activePath);
+  registerCommand({ id: 'editor.toggleMode', name: 'Lock or unlock editing', hotkey: 'Mod-e', run: toggleNoteMode, when: onNote });
+  registerCommand({ id: 'editor.toggleSource', name: 'Toggle Live Preview/source mode', run: toggleSourceMode, when: onNote });
+  registerCommand({ id: 'editor.toggleReading', name: 'Toggle reading view', run: toggleReadingView, when: onNote });
   registerCommand({
     id: 'editor.save',
     name: 'Save now',

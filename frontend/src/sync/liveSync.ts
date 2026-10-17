@@ -25,6 +25,7 @@ export const syncTarget: SyncTarget = {
   onEntryMoved(from, to, type) {
     renameRecent(from, to);
     if (type === 'folder') useUi.getState().rekeyExpanded(from, to);
+    useUi.getState().rekeyNoteModes(from, to);
     const editing = useUi.getState().editingNew;
     const editingNext = editing === null ? null : type === 'file' ? (editing === from ? to : null) : rebasePath(editing, from, to);
     if (editingNext !== null) useUi.getState().setEditingNew(editingNext);

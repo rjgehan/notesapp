@@ -3,11 +3,15 @@ import type { LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { FileEntry } from '../api/types';
 import type { Command } from '../features/commands';
+import type { ViewMode } from '../state/ui';
+
+export type { ViewMode };
 
 export interface FileViewProps {
   path: string;
   entry: FileEntry;
-  mode: 'edit' | 'read';
+  /** One of the descriptor's `modes`. */
+  mode: ViewMode;
 }
 
 export interface EmbedProps {
@@ -27,8 +31,11 @@ export interface FileViewDescriptor {
   icon: LucideIcon;
   /** true → content via DocumentSession over GET/PUT /api/files (versioned, autosave, conflicts, live sync). */
   textual: boolean;
-  /** Which toggles the header shows. */
-  modes: Array<'edit' | 'read'>;
+  /**
+   * The modes the view has, which decide the toggles the header shows: `edit` and `read`, or the
+   * note modes (`live`, `source`, `locked`, `read`). Another file's mode maps to the nearest one.
+   */
+  modes: ViewMode[];
   load(): Promise<{ default: ComponentType<FileViewProps> }>;
   /** For `![[file]]` in the reading view. */
   loadEmbed?(): Promise<{ default: ComponentType<EmbedProps> }>;

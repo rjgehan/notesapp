@@ -16,7 +16,7 @@ import { openPath } from '../../features/navigation';
 import { displayName, newNameError, pathSafetyError } from '../../features/paths';
 import { DEFAULT_SETTINGS } from '../../features/settings';
 import { pageBuild } from '../../state/buildCheck';
-import { usePrefs, type ThemePref } from '../../state/prefs';
+import { usePrefs, type SyntaxVisibility, type ThemePref } from '../../state/prefs';
 import { toast } from '../../state/toasts';
 import { useUi } from '../../state/ui';
 import type { DiscardedRecord } from '../../sync/drafts';
@@ -334,7 +334,7 @@ function EditorSection({ settings: s, set, disabled }: VaultSectionProps) {
           value={e.defaultMode}
           disabled={disabled}
           options={[
-            ['edit', 'Editing view'],
+            ['edit', 'Editing view (Live Preview)'],
             ['read', 'Reading view'],
           ]}
           onChange={(v) => editor({ defaultMode: v })}
@@ -456,6 +456,17 @@ function DeviceSection() {
             ['system', 'Follow the system'],
           ]}
           onChange={(theme) => prefs.update({ theme })}
+        />
+      </Row>
+      <Row label="Markdown syntax" description="In Live Preview: always hidden, or shown for the element you are editing.">
+        <Select<SyntaxVisibility>
+          label="Markdown syntax"
+          value={prefs.syntaxVisibility}
+          options={[
+            ['hide-all', 'Hide all'],
+            ['reveal-at-cursor', 'Reveal at cursor'],
+          ]}
+          onChange={(syntaxVisibility) => prefs.update({ syntaxVisibility })}
         />
       </Row>
       <Row label="Spell check">

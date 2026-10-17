@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react';
 import { registerCommand } from '../features/commands';
 import { navigateTo } from '../features/navigation';
 
-export { registerView, viewFor, registeredViews, type EmbedProps, type FileViewDescriptor, type FileViewProps } from '../views/registry';
+export { registerView, viewFor, registeredViews, type EmbedProps, type FileViewDescriptor, type FileViewProps, type ViewMode } from '../views/registry';
 export { registerCommand, type Command, type CommandContext } from '../features/commands';
 
 export interface PageDescriptor {

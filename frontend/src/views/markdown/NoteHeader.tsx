@@ -1,43 +1,73 @@
-// Note header (DESIGN §6.5): inline title (edit = rename), save status and the mode toggle. On
+// Note header (DESIGN §6.5): inline title (edit = rename), save status and the mode controls. On
 // phones only the inline title is shown, because the TopBar already has the rest; tablets keep the
-// save status here and the mode toggle in the TopBar. On desktop the bar also has back and forward
+// save status here and the lock toggle in the TopBar. On desktop the bar also has back and forward
 // buttons around a centred breadcrumb, as Obsidian's view header does.
-import { ArrowLeft, ArrowRight, BookOpen, Pencil } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, CodeXml, Lock, LockOpen, Pencil } from 'lucide-react';
 import { runCommand } from '../../features/commands';
 import { SaveStatus } from '../../components/SaveStatus';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
+import { toggleNoteMode, toggleSourceMode } from '../../features/noteMode';
 import { displayName, folderOf } from '../../features/paths';
 import { keyLabel } from '../../features/platform';
-import type { NoteMode } from '../../state/ui';
+import type { ViewMode } from '../../state/ui';
 import type { SessionSnapshot } from '../../sync/DocumentSession';
 import { InlineTitle } from './InlineTitle';
 
 interface Props {
   path: string;
   snapshot: SessionSnapshot | null;
-  mode: NoteMode;
-  modes: NoteMode[];
-  onToggleMode(): void;
+  mode: ViewMode;
   /** The title can be edited (renamed). */
   editable: boolean;
 }
 
-export function ModeToggle({ mode, onToggle }: { mode: NoteMode; onToggle(): void }) {
-  const next = mode === 'edit' ? 'reading' : 'editing';
+/**
+ * Mod-E (DESIGN §6.6.1): a note locks and unlocks editing (Live Preview, read-only); the reading view
+ * goes back to editing. Views with `edit` and `read` switch between the two.
+ */
+export function ModeToggle({ mode }: { mode: ViewMode }) {
+  const shortcut = keyLabel('Mod-e');
+  if (mode === 'read' || mode === 'edit') {
+    const next = mode === 'edit' ? 'reading' : 'editing';
+    return (
+      <button type="button" className="icon-button mode-toggle" onClick={toggleNoteMode} aria-label={`Switch to ${next} view`} title={`Switch to ${next} view (${shortcut})`}>
+        {mode === 'edit' ? <BookOpen size={17} /> : <Pencil size={17} />}
+      </button>
+    );
+  }
+  const locked = mode === 'locked';
   return (
     <button
       type="button"
       className="icon-button mode-toggle"
-      onClick={onToggle}
-      aria-label={`Switch to ${next} view`}
-      title={`Switch to ${next} view (${keyLabel('Mod-e')})`}
+      onClick={toggleNoteMode}
+      aria-label="Lock editing"
+      aria-pressed={locked}
+      title={`${locked ? 'Unlock editing' : 'Lock editing'} (${shortcut})`}
     >
-      {mode === 'edit' ? <BookOpen size={17} /> : <Pencil size={17} />}
+      {locked ? <Lock size={17} /> : <LockOpen size={17} />}
     </button>
   );
 }
 
-export function NoteHeader({ path, snapshot, mode, modes, onToggleMode, editable }: Props) {
+/** Live Preview or the Markdown source of a note. */
+export function SourceToggle({ mode }: { mode: ViewMode }) {
+  const source = mode === 'source';
+  return (
+    <button
+      type="button"
+      className="icon-button source-toggle"
+      onClick={toggleSourceMode}
+      aria-label="Source mode"
+      aria-pressed={source}
+      title={source ? 'Show Live Preview' : 'Show the Markdown source'}
+    >
+      <CodeXml size={17} />
+    </button>
+  );
+}
+
+export function NoteHeader({ path, snapshot, mode, editable }: Props) {
   const breakpoint = useBreakpoint();
   const phone = breakpoint === 'phone';
   const title = displayName(path);
@@ -64,7 +94,12 @@ export function NoteHeader({ path, snapshot, mode, modes, onToggleMode, editable
           </span>
           <span className="note-header-actions">
             {snapshot && <SaveStatus snapshot={snapshot} />}
-            {modes.length > 1 && breakpoint === 'desktop' && <ModeToggle mode={mode} onToggle={onToggleMode} />}
+            {breakpoint === 'desktop' && (
+              <>
+                {mode !== 'read' && <SourceToggle mode={mode} />}
+                <ModeToggle mode={mode} />
+              </>
+            )}
           </span>
         </div>
       )}

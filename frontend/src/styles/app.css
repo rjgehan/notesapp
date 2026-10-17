@@ -195,6 +195,11 @@ body.is-resizing {
   cursor: default;
 }
 
+/* A toggle that is on (lock editing, source mode). */
+.icon-button[aria-pressed='true'] {
+  color: var(--interactive-accent);
+}
+
 /* ---------- sidebars and panels ---------- */
 
 .sidebar {

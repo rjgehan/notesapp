@@ -1,17 +1,18 @@
 // Phone and tablet top bar (DESIGN §6.16): ☰, the note title with the connection dot,
-// switcher/search, mode toggle and ⋯ (palette, panels, file actions, template, today, reload).
+// switcher/search, the lock toggle and ⋯ (palette, panels, source mode, file actions, template,
+// today, reload).
 // On tablets it also toggles the right sidebar overlay.
-import { CalendarDays, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
+import { BookOpen, CalendarDays, CodeXml, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
-import { setNoteMode, useNoteMode } from '../../features/noteMode';
+import { toggleReadingView, toggleSourceMode, useNoteMode, viewModeFor } from '../../features/noteMode';
 import { navigateOverOverlays, useOverlayHistory } from '../../features/overlayHistory';
 import { displayName, isNotePath, pathFromLocation } from '../../features/paths';
 import { usePendingNote } from '../../state/pendingNote';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
-import { useUi } from '../../state/ui';
+import { useUi, type ViewMode } from '../../state/ui';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import { ModeToggle } from '../../views/markdown/NoteHeader';
 import { viewFor } from '../../views/registry';
@@ -21,7 +22,7 @@ import { showPanel } from './showPanel';
 import { useBreakpoint } from './useBreakpoint';
 import { useHistoryWarning } from './useHistoryWarning';
 
-function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
+function MoreMenu({ path, mode, onClose }: { path: string | null; mode: ViewMode | null; onClose(): void }) {
   usePrefs((s) => s.theme);
   const ref = useRef<HTMLDivElement>(null);
   const historyWarning = useHistoryWarning();
@@ -68,6 +69,8 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
       {command('app.commandPalette', 'Command palette', <CommandIcon size={16} />)}
       {hasFile && item('Backlinks', <Link2 size={16} />, () => showPanel('right', 'backlinks'))}
       {note && item('Outline', <ListTree size={16} />, () => showPanel('right', 'outline'))}
+      {note && mode !== null && mode !== 'read' && item(mode === 'source' ? 'Live Preview' : 'Source mode', <CodeXml size={16} />, toggleSourceMode)}
+      {note && mode !== null && item(mode === 'read' ? 'Editing view' : 'Reading view', mode === 'read' ? <Pencil size={16} /> : <BookOpen size={16} />, toggleReadingView)}
       {hasFile && item('History', <History size={16} />, () => showPanel('right', 'history'))}
       {hasFile && <div className="menu-separator" role="separator" />}
       {hasFile && command('file.rename', 'Rename', <Pencil size={16} />)}
@@ -120,7 +123,7 @@ export function TopBar() {
           <FileSearch size={20} />
         </button>
       )}
-      {descriptor && descriptor.modes.length > 1 && <ModeToggle mode={mode} onToggle={() => setNoteMode(mode === 'edit' ? 'read' : 'edit')} />}
+      {descriptor && descriptor.modes.length > 1 && <ModeToggle mode={viewModeFor(mode, descriptor.modes)} />}
       {!phone && path && (
         <button type="button" className="icon-button" aria-label="Toggle right sidebar" title="Toggle right sidebar" aria-expanded={sheetOpen} onClick={() => setSheetOpen(!sheetOpen)}>
           <PanelRight size={20} />
@@ -130,7 +133,7 @@ export function TopBar() {
         <button type="button" className="icon-button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
           <Ellipsis size={20} />
         </button>
-        {menuOpen && <MoreMenu path={path} onClose={closeMenu} />}
+        {menuOpen && <MoreMenu path={path} mode={descriptor ? viewModeFor(mode, descriptor.modes) : null} onClose={closeMenu} />}
       </div>
     </header>
   );
