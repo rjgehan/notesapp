@@ -11,7 +11,7 @@ import { inOpenLists, inToday, isOverdue } from '../model';
 import { listMenu, promptNewList } from './listActions';
 import { loadParser } from '../quickadd/loadParser';
 import { OPEN_TASKS, useTaskView } from '../queries';
-import { Loading, LoadError, TaskFab, TaskProblems } from './common';
+import { Loading, LoadError, TaskFab, TaskProblems, TasksNav } from './common';
 import { useTaskData } from './useTaskData';
 import { ListDot } from './parts';
 import { listRoute, openQuickAdd } from './state';
@@ -88,6 +88,7 @@ export default function ListsPage() {
 
   return (
     <div className="page tasks-page">
+      <TasksNav />
       <header className="page-header">
         <h1 className="page-title">Task lists</h1>
         <button type="button" className="button tasks-add-button" onClick={() => void promptNewList()}>

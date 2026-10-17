@@ -1,11 +1,11 @@
 // Pure task logic shared by the views, the store and the tests: the view rules of API.md §20.2
 // (which tasks a view holds and in which order, as the server computes them), tags, links,
 // subtask trees and the rows of a list.
-import type { LocalDate, Task, TaskList, TaskPriority, TaskSection } from '../api/types';
+import type { LocalDate, Task, TaskList, TaskPriority, TaskSection, TaskStatus, TaskView } from '../api/types';
 import type { LinkIndex } from '../features/links';
 import { resolve } from '../features/links';
 import { findTags, findWikiLinks, isInternalDestination, parseMarkdownDestination } from '../features/syntax';
-import { compareTaskDates, datePart } from './dates';
+import { addDays, compareTaskDates, datePart } from './dates';
 import { compareKeys } from './fractionalIndex';
 
 /** Subtasks are at most three levels deep (API.md §20.1): depths 0, 1 and 2. */
@@ -74,6 +74,81 @@ export function inList(task: Task, listId: string): boolean {
 /** `view=list` without a list: the open tasks of every active list. */
 export function inOpenLists(task: Task, lists: ReadonlyMap<string, TaskList>): boolean {
   return task.status === 'open' && activeList(lists, task);
+}
+
+/** `view=upcoming`: open tasks of active lists scheduled from today to today + days - 1. */
+export function inUpcoming(task: Task, today: LocalDate, days: number, lists: ReadonlyMap<string, TaskList>): boolean {
+  const when = scheduled(task);
+  if (task.status !== 'open' || !activeList(lists, task) || when === null) return false;
+  const day = datePart(when);
+  return day >= today && day < addDays(today, days);
+}
+
+/** The filters of GET /api/tasks (API.md §20.2) that views share. */
+export interface TaskFilter {
+  list?: string;
+  /** A tag, matching nested ones too (`home` matches `home/garden`), with or without '#'. */
+  tag?: string;
+  /** A comma-separated set of priorities, such as '2,3'. */
+  priority?: string;
+  /** 'all', or a comma-separated set of statuses. */
+  status?: string;
+}
+
+/** The statuses a view holds: `status`, else the view's default (§20.2). */
+export function statusesOf(status: string | undefined, view: TaskView): ReadonlySet<TaskStatus> {
+  if (status === 'all') return new Set<TaskStatus>(['open', 'done', 'cancelled']);
+  if (status) return new Set(status.split(',').map((s) => s.trim()) as TaskStatus[]);
+  if (view === 'completed') return new Set<TaskStatus>(['done', 'cancelled']);
+  return new Set<TaskStatus>(view === 'search' ? ['open', 'done', 'cancelled'] : ['open']);
+}
+
+/** The priorities of a `priority` parameter, or null for any. */
+export function prioritiesOf(priority: string | undefined): ReadonlySet<number> | null {
+  if (!priority) return null;
+  const set = new Set(priority.split(',').map((p) => Number(p.trim())).filter((p) => Number.isInteger(p) && p >= 0 && p <= 3));
+  return set.size > 0 ? set : null;
+}
+
+/** The list, tag and priority filters, as the server applies them (`TaskQuery.matchesFilters`). */
+export function matchesFilter(task: Task, filter: TaskFilter): boolean {
+  if (filter.list !== undefined && task.listId !== filter.list) return false;
+  const priorities = prioritiesOf(filter.priority);
+  if (priorities && !priorities.has(task.priority)) return false;
+  if (filter.tag) {
+    const wanted = filter.tag.replace(/^#/, '').toLowerCase();
+    if (!taskTags(task).some((t) => t.toLowerCase() === wanted || t.toLowerCase().startsWith(wanted + '/'))) return false;
+  }
+  return true;
+}
+
+/** A filter from a URL's query (the Filter page): only the parameters the server knows, cleaned. */
+export function filterFromParams(params: URLSearchParams): TaskFilter {
+  const tag = params.get('tag')?.trim().replace(/^#/, '') || undefined;
+  const priorities = prioritiesOf(params.get('priority') ?? undefined);
+  const list = params.get('list') || undefined;
+  return {
+    ...(list ? { list } : {}),
+    ...(tag ? { tag } : {}),
+    ...(priorities ? { priority: [...priorities].sort().join(',') } : {}),
+    ...(params.get('status') === 'all' ? { status: 'all' } : {}),
+  };
+}
+
+/** `view=list`: the tasks of one list (archived or not), or of every active list; never archive files. */
+export function inListView(task: Task, lists: ReadonlyMap<string, TaskList>, listId?: string): boolean {
+  if (task.archived) return false;
+  if (listId !== undefined) return task.listId === listId;
+  const list = lists.get(task.listId);
+  return list !== undefined && !list.archived;
+}
+
+/** Completed order (§20.2): `completedAt`, newest first (a task without one last), then id, descending. */
+export function compareCompleted(a: Task, b: Task): number {
+  const ta = a.completedAt ? Date.parse(a.completedAt) : -Infinity;
+  const tb = b.completedAt ? Date.parse(b.completedAt) : -Infinity;
+  if (ta !== tb) return tb > ta ? 1 : -1;
+  return compareKeys(b.id, a.id);
 }
 
 /** A task is overdue when its scheduled day is before today. */

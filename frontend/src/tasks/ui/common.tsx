@@ -1,9 +1,10 @@
 // Pieces shared by the task pages and the note panel.
-import { ChevronRight, Plus, TriangleAlert } from 'lucide-react';
+import { CalendarCheck, CalendarRange, ChevronRight, CircleCheckBig, ListFilter, ListTodo, Plus, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { useLocation } from 'react-router';
 import { errorMessage } from '../../api/client';
 import type { LocalDate, Task, TaskFileProblem } from '../../api/types';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
-import { openPath } from '../../features/navigation';
+import { navigateTo, openPath } from '../../features/navigation';
 import { displayName } from '../../features/paths';
 import { isClosed } from '../model';
 import { isPending } from '../mutations';
@@ -75,6 +76,29 @@ export function Loading() {
       <div className="skeleton-line" />
       <div className="skeleton-line short" />
     </div>
+  );
+}
+
+const VIEWS: Array<{ route: string; label: string; icon: LucideIcon }> = [
+  { route: '/x/tasks/today', label: 'Today', icon: CalendarCheck },
+  { route: '/x/tasks/upcoming', label: 'Upcoming', icon: CalendarRange },
+  { route: '/x/tasks', label: 'Lists', icon: ListTodo },
+  { route: '/x/tasks/filter', label: 'Filter', icon: ListFilter },
+  { route: '/x/tasks/completed', label: 'Completed', icon: CircleCheckBig },
+];
+
+/** The task views, one tap apart: a row of tabs at the top of every task page. */
+export function TasksNav() {
+  const { pathname } = useLocation();
+  const current = pathname.startsWith('/x/tasks/list/') ? '/x/tasks' : pathname;
+  return (
+    <nav className="tasks-nav" aria-label="Task views">
+      {VIEWS.map(({ route, label, icon: Icon }) => (
+        <button key={route} type="button" className={`tasks-nav-item${current === route ? ' is-active' : ''}`} aria-current={current === route ? 'page' : undefined} onClick={() => navigateTo(route)}>
+          <Icon size={15} aria-hidden /> {label}
+        </button>
+      ))}
+    </nav>
   );
 }
 

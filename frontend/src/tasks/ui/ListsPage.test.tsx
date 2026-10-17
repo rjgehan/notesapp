@@ -39,7 +39,8 @@ describe('task list index', () => {
     expect(rows[0].querySelector('.tasks-badge.tone-overdue')?.textContent).toBe('1');
     expect(within(rows[1]).getByText('read-only')).toBeInTheDocument();
     // Today counts the overdue task and today's.
-    expect(screen.getByRole('button', { name: /^Today/ }).querySelector('.tasks-count')?.textContent).toBe('2');
+    const todayRow = screen.getAllByRole('button', { name: /^Today/ }).find((b) => b.classList.contains('tasks-list-link'));
+    expect(todayRow?.querySelector('.tasks-count')?.textContent).toBe('2');
     fireEvent.click(screen.getByRole('button', { name: 'Show archived lists (1)' }));
     expect(within(screen.getByRole('list', { name: 'Archived lists' })).getByText('Old')).toBeInTheDocument();
   });

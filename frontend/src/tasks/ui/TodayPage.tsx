@@ -7,7 +7,7 @@ import { formatLongDate, useToday } from '../dates';
 import { inToday, isOverdue, scheduleComparator } from '../model';
 import { loadParser } from '../quickadd/loadParser';
 import { todayParams, useTaskView } from '../queries';
-import { FlatTaskRow, Loading, LoadError, TaskFab, TaskProblems } from './common';
+import { FlatTaskRow, Loading, LoadError, TaskFab, TaskProblems, TasksNav } from './common';
 import { useTaskData } from './useTaskData';
 import { openQuickAdd } from './state';
 
@@ -27,6 +27,7 @@ export default function TodayPage() {
 
   return (
     <div className="page tasks-page">
+      <TasksNav />
       <header className="page-header">
         <div>
           <h1 className="page-title">Today</h1>
