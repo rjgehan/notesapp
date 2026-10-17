@@ -186,7 +186,7 @@ NotesApp/                              (monorepo; branch main)
 | Path in vault | Meaning | Tree/index/search | Git |
 |---|---|---|---|
 | `**/*.md` | Notes | yes | committed |
-| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes are content-indexed | committed |
+| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes, and documents a `DocumentIndexer` reads (`.sheet`, §6.8), are content-indexed | committed |
 | `.notesapp/settings.json` | App settings (§5.12) | hidden | committed, so settings have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
@@ -414,6 +414,8 @@ Thumbs.db
 | | `TagIndex` | Tag to notes, display casing, nested totals. |
 | | `SearchIndex`, `Tokenizer`, `SearchQueryParser`, `SnippetBuilder` | Full-text search (§5.5.10). |
 | | `MentionFinder` | Unlinked mentions (§5.5.9). |
+| | `DocumentIndexer`, `DocumentParse` | The extension point through which structured files (`.sheet`) feed search, backlinks and tags, and the scan of their Markdown blocks (§6.8). |
+| `sheets` | `SheetDocumentIndexer` | The `DocumentIndexer` for `.sheet` files: cell text and cached values (§6.21.7). |
 | `history` | `GitStore` | Owns the single `Git`/`Repository`. Handles open or init, stale-lock cleanup, repo config and exclude file, `stage`, `commit`, `readAt`, `log --follow`, gc. Takes `ApiPath` values and uses on-disk paths for every git call. Every mutating JGit call runs under its `gitLock`. |
 | | `CommitBatcher` | `SmartLifecycle` at phase `DEFAULT_PHASE - 4096`. Batches autosaves; `prepareWrite`, `markDirty`, `flush`, `commitNow`; retries failed commits with backoff; flushes on shutdown. |
 | | `GitBootstrap` | Runs the initial, import or "changed while stopped" commit asynchronously after readiness (§5.17). |
@@ -559,7 +561,7 @@ record LinkOcc(String raw, String target, @Nullable String subpath, @Nullable St
                boolean rewritable /* false for frontmatter links whose source span differs from the parsed value */) {}
 ```
 
-- `NoteRecord` exists only for `.md` files within their size limit. Larger text files get a `FileRecord` with `version: null` and no content in memory.
+- `NoteRecord` exists only for `.md` files within their size limit, and for documents that a `DocumentIndexer` reads (§6.8). For a document, `text` is the search text the indexer rendered, not the file, so its links are never `rewritable`, it is never offered for unlinked mentions, and it is not counted as a note. Larger text files get a `FileRecord` with `version: null` and no content in memory.
 - **Resolution happens at swap time.** A writer parses a note outside the lock, but `LinkGraph` resolves its links inside the index write lock while swapping it in, so a target created concurrently is always seen.
 
 **Memory budget.** 10k notes at about 5 KB of text each is 50 MB of strings, plus parse data and postings of roughly 60 MB, for about 120 MB of heap. The container gets `mem_limit: 1g` and the JVM uses `MaxRAMPercentage=75`.
@@ -759,6 +761,7 @@ This is `MoveService.move(from, to, updateLinks, dryRun, identity, origin)`. `up
    - **Inbound rewrites.** For every `LinkOcc` in any note (including frontmatter links) that resolves to a path in `moved`, record a rewrite. Its new text is `linkText(newTarget, sourceNewPath, settings.newLinkFormat, occ.style)`.
    - **Outbound re-check.** For every link inside a moved note, compare its resolution before the move (from the old path) with its resolution after the move (simulated with the new paths). If they differ, rewrite the link so it points at the original target.
    - **Collateral protection.** The move may change which file other links resolve to, for example by moving an `A.md` to the root, which hijacks `[[A]]` links that resolved to `Other/A.md`. For each link in the affected name buckets that resolved to a file *not* in `moved`, re-resolve it with the post-move file set. If the result changes, rewrite that link to the path-qualified link text of its original target.
+   - A document indexed through a `DocumentIndexer` (a `.sheet`, §6.21.7) is never rewritten: its links point into its search text, not the file. When the move would change one of its links, it is reported in `failed` with `not-rewritable`.
    - A `LinkOcc` with `rewritable=false` is never planned; its note goes to `failed` with reason `not-rewritable`. A frontmatter link's new target is written for its YAML scalar's style (`'` doubled in a single-quoted scalar; `\` and `"` escaped in a double-quoted one); a target that a plain scalar would misread (`: `, ` #`) is not planned either, with the same reason. As a last check, a rewrite that would make the frontmatter stop parsing or gain or lose links is skipped with `not-rewritable`.
    - A moved file that stops being a note (`.md` renamed to `.txt`) has no rewrites planned inside it.
 3. If `dryRun`, return the plan as a `MoveResult` and stop.
@@ -1338,7 +1341,8 @@ frontend/src/
 │   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, mode toggle, save status), PropertiesTable.tsx
 │   ├── ImageView.tsx, PdfView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
 │   ├── sheet/                register.ts (the descriptor, main bundle); SheetView, SheetEditor, SheetGrid, FormulaBar,
-│   │                         SheetTabs, SheetDialogs, gridModel, theme, useSheetDocument (lazy chunk, §6.21.5)
+│   │                         SheetTabs, SheetDialogs, ChartsPane, importExport, gridModel, theme, useSheetDocument
+│   │                         (lazy chunk, §6.21.5); SheetEmbed (loadEmbed, §6.21.7) and SheetChart (§6.21.9)
 ├── editor/
 │   ├── obsidianSyntax.ts     Lezer inline extension (WikiLink, Embed, Hashtag, Highlight ==x==, Comment %%x%%)
 │   ├── completion.ts         [[ / [[Note# / [[# / # completion sources
@@ -1358,7 +1362,9 @@ frontend/src/
 │   └── embeds.tsx            note transclusion, media, pdf
 ├── sheets/                   .sheet files (§6.21): a1.ts, format.ts (parse, serialize), merge.ts (3-way merge),
 │                             engine.ts (HyperFormula Workbook, lazy chunk), loadEngine.ts, refs.ts (moving formulas),
-│                             tsv.ts, display.ts, edits.ts (fill, copy, paste), activeSheet.ts (palette commands)
+│                             tsv.ts, display.ts, edits.ts (fill, copy, paste), activeSheet.ts (palette commands),
+│                             numfmt.ts and input.ts (number formats, typed input), target.ts (subpaths), charts.ts,
+│                             csv.ts, xlsx.ts (SheetJS, lazy chunk)
 ├── features/
 │   ├── syntax.ts             shared tag and wikilink patterns, parseWikiBody() (vectors API.md §15.6)
 │   ├── links.ts              resolve(), createPath(), linkText(), encodeMdPath() (vectors API.md §15.1, §15.3)
@@ -1561,7 +1567,7 @@ The pipeline is `render/render.ts` from the research, verified:
    | note (`![[Note]]`, `![[Note#Heading]]`) | Transclusion box showing the rendered note or just that heading's section, **one level deep**. Nested embeds render as links. A cycle guard prevents loops. Header links to the note. |
    | `![[Note#^block]]` | A link (block transclusion is roadmap item 20) |
    | other files | A file chip with a download link |
-   | registered view types (future `.sheet`, `.excalidraw`) | The descriptor's `loadEmbed()` |
+   | registered view types (`.sheet`, later `.excalidraw`) | The descriptor's `loadEmbed()`: for a spreadsheet, a read-only table of its cached values (`![[Budget.sheet]]`, `#Summary`, `#Budget!A1:C10`, §6.21.7) |
 6. **Interaction** (delegated on the container):
    - A click on `a.internal-link` calls `preventDefault`, then `nav.openLink(data-href)`.
    - A click on `a.tag` opens tag search.
@@ -1619,11 +1625,11 @@ All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and buil
 | `pdf` | `kind:"pdf"` (2) | no | `<iframe>` plus an "Open in new tab" link |
 | `media` | audio and video (2) | no | Native controls |
 | `unsupported` | everything (1) | no | File info and a Download button |
-| `sheet` | `.sheet` (6) | yes | Spreadsheet grid with formulas, a cell-level `merge` and "New spreadsheet" (ROADMAP item 6, §6.21.5) |
+| `sheet` | `.sheet` (6) | yes | Spreadsheet grid with formulas, a cell-level `merge`, "New spreadsheet", and `loadEmbed` for `![[x.sheet]]` (ROADMAP item 6, §6.21.5, §6.21.7) |
 
 **How the big three plug in later** (ROADMAP items 4–6), through the extension points above:
 
-- `registerView({id: 'sheet', match: e => e.path.toLowerCase().endsWith('.sheet') ? 6 : 0, textual: true, merge: mergeSheetText, ...})`, with a cell-level `merge` (§6.21). Built (`views/sheet/register.ts`).
+- `registerView({id: 'sheet', match: e => e.path.toLowerCase().endsWith('.sheet') ? 6 : 0, textual: true, merge: mergeSheetText, loadEmbed, ...})`, with a cell-level `merge` and embeds (§6.21). Built (`views/sheet/register.ts`).
 - `.excalidraw` (11) and `.excalidraw.md` (14), with `merge` implemented as an element-level merge by element `version`.
 - Tasks: a `.tasks` view, `registerPage` for Today and Upcoming, `registerPanel` for "Tasks linking to this note", `registerCommand` for quick add, and `registerEventHandler` for the `task.*` events that ROADMAP item 4 adds on the server along with its own endpoints.
 
@@ -1636,7 +1642,23 @@ All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and buil
 
 **Semantic merges settle conflicts.** When the view of a file has a `merge` (`SessionDeps.mergeFor`, wired in `sync/instance.ts` through `viewFor`), every conflict the session meets (a 409 with content, a remote change to an unsaved buffer, a draft from another base) goes through it before the banner. A merge equal to theirs adopts their version; any other merge becomes a local edit on top of theirs, saved with `flushHistory` (as Save merged, §6.10) and written to the draft at once, with the toast "Merged changes from another device". The banner appears only when `merge` returns null (the same cell changed on both sides) or throws. Notes have no `merge` and keep the banner for every conflict.
 
-**Backend counterpart.** Text kinds are already readable and writable through the generic API (`notes.text-extensions` lists `sheet`, `tasks`, `excalidraw` and `canvas` from day one), and `notes.limits.text-size-overrides` raises the 5 MiB limit per extension where a format needs it. A future `DocumentIndexer` SPI (`supports(path)`, `index(path, text) → {searchText, links, tags}`) will let these types feed search and backlinks without touching `MarkdownScanner`.
+**Backend counterpart.** Text kinds are already readable and writable through the generic API (`notes.text-extensions` lists `sheet`, `tasks`, `excalidraw` and `canvas` from day one), and `notes.limits.text-size-overrides` raises the 5 MiB limit per extension where a format needs it.
+
+**`DocumentIndexer` (built with ROADMAP item 4).** A Spring bean implementing `index.DocumentIndexer` lets a structured type feed search, backlinks and tags without touching `MarkdownScanner`:
+
+```java
+public interface DocumentIndexer {
+  boolean supports(String path);                          // typically by extension
+  @Nullable Document index(String path, String text);    // null: cannot be read; listed and served, not content-indexed
+  record Document(List<String> blocks) {}                 // the searchable content as Markdown blocks
+}
+```
+
+- `FileIndexer` calls the first indexer that `supports` a text file whenever it indexes one (startup, app writes, the watcher and the rescan), outside every lock, and catches its exceptions so one defective type never stops indexing.
+- The indexer renders what is searchable as Markdown **blocks**, for example one per task. `DocumentParse` scans each block on its own with `MarkdownScanner.scanFragment` (the note rules, without frontmatter), so a code fence or a `%%` comment left open in one block never hides the next, and joins them with shifted offsets. Their `[[links]]`, Markdown links and `#tags` count exactly like a note's, with the same rules and test vectors; nothing new to keep in sync with the client.
+- The result is stored like a note (`NoteRecord` with the search text), so search, `tag:`, `GET /api/tags` and linked backlinks work unchanged. Because offsets point into the search text, a document's links are not `rewritable` (a move reports the file as `not-rewritable`, §5.6), `GET /api/notes/meta` refuses it, unlinked mentions skip it, and `/api/status` does not count it as a note.
+- This replaces the earlier sketch `index(path, text) → {searchText, links, tags}`: rendering links and tags as Markdown reuses the scanner and its vectors instead of a second link model, and still lets a type express any link.
+- `SheetDocumentIndexer` (§6.21.7) indexes spreadsheets through it; the extension point is the same commit as on the tasks and drawings branches, so they merge without conflicts.
 
 ### 6.9 Autosave policy
 
@@ -1973,20 +1995,25 @@ Any other error shows the problem's `detail`. 5xx problem errors show a toast wi
 
 ### 6.21 Spreadsheets (`.sheet`, ROADMAP item 6)
 
-Built so far (6a): the file format, its parser and serializer, the formula engine adapter and the cell-level merge in `frontend/src/sheets/`, and the grid view that uses them in `frontend/src/views/sheet/` (registered with `registerView`, §6.8; §6.21.5). Embeds and search indexing (6b) follow. Nothing on the server changes: `.sheet` is already a text kind (§4.2) with versioned saves, conflicts, history and live sync.
+Built (6a, 6b, 6c): the file format, its parser and serializer, the formula engine adapter and the cell-level merge in `frontend/src/sheets/`; the grid view that uses them in `frontend/src/views/sheet/` (registered with `registerView`, §6.8; §6.21.5); embeds in notes and search indexing (§6.21.7); number formats (§6.21.8); charts (§6.21.9); and CSV and Excel import and export (§6.21.10). `.sheet` is a text kind (§4.2) with versioned saves, conflicts, history and live sync; the only server part is `SheetDocumentIndexer`, which feeds search and backlinks.
 
 | Module | Role | Bundle |
 |---|---|---|
 | `a1.ts` | A1 references: columns A..XFD, rows 1..1048576 (Excel's and Google Sheets' limits), normalization, row-major order | main |
-| `format.ts` | Types, `parseSheet()` (validate, repair or refuse), `serializeSheet()` (stable layout), typed input (`cellInput`, `cellText`), sheet-name rules | main |
+| `format.ts` | Types, `parseSheet()` (validate, repair or refuse), `serializeSheet()` (stable layout), `cellInput`, `cellText`, sheet-name rules | main |
+| `numfmt.ts`, `input.ts`, `display.ts` | Number formats (§6.21.8), typed input with the formats it implies, how a cell shows (in its format: the cell's, else the row's, else the column's) | main |
+| `target.ts` | What an embed's or link's subpath names: a sheet, a named range or a range (§6.21.7) | main |
 | `merge.ts` | `mergeSheetText(base, mine, theirs)`: the descriptor's `merge()` | main |
 | `engine.ts` | `Workbook`: HyperFormula adapter, cached values, undo and redo, remote replace | **lazy chunk** (764 kB, 163 kB gzipped) |
 | `loadEngine.ts` | `loadSheetEngine()`, the only way in to `engine.ts` | main |
-| `refs.ts`, `tsv.ts`, `display.ts`, `edits.ts` | Moving formulas (`shiftFormula`), the TSV clipboard format, how values read, and fill, clear, copy and paste as cell edits (§6.21.5) | main |
+| `refs.ts`, `tsv.ts`, `edits.ts` | Moving formulas (`shiftFormula`, `renameSheetInFormula`), the TSV clipboard format, and fill, clear, copy and paste as cell edits (§6.21.5) | main |
+| `charts.ts`, `csv.ts` | What a chart shows of its range (§6.21.9); CSV in and out (§6.21.10) | with the view's or the embed's chunk |
+| `xlsx.ts` | Excel workbooks in and out through SheetJS (§6.21.10) | **lazy chunk** (490 kB, 160 kB gzipped), loaded only by an import or export of a workbook |
 | `activeSheet.ts`, `views/sheet/register.ts` | The view descriptor and its palette commands | main |
-| `views/sheet/*` | The grid view: Glide Data Grid, formula bar, tabs, dialogs, the session binding | **lazy chunk** (344 kB, 113 kB gzipped, plus 13 kB of CSS) |
+| `views/sheet/*` | The grid view: Glide Data Grid, formula bar, tabs, dialogs, charts pane, import and export, the session binding | **lazy chunk** (352 kB, 114 kB gzipped, plus 16 kB of CSS) |
+| `views/sheet/SheetEmbed.tsx`, `SheetChart.tsx` | The embed (`loadEmbed()`) and the SVG charts it shares with the grid view | **lazy chunks** (3 kB and 8 kB, plus 3 kB of CSS); no engine, no grid |
 
-Embeds, search and merges need only the main-bundle modules, because every formula's result is cached in the file.
+Embeds, search and merges need neither the engine nor the grid, because every formula's result is cached in the file.
 
 **Licence.** HyperFormula is used under its GPL-3.0 option, so the repository is `GPL-3.0-only` (`LICENSE`, `package.json`, `pom.xml`; decided 2026-10-17). `THIRD_PARTY_NOTICES.md` lists every shipped package and its licence; it is generated by `scripts/third-party-notices.mjs` from the frontend lockfile and the backend's resolved runtime dependencies, and is regenerated after dependency changes.
 
@@ -2008,7 +2035,8 @@ Embeds, search and merges need only the main-bundle modules, because every formu
         "B10": { "f": "=SUM(B2:B9)", "c": 1937.5 },
         "D1": { "f": "=SEQUENCE(2)", "c": 1 },
         "D2": { "c": 2 },
-        "E1": { "f": "=1/0", "c": { "e": "#DIV/0!" } }
+        "E1": { "f": "=1/0", "c": { "e": "#DIV/0!" } },
+        "F1": { "v": 0.125, "fmt": "0.0%" }
       },
       "cols": {
         "A": { "w": 180 },
@@ -2017,7 +2045,10 @@ Embeds, search and merges need only the main-bundle modules, because every formu
       "rows": {
         "1": { "bold": true }
       },
-      "frozen": { "rows": 1, "cols": 0 }
+      "frozen": { "rows": 1, "cols": 0 },
+      "charts": {
+        "c0mgv1a2b3x7f2": { "type": "bar", "range": "A1:B9", "title": "Costs", "headers": true, "labels": true }
+      }
     }
   ],
   "named": {
@@ -2031,12 +2062,13 @@ Embeds, search and merges need only the main-bundle modules, because every formu
 | `type`, `version` | Always `"notesapp-sheet"` and `1`. A higher version is refused (read-only until NotesApp is updated). |
 | `engine` | `name@version` of the engine that computed the `c` values. `""` means no single engine run did (a merged file); see §6.21.3. |
 | `sheets[]` | In tab order. `id` is a stable identity for merges (new sheets get random ids such as `s4k2x9q`, so sheets added on two devices never collide); formulas refer to sheets by `name`, which is unique without regard to case. |
-| `cells` | Sparse, keyed by canonical A1 references. `v` is a literal (text, number or `true`/`false`), `f` a formula starting with `=`, `c` the cached result of `f`. An error result is `{"e": "#DIV/0!"}`; an empty result is `null`. A cell with only `c` holds a value an array formula spilled into it. |
+| `cells` | Sparse, keyed by canonical A1 references. `v` is a literal (text, number or `true`/`false`), `f` a formula starting with `=`, `c` the cached result of `f`, `fmt` the cell's number format (§6.21.8; written after `c`). An error result is `{"e": "#DIV/0!"}`; an empty result is `null`. A cell with only `c` holds a value an array formula spilled into it; a cell with only `fmt` is formatted and empty. |
 | `cols`, `rows` | Keyed by column letters and by 1-based row numbers: `w` (width) or `h` (height) in CSS pixels, `fmt` (number format), `bold`. |
 | `frozen` | Frozen rows and columns. |
+| `charts` | The sheet's charts (§6.21.9), keyed by id, one per line: `type` (`bar`, `line` or `pie`), `range` (an A1 range of this sheet), `title`, `headers` (the first row names the series), `labels` (the first column labels the categories). Written only when the sheet has charts, so files without charts keep the layout of earlier versions. Ids are `c`, the creation time in base 36 and a random tail: they sort in the order the charts were made, which is the order they show in, and charts made on two devices never collide. |
 | `named` | Named ranges and constants: name → expression without the leading `=` (`Budget!$B$10`, `0.2`, `Budget!$B$2*2`). |
 
-**Unknown keys survive.** Keys this version does not know, at every level (file, sheet, cell, column, row), are kept in an `extra` record and written back after the known ones, so a tab running older code never strips what newer code added. A known key with an unusable value (`"w": "wide"`) is kept the same way, and is written back until the field is set.
+**Unknown keys survive.** Keys this version does not know, at every level (file, sheet, cell, column, row, chart), are kept in an `extra` record and written back after the known ones, so a tab running older code never strips what newer code added (code from before 6c keeps a cell's `fmt` and a sheet's `charts` this way). A known key with an unusable value (`"w": "wide"`, a chart `type` of `donut`) is kept the same way, and is written back until the field is set; a `charts` value that is not an object is kept aside and written back while the sheet has no charts.
 
 **Stable layout.** `serializeSheet()` always writes: the top-level keys in the order above; sheets in tab order; cells in row-major order (`A1, B1, AA1, A2, A10`); columns by index; rows by number; named ranges by name without regard to case; one cell, column, row or named range per line, as `{ "v": 1, "c": 2 }`; an empty collection as `{}`; LF line endings and a final newline. Writing the same model twice gives the same bytes, so a one-cell edit is a one-line diff and git history stays readable.
 
@@ -2055,12 +2087,14 @@ Embeds, search and merges need only the main-bundle modules, because every formu
 | A bare value as a cell (`"A1": 5`); a `null` cell or value | `{ "v": 5 }`; dropped (nothing to lose) |
 | A formula without `=`; an empty formula | `=` added; dropped |
 | Both `v` and `f` | The formula is used; the value is kept aside and written back |
-| An unusable `v`, `f`, `w`, `h`, `fmt` or `bold` | Kept aside verbatim (not shown or calculated) |
+| An unusable `v`, `f`, `w`, `h`, `fmt` or `bold`, or chart `type`, `range`, `title`, `headers` or `labels` | Kept aside verbatim (not shown or calculated) |
+| `charts` that is not an object | Kept aside verbatim; no charts shown |
+| A chart that is not an object | Refused |
 | An unreadable `c` | Dropped: it is derived data, recalculated on the next engine run |
 | A named range given as a number or boolean, or with a leading `=` | Stored as expression text |
 | Unusable `frozen` values | `0` (a view setting, not data) |
 
-**Typed input** (`cellInput`): `=…` is a formula; a number (`42`, `-1e3`, `.5`, `007`) is a number; `TRUE`/`FALSE` in any case are booleans; a leading `'` forces text; an empty string clears the cell; anything else is text, kept exactly as typed. `cellText` is the inverse for the formula bar: text that would read back as something else is shown with a leading `'`. Dates and number formats in input come with 6c.
+**Typed input** (`input.ts`, `cellInput`): `=…` is a formula; a number (`42`, `-1e3`, `.5`, `007`) is a number; `TRUE`/`FALSE` in any case are booleans; a leading `'` forces text; an empty string clears the cell; percentages (`12.5%`), amounts with a currency symbol (`$1,450.50`, `-€5`), numbers with thousands separators (`1,450`), dates (`2026-10-17`, `10/17/2026`, with an optional time) and times (`14:30`, `2:30 PM`) are numbers that bring the format they imply (`0.0%`, `$#,##0.00`, `#,##0`, `yyyy-mm-dd`, `m/d/yyyy`, `h:mm`, §6.21.8), set on the cell when no format applies to it yet; anything else is text, kept exactly as typed. A cell formatted as plain text (`@`) takes everything as text. Two-digit years 00–29 are 2000–2029 and 30–99 are 1930–1999; dates before 1900 stay text. `cellText` is the inverse for the formula bar: dates and times show as ISO text (`2026-10-17 14:30`), percentages as percentages, and text that would read back as something else with a leading `'`.
 
 #### 6.21.2 Formula engine
 
@@ -2073,8 +2107,8 @@ Embeds, search and merges need only the main-bundle modules, because every formu
 
 - **Cached values.** After every change, each formula's result is written to its cell's `c`, and array results to the content-less cells they spill into (stale spill cells are removed). The model is therefore always ready to serialize.
 - **Stale caches.** `open()` reports `stale` when the file's `engine` differs from `ENGINE_ID` (another engine, another version, or `""` after a merge), a formula has no `c`, or the spilled cells differ. The values are then already recalculated in memory and `engine` rewritten; the view saves once. A different value alone does not count, so volatile functions (`NOW()`, `RAND()`) never make opening a file dirty.
-- **Edits** (`setCell`, `setCells`, `addSheet`, `renameSheet`, `removeSheet`, `moveSheet`, `setFrozen`, `setColumn`, `setRow`, `setNamed`) validate their input and throw on invalid names or references. A cell's unknown keys (future formatting) stay when its content changes or is cleared. Renaming a sheet makes formulas and named ranges that refer to it follow the new name (the engine rewrites them; the workbook adopts the engine's text only where it differs in substance, keeping the user's own spelling elsewhere). Removing a sheet turns references to it into `#REF!`; undoing the removal brings them back.
-- **Patches.** Every change is a list of slot changes, each with its value before and after: a cell's content (never its `c`), a sheet's name, panes and unknown keys, the sheet order, a column, a row, a named range, a top-level unknown key. A patch is applied to the model first; then the engine is reconciled with the model's new state (sheets removed, renamed through temporary names so two sheets can swap names, added; the touched cells and names set). Sheets are added before, and removed after, everything else in a patch, so a patch and its inverse both apply whatever order their changes are in. More than 1000 changed cells, or any failure of the incremental update, rebuilds the engine from the model instead (rows go in as blocks; a 20,000-cell sheet loads in about 0.2 s).
+- **Edits** (`setCell`, `setCells`, `setFormats`, `addSheet`, `renameSheet`, `removeSheet`, `moveSheet`, `setFrozen`, `setColumn`, `setRow`, `addChart`, `setChart`, `setNamed`) validate their input and throw on invalid names or references. A cell's format and unknown keys stay when its content changes or is cleared; a `CellEdit` may set or remove the format with the content (typed `10%`, fill, paste). Renaming a sheet makes formulas and named ranges that refer to it follow the new name (the engine rewrites them; the workbook adopts the engine's text only where it differs in substance, keeping the user's own spelling elsewhere). Removing a sheet turns references to it into `#REF!`; undoing the removal brings them back.
+- **Patches.** Every change is a list of slot changes, each with its value before and after: a cell's content (value or formula, format and unknown keys; never its `c`), a sheet's name, panes and unknown keys, the sheet order, a column, a row, a chart, a named range, a top-level unknown key. A cell change that leaves the value and formula alone (a format) never reaches the engine, and the cell keeps its cached value, spilled values included. A patch is applied to the model first; then the engine is reconciled with the model's new state (sheets removed, renamed through temporary names so two sheets can swap names, added; the touched cells and names set). Sheets are added before, and removed after, everything else in a patch, so a patch and its inverse both apply whatever order their changes are in. More than 1000 changed cells, or any failure of the incremental update, rebuilds the engine from the model instead (rows go in as blocks; a 20,000-cell sheet loads in about 0.2 s).
 - **Undo and redo** are the workbook's own: a stack of up to 200 patches, inverted to undo. `transact(fn)` makes several edits one step with one notification; a new edit clears the redo stack.
 - **Remote changes.** `replace(next, {undoable})` diffs the model against a parsed file and applies the patch. With `undoable` (Take theirs) it is one undo step. Otherwise the history is cleared if any entry touches a changed slot (a change anywhere in a sheet counts as touching that sheet, so undoing its creation could not carry the other device's edits away); an undo can therefore never overwrite another device's edit. After a remote rename the other device's formula text is kept and put back into the engine, because both devices must compute the same file. `replace` also returns `stale`, but a view acts on it only for a change of its own making (its own merge); otherwise two open devices could trade cache-only saves forever.
 - **Notifications.** `subscribe()` receives `{cells, layout, origin}`: the changed cells per sheet (content or value; `null` after a rebuild, when anything may have changed), whether sheets, columns, rows, panes or names changed, and whether the change came from an edit, undo, redo or replace.
@@ -2085,14 +2119,16 @@ Embeds, search and merges need only the main-bundle modules, because every formu
 
 `mergeSheetText(base, mine, theirs)` is a 3-way merge over the same slots as the patches. Per slot: equal sides agree; otherwise the side that differs from the base wins; if both differ from the base and from each other, it is a conflict and the function returns `null`, so the conflict banner (§6.10) appears only when the same cell, sheet property, column, row or named range changed differently on both devices.
 
-- **Cells** are compared by content (`v`, `f`, unknown keys), never by `c`: two devices that each changed a different input both recalculated the same totals, which is not a conflict.
+- **Cells** are compared by content (`v`, `f`, `fmt`, unknown keys), never by `c`: two devices that each changed a different input both recalculated the same totals, which is not a conflict. When both sides changed a cell, its parts merge separately: a value typed on one device and a format set on the other are both kept; two different values (or formats) conflict.
+- **Charts** merge per chart id, like columns and rows. Formats and charts are not calculation inputs, so changing only them keeps a side's exact cached values.
 - **Sheets.** A sheet added on one side is kept, in its place after the sheet it followed there. A sheet removed on one side is removed if the other side left it alone, and is a conflict if the other side changed anything in it. The sheet order of the side that reordered wins; two different reorders conflict. Two sheets (or named ranges) added on both sides with names differing only in case conflict.
 - **Cached values.** If the merged calculation inputs (sheet names, cell values and formulas, named ranges) equal one side's, that side's `c` values and `engine` are taken: they are exact. Otherwise the best values at hand are kept and `engine` is set to `""`, so the next engine run recalculates everything and the device that saved the merge writes correct values.
 - **Text.** When the merge equals one side, that side's text is returned unchanged (even if it is not in the stable layout); otherwise the merged file is serialized. A side that cannot be parsed gives `null`.
 
 #### 6.21.4 Wiring into the view
 
-- `registerView({id: 'sheet', match: e => e.path.toLowerCase().endsWith('.sheet') ? 6 : 0, textual: true, modes: ['edit'], merge: mergeSheetText, create: {label: 'spreadsheet', extension: 'sheet', initialContent: () => serializeSheet(newSheetFile())}, commands: SHEET_COMMANDS, ...})` in `views/sheet/register.ts`, called from `extensions/builtins.ts`. Everything it imports is in the main bundle; `load()` brings in the view's chunk.
+- `registerView({id: 'sheet', match: e => e.path.toLowerCase().endsWith('.sheet') ? 6 : 0, textual: true, modes: ['edit'], merge: mergeSheetText, create: {label: 'spreadsheet', extension: 'sheet', initialContent: () => serializeSheet(newSheetFile())}, commands: SHEET_COMMANDS, loadEmbed: () => import('./SheetEmbed'), ...})` in `views/sheet/register.ts`, called from `extensions/builtins.ts`, which also registers the global command "Import spreadsheet from CSV or Excel…" (§6.21.10). Everything it imports is in the main bundle; `load()` brings in the view's chunk and `loadEmbed()` the embed's.
+- **The route's subpath.** `/n/Budget.sheet#Summary` opens that sheet, `#Budget!A1:C10` (or a named range) opens its sheet with the range selected and scrolled to (`resolveTarget`, §6.21.7). Links and embeds use it.
 - **A binding per session** (`views/sheet/useSheetDocument.ts`, `SheetBinding`) keeps the session and a `Workbook` in step outside React; the view subscribes to its snapshot: `loading`, `failed` (the engine chunk did not load), `refused`, or `ready` with the workbook and a version that changes with every change of it.
   - **Open:** once the session has loaded, `await loadSheetEngine()`, parse the session's text, `Workbook.open()`. Opening writes only for `stale` caches (with `markDirty`, so it is saved like an edit); repairs are written with the next edit, never on open.
   - **Edits** (and the workbook's own undo and redo) call `markDirty(() => workbook.serialize())`, so serialization stays lazy (§6.8).
@@ -2108,12 +2144,13 @@ Embeds, search and merges need only the main-bundle modules, because every formu
 | Part | What it does |
 |---|---|
 | Header | The inline title (editing it renames the file and keeps `.sheet`; files other than notes are titled without their extension) and the save status |
-| Toolbar | Undo, Redo, Bold rows (Bold columns when whole columns are selected), Fill down, Fill right, Freeze (a menu), Column width, Named ranges. 44 px targets on touch devices; it scrolls sideways on a phone. |
+| Toolbar | Undo, Redo, Bold rows (Bold columns when whole columns are selected), Fill down, Fill right, Freeze (a menu), Column width, Decrease and Increase decimal places, Number format (§6.21.8), Insert chart (§6.21.9), Named ranges, Import CSV or Excel, Download as CSV or Excel (a menu, §6.21.10). 44 px targets on touch devices; it scrolls sideways on a phone. |
+| Charts pane | The active sheet's charts, below the grid, scrolling sideways, each with Edit and Delete; it folds away (folded at first on a phone, so the grid keeps its room) and hides with the keyboard (§6.21.9) |
 | Formula bar | The name box (the selection: `B3`, `A1:C4`; type a cell, a range, `Sheet!range` or a named range to go there) and the active cell's formula or value. Enter commits and moves down (Shift+Enter up), Tab right (Shift+Tab left), Esc reverts, leaving the field commits; an edit always writes the cell (and sheet) it started on. An error result shows the engine's explanation (`errorMessage`) beside it. |
 | Grid | Glide over the active sheet: A1 column letters, row numbers, frozen columns and rows, column widths and row heights from the file, bold rows and columns |
 | Sheet tabs | Switch; add (`Sheet<n>`); rename (double-click, F2 or the menu, checked with `sheetNameProblem`); move left or right (menu) or drag (desktop); delete (confirmed, one undo step; formulas that used the sheet show `#REF!`). The active tab's menu button opens its menu, so nothing needs right-click or long-press. |
 
-**Cells.** Every cell is a Glide text cell. `displayData` is the value as shown (`display.ts`: the "Automatic" format of Google Sheets, up to 15 significant digits for whole numbers and 10 for fractions, scientific notation from 1E+15 and below 1E-06; number formats wait for 6c). `data` is what an edit starts from (`cellText`: the formula, or the value as `cellInput` reads it back). Numbers sit right, booleans and errors in the middle, text left; error results use `--text-error`. Commits go through `cellInput` (§6.21.1).
+**Cells.** Every cell is a Glide text cell. `displayData` is the value as shown (`display.ts`: in its number format, §6.21.8, or else the "Automatic" format of Google Sheets, up to 15 significant digits for whole numbers and 10 for fractions, scientific notation from 1E+15 and below 1E-06). `data` is what an edit starts from (`cellText`: the formula, or the value as typed input reads it back, dates as dates). Numbers sit right, booleans and errors in the middle, text left; error results use `--text-error`, and a format's `[Red]`, `[Green]` and `[Blue]` the theme's error, success and link colours. Commits go through typed input (`typedEdit`, §6.21.1), which sets the format a typed value implies on a cell without one.
 
 **Editing.** On desktop, Glide's cell editor opens on a double-click, Enter or typing. On touch devices (`pointer: coarse`) cells are edited in the formula bar, at a 16 px font so iOS does not zoom: a tap selects a cell, a tap on the selected cell focuses the bar. The focus moves in that tap's `touchend`, a user gesture (so iOS opens the keyboard), and its default is prevented, because the mousedown a browser emulates after a tap would otherwise take the focus back. Enter then commits and moves to the next cell with the keyboard still up (`enterkeyhint="next"`). While the keyboard is open on a phone, the title, toolbar and tabs give way to the formula bar and the grid (`.keyboard-open`, §6.16).
 
@@ -2133,13 +2170,13 @@ Embeds, search and merges need only the main-bundle modules, because every formu
 
 **Theme.** A canvas cannot read `var()`: `sheetTheme()` resolves the theme's CSS variables (§6.17) into Glide's theme, and a `MutationObserver` on `data-theme` reads them again when the theme changes.
 
-**Commands.** The descriptor's `commands` (active while the view shows the open file, §6.8) reach the mounted view through `sheets/activeSheet.ts`: Undo and Redo spreadsheet edit, Fill down, Fill right, Bold, Freeze rows, Freeze columns, Unfreeze, Set column width…, Add sheet and Named ranges….
+**Commands.** The descriptor's `commands` (active while the view shows the open file, §6.8) reach the mounted view through `sheets/activeSheet.ts`: Undo and Redo spreadsheet edit, Fill down, Fill right, Bold, Freeze rows, Freeze columns, Unfreeze, Set column width…, Add sheet, Named ranges…, Number format…, Increase and Decrease decimal places, Insert chart…, Import CSV or Excel into this spreadsheet…, Download sheet as CSV and Download spreadsheet as Excel (.xlsx).
 
 **New spreadsheet.** The descriptor's `create` adds "New spreadsheet here" to the explorer's row menu and "Create new spreadsheet" to the palette. Both create `Untitled.sheet` with one empty sheet through the optimistic new-note flow (§6.15): a title typed meanwhile becomes the file's name, and Enter moves on to the grid. `.sheet` files show the `FileSpreadsheet` icon in the tree.
 
 **Files that cannot be edited.** A file the parser refuses opens in the text editor (the `text` view) below the parser's message, untouched, with "Open as spreadsheet" to try again after a fix. A file that is not valid UTF-8 (`lossy`, §4.2) is shown read-only.
 
-**Limits of 6a.** Frozen cells are edited in the formula bar rather than in place, and a range selection stops at the frozen rows. Values and dates show in the Automatic format until number formats arrive (6c), so a date shows as its serial number. Fill copies values (no series). Row heights are shown but cannot be changed yet. Copy and paste need a keyboard or the browser's own clipboard events; there is no Paste button for phones yet.
+**Limits.** Frozen cells are edited in the formula bar rather than in place, and a range selection stops at the frozen rows. Fill copies values and formats (no series). Row heights are shown but cannot be changed yet. Copy and paste need a keyboard or the browser's own clipboard events; there is no Paste button for phones yet. Formats other than number formats (colours, alignment, borders) and floating charts are not in scope.
 
 #### 6.21.6 Tests and measurements
 
@@ -2147,9 +2184,77 @@ Embeds, search and merges need only the main-bundle modules, because every formu
 
 The grid view adds `refs.test.ts`, `tsv.test.ts` and `edits.test.ts` (moving formulas, absolute parts, quoted sheet names, strings, functions and `#REF!`; TSV quoting both ways; fill, clear, copy and paste, own copies and other text, tiling), `gridModel.test.ts` (grid size, widths, frozen rows that fit, cell contents, selections with frozen rows), `useSheetDocument.test.ts` (the binding with the real engine and session over the mock vault: opening, stale saves, lazy serialization, another device's change never saved back, Take theirs as one undo step, a cell-level merge without the banner, refused and fixed files, the cache, an engine chunk that fails to load), `register.test.tsx` (the descriptor, its commands, the theme from CSS variables) and `SheetView.test.tsx`, where Glide is replaced by a stand-in that renders cells and keeps its props: the formula bar, Glide's editor, Delete, undo, fill, copy and paste through clipboard events, frozen cells, column widths, freezing, bold, the name box, sheet tabs, named ranges, live updates, palette commands, refused and read-only files, and the touch flow (tap, `touchend`, Enter to the next cell). `DocumentSession.test.ts` covers views with their own model and semantic merges (§6.8).
 
-Bundle: the view's chunk is 344 kB (113 kB gzipped) plus 13 kB of CSS (3 kB gzipped); the main bundle does not grow by more than the descriptor, the format and the merge.
+6b and 6c add `numfmt.test.ts` (the Automatic format, serial dates, rounding on 15 significant digits, every kind of format code, colours, sections, kinds, decimal places, the presets), `input.test.ts` (percentages, amounts, grouped numbers, dates and times, what stays text, plain-text cells, the formula bar's text reading back), `format.test.ts`, `engine.test.ts` and `merge.test.ts` additions (cell formats and charts in the file, kept-aside values, formats and charts through edits, undo, sheet removal and remote replaces, a format on a spilled value, per-part cell merges, per-chart merges), `edits.test.ts` additions (formats in fill, copy and paste), `target.test.ts` (subpaths, `renameSheetInFormula`), `charts.test.ts`, `csv.test.ts` (quoting, separators, encodings, typed fields), `xlsx.test.ts` (a round trip through SheetJS keeping values, formulas, cached results, formats, spills, widths, heights and names; `_xlfn.`; long sheet names; what an import leaves out; files that are no workbook), `importExport.test.ts` (imports into the open workbook as one undo step with renamed clashing sheets and their formulas, as a new file), `SheetChart.test.tsx` (bars, lines, pies, legends, tooltips, palette order, what cannot be drawn), `SheetEmbed.test.tsx` (with HyperFormula and Glide replaced by modules that fail to load: tables in their formats, sheets, ranges, named ranges, charts, limits, clicks, live updates, and the reading view's placeholder hydrated through `loadEmbed`), and `SheetView.test.tsx` additions (the Number format dialog on cells and whole columns, decimals, a typed percentage, inserting, editing and deleting a chart, importing CSV into a new sheet and a new file, downloads as CSV and .xlsx, opening at the route's sheet or range). On the server, `SheetDocumentIndexerTest` and `SheetIndexingTest` (§6.21.7).
+
+Bundle: the view's chunk is 352 kB (114 kB gzipped) plus 16 kB of CSS; the embed's 3 kB and the charts' 8 kB; SheetJS's 490 kB (160 kB gzipped) loads only for workbooks. The main bundle grows by the number formats, typed input and subpath resolution (about 12 kB minified).
 
 Measured on the development PC (Node, so a phone is slower) with a 20,000-cell sheet (5,000 rows of values, formulas, text and running totals; 744 KiB): parse 42 ms, open and calculate 185 ms, one edit that changes 5,000 dependent results 19 ms, serialize 26 ms, a 3-way merge 380 ms.
+
+#### 6.21.7 Embeds, links and search (6b)
+
+**Embeds.** The descriptor's `loadEmbed()` (§6.8) is `views/sheet/SheetEmbed.tsx`, which the reading view hydrates like any registered view's embed (§6.7; Live Preview's embeds, ROADMAP 10b, go through the same `loadEmbed`). It reads the file through the `['file', path]` query (refreshed by `file.changed`, so it follows other devices), parses it with `parseSheet` and draws a read-only table of cached values in their number formats, bold rows and columns, column widths and error colours. Neither the engine nor the grid loads (a test replaces both with modules that fail to load).
+
+| Embed | Shows |
+|---|---|
+| `![[Budget.sheet]]` | The first sheet's used range (from A1 to the last cell that shows something), and its charts below |
+| `![[Budget.sheet#Summary]]` | The sheet named `Summary` (any case), and its charts |
+| `![[Budget.sheet#Budget!A1:C10]]`, `![[Budget.sheet#B2:D4]]` | A range (without a sheet: on the first sheet) |
+| `![[Budget.sheet#Total]]` | A named range |
+
+`resolveTarget` (`target.ts`) tries a sheet name first, then a named range, then a range (`parseRangeText`), so a sheet called `B2` wins over the cell. An embed shows at most 100 rows and 26 columns and says so (`Showing A1:Z100 of A1:Z500. Open the spreadsheet for the rest.`); the table scrolls sideways inside the embed, so a wide sheet never widens the note on a phone. A file that is empty, refused by the parser, or has no such target says so in place. `![[x.sheet|Caption]]` replaces the title. A file without cached values (an import, or a merge, before its first open) shows its formulas' cells empty until it is opened once.
+
+**Clicks.** A click anywhere on the embed opens the spreadsheet at its target (`openPath(path, subpath)`, so `/n/Budget.sheet#Budget!A1:C10`, §6.21.4), unless text is being selected; the title is a real link, so Ctrl or Cmd-click opens a new tab. The embed handles its own clicks and stops them there, so it behaves the same in any host and the reading view never follows the title link a second time.
+
+**Search and backlinks** (server, `sheets/SheetDocumentIndexer`, through the `DocumentIndexer` of §6.8). Each cell's shown value is one block, in row-major order: its text or number, the cached `c` of its formula (the frontend caches every result, so no engine runs on the server), or a value an array formula spilled into it; sheet names and chart titles are blocks too. A `[[Note]]` in a cell, or computed by a formula, is therefore a backlink with the cell's text as its context, and a `#tag` a tag, as in a note; one block per cell keeps markup in one cell (a backtick, `%%`) from reaching into the next. Formulas, error results, number formats and the JSON around the values are not indexed: searching `SUM` or `frozen` finds nothing. Numbers are indexed as the Automatic format writes them (`1937.5`, `1E+21`), not in their number format. Files that are not readable sheets (not JSON, another `type`, a newer `version`) are listed but not content-indexed; an empty file is an empty document. As for every document, a rename of a linked note reports the sheet as `not-rewritable` instead of rewriting its cells, sheets never count as notes, and they are never offered as unlinked mentions.
+
+#### 6.21.8 Number formats (6c)
+
+**Where a format lives.** A cell's `fmt`, else its row's, else its column's (`effectiveFormat`); none is the Automatic format. Format codes are Excel's and Google Sheets' (`numfmt.ts`, no dependency), so they survive an .xlsx round trip:
+
+| Codes | Meaning |
+|---|---|
+| `0`, `#`, `?` | Digit placeholders: a required digit, an optional one, one padded with a space. Whole parts fill from the right (`000-0000`); fractions drop trailing zeros at `#` |
+| `,` | Between digits: thousands separators; after the last digit: divides by 1,000 (`0.0,,"M"`) |
+| `.`, `%`, `E+00` | Decimal point; percent (times 100); scientific notation |
+| `"text"`, `\x`, `_x`, `*x` | Literal text, an escaped character, a space the width of `x`, a fill (one space) |
+| `;` | Sections: positive; negative (written without a sign); zero; text |
+| `@` | The text of a text value; as the whole format, plain text: typed input stays text |
+| `y`, `m`, `d`, `h`, `s`, `AM/PM`, `[h]`, `.00` | Years, months (`m` after `h` or before `s` is minutes), days and weekdays, hours (12-hour with `AM/PM` or `A/P`), seconds, elapsed time, fractions of a second |
+| `General` | The Automatic format, possibly with literals (`General" kg"`) |
+| `[Red]`, `[Green]`, `[Blue]`, `[$€-407]` | Colours (the theme's error, success and link colours); a currency symbol with a locale |
+
+Numbers round half up on their 15 significant digits, as spreadsheets show them (`1.005` to two places is `1.01`). Dates are serial days from 1899-12-30 (HyperFormula, Google Sheets, Excel after February 1900); a number before day 0 or after 9999 shows in the Automatic format. Conditions (`[>100]`) are ignored, fractions (`# ?/?`) and other colours are not supported. Booleans and errors ignore formats; text uses a format's text section.
+
+**Setting formats.** The Number format dialog lists Google Sheets' formats (Automatic, Plain text, Number, Percent, Scientific, Financial, Currency, Currency rounded, Date, Date (US), Date (long), Time, Date time, Duration), each with a sample, and a custom format with a live preview. It applies to the selection as one undo step: whole columns or rows get a column or row format (and their cells lose their own, so the new format shows everywhere); other selections, up to 10,000 cells, get a format per cell; Automatic on a cell whose row or column has a format stores `General`, which wins. Decrease and Increase decimal places add or remove a `0` after the point in every section; on Automatic they start from the decimals the value shows. Typed input brings formats (§6.21.1); fill and pastes of this app's own copies bring the cells' formats, and copies put values on the clipboard as they show (`$1,450.00`), which pastes back as a number with its format.
+
+#### 6.21.9 Charts (6c)
+
+**Model.** A sheet's `charts` (§6.21.1) describe bar (vertical), line and pie charts of a range of the same sheet; they are stored, merged per chart and undone like everything else, and drawn from the cached values, so the grid's pane and embeds draw them without the engine.
+
+**Data** (`charts.ts`). Columns are series and rows categories, as in Google Sheets. With `headers` the first row names the series; with `labels` the first column labels the categories (the slices of a pie); otherwise series are named after their column and categories numbered by row. Cells that hold no number (text, errors, empty) are gaps. Insert chart guesses both options from the range (text above the values, text in the first column), charts the selection, or the sheet's used range when a single cell is selected, and offers a live preview; a range on another sheet is refused. At most eight series (the palette's colours are never reused) and 500 categories are drawn, with a note of what was left out; a pie takes the first series' positive values, the eight largest at most with the rest summed as Other.
+
+**Drawing** (`SheetChart.tsx`, plain SVG, no library). The validated categorical palette of the data-visualization guidelines, in its fixed order, stepped separately for the dark and the light theme (`styles/sheetChart.css`; the light steps that fall below 3:1 against the surface are relieved by the legend, the tooltips and the sheet itself as the table view). Bars are at most 24 px wide with a 4 px rounded data end and a 2 px gap between neighbours, grouped per category; lines are 2 px with ringed 8 px markers (up to 60 categories); pie slices are separated by the surface colour. One value axis with round ticks including zero, compact labels (`1.5K`, `25%` for percent formats) and hairline grid lines; category labels thin out to fit. A legend appears for two or more series and for every pie (with shares); a single series names the chart when it has no title. Every mark has a tooltip with its category, series and value as the sheet shows it. Charts measure their width, so they fit a phone.
+
+**In the view.** A pane below the grid shows the active sheet's charts as cards that scroll sideways (on a phone, one per screen width), each with Edit (the same dialog) and Delete (confirmed, undoable). It folds away, starts folded on a phone, and hides while the keyboard is open. Charts do not float over the grid as in Google Sheets.
+
+#### 6.21.10 Import and export (6c)
+
+| Action | Where | What happens |
+|---|---|---|
+| Import CSV or Excel | Toolbar, palette (sheet open) | A file picker (`.csv`, `.tsv`, `.txt`, `.xlsx`, `.xlsm`, `.xls`, `.ods`), then a dialog: into new sheets of this spreadsheet (one undo step) or a new spreadsheet file next to it; for CSV the separator (detected) and "Convert text to numbers, dates and formulas" (on: typed input with formats; off: every field is text) |
+| Import spreadsheet from CSV or Excel… | Palette, anywhere | The same, always into a new `.sheet` file in the new-note folder, with the defaults |
+| Download sheet as CSV | Toolbar menu, palette | The current sheet's used range from A1, values as they show, RFC 4180 (comma, CRLF, quotes doubled), UTF-8 without a BOM; `Budget.csv`, or `Budget - Summary.csv` for a workbook of several sheets |
+| Download as Excel (.xlsx) | Toolbar menu, palette | The whole workbook |
+
+**CSV** (`csv.ts`). UTF-8 with or without a BOM, UTF-16 with a BOM, or Windows-1252 (Excel's "CSV" on Windows); the separator that occurs most outside quotes in the first lines (comma, semicolon or tab; `.tsv` is tab). Quoted fields keep separators, quotes and line breaks. A sheet named after the file (made unique) receives the cells.
+
+**Excel** (`xlsx.ts`, a lazy chunk). SheetJS Community Edition **0.20.3** (Apache-2.0), installed from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` as the ROADMAP requires: the lockfile pins the tarball by its `sha512` integrity hash, Dependabot ignores the package, and the npm registry's `xlsx` (frozen at 0.18.x with published advisories) is never used. It contains no `eval` or `new Function`, so the CSP stays as it is (§5.14). A file named `.xlsx` must start like a workbook (a zip or an OLE file), since SheetJS would read any text as a table.
+
+| Survives an import and an export | Not carried over |
+|---|---|
+| Values, booleans; formulas (Excel's `_xlfn.` and `_xlws.` prefixes removed on import and added on export for newer functions); cached results, errors included (the file's `engine` is `""` after an import, so the first open recalculates and saves once); number formats (a column's format is written on its cells); column widths and row heights; array formulas (written as dynamic arrays over the cells they spill into; imported as a formula whose values spill); workbook-level named ranges | Styles other than number formats (SheetJS CE writes no styles), merged cells (shown unmerged, reported), comments, hyperlinks, frozen panes, charts, sheet-scoped names (reported); a literal error value becomes text |
+
+Excel allows 31 characters in a sheet name: longer names are cut on export (made unique), and formulas and names that refer to them follow (`renameSheetInFormula`); an import into the open workbook renames sheets whose names are taken (`Data (2)`) the same way, and leaves out named ranges whose names exist, saying so. Functions that HyperFormula has and Excel lacks show `#NAME?` in Excel until recalculated there with an equivalent.
 
 ---
 
@@ -2592,6 +2697,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 | `MentionFinderTest` | Whole-word, case-insensitive matching; aliases; skips links, code and frontmatter; names under 3 characters ignored. |
 | `FileServiceTest` | **Idempotent retry:** a save whose bytes equal the disk returns `200` even with a stale `baseVersion`, and writes, publishes and commits nothing. **External edit then stale save:** after an external write that the watcher has not reconciled, a stale save returns `409` and `git log` contains the external content. **flushHistory:** theirs and mine saved within one quiet period both appear in `git log`; with git failing, the `flushHistory` save returns `503 history-unavailable` and writes nothing. `PUT` with `baseVersion: null` creates a missing file (no new-name rules) and returns `409` for an existing one. A BOM file keeps its BOM after a save. Two creates of `Untitled.md` in rename mode racing a fail-mode create of `Untitled 1.md` never replace each other. `Idempotency-Key` replays return the first result. A raw overwrite of a `.md` is refused. |
 | `MoveServiceTest` | Every rewritten form (§5.6); occurrences in code blocks untouched; folder move; relative links inside the moved note fixed; collateral protection; `dryRun` writes nothing; case-only rename; `move-into-self`; collisions; **two commits** (a pure rename, then the link updates) and `--follow` crosses the move for a short note whose own links were rewritten; a source note with an unreconciled external edit keeps that edit; a lossy source note is skipped with `not-utf8`; a non-rewritable frontmatter link gives `not-rewritable`; a BOM survives a rewrite; `MoveLog` gives `movedTo`; `createdFolders` lists new target parents. |
+| `DocumentParseTest`, `SheetDocumentIndexerTest`, `SheetIndexingTest` | Blocks scanned on their own and joined with shifted offsets. What each cell shows as a block, in row-major order (text, numbers, booleans, cached results, spilled values; no errors, formats or formulas), numbers as the Automatic format writes them, hand-written cells read as the editor repairs them, sheet names and chart titles; empty files; unreadable, foreign and newer files not content-indexed. Over a real vault: backlinks from cell text and from cached results with their context, search finding cell text and values but not formulas or JSON, tags, a sheet not counted as a note and never offered for unlinked mentions, a rename reporting the sheet as `not-rewritable` with the file untouched, a saved sheet indexed again, an unreadable sheet listed but not searched. |
 | `TrashServiceTest` | Delete and restore a file and a folder; the **flat** layout (`Projects/Plan.md` lands at `.trash/Plan.md`); deleting `A/B.md` after folder `A` was trashed gives a separate top-level entry; two concurrent deletes of `X/Plan.md` and `Y/Plan.md` give `Plan.md` and `Plan 1.md` and both `trash.json` entries; restore conflict and the rename option; restore to an original name with `#` works; purge and empty never follow a symlink placed in `.trash`; a `trash.json` entry whose `trashPath` is `../x` or `a/b` is ignored; externally added `.trash` items listed 1:1. |
 | `CommitBatcherTest` (controlled `Clock`) | Quiet period; max delay; `prepareWrite` with a different author flushes **before** the write (the previous author's bytes are committed under their name); no empty commits and no `history.committed` for them; an immediate commit flushes the batch first; flush on `stop()`; an `IOException` during commit keeps the paths pending, retries with backoff, and reports `failing` then recovers; a file with an NFD on-disk name is staged and committed after a save. |
 | `GitStoreTest` | A stale `index.lock` and `refs/heads/main.lock` are removed at startup and commits work; `core.hooksPath` is set; LFS filters disable history. |
@@ -2630,7 +2736,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 - `features/links.ts`: the API.md §15.1 vectors through the client `resolve()` and `createPath()`, the §15.3 vectors and `encodeMdPath`. `eol.ts`: CRLF detection (all, none, mixed), round trip, offset mapping. `paths.ts`: route encoding and decoding round trip, including `%`, `#`, `?` and Unicode; `joinPath('', x) === x`.
 - `templates.ts`: every placeholder form, unknown placeholders untouched, frontmatter merge rules, insertion at the stored selection after blur. `daily.ts`: formats with `/` subfolders, strict parsing, previous and next.
 - `DocumentSession` (fake timers and a fake API): debounce and max wait; queuing during an in-flight save; 409 leads to conflict and pauses autosave; **a 409 whose content equals mine becomes clean**; a 409 with `movedTo` re-keys and retries at the new path, and `entry.moved` arriving before or after the 409 ends in the same state; a clean remote change is applied; a dirty remote change leads to conflict; **a remote change during an in-flight save is deferred** and compared with the new base; **open, close, remote change, reopen shows the new text without a conflict**; Take theirs is undoable and stores mine in the discarded store; drafts restore, and a stale draft whose text equals the server is dropped; drafts are re-keyed on a move; the keepalive budget is shared across sessions; transient failures (network, empty `502`, `503 busy` with `Retry-After`) go offline and retry, `io-error` shows the storage error; flush on release; **CRLF fixtures**: a remote update, a mention-to-link conversion at server offsets, and a checkbox toggle all land on the right characters and the saved file is still CRLF.
-- `sheets/`: the `.sheet` parser's refusals and repairs, the stable layout, the cell-level merge, and the HyperFormula `Workbook` (formulas, references, named ranges, errors, spills, engine changes, undo and redo, remote replace), and the spreadsheet view with Glide replaced by a stand-in; details in §6.21.6.
+- `sheets/`: the `.sheet` parser's refusals and repairs, the stable layout, the cell-level merge, the HyperFormula `Workbook` (formulas, references, named ranges, errors, spills, engine changes, undo and redo, remote replace), number formats, typed input, charts, CSV and Excel conversion, embeds without the engine, and the spreadsheet view with Glide replaced by a stand-in; details in §6.21.6.
 - `drafts.ts` (with `fake-indexeddb`): write, restore, re-key, ownership by live tabs over a mocked `BroadcastChannel`, the quota-failure warning.
 - `applyEvents`: each event's cache patch, including `removeQueries(['file', …])` and the own-mutation invalidations. `events.ts`: `lastEventId` tracking; **an idle stream that receives only pings for 2 minutes stays Live and never reconnects**; `onerror` with `readyState` `CLOSED` recreates the stream with backoff; the `replayed` countdown sets `caughtUp`; resync buffering drops buffered events with `seq` at or below the tree's `eventId`; a `buildSha` mismatch reloads when all sessions are clean and shows the banner when one is dirty.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.

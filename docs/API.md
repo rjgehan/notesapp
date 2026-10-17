@@ -714,7 +714,7 @@ Request `MoveRequest`:
 | `moved` | Every moved **file** (for folders, all descendants), as old and new paths |
 | `createdFolders` | Missing parents of `to` that the move created, outermost first. The caller adds them itself, because its own `folder.created` events are not echoed. `[]` in a dry run. |
 | `linkUpdates` | Notes whose text was (or, in a dry run, would be) rewritten. Paths are post-move. `version` is the new version, or `null` when `dryRun`. **The calling client applies these itself**, because its own `file.changed` events are not echoed: refresh the open sessions and update the tree versions. |
-| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
+| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string, or a link in a document indexed for backlinks that is not a note, such as a `[[Note]]` in a cell of a `.sheet` file, §12.3), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
 | `commitId` | The **last** commit made (the link-update commit when there is one, otherwise the rename commit). `null` when `dryRun`, when git is disabled, when nothing was committed (an empty folder), or when the commit failed and is being retried |
 
 | Errors |
@@ -838,7 +838,7 @@ Request `ResolveRequest`:
 
 ### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true]`
 
-This is full-text search over notes. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes, and over the cells of `.sheet` spreadsheets (§12.3: a hit's `path` is then the spreadsheet, and `matches` are lines of cell text). Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
@@ -911,6 +911,18 @@ All clauses must match (AND). `OR`, parentheses and regular expressions are not 
 - `total` is the number of distinct notes with this tag or any descendant.
 - A parent that only exists through nesting has `count: 0`.
 - Display casing is the first one seen.
+
+### 12.3 Spreadsheets in search, backlinks and tags
+
+`.sheet` files (DESIGN §6.21) are indexed through the `DocumentIndexer` extension point (DESIGN §6.8): what each cell shows (its text or number, or the cached result of its formula, as stored in the file), the sheet names and the chart titles become searchable text, one line per cell, and the links and tags in it count like a note's. Formulas, error results, number formats and the JSON around the values are not indexed.
+
+- A `[[Note]]` (or Markdown link) in a cell's text or cached result makes the spreadsheet a backlink source of that note (§11.2); the mention's `context` is the cell's text. `#tags` in cells count in `GET /api/tags` and `tag:` search.
+- `GET /api/search` can return a spreadsheet; its `matches` are lines of cell text, and their `line` numbers count lines of that text, not of the file.
+- A spreadsheet is not a note: `GET /api/notes/meta` answers `409 type-mismatch`, it never appears in unlinked mentions, and it does not count in `/api/status` `vault.notes`.
+- Renaming or moving a note does not rewrite links in spreadsheets; such a file is reported in `MoveResult.failed` with `not-rewritable`, and the cell can be edited by hand.
+- A file that is not a readable spreadsheet (not JSON, another `type`, a newer format `version`) is listed and served, but not content-indexed.
+
+Nothing else in the API changes for spreadsheets: they are text files read and saved through §8 with the version and conflict protocol of §4.
 
 ---
 
