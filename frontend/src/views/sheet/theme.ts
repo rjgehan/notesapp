@@ -1,4 +1,4 @@
-// The grid's theme from the app's CSS variables (DESIGN §6.17, §6.21.6). Glide Data Grid draws on a
+// The grid's theme from the app's CSS variables (DESIGN §6.17, §6.21.5). Glide Data Grid draws on a
 // canvas, which cannot read var(): the values are resolved once per theme and read again when
 // `data-theme` changes (the toggle, or the system theme while the preference is `system`).
 import type { Theme } from '@glideapps/glide-data-grid';

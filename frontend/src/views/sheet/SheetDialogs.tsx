@@ -1,4 +1,4 @@
-// Dialogs of the spreadsheet view (DESIGN §6.21.6): named ranges, and column width (the way to
+// Dialogs of the spreadsheet view (DESIGN §6.21.5): named ranges, and column width (the way to
 // resize a column on a phone, where the header's edge is too small to drag).
 import { Trash } from 'lucide-react';
 import { useId, useLayoutEffect, useRef, useState } from 'react';

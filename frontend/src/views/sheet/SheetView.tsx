@@ -1,4 +1,4 @@
-// The `sheet` view (DESIGN §6.21.6), a lazy chunk with Glide Data Grid and HyperFormula: the
+// The `sheet` view (DESIGN §6.21.5), a lazy chunk with Glide Data Grid and HyperFormula: the
 // session's text is parsed, calculated and edited as a workbook. A file the parser refuses is
 // never touched by the grid: it opens in the text editor with the parser's message instead.
 import '@glideapps/glide-data-grid/dist/index.css';

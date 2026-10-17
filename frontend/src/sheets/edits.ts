@@ -1,4 +1,4 @@
-// Range operations of the grid (DESIGN §6.21.6): fill, copy, paste and clear, computed as cell
+// Range operations of the grid (DESIGN §6.21.5): fill, copy, paste and clear, computed as cell
 // edits that the Workbook applies as one undo step. Pure and engine-free (the CellEdit type is a
 // type-only import), so they are tested without HyperFormula and the grid.
 import { MAX_COLUMNS, MAX_ROWS, parseA1, toA1 } from './a1';

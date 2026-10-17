@@ -1,5 +1,5 @@
 // Tab-separated values, the plain-text clipboard format of Google Sheets, Excel and LibreOffice
-// (DESIGN §6.21.6). A field with a tab, a line break or a double quote is quoted, with the quote
+// (DESIGN §6.21.5). A field with a tab, a line break or a double quote is quoted, with the quote
 // doubled inside, as those programs write and read it.
 
 function quoteField(field: string): string {

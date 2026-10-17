@@ -1,4 +1,4 @@
-// The `sheet` view descriptor (DESIGN §6.21.6): `.sheet` files open in the spreadsheet grid, a
+// The `sheet` view descriptor (DESIGN §6.21.5): `.sheet` files open in the spreadsheet grid, a
 // lazy chunk with Glide Data Grid and HyperFormula. Everything here is in the main bundle and
 // small: the format and the cell-level merge, so conflicts merge without loading the engine.
 import { FileSpreadsheet } from 'lucide-react';

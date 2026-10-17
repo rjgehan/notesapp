@@ -1,4 +1,4 @@
-// How a cell's value reads in the grid (DESIGN §6.21.6), the "Automatic" format of Google Sheets:
+// How a cell's value reads in the grid (DESIGN §6.21.5), the "Automatic" format of Google Sheets:
 // up to 15 significant digits for whole numbers, 10 for fractions (so 0.1 + 0.2 shows 0.3),
 // scientific notation for very large and very small numbers, TRUE/FALSE, and errors as their code.
 // Number formats (`fmt`) arrive with 6c. Engine-free, for the grid now and embeds later.

@@ -1,4 +1,4 @@
-/* The spreadsheet view (DESIGN §6.21.6), loaded with its lazy chunk. The view fills the workspace
+/* The spreadsheet view (DESIGN §6.21.5), loaded with its lazy chunk. The view fills the workspace
    and the grid scrolls itself, so the workspace does not scroll around it. */
 
 .workspace-scroll:has(> .sheet-view) {

@@ -1,5 +1,5 @@
 // The open spreadsheet's actions, for the palette commands its view descriptor contributes
-// (DESIGN §6.21.6). The lazy view sets them while it is mounted; the commands live in the main
+// (DESIGN §6.21.5). The lazy view sets them while it is mounted; the commands live in the main
 // bundle and never load the view or the engine themselves.
 
 export interface SheetActions {

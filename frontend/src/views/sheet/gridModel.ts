@@ -1,4 +1,4 @@
-// Between the sheet model and Glide Data Grid (DESIGN §6.21.6): the grid's size, columns, frozen
+// Between the sheet model and Glide Data Grid (DESIGN §6.21.5): the grid's size, columns, frozen
 // rows, cell contents and selections. Glide has frozen columns but no frozen top rows, so frozen
 // rows are drawn in its (sticky) header below the column letters: the grid's own rows start at
 // sheet row `frozenRows`. Sheet coordinates are 0-based column and row; grid rows are offset by

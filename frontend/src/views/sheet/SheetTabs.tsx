@@ -1,4 +1,4 @@
-// Sheet tabs below the grid (DESIGN §6.21.6): switch, add, rename (double-click or the menu),
+// Sheet tabs below the grid (DESIGN §6.21.5): switch, add, rename (double-click or the menu),
 // delete, and reorder (drag on desktop, Move left/right in the menu everywhere). The active tab's
 // ⋯ button opens its menu, so nothing depends on right-click or long-press.
 import { ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, Trash } from 'lucide-react';

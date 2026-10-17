@@ -1,4 +1,4 @@
-// The spreadsheet editor (DESIGN §6.21.6): title and toolbar, formula bar, grid and sheet tabs over
+// The spreadsheet editor (DESIGN §6.21.5): title and toolbar, formula bar, grid and sheet tabs over
 // one Workbook. Every change goes through the workbook (one undo step per action), which marks the
 // session dirty (useSheetDocument), so autosave, drafts, conflicts and history work as for notes.
 import type { DataEditorRef } from '@glideapps/glide-data-grid';

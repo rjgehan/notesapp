@@ -1,4 +1,4 @@
-// The spreadsheet grid (DESIGN §6.21.6): Glide Data Grid over the active sheet, with A1 column
+// The spreadsheet grid (DESIGN §6.21.5): Glide Data Grid over the active sheet, with A1 column
 // letters, row numbers, frozen columns (Glide's own) and frozen rows (drawn in its sticky header
 // below the letters), column resizing, the fill handle, and keys for undo, fill and bold rows.
 // Clipboard events are the editor's (SheetEditor), so they work on frozen cells too.

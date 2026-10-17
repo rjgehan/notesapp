@@ -1,4 +1,4 @@
-// Cell references inside formulas (DESIGN §6.21.6): moving a formula by some rows and columns, as
+// Cell references inside formulas (DESIGN §6.21.5): moving a formula by some rows and columns, as
 // fill and paste do, shifts its relative references (`A1`, `B$2`, `C:C`, `3:3`) and keeps absolute
 // ones (`$A$1`). Text in strings, quoted sheet names, function names and named ranges never
 // changes. A reference pushed off the sheet becomes `#REF!`, as in Google Sheets and Excel.

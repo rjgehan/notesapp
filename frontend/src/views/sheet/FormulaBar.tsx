@@ -1,4 +1,4 @@
-// The formula bar (DESIGN §6.21.6): the name box (the selection's reference; type a cell, a range or
+// The formula bar (DESIGN §6.21.5): the name box (the selection's reference; type a cell, a range or
 // a named range to go there) and the active cell's formula or value. Enter commits and moves
 // down, Tab right (Shift the other way), Esc reverts; leaving the field commits. On a phone this
 // is where cells are edited, at a 16 px font so iOS does not zoom.
