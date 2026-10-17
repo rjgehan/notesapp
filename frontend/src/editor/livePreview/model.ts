@@ -335,12 +335,19 @@ export function collectElements(state: EditorState, ranges: readonly { from: num
       from,
       to,
       enter(ref) {
-        if (SKIP.has(ref.name)) return false;
-        const key = `${ref.name}@${ref.from}`;
-        if (seen.has(key)) return undefined;
-        seen.add(key);
-        const draft = draftFor(state, ref.node);
-        if (draft) out.push({ ...draft, pieces: draft.pieces.map((p) => ({ ...p, kind: draft.kind })) });
+        const add = (node: SyntaxNode) => {
+          const key = `${node.name}@${node.from}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const draft = draftFor(state, node);
+          if (draft) out.push({ ...draft, pieces: draft.pieces.map((p) => ({ ...p, kind: draft.kind })) });
+        };
+        if (SKIP.has(ref.name)) {
+          // The `>` of the lines a skipped block spans (a quoted table or code block) still hides.
+          for (let child = ref.node.firstChild; child; child = child.nextSibling) if (child.name === 'QuoteMark') add(child);
+          return false;
+        }
+        add(ref.node);
         return undefined;
       },
     });

@@ -59,6 +59,7 @@ describe('Live Preview rendering, hide-all (ROADMAP 10a)', () => {
     ['code blocks show as typed', '```\n**not bold** [[x]]\n```\n\n    indented **code**', '```\n**not bold** [[x]]\n```\n\n    indented **code**'],
     ['inline code hides only its backticks', '`**x**` and ``a ` b``', '**x** and a ` b'],
     ['comments, embeds, images and tables stay for 10b', '%%c **b**%%\n\n![[Pic.png]] ![alt](a.png)\n\n| a | **b** |\n|---|---|\n| 1 | 2 |', '%%c **b**%%\n\n![[Pic.png]] ![alt](a.png)\n\n| a | **b** |\n|---|---|\n| 1 | 2 |'],
+    ['a quoted table or code block hides the quote markers of all its lines', '> | a |\n> |---|\n> | b |\n\n> ```\n> **x**\n> ```', '| a |\n|---|\n| b |\n\n```\n**x**\n```'],
     ['frontmatter shows as typed', '---\ntitle: "**x**"\n---\n# H', '---\ntitle: "**x**"\n---\nH'],
     ['escapes, reference links and links without text', '\\*not\\* [a][b] [](u) [e]()', '\\*not\\* [a][b] [](u) [e]()'],
     ['hashtags', 'a #tag and #nested/tag', 'a #tag and #nested/tag'],
