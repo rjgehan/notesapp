@@ -379,6 +379,17 @@ interface Task {
 
 ### 5. Excalidraw drawings *(big three b)*
 
+**Status:** built (wave 1). The editor for `.excalidraw` and Obsidian `.excalidraw.md` files, `![[drawing]]` embeds, and search and backlinks from drawings; design in DESIGN §6.8.1, the `DocumentIndexer` in §6.8. Deviations and additions:
+
+- **Fonts under `/assets/excalidraw-<version>/`**, not `/excalidraw-assets/`: the existing immutable `/assets/**` handler serves them, and the version in the path makes permanent caching safe. The CSP is unchanged; the editor's own SVG export embeds whole fonts because glyph subsetting needs `'unsafe-eval'`.
+- **More than the drawing block and Text Elements is written** in an `.excalidraw.md`: images added here get `## Embedded Files` entries (Obsidian would not show them otherwise), and `## Element Links` is kept in step with the drawing (the plugin reads it before the JSON, so a stale entry would revert a link edited here). Both stay byte-identical while nothing in them changed. New text elements get 8-character ids in the file, the plugin's block ids.
+- **Automatic merge** is a generic `DocumentSession` extension (`SessionDeps.mergeFor`), not drawing code; a rename's rewritten link survives a concurrent edit of the same element.
+- **Embeds** are `<img>`s of the SVG (sandboxed, no id clashes) with the fonts inlined by the app, since Excalidraw's inlining fails under the CSP and its fallback can fail on Safari. Live Preview gets them when item 10 adds embeds (10b), through the same `loadEmbed`.
+- **The plugin's extras** render as static images: an embedded note as a card with its title and text, an embedded drawing as its SVG (one level deep), a LaTeX formula as its source (the plugin typesets with MathJax; the app has no SVG math renderer), PDF pages and web images as placeholders.
+- **`.excalidraw.md` is indexed as the note it is** (as in Obsidian), with the JSON decompressed on the server (a Java port of lz-string, tested against its output) only to add what the Markdown sections lack. To allow that, the `DocumentIndexer` of item 4 also supplements notes.
+- **Links inside drawings are not rewritten** by a rename (only those in an `.excalidraw.md`'s Markdown sections are); the move reports the drawing as `not-rewritable`, and the editor still finds a moved image by name.
+- "New drawing" opens once its pending title is committed (Enter or blur), because drawings have no inline title to take the typing over. Large data URLs in imported excalidraw.com files are kept, never moved out on open.
+
 **One line:** hand-drawn diagrams as vault files, editable on PC and iPhone (touch and pencil) and embeddable in notes.
 
 | Value | Effort | Depends on |
