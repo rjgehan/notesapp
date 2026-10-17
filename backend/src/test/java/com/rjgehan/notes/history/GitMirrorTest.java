@@ -285,6 +285,27 @@ class GitMirrorTest {
 	}
 
 	@Test
+	void aFailedPushWithNothingNewStillRetriesUntilTheMirrorIsBack() throws Exception {
+		GitMirror mirror = mirror();
+		String head = commit("a.md");
+		mirror.requestPush();
+		mirror.tick();
+		assertThat(remoteHead()).isEqualTo(head);
+		Path away = this.remotes.resolve("away.git");
+		Files.move(this.bare, away);
+		mirror.requestPush();
+		mirror.tick();
+		MirrorStatus failing = mirror.status();
+		assertThat(failing.state()).isEqualTo(MirrorState.FAILING);
+		assertThat(failing.nextPushAt()).isEqualTo(this.vault.clock.instant().plus(Duration.ofMinutes(1)));
+		Files.move(away, this.bare);
+		advance(Duration.ofMinutes(1));
+		mirror.tick();
+		assertThat(mirror.status().state()).isEqualTo(MirrorState.READY);
+		assertThat(mirror.status().nextPushAt()).isNull();
+	}
+
+	@Test
 	void theTokenNeverAppearsInTheStatusOrTheLogs(CapturedOutput output) throws Exception {
 		Path token = this.remotes.resolve("mirror_token");
 		Files.writeString(token, "github_pat_s3cr3tT0kenValue\n");

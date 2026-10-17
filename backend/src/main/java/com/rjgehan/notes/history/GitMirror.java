@@ -210,23 +210,25 @@ public class GitMirror implements SmartLifecycle {
 	}
 
 	private boolean isDue(Instant now) {
-		if (this.diverged || this.seenHead == null || this.seenHead.equals(this.pushedCommit)) {
-			return false;
-		}
-		if (this.failures > 0) {
-			return this.nextRetryAt == null || !now.isBefore(this.nextRetryAt);
-		}
 		Instant due = nextPushAt();
 		return due != null && !now.isBefore(due);
 	}
 
+	/**
+	 * When the next push is due: after a failure, the next retry (also when the mirror already had {@code HEAD}, so a
+	 * failed "push now" keeps retrying until the mirror is reachable again); otherwise the delay after a new
+	 * {@code HEAD}. Null when diverged or up to date.
+	 */
 	private @Nullable Instant nextPushAt() {
-		if (this.diverged || this.seenHead == null || this.seenHead.equals(this.pushedCommit)
-				|| this.headSeenAt == null || this.firstUnpushedAt == null) {
+		if (this.diverged) {
 			return null;
 		}
 		if (this.failures > 0) {
-			return this.nextRetryAt;
+			return (this.nextRetryAt != null) ? this.nextRetryAt : this.clock.instant();
+		}
+		if (this.seenHead == null || this.seenHead.equals(this.pushedCommit) || this.headSeenAt == null
+				|| this.firstUnpushedAt == null) {
+			return null;
 		}
 		Instant quiet = this.headSeenAt.plus(this.properties.delay());
 		Instant max = this.firstUnpushedAt.plus(this.properties.maxDelay());
@@ -434,7 +436,9 @@ public class GitMirror implements SmartLifecycle {
 			}
 			return;
 		}
-		logger.info("Git mirror: pushing to {} about {} after each commit", this.remote, this.properties.delay());
+		Duration delay = this.properties.delay();
+		logger.info("Git mirror: pushing to {} about {} after each commit", this.remote,
+				(delay.toSeconds() % 60 == 0) ? delay.toMinutes() + " min" : delay.toSeconds() + " s");
 		ScheduledExecutorService started = Executors
 			.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("git-mirror").daemon().factory());
 		started.scheduleWithFixedDelay(this::tick, TICK.toMillis(), TICK.toMillis(), TimeUnit.MILLISECONDS);

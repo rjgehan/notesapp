@@ -69,7 +69,8 @@ describe('mirror summary (Settings, About)', () => {
   });
 
   it('shows the error of a failing mirror', () => {
-    expect(mirrorSummary({ ...READY, state: 'failing', lastError: 'connection failed' }, NOW)).toBe('Mirror is not being updated: connection failed');
+    expect(mirrorSummary({ ...READY, state: 'failing', lastError: 'connection failed' }, NOW)).toBe('not being updated: connection failed');
+    expect(mirrorSummary({ ...READY, state: 'diverged', lastError: null }, NOW)).toBe('stopped: it has commits this vault does not');
   });
 });
 
