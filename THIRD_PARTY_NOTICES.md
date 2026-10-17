@@ -148,6 +148,7 @@ Vitest, ESLint and so on) are not shipped.
 | tslib | 0BSD | <https://www.typescriptlang.org/> |
 | uc.micro | MIT | <https://github.com/markdown-it/uc.micro> |
 | w3c-keyname | MIT | <https://github.com/marijnh/w3c-keyname> |
+| xlsx | Apache-2.0 | <https://sheetjs.com/> |
 | yaml | ISC | <https://eemeli.org/yaml/> |
 | yocto-queue | MIT | <https://github.com/sindresorhus/yocto-queue> |
 | zustand | MIT | <https://github.com/pmndrs/zustand> |
