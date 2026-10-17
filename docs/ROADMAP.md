@@ -422,6 +422,8 @@ interface Task {
 
 ### 6. Spreadsheets with Google-Sheets-style formulas *(big three a)*
 
+**Progress:** 6a, first part, built (wave 1): the GPL-3.0 licence and generated third-party notices, the `.sheet` format with its validating parser and stable serializer, the HyperFormula engine adapter (cached values, named ranges, multiple sheets, undo and redo, recalculation on an engine change) and the cell-level merge; DESIGN §6.21. The grid view, embeds and search follow. Deviation: HyperFormula is pinned at **3.4.0**, not 3.5.0, because 3.5.0 (published 2026-10-09) is less than two weeks old (same GPL-3.0-only licence; a later upgrade recalculates each sheet once).
+
 **One line:** spreadsheet files in the vault, with a fast grid, about 400 Excel-compatible functions (`=SUM`, `=VLOOKUP`, `=IF`, ...), multiple sheets and named ranges, embeddable in notes.
 
 | Value | Effort | Depends on |
