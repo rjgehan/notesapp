@@ -390,3 +390,105 @@
   font-size: 0.9em;
   padding-inline: 2px;
 }
+
+/* ---------- Live Preview (DESIGN §6.6.1) ---------- */
+
+/* Links show as their text. Wikilinks are underlined on hover, web links always, as in the
+   reading view; unresolved links keep v1's faded, dashed look (.cm-unresolved). */
+.cm-live-preview .cm-lp-link {
+  text-decoration-line: none;
+}
+
+.cm-live-preview .cm-lp-link:hover {
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
+}
+
+.cm-live-preview .cm-lp-url,
+.cm-live-preview .cm-lp-url .cm-url,
+.cm-live-preview .cm-lp-link .cm-link {
+  color: var(--link);
+}
+
+.cm-live-preview .cm-lp-url,
+.cm-live-preview .cm-lp-url .cm-url {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent);
+}
+
+.cm-live-preview .cm-unresolved .cm-lp-link .cm-link {
+  color: var(--link-unresolved);
+}
+
+.cm-live-preview .cm-lp-subpath {
+  color: var(--text-faint);
+}
+
+/* A locked note follows links and tags on a plain click. */
+.cm-lp-locked .cm-lp-link,
+.cm-lp-locked .cm-hashtag {
+  cursor: pointer;
+}
+
+/* Bullets and task boxes fill the list's indent; wrapped lines hang under the text. */
+.cm-lp-bullet,
+.cm-lp-task-box {
+  display: inline-block;
+  box-sizing: border-box;
+  padding-right: 0.45em;
+  text-align: right;
+  text-indent: 0;
+  white-space: nowrap;
+}
+
+.cm-lp-bullet-dot {
+  color: var(--text-faint);
+}
+
+.cm-lp-task-box {
+  cursor: pointer;
+}
+
+.cm-lp-task-box .cm-lp-checkbox {
+  pointer-events: none;
+}
+
+.note-editor .cm-editor .cm-line.cm-lp-indent {
+  padding-left: var(--lp-indent) !important;
+  text-indent: calc(-1 * var(--lp-indent));
+}
+
+.note-editor .cm-editor .cm-line.cm-lp-indent.cm-quote-line {
+  padding-left: calc(14px + var(--lp-indent)) !important;
+}
+
+.cm-live-preview .cm-lp-task-done {
+  color: var(--text-muted);
+}
+
+.cm-live-preview .cm-lp-list-number,
+.cm-live-preview .cm-lp-list-number .cm-formatting {
+  color: var(--text-muted);
+}
+
+.cm-lp-rule {
+  display: inline-block;
+  width: 100%;
+  height: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  vertical-align: middle;
+}
+
+@media (pointer: coarse) {
+  .cm-lp-checkbox {
+    width: 1.2em;
+    height: 1.2em;
+  }
+}
+
+/* A locked note reads like the reading view: no active-line band where the caret was. */
+.note-editor .cm-editor.cm-lp-locked .cm-activeLine {
+  background: transparent;
+}

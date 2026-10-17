@@ -9,10 +9,11 @@ import { drawSelection, EditorView, highlightActiveLine, keymap, placeholder } f
 import { isIOS, modKey } from '../features/platform';
 import { headingSource, tagSource, wikilinkSource } from './completion';
 import { noteContext, type NoteContext } from './context';
-import { followLinkAtCursor, insertMarkdownLink, saveNow, toggleBold, toggleCheckbox, toggleItalic, toggleMode } from './editorCommands';
+import { followLink, followLinkAtCursor, insertMarkdownLink, saveNow, toggleBold, toggleCheckbox, toggleItalic, toggleMode } from './editorCommands';
 import { lineClassPlugin, obsidianHighlight } from './highlight';
 import { linkAt } from './linkAt';
 import { markdownNoteLanguage } from './language';
+import { livePreview, type LivePreviewConfig } from './livePreview';
 import { pasteAndDrop } from './pasteAndDrop';
 import { isLocalEdit } from './remote';
 import { searchHighlight } from './searchHighlight';
@@ -25,9 +26,12 @@ export interface EditorHooks {
   onLocalChange(): void;
   /** Editor blur: the session flushes. */
   onBlur(): void;
+  /** The session cannot be written (a lossy or read-only file). */
   readOnly: boolean;
   spellcheck: boolean;
   autocorrect: boolean;
+  /** Live Preview (DESIGN §6.6.1); absent or null is styled source mode. A locked Live Preview is read-only. */
+  livePreview?: LivePreviewConfig | null;
 }
 
 /**
@@ -53,6 +57,7 @@ function coveredMargins(view: EditorView): { top: number } {
 }
 
 function common(hooks: EditorHooks): Extension[] {
+  const readOnly = hooks.readOnly || hooks.livePreview?.locked === true;
   return [
     history(),
     // The session's pending attachment uploads (the same field instance, so they survive mounts).
@@ -73,8 +78,8 @@ function common(hooks: EditorHooks): Extension[] {
     }),
     EditorView.scrollMargins.of(coveredMargins),
     EditorView.cursorScrollMargin.of({ x: 5, y: 32 }),
-    EditorState.readOnly.of(hooks.readOnly),
-    EditorView.editable.of(!hooks.readOnly),
+    EditorState.readOnly.of(readOnly),
+    EditorView.editable.of(!readOnly),
     EditorView.updateListener.of((update) => {
       if (update.transactions.some(isLocalEdit)) hooks.onLocalChange();
       if (update.focusChanged && !update.view.hasFocus) hooks.onBlur();
@@ -108,26 +113,23 @@ const clickNavigation: Extension = [
       const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
       const hit = linkAt(view.state, pos);
-      const ctx = view.state.facet(noteContext);
-      if (!hit || !ctx) return false;
+      if (!hit || !view.state.facet(noteContext)) return false;
       event.preventDefault();
-      if (hit.kind === 'internal') ctx.openLink(hit.target, hit.subpath);
-      else if (hit.kind === 'tag') ctx.openTag(hit.tag);
-      else window.open(hit.url, '_blank', 'noopener,noreferrer');
-      return true;
+      return followLink(view, hit);
     },
   }),
 ];
 
-/** The Markdown note editor (DESIGN §6.6 #1–16). */
+/** The Markdown note editor (DESIGN §6.6 #1–16), in Live Preview or styled source mode (§6.6.1). */
 export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[] {
   return [
     noteContext.of(ctx),
     common(hooks),
-    placeholder('Start writing…'),
+    hooks.livePreview?.locked ? [] : placeholder('Start writing…'),
     markdownNoteLanguage(),
     syntaxHighlighting(obsidianHighlight),
     lineClassPlugin,
+    hooks.livePreview ? livePreview(hooks.livePreview) : [],
     autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
     clickNavigation,
     unresolvedLinks,

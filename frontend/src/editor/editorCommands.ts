@@ -1,9 +1,9 @@
 // Editing commands bound in the editor keymap and exposed to the palette and mobile toolbar.
 import { startCompletion } from '@codemirror/autocomplete';
 import { EditorSelection, type ChangeSpec } from '@codemirror/state';
-import type { Command } from '@codemirror/view';
+import type { Command, EditorView } from '@codemirror/view';
 import { noteContext } from './context';
-import { linkAt } from './linkAt';
+import { linkAt, type LinkHit } from './linkAt';
 
 const TASK = /^(\s*(?:>\s?)*\s*(?:[-+*]|\d+[.)])\s+\[)([ xX])(\])/;
 const LIST_ITEM = /^(\s*(?:>\s?)*\s*(?:[-+*]|\d+[.)])\s+)/;
@@ -12,6 +12,7 @@ const PREFIX = /^(\s*(?:>\s?)*\s*)/;
 /** Mod-L: plain line → `- [ ] `, list item → task, task → toggled. */
 export const toggleCheckbox: Command = (view) => {
   const { state } = view;
+  if (state.readOnly) return false;
   const changes: ChangeSpec[] = [];
   const seen = new Set<number>();
   for (const range of state.selection.ranges) {
@@ -42,6 +43,7 @@ export const toggleCheckbox: Command = (view) => {
 function toggleWrap(marker: string): Command {
   return (view) => {
     const { state } = view;
+    if (state.readOnly) return false;
     const len = marker.length;
     const tr = state.changeByRange((range) => {
       const before = state.sliceDoc(range.from - len, range.from);
@@ -81,6 +83,7 @@ export const toggleInlineCode: Command = toggleWrap('`');
 
 /** Types `#` (with a separating space when needed, since a tag must follow whitespace) and opens tag completion. */
 export const insertTagSign: Command = (view) => {
+  if (view.state.readOnly) return false;
   const { from, to } = view.state.selection.main;
   const before = view.state.sliceDoc(from - 1, from);
   const insert = before === '' || /\s/.test(before) ? '#' : ' #';
@@ -95,6 +98,7 @@ export const insertTagSign: Command = (view) => {
  */
 export const insertHorizontalRule: Command = (view) => {
   const { state } = view;
+  if (state.readOnly) return false;
   const line = state.doc.lineAt(state.selection.main.head);
   const previousBlank = line.number === 1 || state.doc.line(line.number - 1).text.trim() === '';
   const blank = line.text.trim() === '';
@@ -107,6 +111,7 @@ export const insertHorizontalRule: Command = (view) => {
 /** Mod-K: wraps the selection as `[text]()` with the cursor in the destination. */
 export const insertMarkdownLink: Command = (view) => {
   const { state } = view;
+  if (state.readOnly) return false;
   const tr = state.changeByRange((range) => {
     const text = state.sliceDoc(range.from, range.to);
     const insert = `[${text}]()`;
@@ -117,15 +122,30 @@ export const insertMarkdownLink: Command = (view) => {
   return true;
 };
 
-/** Mod-Enter: follows the link or tag under the cursor. */
-export const followLinkAtCursor: Command = (view) => {
+/** Web addresses a link may open: the schemes the reading view's sanitizer keeps, and `//host` links. */
+const OPENABLE_URL = /^(?:(?:https?|ftps?|mailto|tel|callto|sms|xmpp|matrix):|\/\/)/i;
+
+/** Opens a web link from a note in a new tab, without access to this page; other schemes (`javascript:`) never open. */
+export function openExternalUrl(url: string): boolean {
+  if (!OPENABLE_URL.test(url.trim())) return false;
+  window.open(url.trim(), '_blank', 'noopener,noreferrer');
+  return true;
+}
+
+/** Follows a link or tag found in the editor: notes in the app, tags in search, web links in a new tab. */
+export function followLink(view: EditorView, hit: LinkHit): boolean {
   const ctx = view.state.facet(noteContext);
-  const hit = linkAt(view.state, view.state.selection.main.head);
-  if (!ctx || !hit) return false;
+  if (!ctx) return false;
   if (hit.kind === 'internal') ctx.openLink(hit.target, hit.subpath);
   else if (hit.kind === 'tag') ctx.openTag(hit.tag);
-  else window.open(hit.url, '_blank', 'noopener,noreferrer');
+  else openExternalUrl(hit.url);
   return true;
+}
+
+/** Mod-Enter: follows the link or tag under the cursor. */
+export const followLinkAtCursor: Command = (view) => {
+  const hit = linkAt(view.state, view.state.selection.main.head);
+  return hit !== null && followLink(view, hit);
 };
 
 export const saveNow: Command = (view) => {

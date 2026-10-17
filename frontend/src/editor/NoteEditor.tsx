@@ -19,6 +19,8 @@ import { maybeShowTabEscapeHint } from './tabEscapeHint';
 export interface NoteEditorProps {
   session: DocumentSession;
   readOnly: boolean;
+  /** Live Preview (DESIGN §6.6.1): `live` edits the rendered note, `locked` shows it read-only; absent is styled source mode. */
+  preview?: 'live' | 'locked';
   /** Builds the extension list; defaults to the Markdown note editor. */
   extensions?(ctx: NoteContext, hooks: EditorHooks): Extension[];
   onToggleMode(): void;
@@ -27,11 +29,12 @@ export interface NoteEditorProps {
   autoFocus?: boolean;
 }
 
-export function NoteEditor({ session, readOnly, extensions = noteExtensions, onToggleMode, onView, autoFocus }: NoteEditorProps) {
+export function NoteEditor({ session, readOnly, preview, extensions = noteExtensions, onToggleMode, onView, autoFocus }: NoteEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const spellcheck = usePrefs((s) => s.spellcheck);
   const autocorrect = usePrefs((s) => s.autocorrect);
+  const syntaxVisibility = usePrefs((s) => s.syntaxVisibility);
   const tree = useTree().data;
   const callbacks = useRef({ onToggleMode, onView });
 
@@ -62,6 +65,7 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
       readOnly,
       spellcheck,
       autocorrect,
+      livePreview: preview ? { visibility: syntaxVisibility, locked: preview === 'locked', checkboxes: !readOnly } : null,
     };
     const state = session.prepareState((st) => st.update({ effects: StateEffect.reconfigure.of(extensions(ctx, hooks)) }).state);
     const v = new EditorView({ state, parent });
@@ -84,7 +88,7 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
     };
     // `autoFocus` only matters at mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, readOnly, spellcheck, autocorrect, extensions]);
+  }, [session, readOnly, preview, syntaxVisibility, spellcheck, autocorrect, extensions]);
 
   // Link decorations re-resolve when the vault changes.
   useEffect(() => {

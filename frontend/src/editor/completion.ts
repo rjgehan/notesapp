@@ -192,6 +192,7 @@ export const tagSource: CompletionSource = async (context: CompletionContext): P
 
 /** Inserts `[[]]` with the cursor inside and opens the note list (palette command and toolbar). */
 export function insertWikilink(view: EditorView): boolean {
+  if (view.state.readOnly) return false;
   const { from, to } = view.state.selection.main;
   const selected = view.state.sliceDoc(from, to);
   view.dispatch({
