@@ -1071,3 +1071,185 @@ describe('deletions racing loads and saves (FE-16)', () => {
     expect(session.getSnapshot().deleted).toBeNull();
   });
 });
+
+/**
+ * A view that keeps its own model (a spreadsheet's workbook, DESIGN §6.8): edits mark the session
+ * dirty with a serializer, and text the session puts into the buffer itself is read back.
+ */
+function modelView(session: DocumentSession) {
+  const model = { text: session.getText(), seen: session.remoteChangeCount, serialized: 0, applied: [] as Array<{ text: string; undoable: boolean }> };
+  session.subscribe(() => {
+    if (session.remoteChangeCount === model.seen) return;
+    model.seen = session.remoteChangeCount;
+    model.text = session.getText();
+    model.applied.push({ text: model.text, undoable: session.remoteChangeUndoable });
+  });
+  const edit = (next: string) => {
+    model.text = next;
+    session.markDirty(() => {
+      model.serialized++;
+      return model.text;
+    });
+  };
+  return { model, edit };
+}
+
+/** A toy semantic merge: line by line, as the spreadsheet merge goes cell by cell. */
+function lineMerge(base: string, mine: string, theirs: string): string | null {
+  const b = base.split('\n');
+  const m = mine.split('\n');
+  const t = theirs.split('\n');
+  if (m.length !== b.length || t.length !== b.length) return null;
+  const out: string[] = [];
+  for (let i = 0; i < b.length; i++) {
+    if (m[i] === t[i] || t[i] === b[i]) out.push(m[i]);
+    else if (m[i] === b[i]) out.push(t[i]);
+    else return null;
+  }
+  return out.join('\n');
+}
+
+describe('views with their own model (DESIGN §6.8)', () => {
+  function setupModel(content = 'a\nb\nc', merge?: (base: string, mine: string, theirs: string) => string | null) {
+    const vault = new MockVault(false);
+    vault.createFile({ path: 'x.sheet', content }, 'other-device-1');
+    const fake = fakeApi(vault);
+    const deps = sessionDeps(fake.api, merge ? { mergeFor: () => merge } : {});
+    const session = new DocumentSession('x.sheet', deps);
+    return { vault, fake, deps, session };
+  }
+
+  it('saves what the serializer gives, serializing only to save or write a draft', async () => {
+    const { vault, session } = setupModel();
+    await session.ready;
+    const { model, edit } = modelView(session);
+    for (const t of ['a1\nb\nc', 'a12\nb\nc', 'a123\nb\nc']) edit(t);
+    expect(model.serialized).toBe(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vault.readFile('x.sheet').content).toBe('a123\nb\nc');
+    expect(status(session)).toBe('clean');
+    expect(model.serialized).toBeLessThanOrEqual(2);
+  });
+
+  it('a remote change replaces the serializer and reaches the model, not undoable', async () => {
+    const { vault, session } = setupModel();
+    await session.ready;
+    const { model, edit } = modelView(session);
+    edit('A\nb\nc');
+    await vi.advanceTimersByTimeAsync(1000);
+    vault.externalWrite('x.sheet', 'A\nb\nC');
+    await session.onRemoteChanged({ version: versionOf(vault, 'x.sheet') });
+    // The serializer would still give "A b c": the buffer's text wins until the next edit.
+    expect(text(session)).toBe('A\nb\nC');
+    expect(model.applied.at(-1)).toEqual({ text: 'A\nb\nC', undoable: false });
+    expect(status(session)).toBe('clean');
+  });
+
+  it('Take theirs reaches the model as one undoable change, and Undo puts mine back through setText', async () => {
+    const { vault, fake, deps, session } = setupModel();
+    await session.ready;
+    const { model, edit } = modelView(session);
+    vault.externalWrite('x.sheet', 'a\nTHEIRS\nc');
+    edit('a\nMINE\nc');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(status(session)).toBe('conflict');
+    await session.takeTheirs();
+    expect(text(session)).toBe('a\nTHEIRS\nc');
+    expect(model.applied.at(-1)).toEqual({ text: 'a\nTHEIRS\nc', undoable: true });
+    expect(deps.drafts.discarded.map((d) => d.text)).toEqual(['a\nMINE\nc']);
+    // The toast's Undo restores mine as a local edit, which the model picks up.
+    expect(await session.restoreText('a\nMINE\nc')).toBe(true);
+    expect(model.applied.at(-1)).toEqual({ text: 'a\nMINE\nc', undoable: true });
+    expect(status(session)).toBe('dirty');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fake.api.saveFile.mock.calls.at(-1)![1]).toMatchObject({ content: 'a\nMINE\nc' });
+  });
+
+  it('setText leaves a session that cannot be edited (still loading) alone', async () => {
+    const { session } = setupModel();
+    const before = session.remoteChangeCount;
+    session.setText('anything');
+    expect(session.remoteChangeCount).toBe(before);
+    await session.ready;
+    expect(text(session)).toBe('a\nb\nc');
+  });
+
+  it("a view's merge settles a save conflict without the banner and saves with flushHistory", async () => {
+    const { vault, fake, deps, session } = setupModel('a\nb\nc', lineMerge);
+    await session.ready;
+    const { model, edit } = modelView(session);
+    vault.externalWrite('x.sheet', 'a\nb\nTHEIRS');
+    edit('MINE\nb\nc');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(deps.notices).toContain('Merged changes from another device');
+    expect(model.applied.at(-1)).toEqual({ text: 'MINE\nb\nTHEIRS', undoable: true });
+    // Once the save that met the conflict has settled, autosave saves the merge.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(status(session)).toBe('clean');
+    expect(vault.readFile('x.sheet').content).toBe('MINE\nb\nTHEIRS');
+    expect(fake.api.saveFile.mock.calls.at(-1)![1]).toMatchObject({ content: 'MINE\nb\nTHEIRS', flushHistory: true });
+  });
+
+  it("a view's merge settles a remote change to a dirty session", async () => {
+    const { vault, session } = setupModel('a\nb\nc', lineMerge);
+    await session.ready;
+    const { edit } = modelView(session);
+    edit('a\nMINE\nc');
+    vault.externalWrite('x.sheet', 'THEIRS\nb\nc');
+    await session.onRemoteChanged({ version: versionOf(vault, 'x.sheet') });
+    expect(status(session)).not.toBe('conflict');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vault.readFile('x.sheet').content).toBe('THEIRS\nMINE\nc');
+  });
+
+  it('a merge that equals theirs adopts their version without saving', async () => {
+    const { vault, fake, session } = setupModel('a\nb\nc', lineMerge);
+    await session.ready;
+    const { edit } = modelView(session);
+    edit('a\nB\nc');
+    vault.externalWrite('x.sheet', 'a\nB\nC');
+    await session.onRemoteChanged({ version: versionOf(vault, 'x.sheet') });
+    expect(status(session)).toBe('clean');
+    expect(session.currentVersion).toBe(versionOf(vault, 'x.sheet'));
+    expect(fake.api.saveFile).not.toHaveBeenCalled();
+  });
+
+  it('a merge that gives up (the same line changed on both sides) shows the banner', async () => {
+    const { vault, session } = setupModel('a\nb\nc', lineMerge);
+    await session.ready;
+    const { edit } = modelView(session);
+    edit('a\nMINE\nc');
+    vault.externalWrite('x.sheet', 'a\nTHEIRS\nc');
+    await session.onRemoteChanged({ version: versionOf(vault, 'x.sheet') });
+    expect(status(session)).toBe('conflict');
+    expect(text(session)).toBe('a\nMINE\nc');
+  });
+
+  it('a merge that throws is treated as giving up', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { vault, session } = setupModel('a\nb\nc', () => {
+      throw new Error('boom');
+    });
+    await session.ready;
+    const { edit } = modelView(session);
+    edit('a\nMINE\nc');
+    vault.externalWrite('x.sheet', 'THEIRS\nb\nc');
+    await session.onRemoteChanged({ version: versionOf(vault, 'x.sheet') });
+    expect(status(session)).toBe('conflict');
+    expect(errors).toHaveBeenCalled();
+  });
+
+  it('a draft from another base is merged on open', async () => {
+    const vault = new MockVault(false);
+    vault.createFile({ path: 'x.sheet', content: 'a\nb\nSERVER' }, 'o');
+    const fake = fakeApi(vault);
+    const deps = sessionDeps(fake.api, { mergeFor: () => lineMerge });
+    await deps.drafts.put({ path: 'x.sheet', clientId: 'crashed-tab-1', eol: 'lf', at: Date.now(), baseVersion: 'old0000000000000000000000000000000000000', baseText: 'a\nb\nc', text: 'DRAFT\nb\nc' });
+    const session = new DocumentSession('x.sheet', deps);
+    await session.ready;
+    expect(text(session)).toBe('DRAFT\nb\nSERVER');
+    expect(status(session)).not.toBe('conflict');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vault.readFile('x.sheet').content).toBe('DRAFT\nb\nSERVER');
+  });
+});

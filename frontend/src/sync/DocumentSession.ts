@@ -94,7 +94,12 @@ export interface SessionDeps {
   caughtUp(): boolean;
   /** The tree's version for a path (null for a file without one, undefined when not in the tree). */
   treeVersion?(path: string): Version | null | undefined;
+  /** The view's semantic 3-way merge for a path (DESIGN §6.8), when it has one. */
+  mergeFor?(path: string): MergeFn | undefined;
 }
+
+/** `FileViewDescriptor.merge`: the merged text, or null when the view cannot merge these versions. */
+export type MergeFn = (base: string, mine: string, theirs: string) => string | null;
 
 export const DEBOUNCE_MS = 1000;
 export const MAX_WAIT_MS = 5000;
@@ -155,6 +160,8 @@ export class DocumentSession {
   private retryAt: number | null = null;
 
   private remoteChanges = 0;
+  /** The text the session last put into the buffer itself is an undoable replacement, not a remote update. */
+  private replacedUndoable = false;
   private readonly listeners = new Set<() => void>();
   private snapshot: SessionSnapshot;
   private disposed = false;
@@ -189,6 +196,24 @@ export class DocumentSession {
 
   /** Increments on every content change (local or remote); readers re-render from it. */
   getChangeCount = (): number => this.changes + this.remoteChanges;
+
+  /**
+   * Increments whenever the session itself puts text into the buffer (load, remote change, Take
+   * theirs, merge, restored draft), also when that text equals the buffer's. A view that keeps
+   * its own model (`markDirty(serialize)`) re-reads the buffer when it changes.
+   */
+  get remoteChangeCount(): number {
+    return this.remoteChanges;
+  }
+
+  /**
+   * Whether the session's last own replacement of the buffer was an ordinary undoable edit (Take
+   * theirs, a merge, a restored draft, Discard and its Undo) rather than another device's change.
+   * A view with its own model applies it as one undo step, as CodeMirror does.
+   */
+  get remoteChangeUndoable(): boolean {
+    return this.replacedUndoable;
+  }
 
   private makeSnapshot(): SessionSnapshot {
     return {
@@ -257,7 +282,12 @@ export class DocumentSession {
     return this.view ? this.view.state : this.state;
   }
 
-  /** The document text, LF-only. */
+  /**
+   * The document text, LF-only. A view that marks edits with a serializer (DESIGN §6.8) is asked
+   * for it; text the session put into the buffer itself (a load, a remote change, Take theirs, a
+   * merge, a restored draft) is the text until the view reports its next edit, so that text is
+   * never shadowed by a model the view has not caught up with yet.
+   */
   getText(): string {
     return this.serializer ? this.serializer() : this.editorState.doc.toString();
   }
@@ -312,8 +342,15 @@ export class DocumentSession {
     this.markDirty();
   }
 
-  /** Replaces the whole text as a local edit (generic textual views). */
+  /**
+   * Replaces the whole text as a local edit (generic textual views, restored text). The text wins
+   * over a view's serializer, and a view with its own model re-reads it as an undoable change.
+   */
   setText(text: string): void {
+    if (!this.isEditable()) return;
+    this.serializer = null;
+    this.replacedUndoable = true;
+    this.remoteChanges++;
     this.applyEdit(remoteChanges(this.editorState.doc.toString(), text));
   }
 
@@ -394,6 +431,8 @@ export class DocumentSession {
     this.eol = detectEol(file.content);
     const text = toLf(file.content);
     this.state = EditorState.create({ doc: text, extensions: this.baseExtensions() });
+    this.serializer = null;
+    this.replacedUndoable = false;
     this.remoteChanges++;
     this.loaded = true;
     this.version = file.version;
@@ -430,6 +469,8 @@ export class DocumentSession {
       const spec = remoteTransaction(this.state, text);
       if (spec) this.state = this.state.update(spec).state;
     }
+    this.serializer = null;
+    this.replacedUndoable = false;
     this.remoteChanges++;
   }
 
@@ -441,6 +482,8 @@ export class DocumentSession {
     };
     if (this.view) this.view.dispatch(spec);
     else this.state = this.state.update(spec).state;
+    this.serializer = null;
+    this.replacedUndoable = true;
     this.remoteChanges++;
   }
 
@@ -569,9 +612,50 @@ export class DocumentSession {
   }
 
   private enterConflict(theirsText: string, theirsVersion: Version, theirsEol: Eol, source: ConflictInfo['source']): void {
+    if (this.tryMerge(theirsText, theirsVersion, theirsEol, this.baseText)) return;
     this.clearSaveTimers();
     this.conflict = { theirsText, theirsVersion, theirsEol, baseText: this.baseText, source, historyBlocked: false };
     this.setStatus('conflict');
+  }
+
+  /**
+   * A view's semantic merge (DESIGN §6.8) settles a conflict without the banner: the merged text
+   * becomes a local edit on top of theirs, saved like "Save merged" (with flushHistory, so the
+   * server commits theirs first). False when the view has no merge, the base is unknown, or the
+   * merge gives up; the banner then appears as usual.
+   */
+  private tryMerge(theirsText: string, theirsVersion: Version, theirsEol: Eol, baseText: string | null): boolean {
+    const merge = this.deps.mergeFor?.(this.path);
+    if (!merge || baseText === null || !this.loaded || this.lossy) return false;
+    let merged: string | null;
+    try {
+      merged = merge(baseText, this.getText(), theirsText);
+    } catch (e) {
+      console.error('[notesapp] merge failed', e);
+      merged = null;
+    }
+    if (merged === null) return false;
+    this.clearSaveTimers();
+    if (merged === theirsText) {
+      // Everything mine changed is in theirs already.
+      this.replaceUndoable(theirsText);
+      this.adoptVersion(theirsVersion, theirsText, theirsEol);
+    } else {
+      this.replaceUndoable(merged);
+      this.version = theirsVersion;
+      this.baseText = theirsText;
+      this.conflict = null;
+      this.deleted = null;
+      this.flushHistoryNext = true;
+      this.changes++;
+      if (this.firstUnsavedAt === null) this.firstUnsavedAt = Date.now();
+      this.setStatus('dirty');
+      // The merge is unsaved work: a killed tab restores it (as a pending merge), not the old text.
+      void this.writeDraft();
+      this.scheduleSave(true);
+    }
+    this.deps.notify({ message: 'Merged changes from another device' });
+    return true;
   }
 
   /** `file.deleted` for this path. */
@@ -629,7 +713,7 @@ export class DocumentSession {
     if (this.firstUnsavedAt === null) this.firstUnsavedAt = Date.now();
     if (this.status === 'clean') this.status = 'dirty';
     // Text a 413 refused: once it is shorter, autosave tries again.
-    if (this.status === 'error' && this.refusedLength !== null && this.editorState.doc.length < this.refusedLength) this.status = 'dirty';
+    if (this.status === 'error' && this.refusedLength !== null && (this.serializer ? this.getText() : this.editorState.doc).length < this.refusedLength) this.status = 'dirty';
     if (this.status === 'deleted' && this.deleted) this.deleted = { ...this.deleted, hasLocalEdits: true };
     this.scheduleDraft();
     if (this.status === 'dirty') this.scheduleSave(false);
@@ -773,6 +857,7 @@ export class DocumentSession {
           }
           return;
         }
+        if (this.tryMerge(theirs, p.currentVersion, detectEol(p.currentContent), this.baseText)) return;
         this.status = 'conflict';
         this.conflict = {
           theirsText: theirs,
@@ -1103,7 +1188,7 @@ export class DocumentSession {
         this.setStatus('dirty');
         this.scheduleSave(false);
         this.deps.notify({ message: 'Restored unsaved changes' });
-      } else {
+      } else if (!this.tryMerge(serverText, file.version, detectEol(file.content), d.baseText ?? null)) {
         this.version = d.baseVersion;
         this.conflict = {
           theirsText: serverText,
