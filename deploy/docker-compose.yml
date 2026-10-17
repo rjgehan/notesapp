@@ -1,4 +1,4 @@
-# NotesApp on homeserver: tailscale + notes + watchtower. Runbook: docs/DEPLOY.md
+# NotesApp on homeserver: tailscale + notes + watchtower, plus the optional backup sidecars. Runbook: docs/DEPLOY.md
 # Run every docker compose command from this directory (deploy/), next to .env.
 name: notes
 
@@ -76,8 +76,71 @@ services:
     logging: *logging
     restart: unless-stopped
 
+  # ---- Nightly backups (ROADMAP item 1, DESIGN §7.10, DEPLOY.md "Backups"): off until deploy/.env sets
+  # COMPOSE_PROFILES=backup (sidecar + scheduler) or backup-host-cron (sidecar only; host cron triggers it).
+  # Neither has a watchtower label: Dependabot proposes their digest bumps, merged by hand.
+  backup:                                       # restic; idles, and runs backup/restic-job.sh steps via docker exec
+    image: restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+    profiles: [backup, backup-host-cron]
+    entrypoint: ["/bin/sh", "/backup/restic-job.sh"]
+    command: ["idle"]                           # `docker compose run --rm backup restore ...` replaces it
+    environment:
+      TZ: ${TZ:-UTC}
+      RESTIC_REPOSITORY: /repo
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      RESTIC_CACHE_DIR: /cache
+      AWS_SHARED_CREDENTIALS_FILE: /run/secrets/backup_offsite_credentials   # S3 API keys (B2 or AWS), INI format
+      NOTES_BACKUP_OFFSITE_REPO: ${NOTES_BACKUP_OFFSITE_REPO:-}             # empty = local repository only
+    volumes:
+      - notes-data:/source/notes-data:ro        # vault + .git; read-only: a restore goes to a scratch directory
+      - tailscale-state:/source/tailscale-state:ro
+      - type: bind                              # the local repository, on a second disk
+        source: ${NOTES_BACKUP_LOCAL_REPO:-/mnt/backup/notes-restic}
+        target: /repo
+        bind:
+          create_host_path: false               # an unmounted disk fails loudly instead of filling the system disk
+      - ./backup:/backup:ro
+      - backup-cache:/cache
+    secrets: [restic_password, backup_offsite_credentials]
+    mem_limit: 1g
+    logging: *logging
+    restart: unless-stopped
+
+  backup-scheduler:                             # runs backup/nightly.sh daily: stops notes around the snapshot
+    image: docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32   # pinned by digest (it holds docker.sock)
+    profiles: [backup]
+    depends_on: [backup]
+    entrypoint: ["/bin/sh", "/backup/scheduler.sh"]
+    environment:
+      TZ: ${TZ:-UTC}
+      NOTES_BACKUP_TIME: ${NOTES_BACKUP_TIME:-04:00}                   # local time; clear of the app's 03:30 git gc
+      NOTES_BACKUP_NTFY_URL: ${NOTES_BACKUP_NTFY_URL:-}                # failure alerts and a weekly OK report
+      NOTES_BACKUP_HEARTBEAT_URL: ${NOTES_BACKUP_HEARTBEAT_URL:-}      # optional dead man's switch, pinged after each good run
+      NOTES_BACKUP_STATE_DIR: /state
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # docker stop/start notes, docker exec into backup
+      - ./backup:/backup:ro
+      - backup-state:/state                     # status.json, and the marker that brings notes back after a crash
+      - type: bind                              # time zones for TZ (the image has none)
+        source: /usr/share/zoneinfo
+        target: /usr/share/zoneinfo
+        read_only: true
+        bind:
+          create_host_path: false
+    stop_grace_period: 2m                       # time to start notes again if stopped mid-snapshot
+    logging: *logging
+    restart: unless-stopped
+
 volumes:
   tailscale-state:
     external: true                              # created once (docs/DEPLOY.md); `docker compose down -v` cannot delete it
   notes-data:
     external: true
+  backup-cache: {}                              # restic's cache; disposable
+  backup-state: {}
+
+secrets:                                        # files under deploy/secrets/ (gitignored, mode 600); DEPLOY.md "Backups"
+  restic_password:
+    file: ./secrets/restic-password
+  backup_offsite_credentials:
+    file: ./secrets/backup-offsite-credentials

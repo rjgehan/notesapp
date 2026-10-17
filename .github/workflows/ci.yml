@@ -49,6 +49,28 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  deploy-scripts:                            # deploy/backup runs only on homeserver: test it here, in its own images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ShellCheck
+        run: |
+          command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --shell=sh --severity=warning deploy/backup/*.sh deploy/backup/test/*.sh deploy/backup/test/fake-bin/*
+      - name: nightly.sh and scheduler.sh (dash)
+        run: sh deploy/backup/test/run-tests.sh sh
+      - name: nightly.sh and scheduler.sh (BusyBox, in the backup-scheduler image)
+        run: |
+          image=$(sed -n 's/^ *image: \(docker:[^ ]*\).*/\1/p' deploy/docker-compose.yml)
+          docker run --rm -v "$PWD/deploy/backup:/backup:ro" --entrypoint sh "$image" /backup/test/run-tests.sh sh
+      - name: restic-job.sh against restic (in the backup image)
+        run: |
+          image=$(sed -n 's/^ *image: \(restic\/restic:[^ ]*\).*/\1/p' deploy/docker-compose.yml)
+          docker run --rm -v "$PWD/deploy/backup:/backup:ro" --entrypoint sh "$image" /backup/test/restic-job-test.sh
+
   docker-build:                              # the Dockerfile is tested before anything reaches main
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04

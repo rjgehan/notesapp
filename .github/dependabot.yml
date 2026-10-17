@@ -18,7 +18,7 @@ updates:
       - dependency-name: eclipse-temurin   # Java 21 is the baseline (--release 21)
         update-types: ['version-update:semver-major']
 
-  - package-ecosystem: docker-compose      # watchtower image (tag + digest pin); tailscale follows :stable
+  - package-ecosystem: docker-compose      # watchtower, restic and docker:cli images (tag + digest pins); tailscale follows :stable
     directory: /deploy
     schedule: { interval: weekly }
     groups: { compose: { patterns: ['*'] } }
