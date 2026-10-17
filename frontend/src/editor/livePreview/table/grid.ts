@@ -523,7 +523,14 @@ export class TableGrid {
     removeNestedEditor(this.view, a.editor);
     if (activeEditor() === a.editor) setActiveEditor(this.view);
     a.editor.destroy();
-    if (hadFocus && !this.active) this.view.state.facet(noteContext)?.save();
+    if (hadFocus && !this.active) {
+      this.view.state.facet(noteContext)?.save();
+      // The cell went with the focus (an undo took the table away): the note takes it back, after the update.
+      const view = this.view;
+      queueMicrotask(() => {
+        if (view.dom.isConnected && (document.activeElement === null || document.activeElement === document.body)) view.focus();
+      });
+    }
   }
 
   private place(editor: EditorView, place: Place): void {

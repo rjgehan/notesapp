@@ -9,10 +9,12 @@ import { deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
 import { EditorSelection, EditorState, Facet, findClusterBreak, Prec, RangeSet, type Extension, type SelectionRange } from '@codemirror/state';
 import { Direction, EditorView, keymap, ViewPlugin, type Command, type ViewUpdate } from '@codemirror/view';
-import { modKey } from '../../features/platform';
+import { isCoarsePointer, isIOS, modKey } from '../../features/platform';
 import { followLink } from '../editorCommands';
 import { linkAt } from '../linkAt';
 import { buildLivePreview, revealOptions, type LivePreview, type LivePreviewConfig } from './decorations';
+import { formatToolbar } from './formatToolbar';
+import { inputRules } from './inputRules';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
 import { tables } from './table';
 
@@ -310,14 +312,17 @@ export function livePreviewInline(config: LivePreviewConfig): Extension {
     EditorView.editorAttributes.of({ class: config.locked ? 'cm-live-preview cm-lp-locked' : 'cm-live-preview' }),
     Prec.high(linkClicks),
     config.locked ? EditorView.contentAttributes.of({ tabindex: '0' }) : [settleSelection, removeEmptyFormatting, liveKeymap],
+    // The selection toolbar on desktop; phones have the keyboard toolbar and the system's selection menu.
+    config.locked || isIOS || isCoarsePointer() ? [] : formatToolbar(),
   ];
 }
 
 /**
  * The Live Preview extension (DESIGN §6.6.1). `locked` renders the same way read-only: the note
  * gets keyboard focus for reading, and links follow on a plain click. Tables come first, so their
- * keys (arrows and deletion next to a table) run before the inline ones.
+ * keys (arrows and deletion next to a table) run before the inline ones. The typing shortcuts
+ * (inputRules.ts) apply to the note's lines, not in a table cell.
  */
 export function livePreview(config: LivePreviewConfig): Extension {
-  return [tables({ locked: config.locked }), livePreviewInline(config)];
+  return [tables({ locked: config.locked }), livePreviewInline(config), config.locked ? [] : inputRules()];
 }

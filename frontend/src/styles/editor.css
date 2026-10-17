@@ -493,6 +493,80 @@
   background: transparent;
 }
 
+/* ---------- formatting (DESIGN §6.6.1) ---------- */
+
+/* Formats switched on at the cursor, for the text typed next: a faint mark after the caret. */
+.cm-pending-format {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 1px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--background-modifier-hover);
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  font-size: 0.7em;
+  line-height: 1.3;
+  vertical-align: 0.15em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cm-pending-strong {
+  font-weight: 700;
+}
+
+.cm-pending-emphasis {
+  font-style: italic;
+}
+
+.cm-pending-strikethrough {
+  text-decoration: line-through;
+}
+
+.cm-pending-highlight {
+  background: var(--text-highlight-bg);
+}
+
+.cm-pending-code {
+  font-family: var(--font-mono);
+}
+
+/* The toolbar over selected text (desktop). */
+.cm-editor .cm-tooltip.cm-format-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  overflow: visible;
+}
+
+.cm-editor .cm-tooltip.cm-format-toolbar[hidden] {
+  display: none;
+}
+
+.cm-format-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.cm-format-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.cm-format-button[aria-pressed='true'] {
+  background: var(--background-modifier-active-hover);
+  color: var(--interactive-accent);
+}
+
 /* ---------- tables as grids (DESIGN §6.6.1) ---------- */
 
 /* The reading view's table look. The scroller scrolls a wide table sideways, and leaves room on
