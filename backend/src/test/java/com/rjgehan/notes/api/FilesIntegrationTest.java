@@ -642,4 +642,16 @@ class FilesIntegrationTest {
 		assertThat(tooLargeText.json().get("limit").asLong()).isEqualTo(5L * 1024 * 1024);
 	}
 
+	@Test
+	void theMirrorIsOffAndTheLargeFileLimitIs25MegabytesByDefault() {
+		JsonNode status = status();
+		JsonNode mirror = status.get("mirror");
+		assertThat(mirror.get("state").asString()).isEqualTo("disabled");
+		assertThat(mirror.get("reason").asString()).isEqualTo("not configured");
+		assertThat(mirror.get("remote").isNull()).isTrue();
+		assertThat(mirror.get("pushing").asBoolean()).isFalse();
+		assertThat(status.get("git").get("largeFiles").get("limitBytes").asLong()).isEqualTo(25L * 1024 * 1024);
+		assertThat(this.api.postEmpty("/api/mirror/push").problem(400)).isEqualTo("bad-request");
+	}
+
 }

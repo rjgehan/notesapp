@@ -28,18 +28,37 @@ public record NotesProperties(
 		@DefaultValue Identity identity,
 		@DefaultValue Security security,
 		@DefaultValue TailscaleWatchdog tailscaleWatchdog,
+		@DefaultValue Mirror mirror,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
 				"yml" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
 		@DefaultValue("dev") String buildSha) {
 
+	/**
+	 * {@code largeFileThreshold}: files larger than this stay in the vault but out of git history (DESIGN §5.8,
+	 * ROADMAP item 23); {@code 0} versions every file.
+	 */
 	public record Git(
 			@DefaultValue("true") boolean enabled,
 			@DefaultValue("30s") Duration commitQuietPeriod,
 			@DefaultValue("5m") Duration commitMaxDelay,
 			@DefaultValue("NotesApp") String committerName,
 			@DefaultValue("notesapp@notes") String committerEmail,
-			@DefaultValue("0 30 3 * * *") String gcCron) {
+			@DefaultValue("0 30 3 * * *") String gcCron,
+			@DefaultValue("25MB") DataSize largeFileThreshold) {
+	}
+
+	/**
+	 * The optional push mirror of the vault's history (DESIGN §5.8, ROADMAP item 2). Off while {@code url} is empty.
+	 * {@code tokenFile} holds the access token (a compose secret); the token itself is never configured directly.
+	 */
+	public record Mirror(
+			@DefaultValue("") String url,
+			@DefaultValue("") String tokenFile,
+			@DefaultValue("x-access-token") String username,
+			@DefaultValue("10m") Duration delay,
+			@DefaultValue("1h") Duration maxDelay,
+			@DefaultValue("60s") Duration timeout) {
 	}
 
 	public record Watcher(

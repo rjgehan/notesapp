@@ -198,6 +198,17 @@ public class VaultFs {
 	}
 
 	/**
+	 * Places a copy of a file at a path that must not exist, leaving the source in place: a hard link where the
+	 * filesystem has them (instant, and safe because every app write replaces a file by renaming a new one over it),
+	 * else a real copy.
+	 */
+	public void copyExclusive(String fromDisk, String toDisk) throws IOException {
+		Path target = resolve(toDisk);
+		placeExclusive(resolve(fromDisk), target);
+		syncDirectory(target.getParent());
+	}
+
+	/**
 	 * Moves a directory with an atomic rename. Directories cannot be hard-linked, so unlike {@link #moveExclusive} this
 	 * relies on the caller's locks to keep internal racers away from the target name.
 	 */

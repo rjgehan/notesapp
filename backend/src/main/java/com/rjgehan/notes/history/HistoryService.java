@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 import com.rjgehan.notes.api.dto.FileEntry;
 import com.rjgehan.notes.api.dto.FileKind;
 import com.rjgehan.notes.api.dto.HistoryContent;
+import com.rjgehan.notes.api.dto.HistoryExclusion;
 import com.rjgehan.notes.api.dto.HistoryEntry;
 import com.rjgehan.notes.api.dto.HistoryResponse;
 import com.rjgehan.notes.api.dto.HistoryRestoreRequest;
@@ -23,6 +24,7 @@ import com.rjgehan.notes.api.error.NotesException;
 import com.rjgehan.notes.api.error.VersionConflictException;
 import com.rjgehan.notes.events.EventHub;
 import com.rjgehan.notes.events.FileEvent;
+import com.rjgehan.notes.events.TrashChangedEvent;
 import com.rjgehan.notes.identity.Identity;
 import com.rjgehan.notes.index.FileRecord;
 import com.rjgehan.notes.index.VaultIndex;
@@ -79,10 +81,13 @@ public class HistoryService {
 
 	private final EventHub hub;
 
+	private final LargeFiles largeFiles;
+
 	public HistoryService(GitStore git, CommitBatcher batcher, VaultPaths paths, VaultIndex index, VaultLocks locks,
-			VaultFs fs, FileKinds kinds, FileService files, MoveLog moveLog, EventHub hub) {
+			VaultFs fs, FileKinds kinds, FileService files, MoveLog moveLog, EventHub hub, LargeFiles largeFiles) {
 		this.git = git;
 		this.batcher = batcher;
+		this.largeFiles = largeFiles;
 		this.paths = paths;
 		this.index = index;
 		this.locks = locks;
@@ -93,7 +98,10 @@ public class HistoryService {
 		this.hub = hub;
 	}
 
-	/** {@code GET /api/history}: newest first, with each commit's path as of that commit. */
+	/**
+	 * {@code GET /api/history}: newest first, with each commit's path as of that commit. A file over the large-file
+	 * threshold is marked {@code excluded}; it never has pending changes, since none of them will be committed.
+	 */
 	public HistoryResponse list(String apiPath, int limit, int offset) throws IOException {
 		requireAvailable();
 		String path = this.paths.normalize(apiPath);
@@ -110,7 +118,12 @@ public class HistoryService {
 					author.getWhenAsInstant(), author.getName(), author.getEmailAddress(), commit.getShortMessage(),
 					entry.change(), entry.renamedFrom()));
 		}
-		return new HistoryResponse(path, this.batcher.isPending(path), page.hasMore(), entries);
+		LargeFiles.Entry large = this.largeFiles.entry(path);
+		HistoryExclusion excluded = (large != null)
+				? new HistoryExclusion(HistoryExclusion.Reason.LARGE_FILE, large.size(), this.largeFiles.limit())
+				: null;
+		return new HistoryResponse(path, excluded == null && this.batcher.isPending(path), page.hasMore(), entries,
+				excluded);
 	}
 
 	/** {@code GET /api/history/content}: decoded text for text kinds; {@code binary} for the others. */
@@ -192,6 +205,7 @@ public class HistoryService {
 			boolean exists = attributes != null && attributes.isRegularFile();
 			checkBase(path, kind, request.baseVersion(), exists);
 			this.files.preserve(path);
+			boolean kept = exists && this.files.keepReplacedVersion(path, identity.login());
 			boolean created = !exists;
 			List<String> createdFolders = created ? this.files.ensureParentFolders(path) : List.of();
 			if (created) {
@@ -218,6 +232,9 @@ public class HistoryService {
 					"Restore " + path.nfc() + " to version " + commit.substring(0, 7), null, author, List.of(path));
 			this.files.publishFolders(createdFolders, origin);
 			this.hub.publish(created ? FileEvent.created(entry, origin) : FileEvent.changed(entry, origin));
+			if (kept) {
+				this.hub.publish(new TrashChangedEvent());
+			}
 			String commitId;
 			if (restore != null) {
 				commitId = restore.id();

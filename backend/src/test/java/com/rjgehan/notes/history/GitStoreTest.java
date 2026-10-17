@@ -6,6 +6,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 
+import com.rjgehan.notes.index.VaultIndex;
 import com.rjgehan.notes.support.TestProperties;
 import com.rjgehan.notes.vault.ApiPath;
 import com.rjgehan.notes.vault.VaultFs;
@@ -22,7 +23,8 @@ class GitStoreTest {
 
 	private GitStore store(Map<String, String> overrides) {
 		var properties = TestProperties.forVault(this.vault, overrides);
-		return new GitStore(new VaultFs(properties), properties, Clock.systemUTC());
+		return new GitStore(new VaultFs(properties), properties, Clock.systemUTC(),
+				new LargeFiles(new VaultIndex(), properties));
 	}
 
 	private static GitStore.Commit commitFile(GitStore git, Path vault, String name, String content) throws Exception {

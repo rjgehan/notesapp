@@ -3,19 +3,26 @@ package com.rjgehan.notes.history;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.text.Normalizer;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.rjgehan.notes.api.dto.ChangeType;
@@ -27,6 +34,7 @@ import org.eclipse.jgit.api.errors.EmptyCommitException;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffConfig;
 import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.dircache.DirCache;
 import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
@@ -46,6 +54,10 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileBasedConfig;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.PushResult;
+import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.transport.RemoteRefUpdate;
 import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
@@ -59,9 +71,13 @@ import org.springframework.stereotype.Component;
 
 /**
  * Owns the vault's single JGit repository (DESIGN §5.8): open or init, stale-lock cleanup, repository config and
- * {@code info/exclude}, staging and committing, reading old versions, {@code log --follow}, and gc. Every mutating
- * call runs under {@code gitLock}; reads use their own walkers and readers. Paths given to git are always the
- * repo-relative on-disk paths, mapped back to NFC on output.
+ * {@code info/exclude}, staging and committing, reading old versions, {@code log --follow}, gc, and the mirror's
+ * push. Every mutating call runs under {@code gitLock}; reads use their own walkers and readers. Paths given to git
+ * are always the repo-relative on-disk paths, mapped back to NFC on output.
+ * <p>
+ * Every commit first applies the large-file policy ({@link LargeFiles}): the managed section of {@code info/exclude}
+ * is brought up to date from the index, and a large file the commit touches is removed from git's index ({@code rm
+ * --cached}) before anything is staged, so no version of it above the threshold ever becomes a git object.
  */
 @Component
 public class GitStore implements DisposableBean {
@@ -83,6 +99,9 @@ public class GitStore implements DisposableBean {
 			*.swp
 			*~
 			""";
+
+	/** The header of the managed large-file section of {@code info/exclude}; the threshold follows it. */
+	static final String LARGE_FILES_HEADER = "# kept out of history, larger than ";
 
 	private static final int MAX_SUBJECT = 120;
 
@@ -113,13 +132,35 @@ public class GitStore implements DisposableBean {
 	public record LogPage(List<LogEntry> entries, boolean hasMore) {
 	}
 
+	/** How a push to the mirror ended. */
+	public enum PushStatus {
+
+		/** The branch was updated. */
+		PUSHED,
+		/** The mirror already had this commit. */
+		UP_TO_DATE,
+		/** The mirror has commits this history lacks; only a force-push could update it, which is never done. */
+		DIVERGED,
+		/** The remote refused the update for another reason (a hook, a protected branch, a size limit). */
+		REJECTED
+
+	}
+
+	public record PushOutcome(PushStatus status, @Nullable String message) {
+	}
+
 	private final Path root;
 
 	private final NotesProperties.Git properties;
 
 	private final Clock clock;
 
+	private final LargeFiles largeFiles;
+
 	private final ReentrantLock gitLock = new ReentrantLock();
+
+	/** Held by gc and by a push, so a push never reads packs that gc is replacing. Taken before {@code gitLock}. */
+	private final ReentrantLock maintenanceLock = new ReentrantLock();
 
 	private volatile @Nullable Git git;
 
@@ -127,10 +168,14 @@ public class GitStore implements DisposableBean {
 
 	private volatile boolean createdThisBoot;
 
-	public GitStore(VaultFs fs, NotesProperties properties, Clock clock) {
+	/** The {@code info/exclude} content last written; guarded by {@code gitLock}. */
+	private @Nullable String writtenExclude;
+
+	public GitStore(VaultFs fs, NotesProperties properties, Clock clock, LargeFiles largeFiles) {
 		this.root = fs.root();
 		this.properties = properties.git();
 		this.clock = clock;
+		this.largeFiles = largeFiles;
 	}
 
 	// ---------------------------------------------------------------- lifecycle
@@ -164,6 +209,14 @@ public class GitStore implements DisposableBean {
 			logger.info("Initialized a git repository in {}", gitDir);
 		}
 		configure(repository, gitDir);
+		// The large-file section is filled in from the index once it is built (syncLargeFiles).
+		this.gitLock.lock();
+		try {
+			writeExclude(List.of());
+		}
+		finally {
+			this.gitLock.unlock();
+		}
 		this.git = new Git(repository);
 		logRepository(repository);
 		this.unusableReason = unusableReason(repository);
@@ -245,14 +298,18 @@ public class GitStore implements DisposableBean {
 
 	/**
 	 * Stages {@code present} paths with {@code git add} and the others with {@code git rm --cached}, then commits
-	 * whatever changed. Returns null when nothing changed. {@code message} receives the actual changes.
+	 * whatever changed. Returns null when nothing changed. {@code message} receives the actual changes, without the
+	 * large files this commit stops tracking (they are described in the message by the store itself).
 	 */
 	public @Nullable Commit commit(Collection<ApiPath> present, Collection<ApiPath> removed,
 			Function<List<Change>, Message> message, Author author) throws IOException, GitAPIException {
 		Git current = requireGit();
 		this.gitLock.lock();
 		try {
+			List<LargeFiles.Entry> large = syncLargeFilesLocked(present);
+			Set<String> untracked = untrackLarge(current, large, present);
 			if (!present.isEmpty()) {
+				// A large file that is not tracked is ignored through info/exclude, so add skips it.
 				var add = current.add().setRenormalize(false);
 				present.forEach((path) -> add.addFilepattern(path.disk()));
 				add.call();
@@ -268,30 +325,190 @@ public class GitStore implements DisposableBean {
 			if (changes.isEmpty()) {
 				return null;
 			}
-			return doCommit(current, message.apply(changes), author, changes);
+			return doCommit(current, compose(changes, untracked, message), author, changes);
 		}
 		finally {
 			this.gitLock.unlock();
 		}
 	}
 
-	/** Stages the whole working tree (additions, modifications and deletions) and commits it; null when clean. */
+	/**
+	 * Stages the whole working tree (additions, modifications and deletions) and commits it; null when clean. Every
+	 * tracked large file stops being tracked in the same commit.
+	 */
 	public @Nullable Commit commitAll(Function<List<Change>, Message> message, Author author)
 			throws IOException, GitAPIException {
 		Git current = requireGit();
 		this.gitLock.lock();
 		try {
+			List<LargeFiles.Entry> large = syncLargeFilesLocked(List.of());
+			Set<String> untracked = untrackLarge(current, large, null);
 			current.add().addFilepattern(".").setRenormalize(false).call();
 			current.add().addFilepattern(".").setUpdate(true).setRenormalize(false).call();
 			List<Change> changes = stagedChanges(current, Map.of());
 			if (changes.isEmpty()) {
 				return null;
 			}
-			return doCommit(current, message.apply(changes), author, changes);
+			return doCommit(current, compose(changes, untracked, message), author, changes);
 		}
 		finally {
 			this.gitLock.unlock();
 		}
+	}
+
+	// ---------------------------------------------------------------- large files
+
+	/**
+	 * Rewrites the managed large-file section of {@code info/exclude} from the index when it changed. Called at
+	 * startup once the index is built; every commit does it too.
+	 */
+	public void syncLargeFiles() throws IOException {
+		if (this.git == null) {
+			return;
+		}
+		this.gitLock.lock();
+		try {
+			syncLargeFilesLocked(List.of());
+		}
+		finally {
+			this.gitLock.unlock();
+		}
+	}
+
+	/** True when git still tracks a file that is now over the threshold (an imported or older repository). */
+	public boolean tracksLargeFiles() throws IOException {
+		Git current = requireGit();
+		this.gitLock.lock();
+		try {
+			DirCache index = current.getRepository().readDirCache();
+			return this.largeFiles.current().files().stream().anyMatch((file) -> index.findEntry(file.disk()) >= 0);
+		}
+		finally {
+			this.gitLock.unlock();
+		}
+	}
+
+	/**
+	 * The large files: the index's, plus any of the commit's own {@code present} files that are over the threshold on
+	 * disk right now (a file still growing under an external copy may not be reindexed yet). Writes the exclude
+	 * section for them.
+	 */
+	private List<LargeFiles.Entry> syncLargeFilesLocked(Collection<ApiPath> present) throws IOException {
+		if (!this.largeFiles.enabled()) {
+			writeExclude(List.of());
+			return List.of();
+		}
+		Map<String, LargeFiles.Entry> large = new LinkedHashMap<>();
+		this.largeFiles.current().files().forEach((file) -> large.put(file.disk(), file));
+		for (ApiPath path : present) {
+			if (path.disk().isEmpty() || large.containsKey(path.disk())) {
+				continue;
+			}
+			BasicFileAttributes attributes = VaultFs.attributes(this.root.resolve(path.disk()));
+			if (attributes != null && attributes.isRegularFile() && attributes.size() > this.largeFiles.limit()) {
+				large.put(path.disk(), new LargeFiles.Entry(path.nfc(), path.disk(), attributes.size()));
+			}
+		}
+		List<LargeFiles.Entry> files = List.copyOf(large.values());
+		writeExclude(files);
+		return files;
+	}
+
+	/**
+	 * Removes from git's index the tracked large files that this commit touches: those equal to or under one of
+	 * {@code scope}'s paths, or all of them when {@code scope} is null. Returns their NFC paths.
+	 */
+	private static Set<String> untrackLarge(Git current, List<LargeFiles.Entry> large,
+			@Nullable Collection<ApiPath> scope) throws IOException, GitAPIException {
+		if (large.isEmpty()) {
+			return Set.of();
+		}
+		DirCache index = current.getRepository().readDirCache();
+		List<LargeFiles.Entry> tracked = new ArrayList<>();
+		for (LargeFiles.Entry file : large) {
+			if (index.findEntry(file.disk()) >= 0 && (scope == null || touches(scope, file.disk()))) {
+				tracked.add(file);
+			}
+		}
+		if (tracked.isEmpty()) {
+			return Set.of();
+		}
+		var rm = current.rm().setCached(true);
+		tracked.forEach((file) -> rm.addFilepattern(file.disk()));
+		rm.call();
+		Set<String> untracked = new HashSet<>();
+		tracked.forEach((file) -> untracked.add(file.path()));
+		return untracked;
+	}
+
+	private static boolean touches(Collection<ApiPath> scope, String disk) {
+		for (ApiPath path : scope) {
+			if (path.disk().isEmpty() || path.disk().equals(disk) || disk.startsWith(path.disk() + "/")) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The commit message: the caller's for the ordinary changes, plus a line per large file that stops being tracked;
+	 * a commit that only stops tracking large files says so in its subject.
+	 */
+	private Message compose(List<Change> changes, Set<String> untracked, Function<List<Change>, Message> message) {
+		List<Change> regular = changes.stream().filter((change) -> !untracked.contains(change.path())).toList();
+		List<String> stopped = changes.stream().map(Change::path).filter(untracked::contains).toList();
+		if (stopped.isEmpty()) {
+			return message.apply(regular);
+		}
+		String reason = "(larger than " + this.largeFiles.describeLimit() + ")";
+		String lines = stopped.stream().map((path) -> "Stopped versioning " + path + " " + reason)
+			.collect(Collectors.joining("\n"));
+		if (regular.isEmpty()) {
+			if (stopped.size() == 1) {
+				return new Message("Stop versioning " + stopped.get(0) + " " + reason, null);
+			}
+			String names = String.join(", ", stopped.subList(0, Math.min(3, stopped.size())));
+			String more = (stopped.size() > 3) ? " (+" + (stopped.size() - 3) + " more)" : "";
+			return new Message("Stop versioning " + stopped.size() + " files " + reason + ": " + names + more, lines);
+		}
+		Message base = message.apply(regular);
+		String body = (base.body() != null && !base.body().isBlank()) ? base.body() + "\n" + lines : lines;
+		return new Message(base.subject(), body);
+	}
+
+	/** The whole {@code info/exclude}: the fixed section, then one exact pattern per large file. */
+	String exclude(List<LargeFiles.Entry> large) {
+		if (!this.largeFiles.enabled()) {
+			return EXCLUDE;
+		}
+		StringBuilder text = new StringBuilder(EXCLUDE).append(LARGE_FILES_HEADER)
+			.append(this.largeFiles.describeLimit())
+			.append(" (ROADMAP item 23); kept current by NotesApp\n");
+		large.forEach((file) -> text.append(LargeFiles.pattern(file.disk())).append('\n'));
+		return text.toString();
+	}
+
+	/** Replaces {@code info/exclude} atomically when its content changes. Called under {@code gitLock}. */
+	private void writeExclude(List<LargeFiles.Entry> large) throws IOException {
+		String content = exclude(large);
+		if (content.equals(this.writtenExclude)) {
+			return;
+		}
+		Path info = this.root.resolve(Constants.DOT_GIT).resolve("info");
+		Files.createDirectories(info);
+		Path target = info.resolve("exclude");
+		Path tmp = info.resolve("exclude.notesapp-tmp");
+		Files.writeString(tmp, content, StandardCharsets.UTF_8);
+		try {
+			Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+		}
+		catch (AtomicMoveNotSupportedException ex) {
+			Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+		}
+		finally {
+			Files.deleteIfExists(tmp);
+		}
+		this.writtenExclude = content;
 	}
 
 	/** True when the working tree differs from {@code HEAD} (including untracked files). */
@@ -312,13 +529,69 @@ public class GitStore implements DisposableBean {
 		if (current == null || !isEnabled()) {
 			return;
 		}
+		this.maintenanceLock.lock();
 		this.gitLock.lock();
 		try {
 			current.getRepository().autoGC(NullProgressMonitor.INSTANCE);
 		}
 		finally {
 			this.gitLock.unlock();
+			this.maintenanceLock.unlock();
 		}
+	}
+
+	// ---------------------------------------------------------------- mirror
+
+	/** The current branch's short name, for example {@code main}; null when history is unavailable. */
+	public @Nullable String branch() throws IOException {
+		Git current = this.git;
+		return (current != null && isEnabled()) ? current.getRepository().getBranch() : null;
+	}
+
+	/**
+	 * Pushes {@code commitId} to {@code refs/heads/<branch>} at {@code url}, as a fast-forward only: the ref spec has no
+	 * {@code +} and force is off, so a remote that has diverged is reported as {@link PushStatus#DIVERGED} and never
+	 * overwritten. A push only reads the repository, so it runs outside {@code gitLock} and commits continue meanwhile;
+	 * the id is resolved before, so commits made during the push are simply pushed next time.
+	 * @throws GitAPIException on a transport failure (network, authentication, a missing repository)
+	 */
+	public PushOutcome push(String url, String branch, String commitId, @Nullable CredentialsProvider credentials,
+			Duration timeout) throws GitAPIException {
+		Git current = requireGit();
+		String ref = Constants.R_HEADS + branch;
+		this.maintenanceLock.lock();
+		try {
+			Iterable<PushResult> results = current.push()
+				.setRemote(url)
+				.setRefSpecs(new RefSpec(commitId + ":" + ref))
+				.setForce(false)
+				.setCredentialsProvider(credentials)
+				.setTimeout((int) Math.max(1, timeout.toSeconds()))
+				.setProgressMonitor(NullProgressMonitor.INSTANCE)
+				.call();
+			for (PushResult result : results) {
+				RemoteRefUpdate update = result.getRemoteUpdate(ref);
+				if (update != null) {
+					return outcome(update);
+				}
+			}
+			return new PushOutcome(PushStatus.REJECTED, "the remote reported no result for " + ref);
+		}
+		finally {
+			this.maintenanceLock.unlock();
+		}
+	}
+
+	private static PushOutcome outcome(RemoteRefUpdate update) {
+		return switch (update.getStatus()) {
+			case OK -> new PushOutcome(PushStatus.PUSHED, null);
+			case UP_TO_DATE -> new PushOutcome(PushStatus.UP_TO_DATE, null);
+			case REJECTED_NONFASTFORWARD, REJECTED_REMOTE_CHANGED -> new PushOutcome(PushStatus.DIVERGED,
+					"the mirror has commits that are not in the vault's history");
+			default -> new PushOutcome(PushStatus.REJECTED,
+					(update.getMessage() != null && !update.getMessage().isBlank()) ? update.getMessage()
+							: "the remote refused the update (" + update.getStatus() + ")");
+		};
 	}
 
 	private Commit doCommit(Git current, Message message, Author author, List<Change> changes)
@@ -609,9 +882,7 @@ public class GitStore implements DisposableBean {
 		config.setString("core", null, "hooksPath", Constants.DOT_GIT + "/" + HOOKS_DIR);
 		config.save();
 		Files.createDirectories(gitDir.resolve(HOOKS_DIR));
-		Path info = gitDir.resolve("info");
-		Files.createDirectories(info);
-		Files.writeString(info.resolve("exclude"), EXCLUDE, StandardCharsets.UTF_8);
+		Files.createDirectories(gitDir.resolve("info"));
 	}
 
 	private static void logRepository(Repository repository) throws IOException {
