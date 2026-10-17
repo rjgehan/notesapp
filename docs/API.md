@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides) |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -108,7 +108,7 @@ version = lowercase_hex( SHA1( "blob " + decimal(byteLength) + "\0" + bytes ) )
 | `Origin` | Sent automatically by browsers | On mutating requests, if present, its host:port must equal the `Host` header, compared case-insensitively. `Origin: null` is rejected. Failure gets `403 cross-origin`. |
 | `Sec-Fetch-Site` | Sent automatically by browsers | On mutating requests, if present, it must be `same-origin` or `none`. Anything else gets `403 cross-origin`. |
 | `Accept` | Optional | `application/json`, or `text/event-stream` for §16 |
-| `Idempotency-Key` | Optional on `POST /api/files`, `PUT /api/files/raw` and `POST /api/attachments` | Any string of 8 to 64 characters from `[A-Za-z0-9-]`, unique per logical operation (for example `crypto.randomUUID()` generated once and reused for every retry). The server keeps a per-boot cache of 1,000 keys for 1 hour; a request whose key, method and path match an earlier one gets the **stored status and body** of the first result, and nothing is done again. Without it, a retried "New note" whose response was lost would create `Untitled 1.md`. |
+| `Idempotency-Key` | Optional on `POST /api/files`, `PUT /api/files/raw`, `POST /api/attachments` and every `POST`, `PATCH` and `DELETE` of the task API (§20) | Any string of 8 to 64 characters from `[A-Za-z0-9-]`, unique per logical operation (for example `crypto.randomUUID()` generated once and reused for every retry). The server keeps a per-boot cache of 1,000 keys for 1 hour; a request whose key, method and path match an earlier one gets the **stored status and body** of the first result, and nothing is done again. Without it, a retried "New note" whose response was lost would create `Untitled 1.md`. |
 | `Host` | Sent by every client | Must match the server's allowlist (`notes.<tailnet>.ts.net` in production). Otherwise `421 unknown-host`. |
 | `Tailscale-User-*` | Set by `tailscale serve` in production | Identity (§6.1). A request without an allowed `Tailscale-User-Login` gets `403 identity-not-allowed` (DESIGN §5.13). Clients never send them. |
 
@@ -158,6 +158,8 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `type-mismatch` | 409 | Wrong entry type | A file was expected but a folder exists (or the reverse), a parent segment is a file, or a note was required | `path`, `expected: "file" \| "folder" \| "note"` |
 | `version-conflict` | 409 | Version conflict | `baseVersion` does not match the server (§4) | `path`, `currentVersion`, `currentContent`, `currentMtime`, `movedTo` |
 | `settings-read-only` | 409 | Settings are read-only | The settings file was written by a newer version, or fails validation (DESIGN §5.12) | `reason` |
+| `task-conflict` | 409 | Task changed on the server | A task or list field in a `PATCH` was changed on the server since the client read it (its `base`, §20.4) | `task` (or `list`), `fields` |
+| `malformed-file` | 409 | File cannot be read | A task operation needs a `.tasks` file that cannot be used: not valid JSON, not a task file, written by a newer version, or a copy that repeats another list's id. It is never rewritten (§20.1). | `path`, `reason` |
 | `too-large` | 413 | Too large | Text over its size limit, a JSON body over 16 MiB, or an upload over 100 MiB | `limit` (bytes) |
 | `not-text` | 415 | Not a text file | The text API was used on a non-text kind | `path`, `kind` |
 | `unsupported-media-type` | 415 | Unsupported media type | A JSON endpoint received a non-JSON body | |
@@ -714,7 +716,7 @@ Request `MoveRequest`:
 | `moved` | Every moved **file** (for folders, all descendants), as old and new paths |
 | `createdFolders` | Missing parents of `to` that the move created, outermost first. The caller adds them itself, because its own `folder.created` events are not echoed. `[]` in a dry run. |
 | `linkUpdates` | Notes whose text was (or, in a dry run, would be) rewritten. Paths are post-move. `version` is the new version, or `null` when `dryRun`. **The calling client applies these itself**, because its own `file.changed` events are not echoed: refresh the open sessions and update the tree versions. |
-| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
+| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string, or a link in a document indexed for backlinks that is not a note, such as a task title in a `.tasks` list, §20.9), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
 | `commitId` | The **last** commit made (the link-update commit when there is one, otherwise the rename commit). `null` when `dryRun`, when git is disabled, when nothing was committed (an empty folder), or when the commit failed and is being retried |
 
 | Errors |
@@ -786,6 +788,7 @@ Events to other clients, in this order: `folder.created` for new target parents,
 | `unlinked` | `null` unless `unlinked=true`. Then it lists plain-text, whole-word, case-insensitive occurrences of the note's basename or aliases (3 or more characters) outside code, links, frontmatter and URLs, in notes not matching `excludedPaths`. `matched` is the text found. At most 200 groups. It is `[]` for non-notes. |
 | `context` | The source line, clipped to at most 240 characters around the match. A leading or trailing `…` marks clipping. `contextRange` is relative to `context`. |
 | `from`, `to` | Absolute offsets in the source file at `sourceVersion` (used by §15.5) |
+| Sources that are not notes | A `.tasks` list links to a note through `[[Note]]` in a task title or notes, or through a task's `links` (§20.9). Such a group's `source` is the `.tasks` file, `context` is the task's line of text (for example `Call [[Plumber]] about the leak`), and `line`, `from` and `to` refer to that indexed text, not to the file's JSON. Unlinked mentions never come from these files. |
 
 | Errors |
 |---|
@@ -838,7 +841,7 @@ Request `ResolveRequest`:
 
 ### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true]`
 
-This is full-text search over notes. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes, and over the tasks of `.tasks` lists (§20.9: a hit's `path` is then the list file, and `matches` are lines of task text). Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
@@ -1413,6 +1416,11 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, or free space crossing 1 GiB); refetch it |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
+| `task.created`, `task.changed` | `TaskEvent` | no | A task was created or changed through the task API (§20.8) |
+| `task.deleted` | `TaskDeletedEvent` | no | A task was deleted through the task API |
+| `list.changed` | `ListChangedEvent` | no | A task list was created, changed or deleted (`list: null`), or many of its tasks changed at once (the archive rollover, `origin: null`) |
+
+The task events are not in `VAULT_EVENT_NAMES`: the tasks feature registers them with `registerEventHandler` (DESIGN §6.8), and their names are in `TASK_EVENT_NAMES` (§17).
 
 Examples of `data` payloads:
 
@@ -1471,6 +1479,7 @@ export type ErrorCode =
   | 'client-id-required' | 'cross-origin' | 'identity-not-allowed' | 'reserved-path'
   | 'not-found' | 'method-not-allowed'
   | 'already-exists' | 'case-collision' | 'type-mismatch' | 'version-conflict' | 'settings-read-only'
+  | 'task-conflict' | 'malformed-file'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
   | 'busy' | 'history-unavailable' | 'insufficient-storage';
@@ -1503,6 +1512,13 @@ export interface VersionConflictProblem extends Problem {
   currentContent: string | null;
   currentMtime: IsoInstant | null;
   movedTo: VaultPath | null;      // set when the file is gone because it was moved during this server run
+}
+
+export interface TaskConflictProblem extends Problem {
+  code: 'task-conflict';
+  task?: Task;                    // the task as it is on the server (PATCH /api/tasks/{id})
+  list?: TaskList;                // the list as it is on the server (PATCH /api/tasks/lists/{id})
+  fields: string[];               // the requested fields that were changed on the server since the client read them
 }
 
 // ---------- identity / status (§6) ----------
@@ -1770,6 +1786,123 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
+
+// ---------- tasks (§20) ----------
+export type TaskStatus = 'open' | 'done' | 'cancelled';
+export type TaskPriority = 0 | 1 | 2 | 3;              // none / low / medium / high
+export type TaskView = 'today' | 'upcoming' | 'list' | 'completed' | 'search';
+export type LocalDate = string;                       // 'YYYY-MM-DD' in the user's own time zone
+export type LocalDateTime = string;                   // 'YYYY-MM-DDTHH:mm' in the user's own time zone
+export type TaskDate = LocalDate | LocalDateTime;
+export type OrderKey = string;                        // fractional index (§20.1)
+
+export interface TaskRecurrence { rrule: string; from: 'due' | 'completion' }   // RFC 5545 RRULE subset (§20.6)
+export interface TaskReminder { at: LocalDateTime }
+export interface TaskSection { id: string; name: string; order: OrderKey }
+export interface TaskList {
+  id: string;
+  name: string;
+  color: string | null;           // '#rrggbb' or a color name such as 'green'
+  icon: string | null;            // a lucide icon name such as 'shopping-cart'
+  order: OrderKey;
+  archived: boolean;              // left out of Today, Upcoming and the all-lists view
+  sections: TaskSection[];        // in order
+  path: VaultPath;                // the list's .tasks file
+  writable: boolean;              // false: written by a newer NotesApp, so this version only reads it
+}
+export interface Task {
+  id: string;
+  listId: string;
+  sectionId: string | null;
+  parentId: string | null;        // subtasks, at most 3 levels
+  title: string;                  // one line; [[Note]] links and #tags allowed inline
+  notes: string | null;           // Markdown
+  status: TaskStatus;
+  priority: TaskPriority;
+  due: TaskDate | null;
+  start: TaskDate | null;         // the "do on" date; drives Today
+  recurrence: TaskRecurrence | null;
+  reminders: TaskReminder[];      // stored and validated; delivered by ROADMAP item 9
+  tags: string[];                 // without '#'
+  links: VaultPath[];             // related notes
+  order: OrderKey;
+  createdAt: IsoInstant | null;   // null only for a task added by hand without it
+  updatedAt: IsoInstant | null;
+  completedAt: IsoInstant | null;
+  archived: boolean;              // closed and rolled into an archive file (Tasks/Archive/...)
+}
+export interface TaskFileProblem { path: VaultPath; taskId: string | null; reason: string }
+export interface TasksResponse {
+  view: TaskView;
+  lists: TaskList[];              // every usable list, in order, archived ones included
+  tasks: Task[];
+  total: number;                  // matching tasks; tasks holds at most `limit` for completed and search
+  problems: TaskFileProblem[];
+}
+export interface TaskListsResponse { lists: TaskList[]; problems: TaskFileProblem[] }
+
+export interface TaskFields {     // what a client sets; null clears an optional field
+  title?: string;
+  notes?: string | null;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  due?: TaskDate | null;
+  start?: TaskDate | null;
+  recurrence?: TaskRecurrence | null;
+  reminders?: TaskReminder[];
+  tags?: string[];
+  links?: VaultPath[];
+  listId?: string;
+  sectionId?: string | null;
+  parentId?: string | null;
+}
+export interface CreateTaskRequest extends TaskFields { title: string; after?: string | null }
+export interface UpdateTaskRequest { changes: TaskFields; base?: TaskFields }
+export interface CompleteTaskRequest {
+  tz?: string;                    // the client's IANA time zone, or
+  date?: LocalDate;               // the client's date: the completion day for recurrence
+  base?: { due?: TaskDate | null; start?: TaskDate | null };
+}
+export interface ReorderTasksRequest {
+  listId: string;
+  sectionId: string | null;       // top-level tasks only
+  parentId: string | null;
+  ids: string[];
+  after: string | null;           // null: first
+}
+export interface TaskWriteResult {
+  task: Task | null;              // the addressed task after the change; null for reorder and delete
+  changed: Task[];                // other tasks the change touched
+  deleted: string[];              // ids removed: the task and its subtasks
+  rolledForward: boolean;         // complete: a recurring task moved to its next occurrence
+  files: FileEntry[];             // list files written; apply them like file.changed / file.created
+  createdFolders: VaultPath[];
+}
+
+export interface TaskListFields { name?: string; color?: string | null; icon?: string | null; archived?: boolean }
+export interface CreateTaskListRequest { name: string; color?: string | null; icon?: string | null }
+export interface UpdateTaskListRequest { changes: TaskListFields; base?: TaskListFields }
+export interface ReorderRequest { ids: string[]; after: string | null }
+export interface SectionRequest { name: string }
+export interface TaskListWriteResult {
+  lists: TaskList[];              // the created, changed or reordered lists, after the change
+  files: FileEntry[];             // list files written or created
+  createdFolders: VaultPath[];
+  moved: MovedFile | null;        // a rename that renamed the list's file
+  trash: TrashEntry | null;       // a delete: the trash entry of the list's file
+}
+
+export interface TaskEvent { task: Task; origin: string | null }
+export interface TaskDeletedEvent { id: string; listId: string; origin: string | null }
+export interface ListChangedEvent { listId: string; list: TaskList | null; origin: string | null }
+export interface TaskEventMap {
+  'task.created': TaskEvent;
+  'task.changed': TaskEvent;
+  'task.deleted': TaskDeletedEvent;
+  'list.changed': ListChangedEvent;
+}
+export type TaskEventName = keyof TaskEventMap;
+export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task.changed', 'task.deleted', 'list.changed'];
 ```
 
 ---
@@ -1809,6 +1942,23 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | POST | `/api/history/restore` | `HistoryRestoreRequest` | 200 `HistoryRestoreResult` | 14.4 |
 | POST | `/api/history/commit` | | 200 `CommitResult` | 14.5 |
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
+| GET | `/api/tasks?view=&list=&tag=&priority=&status=&q=&date=&tz=&days=&limit=&before=` | | 200 `TasksResponse` | 20.2 |
+| GET | `/api/tasks/{id}` | | 200 `Task` | 20.3 |
+| POST | `/api/tasks` | `CreateTaskRequest` | 201 `TaskWriteResult` | 20.4 |
+| PATCH | `/api/tasks/{id}` | `UpdateTaskRequest` | 200 `TaskWriteResult` | 20.4 |
+| POST | `/api/tasks/{id}/complete` | `CompleteTaskRequest` (optional) | 200 `TaskWriteResult` | 20.4 |
+| POST | `/api/tasks/{id}/uncomplete` | | 200 `TaskWriteResult` | 20.4 |
+| POST | `/api/tasks/reorder` | `ReorderTasksRequest` | 200 `TaskWriteResult` | 20.4 |
+| DELETE | `/api/tasks/{id}` | | 200 `TaskWriteResult` | 20.4 |
+| GET | `/api/tasks/lists` | | 200 `TaskListsResponse` | 20.5 |
+| POST | `/api/tasks/lists` | `CreateTaskListRequest` | 201 `TaskListWriteResult` | 20.5 |
+| PATCH | `/api/tasks/lists/{id}` | `UpdateTaskListRequest` | 200 `TaskListWriteResult` | 20.5 |
+| DELETE | `/api/tasks/lists/{id}` | | 200 `TaskListWriteResult` | 20.5 |
+| POST | `/api/tasks/lists/reorder` | `ReorderRequest` | 200 `TaskListWriteResult` | 20.5 |
+| POST | `/api/tasks/lists/{id}/sections` | `SectionRequest` | 201 `TaskListWriteResult` | 20.5 |
+| PATCH | `/api/tasks/lists/{id}/sections/{sectionId}` | `SectionRequest` | 200 `TaskListWriteResult` | 20.5 |
+| DELETE | `/api/tasks/lists/{id}/sections/{sectionId}` | | 200 `TaskListWriteResult` | 20.5 |
+| POST | `/api/tasks/lists/{id}/sections/reorder` | `ReorderRequest` | 200 `TaskListWriteResult` | 20.5 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -1837,8 +1987,193 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `HistoryEntry`, `HistoryResponse`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
-| `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
+| `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
+| `Task`, `TaskList`, `TaskSection`, `TaskRecurrence`, `TaskReminder`, `TaskFileProblem`, `TasksResponse`, `TaskListsResponse`, `TaskWriteResult`, `TaskListWriteResult`, `CompleteTaskRequest`, `ReorderTasksRequest`, `ReorderRequest`, `CreateTaskListRequest`, `SectionRequest` | Same | Enums `TaskStatus`, `TaskView` and `RecurrenceFrom` (for `TaskRecurrence.from`); `Task.priority` is an `int`. `CompleteTaskRequest.base` is a `JsonNode`. |
+| `CreateTaskRequest`, `UpdateTaskRequest`, `UpdateTaskListRequest`, `TaskFields`, `TaskListFields` | `POST /api/tasks` takes a `JsonNode`; both `PATCH`es take the record `UpdateTaskRequest(JsonNode changes, JsonNode base)` | Kept as JSON trees, because an omitted field (unchanged) and `null` (cleared) differ |
+| `TaskEvent`, `TaskDeletedEvent`, `ListChangedEvent` | Same names in `com.rjgehan.notes.events` | Content events: `origin` is serialized and drives echo suppression. `TaskEvent` covers `task.created` and `task.changed`. |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
 **Nullability.** Every TypeScript `T | null` is a `@Nullable` component that is always serialized, including when null. An optional request field (`?`) is a `@Nullable` component; the server applies the documented default.
+
+---
+
+## 20. Tasks (ROADMAP item 4)
+
+Structured tasks live in the vault as `.tasks` JSON files, one task list per file (DESIGN §5.20 has the format and the design). The server owns task operations: a client changes single fields of single tasks, and the server applies the change to the current file under the file's lock, so two devices that edit different tasks of one list never conflict. The files stay ordinary vault files: they appear in the tree, have history, go to the trash, and can be read and saved through §8 like any text file (the task API picks up such edits like any external edit).
+
+Every mutating endpoint needs `X-Client-Id` and accepts an `Idempotency-Key` (§2).
+
+### 20.1 Model
+
+The types are in §17 (`Task`, `TaskList`, ...). Field rules:
+
+| Field | Rule |
+|---|---|
+| `id` | A ULID made by the server (26 Crockford base-32 characters, time-ordered). Ids written by hand may be any 1 to 64 letters, digits, `-` or `_`. |
+| `title` | 1 to 500 characters on one line, trimmed. `[[Note]]` links and `#tags` may be written inline. |
+| `notes` | Markdown, at most 100,000 characters; blank becomes `null`. |
+| `status` | `open`, `done` or `cancelled`. Done and cancelled tasks are *closed* and carry `completedAt`. |
+| `priority` | `0` none, `1` low, `2` medium, `3` high. |
+| `due`, `start` | `YYYY-MM-DD` (all day) or `YYYY-MM-DDTHH:mm`, both in the user's own time zone. `start` is the "do on" date. |
+| `recurrence` | `{rrule, from}`: an RRULE (§20.6) and `due` (the default) or `completion`. |
+| `reminders` | At most 20 `{at: YYYY-MM-DDTHH:mm}`, duplicates removed. Stored and validated; delivery comes with ROADMAP item 9. |
+| `tags` | At most 50, without `#` (a leading `#` is dropped), each a valid tag (§15.6); duplicates ignoring case are removed. Views filter on these and on `#tags` written in the title. |
+| `links` | At most 50 vault paths of related notes (they need not exist). |
+| `parentId` | Another task of the same list. Subtasks are at most 3 levels deep, without cycles. |
+| `sectionId` | A section of the same list (top-level tasks; a subtask sits under its parent). |
+| `order` | A fractional-index key: keys compare as plain strings, and a key can always be made between two others, so moving one task changes only that task. The algorithm is that of the `fractional-indexing` package (the first key is `a0`, then `a1`, ...; between `a0` and `a1` comes `a0V`). Equal keys sort by `id`. |
+| `archived` | `true` for a closed task that the nightly rollover moved into an archive file, `Tasks/Archive/<List> <YYYY>.tasks`, 90 days after it was completed. Archived tasks still appear in `completed` and `search`. |
+| `createdAt`, `updatedAt`, `completedAt` | Set by the server; `null` only for tasks added by hand without them. |
+
+**Lists.** A list is a file. `path` is the file, `order` its place among lists, and `archived` hides the list from Today, Upcoming and the all-lists view. `writable: false` means the file was written by a newer version of NotesApp: it is shown, but every change to it is refused with `409 malformed-file`.
+
+**Problems.** The server never rewrites a file to repair it. Responses that list tasks carry `problems`: a whole file that cannot be used (`taskId: null`: not valid JSON, not a task file, larger than the text limit, written by a newer version, or a copy that repeats the list id of a file earlier in path order, whose tasks are then not shown) or a single task (an invalid `status`, `priority`, date or id is skipped; a smaller defect, such as a bad reminder, is reported while the rest of the task is shown). A task id that appears in two files is shown from the first file in path order. Every field the server does not know, and every task it cannot read, survives each write.
+
+### 20.2 `GET /api/tasks`
+
+| Parameter | Meaning |
+|---|---|
+| `view` | `today`, `upcoming`, `list` (default), `completed` or `search` |
+| `list` | Only this list (`404 not-found` when there is no such list) |
+| `tag` | Only tasks with this tag or a nested one (`home` matches `home/garden`), from `tags` or the title; a leading `#` is ignored; case-insensitive |
+| `priority` | A comma-separated set, such as `2,3` |
+| `status` | `all`, or a comma-separated set of `open`, `done`, `cancelled`. Default: `done,cancelled` for `completed`, every status for `search`, `open` otherwise. |
+| `q` | The search words (`search`, required): every word must start a word of the title, the notes or a tag; case-, accent- and width-insensitive |
+| `date` | The client's date, `YYYY-MM-DD` |
+| `tz` | The client's IANA time zone, such as `Europe/Paris`, used for "today" when `date` is absent. `today` and `upcoming` need `date` or `tz`. |
+| `days` | How many days `upcoming` covers, today included: 1 to 366, default 14 |
+| `limit` | At most this many tasks for `completed` and `search`: 1 to 1000, default 200 |
+| `before` | `completed` only: tasks completed before this instant (for paging, pass the last `completedAt` received) |
+
+| View | Tasks | Order |
+|---|---|---|
+| `today` | Open tasks of lists that are not archived, whose `due` or `start` date is today or earlier (overdue included) | By `due` (else `start`; an all-day date before the times of its day), then priority (high first), list order, `order` |
+| `upcoming` | Open tasks of lists that are not archived, whose `due` (else `start`) date is between today and today plus `days` minus one | As `today` |
+| `list` | The tasks of `list` (archived or not), or of every list that is not archived; never archive files | By list order, then `order`; the client builds sections and subtasks from `sectionId` and `parentId` |
+| `completed` | Closed tasks, archived ones included | `completedAt`, newest first |
+| `search` | Matching tasks of every list and archive | Open first, then `updatedAt`, newest first |
+
+`200 TasksResponse`; `total` counts every matching task, and `tasks` holds at most `limit` of them for `completed` and `search`.
+
+```json
+{
+  "view": "today",
+  "lists": [ { "id": "01JC4M2ZKD8R6V3W5Y7A9B1C0D", "name": "Home", "color": "#2f9e44", "icon": "house",
+               "order": "a0", "archived": false, "sections": [], "path": "Tasks/Home.tasks", "writable": true } ],
+  "tasks": [
+    { "id": "01JC4M3A0QY1T9X2W4E6R8T0U2", "listId": "01JC4M2ZKD8R6V3W5Y7A9B1C0D", "sectionId": null,
+      "parentId": null, "title": "Pay rent [[Apartment]]", "notes": null, "status": "open", "priority": 2,
+      "due": "2026-10-16", "start": null, "recurrence": { "rrule": "FREQ=MONTHLY", "from": "due" },
+      "reminders": [ { "at": "2026-10-16T09:00" } ], "tags": [ "bills" ], "links": [], "order": "a0",
+      "createdAt": "2026-10-01T08:12:40.120Z", "updatedAt": "2026-10-01T08:12:40.120Z", "completedAt": null,
+      "archived": false }
+  ],
+  "total": 1,
+  "problems": []
+}
+```
+
+| Errors |
+|---|
+| `400 bad-request` (an unknown view, a bad parameter, `today`/`upcoming` without `date` or `tz`, `search` without `q`), `404 not-found` (`list`) |
+
+### 20.3 `GET /api/tasks/{id}`
+
+`200 Task`, or `404 not-found`.
+
+### 20.4 Changing tasks
+
+Every change answers `TaskWriteResult`: the task after the change (`task`), other tasks it touched (`changed`: subtasks completed or moved with it, siblings renumbered), removed ids (`deleted`), and the list files written (`files`, with `createdFolders`). The calling client applies `files` to its tree as it would `file.changed`, because its own events are not echoed. A request that changes nothing (repeating a change already made) answers the current task with `files: []` and publishes nothing.
+
+**`POST /api/tasks`** creates a task. The body is a `CreateTaskRequest`: the `TaskFields` to set (`title` is required) and `after`. Without `listId`, the task goes to its parent's list, or to the Inbox, `Tasks/Inbox.tasks`, which is created (first in the list order) the first time it is needed. Without `after` the task goes last among its siblings (same parent and, for a top-level task, same section); with `after: null` first; otherwise right after that sibling. `201 TaskWriteResult`.
+
+**`PATCH /api/tasks/{id}`** sets the fields in `changes` (`null` clears an optional field). Versioning is **per field**: `base` holds the values the client last saw for the fields it changes. A field whose server value differs both from `base` and from the requested value was changed by someone else since: the answer is `409 task-conflict` with the server's `task` and the conflicting `fields`, and nothing is written. Fields that are already as requested are left alone, so two devices that change different fields of one task both succeed, and a retried `PATCH` is a no-op. Without `base` the change always applies.
+
+```json
+{ "changes": { "title": "Pay the rent", "due": null }, "base": { "title": "Pay rent", "due": "2026-11-01" } }
+```
+
+- `listId` moves the task, with its subtasks, to the end of the other list's top level (or under `parentId`, when given). The moved tasks lose their sections, which belong to the old list, unless `sectionId` names one of the new list.
+- A new `parentId` (or `null`) puts the task last among its new siblings.
+- `status` sets the status and `completedAt` without the effects of `complete`: `done` closes even a recurring task for good, and subtasks are not touched.
+- An archived task keeps its `status`, `listId`, `parentId` and `sectionId` (`400 bad-request`; reopen it with `uncomplete` first).
+
+**`POST /api/tasks/{id}/complete`** checks a task off. The optional body `CompleteTaskRequest` gives the client's `tz` or `date` (the completion day, for recurrence; UTC when both are absent) and the `base` `due` and `start` it saw.
+
+- A **recurring** task rolls forward to its next occurrence (§20.6) and stays open: `due` (or `start`, when it has no `due`) becomes the next occurrence, the other date and every reminder move by the same number of days, `COUNT` decreases, and closed subtasks reopen for the next round. `rolledForward` is `true`.
+- Otherwise, or after the last occurrence, the task becomes `done` with `completedAt`, and so do its open subtasks.
+- Completing a closed task changes nothing. When `base` names a `due` or `start` that the task no longer has, that occurrence was already completed (a retry whose response was lost, or another device), and nothing changes either, so a recurring task is never rolled forward twice.
+
+**`POST /api/tasks/{id}/uncomplete`** reopens a closed task: `status: "open"`, `completedAt` cleared; subtasks keep their status. An archived task moves back into its list with its archived subtasks (`404 not-found` when the list no longer exists).
+
+**`POST /api/tasks/reorder`** places `ids` (tasks of `listId`, in this order) right after `after` (`null`: first) under `parentId` (`null`: top level) and, at the top level, in `sectionId`. This is also how a task moves to another section or parent (a Kanban move). Only the moved tasks get new order keys, unless the neighbours' keys are unusable (a hand edit), when the whole sibling sequence is renumbered and returned in `changed`. A drop where the tasks already are changes nothing. `after` must be a sibling in that place and not one of `ids` (`400`).
+
+**`DELETE /api/tasks/{id}`** deletes the task and its subtasks; `deleted` lists their ids. Deleting a task that no longer exists is `404 not-found`, which a retrying client treats as done. The list file keeps its history, so a deleted task can be recovered from §14.
+
+| Errors (all changes) |
+|---|
+| `400 bad-request` with `errors[]` (field names such as `changes.due` or `task.title`), `403 client-id-required` / `cross-origin` |
+| `404 not-found` (the task, its list, or a section) |
+| `409 task-conflict` (`PATCH`), `409 malformed-file` (`path`, `reason`: the list file cannot be used) |
+| `413 too-large` (the list file would exceed its text limit), `503 busy` (locks, or the task kept moving between files) |
+
+### 20.5 Lists and sections
+
+| Endpoint | Meaning |
+|---|---|
+| `GET /api/tasks/lists` | `200 TaskListsResponse`: every usable list in order, and the problems |
+| `POST /api/tasks/lists` | `{name, color?, icon?}`: a new list, last in the order, in `Tasks/<Name>.tasks`. The file name is the name made into a valid new name (`Q4: Plans/Ideas` gives `Q4- Plans-Ideas.tasks`), with ` 1`, ` 2`, ... when it is taken. `201 TaskListWriteResult`. |
+| `PATCH /api/tasks/lists/{id}` | `UpdateTaskListRequest`: `name`, `color`, `icon` and `archived`, with the same per-field `base` check as tasks (`409 task-conflict` carries `list`). A new name also renames the file in its folder (through §10.3, so links to it follow); `moved` gives the old and new paths. |
+| `DELETE /api/tasks/lists/{id}` | Moves the list's file to the trash (§13), from where it can be restored with its tasks; `trash` is the entry. Its archive files stay. |
+| `POST /api/tasks/lists/reorder` | `ReorderRequest {ids, after}`: like task reordering, over the lists |
+| `POST /api/tasks/lists/{id}/sections` | `{name}`: a new section, last (at most 100). `201`. |
+| `PATCH /api/tasks/lists/{id}/sections/{sectionId}` | `{name}`: renames a section |
+| `DELETE /api/tasks/lists/{id}/sections/{sectionId}` | Deletes a section; its tasks stay, without a section (`task.changed` for each) |
+| `POST /api/tasks/lists/{id}/sections/reorder` | `ReorderRequest {ids, after}`: reorders sections |
+
+Names are 1 to 200 characters on one line, trimmed. `color` is `#rrggbb` or a lower-case color name; `icon` is a lucide icon name (`shopping-cart`). Each answers `TaskListWriteResult` with the lists after the change.
+
+### 20.6 Recurrence
+
+`rrule` is an RFC 5545 `RRULE` value, stored upper case and without an `RRULE:` prefix (one is accepted and removed). The supported subset:
+
+- `FREQ` of `DAILY`, `WEEKLY`, `MONTHLY` or `YEARLY` (required);
+- `INTERVAL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`, `BYYEARDAY`, `BYWEEKNO`, `BYSETPOS`, `WKST`, `BYHOUR`, `BYMINUTE` (hours and minutes apply only to a task with a time);
+- `COUNT` or `UNTIL` (not both). `COUNT` is the number of occurrences left, including the current one: each roll-forward decreases it, and completing the last one closes the task. `UNTIL` (`YYYYMMDD` or `YYYYMMDDTHHMMSSZ`) is compared by date.
+
+Rules are evaluated on local dates and times, so daylight-saving changes never shift a task. A rule that never produces an occurrence (`FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30`) is refused with `400`.
+
+| `from` | The next occurrence is |
+|---|---|
+| `due` | The first occurrence after the task's `due` (else `start`) date that also falls after the completion day. Completing an overdue task therefore skips the occurrences already missed: a weekly Wednesday task three weeks late moves to the next Wednesday. |
+| `completion` | The first occurrence after the completion day, at the task's time if it has one: `FREQ=DAILY;INTERVAL=3` means "three days after I last did it". |
+
+Examples, completed on Wednesday 2026-10-14: `FREQ=WEEKLY` from `due` `2026-10-14T08:00` gives `2026-10-21T08:00`; `FREQ=MONTHLY;BYMONTHDAY=-1` from `due` `2026-09-30` gives `2026-10-31`; `FREQ=MONTHLY` from `due` `2026-01-31` skips months without a 31st, as RFC 5545 says.
+
+### 20.7 Archive rollover
+
+Every night (`notes.tasks.archive-cron`, 03:20), tasks closed more than 90 days ago (`notes.tasks.archive-after`) move from their list into `Tasks/Archive/<List file name> <YYYY>.tasks`, by the year they were completed (UTC), so active lists stay small. A task moves only with its whole subtree and only when its parent moves too. An archive file has `"archive": true` and its list's `id` and `name`; it is not a list, and its tasks have `archived: true`. The rollover publishes `list.changed` for each list it changed, with `origin: null`.
+
+### 20.8 Events
+
+| `event:` | `data` | When |
+|---|---|---|
+| `task.created` | `TaskEvent {task, origin}` | `POST /api/tasks` |
+| `task.changed` | `TaskEvent {task, origin}` | Any other change to a task through this API, one event per task touched (moves, completions, reorders, subtasks that followed) |
+| `task.deleted` | `TaskDeletedEvent {id, listId, origin}` | `DELETE /api/tasks/{id}`, one event per task removed |
+| `list.changed` | `ListChangedEvent {listId, list, origin}` | A list was created, changed (name, color, icon, archived, order, sections) or deleted (`list: null`), or the archive rollover moved its tasks |
+
+- They are content events: not delivered to the client whose `X-Client-Id` made the change (§16.4), and replayed like any other event.
+- One task operation publishes, in this order: `folder.created` and `file.created` or `file.changed` for each list file written, then the task events, then (later, with the batch) `history.committed`.
+- **Changes made outside the task API** (a hand edit over SSH or in Obsidian, a save through §8, a history restore, a trash restore, a move, or a deleted file) produce only the usual `file.*`, `entry.moved` and `folder.deleted` events. A client showing tasks therefore refetches its task views (debounced, about one second) on any of those events that touches a `.tasks` path; on other devices a task operation is then applied twice, once from the task event and once by the refetch, which is harmless.
+- The tasks feature registers these names (`TASK_EVENT_NAMES`) with `registerEventHandler` (DESIGN §6.8), and refetches its views after `hello {resync: true}` and `resync`.
+
+### 20.9 Tasks in search, backlinks and tags
+
+`.tasks` files are indexed through the `DocumentIndexer` extension point (DESIGN §6.8): the list's name and each task's title, tags, related notes and notes become searchable text, and the links and tags in it count like a note's.
+
+- A `[[Note]]` (or Markdown link) in a task's title or notes, and each path in `links`, make the list file a backlink source of that note (§11.2). `#tags` in titles and notes and the entries of `tags` count in `GET /api/tags` and `tag:` search.
+- `GET /api/search` can return a list file; its `matches` are lines of task text.
+- A list file is not a note: `GET /api/notes/meta` answers `409 type-mismatch`, it never appears in unlinked mentions, and it does not count in `/api/status` `vault.notes`.
+- Renaming or moving a note does not rewrite links in task files; such a file is reported in `MoveResult.failed` with `not-rewritable`, and the link can be fixed by editing the task.

@@ -182,7 +182,8 @@ NotesApp/                              (monorepo; branch main)
 | Path in vault | Meaning | Tree/index/search | Git |
 |---|---|---|---|
 | `**/*.md` | Notes | yes | committed |
-| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes are content-indexed | committed |
+| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes, and documents a `DocumentIndexer` reads (`.tasks`, §6.8), are content-indexed | committed |
+| `Tasks/*.tasks`, `Tasks/Archive/*.tasks` | Task lists and their archives (§5.20). Any `.tasks` file in the vault is a list; new lists are created in `Tasks/`. | yes (as documents) | committed |
 | `.notesapp/settings.json` | App settings (§5.12) | hidden | committed, so settings have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
@@ -361,6 +362,7 @@ Thumbs.db
     <configuration><excludedGroups>perf</excludedGroups></configuration>                    <!-- -DexcludedGroups= runs them -->
   </plugin>
   ```
+- Added with ROADMAP item 4: `org.dmfs:lib-recur` **0.17.1** (Apache-2.0, with its Apache-2.0 dependencies `rfc5545-datetime` 0.3 and `jems2` 2.23.1), which evaluates the recurrence rules of tasks (§5.20).
 - **Test naming rule.** Every test class ends in `Test`; integration tests end in `IntegrationTest`. Surefire's default includes run both, so Failsafe is not used and no `*IT` classes exist.
 - **Not used:**
   - Spring Security. A single `HandlerInterceptor` and a servlet filter cover the CSRF and header needs, without a filter chain to configure.
@@ -410,6 +412,14 @@ Thumbs.db
 | | `TagIndex` | Tag to notes, display casing, nested totals. |
 | | `SearchIndex`, `Tokenizer`, `SearchQueryParser`, `SnippetBuilder` | Full-text search (§5.5.10). |
 | | `MentionFinder` | Unlinked mentions (§5.5.9). |
+| | `DocumentIndexer`, `DocumentParse` | The extension point through which structured files (`.tasks`) feed search, backlinks and tags, and the scan of their Markdown blocks (§6.8). |
+| `tasks` | `TaskStore`, `TaskCatalog`, `TaskSnapshot` | Reading `.tasks` files: a version-keyed cache of parsed files, and the vault-wide catalog of lists, tasks and problems (§5.20). |
+| | `TaskWrites` | The write session every task operation runs in: locks, read from disk, atomic writes, indexing, batching, events. |
+| | `TaskService`, `TaskListService`, `TaskQuery` | Task operations, list and section operations, and the views of `GET /api/tasks`. |
+| | `TaskFile`, `TaskCodec`, `TaskTree`, `TaskDates` | The file format as a mutable JSON tree, field reading and validation, subtask structure, local dates. |
+| | `Recurrence`, `FractionalIndex`, `Ulid`, `TaskOrder` | RRULE evaluation (lib-recur), order keys, ids, ordering. |
+| | `TaskArchiver` | The nightly archive rollover (`@Scheduled`). |
+| | `TaskDocumentIndexer` | The `DocumentIndexer` for `.tasks` files. |
 | `history` | `GitStore` | Owns the single `Git`/`Repository`. Handles open or init, stale-lock cleanup, repo config and exclude file, `stage`, `commit`, `readAt`, `log --follow`, gc. Takes `ApiPath` values and uses on-disk paths for every git call. Every mutating JGit call runs under its `gitLock`. |
 | | `CommitBatcher` | `SmartLifecycle` at phase `DEFAULT_PHASE - 4096`. Batches autosaves; `prepareWrite`, `markDirty`, `flush`, `commitNow`; retries failed commits with backoff; flushes on shutdown. |
 | | `GitBootstrap` | Runs the initial, import or "changed while stopped" commit asynchronously after readiness (§5.17). |
@@ -426,7 +436,7 @@ Thumbs.db
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
 | | `TailscaleInterfaceCheck` | Refuses to start outside the dev profile when no kernel Tailscale interface is visible (§5.13). |
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController`, `TaskController`, `TaskListController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -555,7 +565,7 @@ record LinkOcc(String raw, String target, @Nullable String subpath, @Nullable St
                boolean rewritable /* false for frontmatter links whose source span differs from the parsed value */) {}
 ```
 
-- `NoteRecord` exists only for `.md` files within their size limit. Larger text files get a `FileRecord` with `version: null` and no content in memory.
+- `NoteRecord` exists only for `.md` files within their size limit, and for documents that a `DocumentIndexer` reads (§6.8). For a document, `text` is the search text the indexer rendered, not the file, so its links are never `rewritable`, it is never offered for unlinked mentions, and it is not counted as a note. Larger text files get a `FileRecord` with `version: null` and no content in memory.
 - **Resolution happens at swap time.** A writer parses a note outside the lock, but `LinkGraph` resolves its links inside the index write lock while swapping it in, so a target created concurrently is always seen.
 
 **Memory budget.** 10k notes at about 5 KB of text each is 50 MB of strings, plus parse data and postings of roughly 60 MB, for about 120 MB of heap. The container gets `mem_limit: 1g` and the JVM uses `MaxRAMPercentage=75`.
@@ -757,6 +767,7 @@ This is `MoveService.move(from, to, updateLinks, dryRun, identity, origin)`. `up
    - **Collateral protection.** The move may change which file other links resolve to, for example by moving an `A.md` to the root, which hijacks `[[A]]` links that resolved to `Other/A.md`. For each link in the affected name buckets that resolved to a file *not* in `moved`, re-resolve it with the post-move file set. If the result changes, rewrite that link to the path-qualified link text of its original target.
    - A `LinkOcc` with `rewritable=false` is never planned; its note goes to `failed` with reason `not-rewritable`. A frontmatter link's new target is written for its YAML scalar's style (`'` doubled in a single-quoted scalar; `\` and `"` escaped in a double-quoted one); a target that a plain scalar would misread (`: `, ` #`) is not planned either, with the same reason. As a last check, a rewrite that would make the frontmatter stop parsing or gain or lose links is skipped with `not-rewritable`.
    - A moved file that stops being a note (`.md` renamed to `.txt`) has no rewrites planned inside it.
+   - A document indexed through a `DocumentIndexer` (a `.tasks` list, §5.20) is never rewritten: its links point into its search text, not the file. When the move would change one of its links, it is reported in `failed` with `not-rewritable`.
 3. If `dryRun`, return the plan as a `MoveResult` and stop.
 4. **Move on disk.** A file moves with `moveExclusive`; a folder with `Files.move(fromDisk, toDisk, ATOMIC_MOVE)` (§5.4). A case-only rename on a case-insensitive filesystem goes through a hidden sibling name, `.notesapp-<uuid>.tmp` in the same folder (ignored by the index, the watcher and git), never through `.notesapp/tmp/`, which is emptied at startup: if the second rename fails, the entry is moved back before the error is reported, and a crash between the two renames leaves the entry beside its old name. Missing target parents are created and listed in `MoveResult.createdFolders`.
 5. Update the index paths for every moved file (records keep their parse data and are re-keyed), then re-resolve the affected link buckets. A renamed file whose new extension is indexed differently (another kind or text limit, such as `.txt` to `.md`) is instead read again from disk at its new path, so its kind, version, tags, links and search document match its new name. Record every `oldPath → newPath` in `MoveLog`.
@@ -1122,6 +1133,7 @@ public record NotesProperties(
     @DefaultValue Git git, @DefaultValue Watcher watcher, @DefaultValue Sse sse,
     @DefaultValue Limits limits, @DefaultValue Identity identity, @DefaultValue Security security,
     @DefaultValue TailscaleWatchdog tailscaleWatchdog,
+    @DefaultValue Tasks tasks,
     @DefaultValue({"md","markdown","txt","json","canvas","excalidraw","sheet","tasks","csv","tsv","yaml","yml"}) List<String> textExtensions,
     @DefaultValue("true") boolean welcomeNote,
     @DefaultValue("dev") String buildSha /* NOTES_BUILD_SHA, set by the image; shown in /api/status, hello and X-Notes-Build */) {
@@ -1146,6 +1158,8 @@ public record NotesProperties(
                          @DefaultValue List<String> allowedLogins /* NOTES_IDENTITY_ALLOWED_LOGINS; empty = any tailnet user */) {}
   public record Security(@DefaultValue("true") boolean requireTailscaleInterface /* false in dev and tests */,
                          @DefaultValue("false") boolean allowUserspaceTailscale) {}
+  public record Tasks(@DefaultValue("90d") Duration archiveAfter /* closed tasks older than this roll into archives (§5.20) */,
+                      @DefaultValue("0 20 3 * * *") String archiveCron) {}
   public record TailscaleWatchdog(@DefaultValue("false") boolean enabled,
                                   @DefaultValue("http://127.0.0.1:9002/healthz") URI url,
                                   @DefaultValue("10s") Duration interval, @DefaultValue("6") int failures,
@@ -1257,6 +1271,57 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | SSE fan-out to 5 clients | < 50 ms |
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
+
+### 5.20 Structured tasks (ROADMAP item 4)
+
+A real task manager whose data lives in the vault as JSON, not as `- [ ]` lines. The contract is API.md §20; this section is the server's design. (Built so far: the data model, storage, API, events, recurrence, archive and indexing, phases 4a and 4b on the server. The views, quick add, embeds and the note panel come with the frontend steps; reminder delivery comes with item 9.)
+
+**Files.** One list per file. Any `.tasks` file in the vault is a list (moving one into a subfolder keeps it working); new lists are created in `Tasks/`, and tasks created without a list go to `Tasks/Inbox.tasks`, which is created on first use.
+
+```json
+{
+  "type": "notesapp-tasks",
+  "version": 1,
+  "list": { "id": "01JC4M2ZKD8R6V3W5Y7A9B1C0D", "name": "Home", "order": "a0", "archived": false,
+            "sections": [ { "id": "01JC4M…", "name": "Errands", "order": "a0" } ] },
+  "tasks": [
+    { "id": "01JC4M3A0QY1T9X2W4E6R8T0U2", "title": "Pay rent [[Apartment]]", "status": "open", "priority": 2,
+      "due": "2026-11-01", "recurrence": { "rrule": "FREQ=MONTHLY", "from": "due" }, "tags": [ "bills" ],
+      "links": [], "order": "a0", "createdAt": "2026-10-01T08:12:40.120Z", "updatedAt": "2026-10-01T08:12:40.120Z" }
+  ]
+}
+```
+
+- **Canonical form** (`TaskFile.serialize`): `JSON.stringify(value, null, 2)` layout (the writer `JsonConfig.vaultFileWriter`, shared with `settings.json`), a final newline, a kept BOM, known keys in a fixed order followed by unknown keys in their own order, tasks sorted by id, and no `listId` inside tasks (a task belongs to the list of its file). Optional fields are omitted when empty; `tags` and `links` are always written. Since ids are ULIDs, sorting by id is creation order, and a change shows up in `git diff` as the few lines it touched.
+- **Ids** are monotonic ULIDs (`Ulid`); ids written by hand may be any 1 to 64 letters, digits, `-` or `_`. **Order keys** are fractional indexes (`FractionalIndex`, a port of the `fractional-indexing` package, checked against its vectors), so a move changes one task's key, and two devices reordering different tasks never touch the same field.
+- **Preservation.** Operations change single fields of a parsed `ObjectNode` tree and write the whole tree back, so fields this build does not know (a newer build's, or the user's own), and tasks it cannot read, survive every write. A file whose `version` is newer than 1 is shown but never written (`writable: false`), the rollback rule of settings (§5.12).
+- **Malformed files are reported, never overwritten.** A file that is not valid UTF-8, not valid JSON (trailing content counts, because the next write would drop it), not of type `notesapp-tasks`, or without a list id and name, is listed in `problems` and every operation on it answers `409 malformed-file`. Single tasks with an invalid id, title, status, priority, date or parent are skipped and reported; smaller defects (a bad reminder) are reported and the rest is served. Parse errors name a line and column, never content.
+
+**Reading** (`TaskStore`, `TaskCatalog`). The index says which `.tasks` files exist and their versions; `TaskStore` keeps one immutable `TaskSnapshot` per file, keyed by version, and parses a file again only when its version changes. A hand edit therefore shows up as soon as the watcher or the rescan has indexed it, and a write needs no parse at all on the next read (the session hands its result to the cache). `TaskCatalog` combines the snapshots in path order: a later file that repeats a list id (a copied file) is reported and blocked, and a task id seen in an earlier file is reported and hidden, so an id always names one task in one file. Reads take no lock.
+
+**Writing** (`TaskWrites.Session`). Every operation:
+
+1. Finds its task (or list) in a fresh catalog, then opens a session for the files it may touch: `CommitBatcher.beginOperation()`, then the vault **read** lock and the path locks of every file and its parent folders in **one** sorted acquisition (§5.4), so an operation over two lists cannot deadlock against another.
+2. Reads each file **from disk** under its lock. When the bytes differ from the index (an external edit the watcher has not reported), it runs `reconcileLocked` first: the edit is indexed, announced and queued as External, and `prepareWrite` commits it under the External author before this operation's bytes. A malformed file stops the operation with `409 malformed-file`.
+3. Checks that the task is still where the catalog said; if it moved meanwhile (another device moved it to another list, or the rollover archived it), the session is closed and the operation starts again from a fresh catalog (up to five times, then `503 busy`).
+4. Edits the trees in memory, then `commit()`: serializes the touched files, refuses with `413` before writing anything if one would exceed its text limit, skips files whose bytes did not change, and writes the rest: new files with `FileService.createLocked` (the no-clobber create, with parent folders), others with `prepareWrite`, `atomicWrite`, `indexWritten` (which runs the `DocumentIndexer`) and `markDirty`. Commits are batched like autosaves (§5.8). Files that **gain** tasks are written before files that **lose** them, so a failure between two writes leaves a duplicate (reported by the catalog) rather than a lost task.
+5. Publishes, still under the locks: `folder.created`, `file.created` or `file.changed` for each file written, then the operation's `task.*` and `list.changed` events. A file written before a later write failed is still announced. When nothing changed on disk, nothing is published.
+
+`FileService.createLocked` is the one extension of `FileService`: the existing creates take their own locks, while the task API needs the no-clobber create inside a session that already holds the locks of several files.
+
+**Conflicts.** Versioning is per field rather than per task or per list: a `PATCH` sends `changes` and the `base` values it saw for those fields (API.md §20.4). A field whose server value differs from both is a `409 task-conflict` carrying the server's task; fields already at the requested value are skipped. Two devices editing different tasks never meet (each operation rewrites only its own task's fields, from the file as it is now); two devices editing different fields of the same task both succeed; a retried `PATCH` is a no-op; and a real conflict on the same field is never silently overwritten. A per-task version would have turned the second case into conflicts, and a per-list version would have turned the first into them. `complete` takes the `due` and `start` the client saw, so a retried (or doubled) completion of a recurring task does not roll it forward twice; every mutating endpoint also accepts an `Idempotency-Key` (§5.4).
+
+**Recurrence** (`Recurrence`, lib-recur 0.17.1). Rules are validated when they are written: the supported RRULE subset (API.md §20.6), parsed by lib-recur in strict RFC 5545 mode, and probed for at least one occurrence (`FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30` is refused). They are evaluated on floating dates and times, because task dates are local. `COUNT` and `UNTIL` are handled by the app rather than lib-recur: rolling forward restarts the series at the new date, so `COUNT` is stored as the number of occurrences left and decremented, and `UNTIL` is compared by date (lib-recur requires its type to match the start's). The next occurrence counts from the due date (skipping occurrences already past on the completion day, with `fastForward`, so a long-overdue daily task costs no iteration) or from the completion day; the completion day is the client's (`tz` or `date`). A rule that cannot be evaluated at completion time closes the task instead of failing the request.
+
+**Views** (`TaskQuery`). Computed per request from the catalog; "today" is the client's date, sent as `date` or as its time zone `tz`, the same split as daily notes (§5.11): dates are local, and only the client knows its day.
+
+**Lists** (`TaskListService`). Creating a list creates its file with the no-clobber create in rename mode (`Home 1.tasks` when `Home.tasks` is taken; the list's name stays `Home`). Renaming a list also renames its file through `MoveService` (so `![[Home.tasks]]` embeds follow), before the name is written; deleting a list moves its file to the trash through `TrashService`, so it can be restored with its tasks. Both run inside an outer `Operation`, so `history.committed` still comes after `list.changed`. Sections are an array in the list object, with order keys.
+
+**Archive rollover** (`TaskArchiver`). A nightly job (`notes.tasks.archive-cron`) moves tasks closed more than `notes.tasks.archive-after` (90 days) ago into `Tasks/Archive/<list file name> <YYYY>.tasks` (by completion year, UTC; ` 1`, ` 2`, ... when that name belongs to something else). A task moves only with its whole subtree and only when its parent moves too; a subtree goes to the archive of its top task's year. Archive files have `"archive": true` and their list's id and name, are written before the list file, and are authored by NotesApp (the committer identity). The job publishes `list.changed` with `origin: null`. Uncompleting an archived task moves it back. Malformed lists and archives are skipped and logged.
+
+**Events.** `task.created`, `task.changed`, `task.deleted` and `list.changed` are content events (`origin`, echo suppression, replay; §5.10). Changes made outside the task API produce only `file.*` events, so clients refetch task views on `file.*` events touching `.tasks` paths (API.md §20.8); the server needs no hook in the reconciler, the move or the restores, and every route that changes a file is covered.
+
+**Search, backlinks and tags** (`TaskDocumentIndexer`, §6.8). The list's name is a heading block; each usable task contributes its title, a block with its `#tags` and `[name](/path)` links for `links`, and its notes. A malformed file is not content-indexed.
 
 ---
 
@@ -1621,7 +1686,23 @@ All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and buil
 - `markDirty(serialize: () => string)` makes serialization **lazy**: the session calls `serialize` only when it saves or writes a draft. Excalidraw fires `onChange` on every pointer move and sheets can be large, so `setText` on every change would serialize far too often.
 - The session keeps `baseText` (the content at `baseVersion`) and passes it to `merge(base, mine, theirs)`; drafts persist it when they fit (§6.9). Without it, a 3-way merge after a reload would have no base: no API returns content by blob version, and the base may never have been committed, because commits are batched.
 
-**Backend counterpart.** Text kinds are already readable and writable through the generic API (`notes.text-extensions` lists `sheet`, `tasks`, `excalidraw` and `canvas` from day one), and `notes.limits.text-size-overrides` raises the 5 MiB limit per extension where a format needs it. A future `DocumentIndexer` SPI (`supports(path)`, `index(path, text) → {searchText, links, tags}`) will let these types feed search and backlinks without touching `MarkdownScanner`.
+**Backend counterpart.** Text kinds are already readable and writable through the generic API (`notes.text-extensions` lists `sheet`, `tasks`, `excalidraw` and `canvas` from day one), and `notes.limits.text-size-overrides` raises the 5 MiB limit per extension where a format needs it.
+
+**`DocumentIndexer` (built with ROADMAP item 4).** A Spring bean implementing `index.DocumentIndexer` lets a structured type feed search, backlinks and tags without touching `MarkdownScanner`:
+
+```java
+public interface DocumentIndexer {
+  boolean supports(String path);                          // typically by extension
+  @Nullable Document index(String path, String text);    // null: cannot be read; listed and served, not content-indexed
+  record Document(List<String> blocks) {}                 // the searchable content as Markdown blocks
+}
+```
+
+- `FileIndexer` calls the first indexer that `supports` a text file whenever it indexes one (startup, app writes, the watcher and the rescan), outside every lock, and catches its exceptions so one defective type never stops indexing.
+- The indexer renders what is searchable as Markdown **blocks**, for example one per task. `DocumentParse` scans each block on its own with `MarkdownScanner.scanFragment` (the note rules, without frontmatter), so a code fence or a `%%` comment left open in one block never hides the next, and joins them with shifted offsets. Their `[[links]]`, Markdown links and `#tags` count exactly like a note's, with the same rules and test vectors; nothing new to keep in sync with the client.
+- The result is stored like a note (`NoteRecord` with the search text), so search, `tag:`, `GET /api/tags` and linked backlinks work unchanged. Because offsets point into the search text, a document's links are not `rewritable` (a move reports the file as `not-rewritable`, §5.6), `GET /api/notes/meta` refuses it, unlinked mentions skip it, and `/api/status` does not count it as a note.
+- This replaces the earlier sketch `index(path, text) → {searchText, links, tags}`: rendering links and tags as Markdown reuses the scanner and its vectors instead of a second link model, and still lets a type express any link (a `.tasks` list writes each related note as `[name](/percent-encoded/path)`, which resolves to exactly that path).
+- `TaskDocumentIndexer` (§5.20) is the first implementation; sheets, drawings and canvases (items 5, 6 and 25) add their own beans.
 
 ### 6.9 Autosave policy
 
@@ -2406,6 +2487,10 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 | `EventHubTest` | Echo suppression; replay after `lastEventId` with the right `replayed` count; a foreign `bootId` or too-old id gives `hello{resync:true}` with the head id; **`ping` frames carry no `id:` and never enter the ring**; concurrent publishers produce strictly increasing ids in delivery order; `onTimeout` completes the emitter without an exception; a slow client does not block others; `closeAll`. |
 | `Rfc2047Test`, `IdentityResolverTest`, `HostAndIdentityFilterTest` | Q-encoding, B-encoding, multiple encoded words, invalid input. A missing login gives `403` unless `allow-default`; a login outside `allowed-logins` gives `403`; `Host: evil.example` gives `421`; health paths are exempt from both. |
 | `ApiGuardInterceptorTest`, `SettingsServiceTest` | Header, Origin and `Sec-Fetch-Site` rules. Settings defaults, validation and version conflict; unknown fields survive a write; a newer `schemaVersion` makes settings read-only and leaves the file byte-for-byte unchanged. |
+| `FractionalIndexTest`, `UlidTest`, `RecurrenceTest` | The `fractional-indexing` package's vectors and 2,000 random inserts staying ordered; ULIDs sorted and monotonic when the clock goes back. RRULE normalization and every refused rule (unsupported parts, `COUNT` with `UNTIL`, "never repeats"); next occurrences from due (early, on time, overdue years ago), from completion, with times, `BYHOUR`, month ends, `COUNT` counting down to the end, `UNTIL`. |
+| `TaskFileTest` | The canonical form, byte for byte (sorted tasks, key order, unknown fields kept, stray `listId` dropped, idempotent); a BOM kept; every malformed frame, including trailing content and invalid UTF-8; parse errors name a position but no content; a minimal hand-written file; unusable tasks reported but written back untouched; a newer format version read-only. |
+| `TaskServiceTest` | The Inbox made on first use and the events of a create; validation and normalization; order keys and `after`; subtask depth and cycles; per-field updates, idempotent repeats and `task-conflict`; **six threads editing six tasks of one list never lose an edit**; moving a subtree to another list (gaining file written first); completing with cascading subtasks; **a recurring task rolled forward once even when the completion is retried**; `COUNT` closing the last occurrence; reorder and renumbering after corrupt keys; cascading delete; a malformed file, a file broken between lookup and write, and a newer file are never written; a hand edit is kept and committed as External before the next write; a copied list file is reported, not merged. |
+| `TaskQueryTest`, `TaskListServiceTest`, `TaskArchiverTest`, `TaskIndexingTest` | Today and Upcoming from the client's date or time zone; filters; search; completed paging; archived lists. List files named and renamed with their links; delete to trash and restore; list and section reordering; deleting a section keeps its tasks. Rollover by year, subtree rules, adding to an existing archive, a foreign file at the archive's name left alone, a malformed list skipped, reopening an archived task. Backlinks from titles and `links`, a fence in notes not hiding the next task, tags and search, no note meta or unlinked mentions for task files, a rename reporting the task file as `not-rewritable`. |
 
 **Integration tests** (classes named `*IntegrationTest`; `@SpringBootTest(webEnvironment = RANDOM_PORT)` + `@AutoConfigureRestTestClient`, `@TempDir` vault, `notes.watcher.enabled=false`, short git periods, `notes.allowed-hosts=localhost`, `notes.identity.allow-default=true`, `notes.security.require-tailscale-interface=false`):
 
@@ -2424,6 +2509,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 13. A JSON body with `Content-Length` above `max-json-body` gets `413` before it is read.
 14. Importing a vault whose `.git` has a `post-commit` hook that writes a marker file: after several commits, the marker does not exist.
 15. A save is not delayed by more than a few ms while a slow upload (a body trickled over 5 s) is in progress.
+16. Tasks (`TasksIntegrationTest`): every field of a task and a list on the wire; views with `date` and `tz`; CSRF on `POST` and `PATCH`; an `Idempotency-Key` retry creating one task; `task-conflict` and `malformed-file` problems (the file untouched); another client receives `file.changed` then `task.*`, the origin client none; the list file through the text API; lists and sections; backlinks from a task title.
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
@@ -2432,6 +2518,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 - `features/syntax.ts`, `obsidianSyntax` and the markdown-it rules: the API.md §15.6 vectors (tags with emoji and `’`, `#1984`, `a#b`, `#a/b/`, a tag in a heading, no tag inside link text; wikilink bodies with `\|`, an empty target, an empty body, nested `#`), plus the research's verified parse cases.
 - `completion`: the apply behaviour with `closeBrackets`, aliases, no completion in code; **typing further re-ranks the list** (no frozen `validFor` list); picking one of two same-named notes inserts a path-qualified link; with `useWikilinks: false` a Markdown link is inserted; `[[#` lists the open note's headings from the Lezer tree.
 - `render.ts`: wikilinks, aliases, headings with `data-heading`, unresolved class on the first render, image sizes and `v=` URLs, sanitization (script and `onerror` removed; `style`, `form` and `button` forbidden; `position: fixed` stripped), `data-line` with `lineOffset`, footnotes, `breaks` on by default and off with `strictLineBreaks`, `==mark==`, `%%comments%%` hidden (inline and block). `toggleTaskAtLine`, including `> - [ ]` and a stale `data-hash`. `patch.ts`: an `<img>` node survives a re-render of an unrelated paragraph, and a checkbox-only change does not re-render.
+- `api/types.test.ts`: `types.ts` is a verbatim copy of API.md §17 (the test reads `docs/API.md`, which `vite.config.ts` allows for tests only), and the task event names.
 - `features/links.ts`: the API.md §15.1 vectors through the client `resolve()` and `createPath()`, the §15.3 vectors and `encodeMdPath`. `eol.ts`: CRLF detection (all, none, mixed), round trip, offset mapping. `paths.ts`: route encoding and decoding round trip, including `%`, `#`, `?` and Unicode; `joinPath('', x) === x`.
 - `templates.ts`: every placeholder form, unknown placeholders untouched, frontmatter merge rules, insertion at the stored selection after blur. `daily.ts`: formats with `/` subfolders, strict parsing, previous and next.
 - `DocumentSession` (fake timers and a fake API): debounce and max wait; queuing during an in-flight save; 409 leads to conflict and pauses autosave; **a 409 whose content equals mine becomes clean**; a 409 with `movedTo` re-keys and retries at the new path, and `entry.moved` arriving before or after the 409 ends in the same state; a clean remote change is applied; a dirty remote change leads to conflict; **a remote change during an in-flight save is deferred** and compared with the new base; **open, close, remote change, reopen shows the new text without a conflict**; Take theirs is undoable and stores mine in the discarded store; drafts restore, and a stale draft whose text equals the server is dropped; drafts are re-keyed on a move; the keepalive budget is shared across sessions; transient failures (network, empty `502`, `503 busy` with `Retry-After`) go offline and retry, `io-error` shows the storage error; flush on release; **CRLF fixtures**: a remote update, a mention-to-link conversion at server offsets, and a checkbox toggle all land on the right characters and the saved file is still CRLF.

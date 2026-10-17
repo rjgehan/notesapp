@@ -17,6 +17,8 @@ const TABLE: Record<ErrorCode, [number, string]> = {
   'type-mismatch': [409, 'Wrong entry type'],
   'version-conflict': [409, 'Version conflict'],
   'settings-read-only': [409, 'Settings are read-only'],
+  'task-conflict': [409, 'Task changed on the server'],
+  'malformed-file': [409, 'File cannot be read'],
   'too-large': [413, 'Too large'],
   'not-text': [415, 'Not a text file'],
   'unsupported-media-type': [415, 'Unsupported media type'],

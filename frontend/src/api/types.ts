@@ -19,6 +19,7 @@ export type ErrorCode =
   | 'client-id-required' | 'cross-origin' | 'identity-not-allowed' | 'reserved-path'
   | 'not-found' | 'method-not-allowed'
   | 'already-exists' | 'case-collision' | 'type-mismatch' | 'version-conflict' | 'settings-read-only'
+  | 'task-conflict' | 'malformed-file'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
   | 'busy' | 'history-unavailable' | 'insufficient-storage';
@@ -51,6 +52,13 @@ export interface VersionConflictProblem extends Problem {
   currentContent: string | null;
   currentMtime: IsoInstant | null;
   movedTo: VaultPath | null;      // set when the file is gone because it was moved during this server run
+}
+
+export interface TaskConflictProblem extends Problem {
+  code: 'task-conflict';
+  task?: Task;                    // the task as it is on the server (PATCH /api/tasks/{id})
+  list?: TaskList;                // the list as it is on the server (PATCH /api/tasks/lists/{id})
+  fields: string[];               // the requested fields that were changed on the server since the client read them
 }
 
 // ---------- identity / status (§6) ----------
@@ -318,3 +326,120 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
+
+// ---------- tasks (§20) ----------
+export type TaskStatus = 'open' | 'done' | 'cancelled';
+export type TaskPriority = 0 | 1 | 2 | 3;              // none / low / medium / high
+export type TaskView = 'today' | 'upcoming' | 'list' | 'completed' | 'search';
+export type LocalDate = string;                       // 'YYYY-MM-DD' in the user's own time zone
+export type LocalDateTime = string;                   // 'YYYY-MM-DDTHH:mm' in the user's own time zone
+export type TaskDate = LocalDate | LocalDateTime;
+export type OrderKey = string;                        // fractional index (§20.1)
+
+export interface TaskRecurrence { rrule: string; from: 'due' | 'completion' }   // RFC 5545 RRULE subset (§20.6)
+export interface TaskReminder { at: LocalDateTime }
+export interface TaskSection { id: string; name: string; order: OrderKey }
+export interface TaskList {
+  id: string;
+  name: string;
+  color: string | null;           // '#rrggbb' or a color name such as 'green'
+  icon: string | null;            // a lucide icon name such as 'shopping-cart'
+  order: OrderKey;
+  archived: boolean;              // left out of Today, Upcoming and the all-lists view
+  sections: TaskSection[];        // in order
+  path: VaultPath;                // the list's .tasks file
+  writable: boolean;              // false: written by a newer NotesApp, so this version only reads it
+}
+export interface Task {
+  id: string;
+  listId: string;
+  sectionId: string | null;
+  parentId: string | null;        // subtasks, at most 3 levels
+  title: string;                  // one line; [[Note]] links and #tags allowed inline
+  notes: string | null;           // Markdown
+  status: TaskStatus;
+  priority: TaskPriority;
+  due: TaskDate | null;
+  start: TaskDate | null;         // the "do on" date; drives Today
+  recurrence: TaskRecurrence | null;
+  reminders: TaskReminder[];      // stored and validated; delivered by ROADMAP item 9
+  tags: string[];                 // without '#'
+  links: VaultPath[];             // related notes
+  order: OrderKey;
+  createdAt: IsoInstant | null;   // null only for a task added by hand without it
+  updatedAt: IsoInstant | null;
+  completedAt: IsoInstant | null;
+  archived: boolean;              // closed and rolled into an archive file (Tasks/Archive/...)
+}
+export interface TaskFileProblem { path: VaultPath; taskId: string | null; reason: string }
+export interface TasksResponse {
+  view: TaskView;
+  lists: TaskList[];              // every usable list, in order, archived ones included
+  tasks: Task[];
+  total: number;                  // matching tasks; tasks holds at most `limit` for completed and search
+  problems: TaskFileProblem[];
+}
+export interface TaskListsResponse { lists: TaskList[]; problems: TaskFileProblem[] }
+
+export interface TaskFields {     // what a client sets; null clears an optional field
+  title?: string;
+  notes?: string | null;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  due?: TaskDate | null;
+  start?: TaskDate | null;
+  recurrence?: TaskRecurrence | null;
+  reminders?: TaskReminder[];
+  tags?: string[];
+  links?: VaultPath[];
+  listId?: string;
+  sectionId?: string | null;
+  parentId?: string | null;
+}
+export interface CreateTaskRequest extends TaskFields { title: string; after?: string | null }
+export interface UpdateTaskRequest { changes: TaskFields; base?: TaskFields }
+export interface CompleteTaskRequest {
+  tz?: string;                    // the client's IANA time zone, or
+  date?: LocalDate;               // the client's date: the completion day for recurrence
+  base?: { due?: TaskDate | null; start?: TaskDate | null };
+}
+export interface ReorderTasksRequest {
+  listId: string;
+  sectionId: string | null;       // top-level tasks only
+  parentId: string | null;
+  ids: string[];
+  after: string | null;           // null: first
+}
+export interface TaskWriteResult {
+  task: Task | null;              // the addressed task after the change; null for reorder and delete
+  changed: Task[];                // other tasks the change touched
+  deleted: string[];              // ids removed: the task and its subtasks
+  rolledForward: boolean;         // complete: a recurring task moved to its next occurrence
+  files: FileEntry[];             // list files written; apply them like file.changed / file.created
+  createdFolders: VaultPath[];
+}
+
+export interface TaskListFields { name?: string; color?: string | null; icon?: string | null; archived?: boolean }
+export interface CreateTaskListRequest { name: string; color?: string | null; icon?: string | null }
+export interface UpdateTaskListRequest { changes: TaskListFields; base?: TaskListFields }
+export interface ReorderRequest { ids: string[]; after: string | null }
+export interface SectionRequest { name: string }
+export interface TaskListWriteResult {
+  lists: TaskList[];              // the created, changed or reordered lists, after the change
+  files: FileEntry[];             // list files written or created
+  createdFolders: VaultPath[];
+  moved: MovedFile | null;        // a rename that renamed the list's file
+  trash: TrashEntry | null;       // a delete: the trash entry of the list's file
+}
+
+export interface TaskEvent { task: Task; origin: string | null }
+export interface TaskDeletedEvent { id: string; listId: string; origin: string | null }
+export interface ListChangedEvent { listId: string; list: TaskList | null; origin: string | null }
+export interface TaskEventMap {
+  'task.created': TaskEvent;
+  'task.changed': TaskEvent;
+  'task.deleted': TaskDeletedEvent;
+  'list.changed': ListChangedEvent;
+}
+export type TaskEventName = keyof TaskEventMap;
+export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task.changed', 'task.deleted', 'list.changed'];

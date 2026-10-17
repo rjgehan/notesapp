@@ -12,6 +12,7 @@ A self-hosted, single-user notes web app modelled closely on Obsidian. The vault
 - **Organise.** Rename and move with automatic link updates (and undo), trash with restore, attachments by paste, drop or upload, daily notes and templates.
 - **Phone-first.** A responsive layout tuned for iPhone Safari (keyboard-aware editor, toolbar, drawer, 44 px targets), dark and light themes.
 - **Zero-touch deploys.** A push to `main` is tested, built for amd64 and arm64, and running on the server within about five minutes.
+- **Tasks** *(roadmap item 4, being built; the server side is done)*. Structured to-do lists kept in the vault as readable `.tasks` JSON files under `Tasks/`: due and start dates, priorities, tags, subtasks, sections, repeating tasks (RFC 5545 rules, from the due date or from completion), reminders stored for later delivery, and a yearly archive of tasks completed more than 90 days ago. Devices editing different tasks of one list never conflict, edits made by hand are picked up, and `[[links]]` and `#tags` in tasks show up in backlinks, tags and search.
 
 ## Architecture
 
