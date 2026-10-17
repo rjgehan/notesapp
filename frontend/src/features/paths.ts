@@ -47,6 +47,11 @@ export function displayName(path: string): string {
   return isNotePath(seg) ? seg.slice(0, -3) : seg;
 }
 
+/** The editable title of a file: a note's name without `.md`, any other file's without its extension. */
+export function titleOf(path: string): string {
+  return isNotePath(path) ? displayName(path) : basenameOf(path);
+}
+
 export function segmentCount(path: string): number {
   return path === '' ? 0 : path.split('/').length;
 }

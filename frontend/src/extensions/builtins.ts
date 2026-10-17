@@ -45,6 +45,7 @@ import { useUi } from '../state/ui';
 import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
 import { onViewsChanged, registeredViews, viewFor } from '../views/registry';
+import { registerSheetView } from '../views/sheet/register';
 import { registerCommand, registerPanel, registerView } from './index';
 
 let registered = false;
@@ -134,6 +135,7 @@ export function registerBuiltins(): void {
     modes: ['edit'],
     load: () => import('../views/TextView'),
   });
+  registerSheetView();
   registerView({
     id: 'image',
     match: (e) => (e.kind === 'image' ? 2 : 0),

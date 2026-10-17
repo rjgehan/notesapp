@@ -17,6 +17,11 @@ Vitest, ESLint and so on) are not shipped.
 
 | Package | Licence | Source |
 |---|---|---|
+| @babel/generator | MIT | <https://babel.dev/docs/en/next/babel-generator> |
+| @babel/helper-string-parser | MIT | <https://babel.dev/docs/en/next/babel-helper-string-parser> |
+| @babel/helper-validator-identifier | MIT | <https://github.com/babel/babel> |
+| @babel/parser | MIT | <https://babel.dev/docs/en/next/babel-parser> |
+| @babel/types | MIT | <https://babel.dev/docs/en/next/babel-types> |
 | @codemirror/autocomplete | MIT | <https://code.haverbeke.berlin/codemirror/autocomplete> |
 | @codemirror/commands | MIT | <https://code.haverbeke.berlin/codemirror/commands> |
 | @codemirror/lang-angular | MIT | <https://github.com/codemirror/lang-angular> |
@@ -49,6 +54,13 @@ Vitest, ESLint and so on) are not shipped.
 | @codemirror/state | MIT | <https://code.haverbeke.berlin/codemirror/state> |
 | @codemirror/streamparser | MIT | <https://code.haverbeke.berlin/codemirror/streamparser> |
 | @codemirror/view | MIT | <https://code.haverbeke.berlin/codemirror/view> |
+| @emotion/is-prop-valid | MIT | <https://github.com/emotion-js/emotion/tree/main/packages/is-prop-valid> |
+| @emotion/memoize | MIT | <https://github.com/emotion-js/emotion/tree/main/packages/memoize> |
+| @glideapps/glide-data-grid | MIT | <https://grid.glideapps.com> |
+| @jridgewell/gen-mapping | MIT | <https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping> |
+| @jridgewell/resolve-uri | MIT | <https://github.com/jridgewell/resolve-uri> |
+| @jridgewell/sourcemap-codec | MIT | <https://github.com/jridgewell/sourcemaps/tree/main/packages/sourcemap-codec> |
+| @jridgewell/trace-mapping | MIT | <https://github.com/jridgewell/sourcemaps/tree/main/packages/trace-mapping> |
 | @lezer/common | MIT | <https://code.haverbeke.berlin/lezer/common> |
 | @lezer/cpp | MIT | <https://code.haverbeke.berlin/lezer/cpp> |
 | @lezer/css | MIT | <https://code.haverbeke.berlin/lezer/css> |
@@ -66,6 +78,8 @@ Vitest, ESLint and so on) are not shipped.
 | @lezer/sass | MIT | <https://github.com/lezer-parser/sass> |
 | @lezer/xml | MIT | <https://github.com/lezer-parser/xml> |
 | @lezer/yaml | MIT | <https://github.com/lezer-parser/yaml> |
+| @linaria/core | MIT | <https://github.com/callstack/linaria> |
+| @linaria/react | MIT | <https://github.com/callstack/linaria> |
 | @marijn/find-cluster-break | MIT | <https://code.haverbeke.berlin/marijn/find-cluster-break> |
 | @mdit/helper | MIT | <https://mdit-plugins.github.io/> |
 | @mdit/plugin-footnote | MIT | <https://mdit-plugins.github.io/footnote.html> |
@@ -75,30 +89,67 @@ Vitest, ESLint and so on) are not shipped.
 | @remix-run/route-pattern | MIT | <https://github.com/remix-run/remix/tree/main/packages/route-pattern> |
 | @tanstack/query-core | MIT | <https://tanstack.com/query> |
 | @tanstack/react-query | MIT | <https://tanstack.com/query> |
+| @wyw-in-js/processor-utils | MIT |  |
+| @wyw-in-js/shared | MIT |  |
 | argparse | PSF-2.0 | <https://github.com/nodeca/argparse> |
+| balanced-match | MIT | <https://github.com/juliangruber/balanced-match> |
+| brace-expansion | MIT | <https://github.com/juliangruber/brace-expansion> |
+| canvas-hypertxt | MIT | <https://github.com/glideapps/canvas-hypertxt> |
 | chevrotain | Apache-2.0 | <https://sap.github.io/chevrotain/docs/> |
+| classnames | MIT | <https://github.com/JedWatson/classnames> |
 | cookie-es | MIT | <https://github.com/unjs/cookie-es> |
 | crelt | MIT | <https://code.haverbeke.berlin/marijn/crelt> |
 | dayjs | MIT | <https://day.js.org> |
+| debug | MIT | <https://github.com/debug-js/debug> |
 | dompurify | (MPL-2.0 OR Apache-2.0) | <https://github.com/cure53/DOMPurify> |
 | entities | BSD-2-Clause | <https://github.com/fb55/entities> |
+| es-errors | MIT | <https://github.com/ljharb/es-errors> |
+| find-up | MIT | <https://github.com/sindresorhus/find-up> |
+| function-bind | MIT | <https://github.com/Raynos/function-bind> |
 | fuzzysort | MIT | <https://github.com/farzher/fuzzysort> |
+| hasown | MIT | <https://github.com/inspect-js/hasOwn> |
+| html-element-attributes | MIT | <https://github.com/wooorm/html-element-attributes> |
 | hyperformula | GPL-3.0-only | <https://hyperformula.handsontable.com/> |
+| is-core-module | MIT | <https://github.com/inspect-js/is-core-module> |
+| js-tokens | MIT | <https://github.com/lydell/js-tokens> |
+| jsesc | MIT | <https://mths.be/jsesc> |
 | linkify-it | MIT | <https://github.com/markdown-it/linkify-it> |
+| locate-path | MIT | <https://github.com/sindresorhus/locate-path> |
+| lodash | MIT | <https://lodash.com/> |
+| loose-envify | MIT | <https://github.com/zertosh/loose-envify> |
 | lucide-react | ISC | <https://lucide.dev> |
 | markdown-it | MIT | <https://github.com/markdown-it/markdown-it> |
+| marked | MIT | <https://marked.js.org> |
 | mdurl | MIT | <https://github.com/markdown-it/mdurl> |
+| minimatch | ISC | <https://github.com/isaacs/minimatch> |
+| ms | MIT | <https://github.com/vercel/ms> |
+| object-assign | MIT | <https://github.com/sindresorhus/object-assign> |
+| p-limit | MIT | <https://github.com/sindresorhus/p-limit> |
+| p-locate | MIT | <https://github.com/sindresorhus/p-locate> |
+| path-exists | MIT | <https://github.com/sindresorhus/path-exists> |
+| path-parse | MIT | <https://github.com/jbgutierrez/path-parse> |
+| prop-types | MIT | <https://facebook.github.io/react/> |
 | punycode.js | MIT | <https://mths.be/punycode> |
 | react | MIT | <https://react.dev/> |
 | react-dom | MIT | <https://react.dev/> |
+| react-easy-swipe | MIT | <http://leandrowd.github.io/react-easy-swipe/> |
+| react-html-attributes | MIT | <https://github.com/jackyho112/react-html-attributes> |
+| react-is | MIT | <https://reactjs.org/> |
+| react-number-format | MIT | <https://s-yadav.github.io/react-number-format/docs/intro> |
+| react-responsive-carousel | MIT | <http://leandrowd.github.io/react-responsive-carousel/> |
 | react-router | MIT | <https://github.com/remix-run/react-router> |
 | regexp-to-ast | MIT | <https://github.com/bd82/regexp-to-ast> |
+| resolve | MIT | <ssh://github.com/browserify/resolve> |
 | scheduler | MIT | <https://react.dev/> |
 | style-mod | MIT | <https://code.haverbeke.berlin/marijn/style-mod> |
+| supports-preserve-symlinks-flag | MIT | <https://github.com/inspect-js/node-supports-preserve-symlinks-flag> |
 | tiny-emitter | MIT | <https://github.com/scottcorgan/tiny-emitter> |
+| ts-invariant | MIT | <https://github.com/apollographql/invariant-packages> |
+| tslib | 0BSD | <https://www.typescriptlang.org/> |
 | uc.micro | MIT | <https://github.com/markdown-it/uc.micro> |
 | w3c-keyname | MIT | <https://github.com/marijnh/w3c-keyname> |
 | yaml | ISC | <https://eemeli.org/yaml/> |
+| yocto-queue | MIT | <https://github.com/sindresorhus/yocto-queue> |
 | zustand | MIT | <https://github.com/pmndrs/zustand> |
 
 ## Server (in the Spring Boot jar)

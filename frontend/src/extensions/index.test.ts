@@ -8,15 +8,21 @@ describe('registerView create (DESIGN §6.8)', () => {
   it('adds "Create new <label>" to the palette for a view registered later', () => {
     registerBuiltins();
     expect(getCommand('file.new.markdown')).toBeUndefined();
+    expect(getCommand('file.new.probe')).toBeUndefined();
     registerView({
-      id: 'sheet',
-      match: (e) => (e.path.endsWith('.sheet') ? 6 : 0),
+      id: 'probe',
+      match: (e) => (e.path.endsWith('.probe') ? 6 : 0),
       icon: FileText,
       textual: true,
       modes: ['edit'],
       load: () => Promise.resolve({ default: () => null }),
-      create: { label: 'spreadsheet', extension: 'sheet', initialContent: () => '{}' },
+      create: { label: 'probe', extension: 'probe', initialContent: () => '{}' },
     });
+    expect(getCommand('file.new.probe')?.name).toBe('Create new probe');
+  });
+
+  it('registers the spreadsheet view with "Create new spreadsheet" (ROADMAP item 6)', () => {
+    registerBuiltins();
     expect(getCommand('file.new.sheet')?.name).toBe('Create new spreadsheet');
   });
 });

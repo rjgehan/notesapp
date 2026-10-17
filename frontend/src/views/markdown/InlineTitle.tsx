@@ -8,19 +8,20 @@ import { activeEditor } from '../../editor/activeEditor';
 import { cancelNoteFocus, requestNoteFocus } from '../../features/focus';
 import { nameWithExtension, renameEntry, retitleNewNote, validateNewName } from '../../features/fileOps';
 import { currentNoteMode, editNote } from '../../features/noteMode';
-import { displayName } from '../../features/paths';
+import { titleOf } from '../../features/paths';
 import { takeTitleHandoff } from '../../state/pendingNote';
 import { toast } from '../../state/toasts';
 import { toastError } from '../../features/errors';
 
-export function InlineTitle({ path, editable }: { path: string; editable: boolean }) {
+export function InlineTitle({ path, editable, label = 'Note title' }: { path: string; editable: boolean; label?: string }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const reverting = useRef(false);
   const toText = useRef(false);
   const errorId = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const title = displayName(path);
+  // Other files (a spreadsheet) are titled without their extension, which a rename keeps.
+  const title = titleOf(path);
   useAutoGrow(ref);
   const error = draft !== null && draft.trim() !== title ? validateNewName(nameWithExtension(path, draft.trim(), 'file')) : null;
 
@@ -122,7 +123,7 @@ export function InlineTitle({ path, editable }: { path: string; editable: boolea
           defaultValue={title}
           rows={1}
           readOnly={!editable || busy}
-          aria-label="Note title"
+          aria-label={label}
           aria-invalid={!!error}
           aria-describedby={error ? errorId : undefined}
           spellCheck={false}
