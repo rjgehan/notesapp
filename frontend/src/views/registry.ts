@@ -65,6 +65,22 @@ export function viewFor(entry: FileEntry): FileViewDescriptor {
   return best;
 }
 
+/**
+ * True when the Markdown view shows the note at `path`: false for other files, and for notes
+ * another view claims by name (an `.excalidraw.md` drawing), whose text has no outline, word
+ * count or insertion point.
+ */
+export function isMarkdownViewPath(path: string): boolean {
+  if (!path.toLowerCase().endsWith('.md')) return false;
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const probe: FileEntry = { path, name, basename: name.slice(0, -3), extension: 'md', kind: 'note', size: 0, mtime: '', version: null, aliases: [] };
+  try {
+    return viewFor(probe).id === 'markdown';
+  } catch {
+    return true;
+  }
+}
+
 export function registeredViews(): readonly FileViewDescriptor[] {
   return views;
 }

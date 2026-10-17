@@ -2,9 +2,9 @@
 import { useEffect, useState } from 'react';
 import { headingsFromState, type OutlineHeading } from '../../editor/outline';
 import { requestNoteScroll } from '../../features/noteScroll';
-import { isNotePath } from '../../features/paths';
 import { useUi } from '../../state/ui';
 import { useDocumentSession, useSessionChangeCount } from '../../sync/useTextDocument';
+import { isMarkdownViewPath } from '../../views/registry';
 
 const DEBOUNCE_MS = 300;
 
@@ -44,6 +44,6 @@ function Headings({ path }: { path: string }) {
 }
 
 export default function OutlinePanel({ activePath }: { activePath: string | null }) {
-  if (!activePath || !isNotePath(activePath)) return <div className="panel-empty">Open a note to see its outline.</div>;
+  if (!activePath || !isMarkdownViewPath(activePath)) return <div className="panel-empty">Open a note to see its outline.</div>;
   return <Headings key={activePath} path={activePath} />;
 }

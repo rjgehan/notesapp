@@ -1,0 +1,57 @@
+/* The drawing view (DESIGN §6.8.1): Excalidraw fills the workspace below a compact header. Loaded
+   with the view's lazy chunk. */
+
+/* The canvas pans and zooms itself; the workspace does not scroll around it. */
+.workspace-scroll:has(> .excalidraw-view) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.excalidraw-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.drawing-header {
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.drawing-title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.excalidraw-host {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  /* Pinch and pan belong to the canvas, never to the page (iPad and iPhone Safari). */
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.drawing-fallback-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px max(var(--content-gutter), env(safe-area-inset-left));
+}
+
+@media (max-width: 767px) {
+  /* The home indicator stays clear of Excalidraw's bottom toolbar. */
+  .excalidraw-host {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+}

@@ -37,14 +37,15 @@ import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
 import { navigateTo, openSearch } from '../features/navigation';
 import { toggleNoteMode } from '../features/noteMode';
-import { basenameOf, folderOf, isNotePath } from '../features/paths';
+import { basenameOf, folderOf } from '../features/paths';
 import { promptText } from '../state/dialogs';
 import { toggleTheme } from '../state/prefs';
 import { toast } from '../state/toasts';
 import { useUi } from '../state/ui';
 import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
-import { onViewsChanged, registeredViews, viewFor } from '../views/registry';
+import { registerDrawingViews } from '../views/excalidraw/register';
+import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerCommand, registerPanel, registerView } from './index';
 
 let registered = false;
@@ -73,7 +74,8 @@ function editorCommand(id: string, name: string, run: (view: NonNullable<ReturnT
 }
 
 const hasFile = (c: { activePath: string | null }) => c.activePath !== null && currentTree().byPath.has(c.activePath);
-const hasNote = (c: { activePath: string | null }) => c.activePath !== null && isNotePath(c.activePath) && currentTree().byPath.has(c.activePath);
+// A note another view shows (an `.excalidraw.md` drawing) has no text to insert into.
+const hasNote = (c: { activePath: string | null }) => c.activePath !== null && isMarkdownViewPath(c.activePath) && currentTree().byPath.has(c.activePath);
 
 /**
  * Views that can create files add "Create new <label>" to the palette (DESIGN §6.8), also those
@@ -166,6 +168,7 @@ export function registerBuiltins(): void {
     modes: ['read'],
     load: () => import('../views/UnsupportedView'),
   });
+  registerDrawingViews();
   registerCreateCommands();
   onViewsChanged(registerCreateCommands);
   // Commands contributed by a view are active only while that view shows the open file.
@@ -216,7 +219,7 @@ export function registerBuiltins(): void {
   });
 
   // ---------- editor ----------
-  registerCommand({ id: 'editor.toggleMode', name: 'Toggle reading/editing view', hotkey: 'Mod-e', run: toggleNoteMode, when: (c) => c.activePath !== null && isNotePath(c.activePath) });
+  registerCommand({ id: 'editor.toggleMode', name: 'Toggle reading/editing view', hotkey: 'Mod-e', run: toggleNoteMode, when: (c) => c.activePath !== null && isMarkdownViewPath(c.activePath) });
   registerCommand({
     id: 'editor.save',
     name: 'Save now',
