@@ -6,7 +6,7 @@ import type { Endpoints } from '../api/endpoints';
 import type { FileEntry, WriteResult } from '../api/types';
 import { displayName, rebasePath } from '../features/paths';
 import type { SaveSummary } from '../state/ui';
-import { DocumentSession, type Notice, type SessionDeps } from './DocumentSession';
+import { DocumentSession, type MergeFn, type Notice, type SessionDeps } from './DocumentSession';
 import { orphanRecord, type DraftStore, type TabCoordinator } from './drafts';
 import type { MoveMap } from './moves';
 import { applyWriteResult } from './treePatch';
@@ -28,6 +28,8 @@ export interface RegistryOptions {
   /** A session changed path; the app re-routes when it is the open note. */
   onSessionMoved(from: string, to: string): void;
   caughtUp(): boolean;
+  /** The semantic merge of the view that shows a path (DESIGN §6.8). */
+  mergeFor?(path: string): MergeFn | undefined;
 }
 
 export class DocumentRegistry {
@@ -55,6 +57,7 @@ export class DocumentRegistry {
       onDraftWrite: opts.onDraftWrite,
       caughtUp: opts.caughtUp,
       treeVersion: (path) => opts.treeEntry(path)?.version,
+      mergeFor: opts.mergeFor,
     };
   }
 

@@ -1071,3 +1071,179 @@ describe('deletions racing loads and saves (FE-16)', () => {
     expect(session.getSnapshot().deleted).toBeNull();
   });
 });
+
+describe('views that keep their own model (markDirty(serialize), DESIGN §6.8)', () => {
+  /** A stand-in for a drawing: the view's model is a string the session never sees directly. */
+  function modelView(session: DocumentSession, initial: string) {
+    const view = { model: initial, applied: session.remoteChangeCount };
+    session.subscribe(() => {
+      if (session.remoteChangeCount === view.applied) return;
+      view.applied = session.remoteChangeCount;
+      view.model = session.editorState.doc.toString();
+    });
+    return {
+      view,
+      edit(next: string) {
+        view.model = next;
+        session.markDirty(() => view.model);
+      },
+    };
+  }
+
+  it('serializes only when saving, and text the session put into its buffer wins until the next edit', async () => {
+    const { vault, fake, session } = setup('one');
+    await session.ready;
+    const { view, edit } = modelView(session, 'one');
+    const serialize = vi.fn(() => view.model);
+    view.model = 'one two';
+    session.markDirty(serialize);
+    session.markDirty(serialize);
+    expect(serialize).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(serialize).toHaveBeenCalled();
+    expect(vault.readFile('a.md').content).toBe('one two');
+    // A remote change: the buffer holds theirs; the old serializer must not shadow it.
+    vault.externalWrite('a.md', 'theirs');
+    await session.onRemoteChanged({ version: versionOf(vault, 'a.md') });
+    expect(session.getText()).toBe('theirs');
+    expect(view.model).toBe('theirs');
+    edit('theirs!');
+    expect(session.getText()).toBe('theirs!');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vault.readFile('a.md').content).toBe('theirs!');
+    expect(fake.api.saveFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts every text the session puts into its buffer, also one equal to the buffer', async () => {
+    const { vault, session } = setup('base');
+    await session.ready;
+    const { edit } = modelView(session, 'base');
+    const before = session.remoteChangeCount;
+    edit('mine');
+    await vi.advanceTimersByTimeAsync(1000);
+    // Another device writes the buffer's old text back: the view must still hear about it.
+    vault.externalWrite('a.md', 'base');
+    await session.onRemoteChanged({ version: versionOf(vault, 'a.md') });
+    expect(session.remoteChangeCount).toBeGreaterThan(before);
+    expect(session.getText()).toBe('base');
+  });
+
+  it('a save refused as too large retries once the serialized text is shorter', async () => {
+    const { vault, fake, session } = setup('x');
+    await session.ready;
+    const { edit } = modelView(session, 'x');
+    fake.failNext(() => {
+      throw problem({ code: 'too-large', status: 413, limit: 5 });
+    });
+    edit('x'.repeat(100));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(session.getSnapshot().tooLarge).toBe(true);
+    edit('x'.repeat(50));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vault.readFile('a.md').content).toBe('x'.repeat(50));
+  });
+
+  it('counts uploads of views without editor widgets as unsaved work', async () => {
+    const { session } = setup();
+    await session.ready;
+    let release!: (v: string) => void;
+    const upload = session.trackUpload(new Promise<string>((r) => (release = r)));
+    expect(session.uploadsInFlight).toBe(1);
+    release('done');
+    await expect(upload).resolves.toBe('done');
+    expect(session.uploadsInFlight).toBe(0);
+    await expect(session.trackUpload(Promise.reject(new Error('offline')))).rejects.toThrow('offline');
+    expect(session.uploadsInFlight).toBe(0);
+  });
+});
+
+describe('semantic merge of a view (DESIGN §6.8)', () => {
+  /** Merges line sets: theirs, plus the lines mine added; gives up on a line saying CONFLICT. */
+  const lineMerge = (base: string, mine: string, theirs: string): string | null => {
+    if (mine.includes('CONFLICT') || theirs.includes('CONFLICT')) return null;
+    const b = new Set(base.split('\n'));
+    const t = theirs.split('\n');
+    return [...t, ...mine.split('\n').filter((l) => !b.has(l) && !t.includes(l))].join('\n');
+  };
+
+  function mergeSetup(content = 'a\nb') {
+    const vault = new MockVault(false);
+    vault.createFile({ path: 'd.json', content }, 'other-device-1');
+    const fake = fakeApi(vault);
+    const deps = sessionDeps(fake.api, { mergeFor: (path) => (path === 'd.json' ? lineMerge : undefined) });
+    const session = new DocumentSession('d.json', deps);
+    return { vault, fake, deps, session };
+  }
+
+  it('merges a remote change into unsaved edits without the banner, saving with flushHistory', async () => {
+    const { vault, fake, deps, session } = mergeSetup();
+    await session.ready;
+    type(session, '\nmine');
+    vault.externalWrite('d.json', 'a\nb\ntheirs');
+    await session.onRemoteChanged({ version: versionOf(vault, 'd.json') });
+    expect(status(session)).toBe('dirty');
+    expect(session.getSnapshot().conflict).toBeNull();
+    expect(text(session)).toBe('a\nb\ntheirs\nmine');
+    expect(deps.notices).toContain('Merged changes from another device');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(status(session)).toBe('clean');
+    expect(vault.readFile('d.json').content).toBe('a\nb\ntheirs\nmine');
+    expect(fake.api.saveFile.mock.calls.at(-1)![1] as SaveFileRequest).toMatchObject({ flushHistory: true });
+  });
+
+  it('merges when a save meets a newer version (409)', async () => {
+    const { vault, session } = mergeSetup();
+    await session.ready;
+    vault.externalWrite('d.json', 'a\nb\ntheirs');
+    type(session, '\nmine');
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(status(session)).toBe('clean');
+    expect(vault.readFile('d.json').content).toBe('a\nb\ntheirs\nmine');
+  });
+
+  it('a merge that gives up shows the banner as before', async () => {
+    const { vault, session } = mergeSetup();
+    await session.ready;
+    type(session, '\nmine');
+    vault.externalWrite('d.json', 'CONFLICT');
+    await session.onRemoteChanged({ version: versionOf(vault, 'd.json') });
+    expect(status(session)).toBe('conflict');
+    expect(session.getSnapshot().conflict).toMatchObject({ theirsText: 'CONFLICT', source: 'remote' });
+    expect(text(session)).toBe('a\nb\nmine');
+  });
+
+  it('a merge equal to theirs adopts theirs without saving', async () => {
+    const { vault, fake, session } = mergeSetup();
+    await session.ready;
+    type(session, '\nsame');
+    vault.externalWrite('d.json', 'a\nb\nsame\nmore');
+    await session.onRemoteChanged({ version: versionOf(vault, 'd.json') });
+    expect(status(session)).toBe('clean');
+    expect(session.currentVersion).toBe(versionOf(vault, 'd.json'));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fake.api.saveFile).not.toHaveBeenCalled();
+  });
+
+  it('a draft from an earlier visit on another base is merged too', async () => {
+    const vault = new MockVault(false);
+    vault.createFile({ path: 'd.json', content: 'a\nb\ntheirs' }, 'o');
+    const deps = sessionDeps(fakeApi(vault).api, { mergeFor: () => lineMerge });
+    await deps.drafts.put({ path: 'd.json', clientId: 'crashed-tab-1', eol: 'lf', at: Date.now(), baseVersion: 'old0000000000000000000000000000000000000', baseText: 'a\nb', text: 'a\nb\nmine' });
+    const session = new DocumentSession('d.json', deps);
+    await session.ready;
+    expect(session.getSnapshot().conflict).toBeNull();
+    expect(text(session)).toBe('a\nb\ntheirs\nmine');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vault.readFile('d.json').content).toBe('a\nb\ntheirs\nmine');
+  });
+
+  it('notes without a merge keep the banner', async () => {
+    const { vault, session } = setup('hello');
+    await session.ready;
+    type(session, ' mine');
+    vault.externalWrite('a.md', 'theirs');
+    await session.onRemoteChanged({ version: versionOf(vault, 'a.md') });
+    expect(status(session)).toBe('conflict');
+  });
+});

@@ -8,6 +8,7 @@ import { setUnsavedProbe } from '../state/buildCheck';
 import { clientId } from '../state/clientId';
 import { toast } from '../state/toasts';
 import { useUi } from '../state/ui';
+import { viewFor } from '../views/registry';
 import { DocumentRegistry } from './documents';
 import { IdbDraftStore, TabCoordinator, type DraftStore } from './drafts';
 import { MoveMap } from './moves';
@@ -57,6 +58,16 @@ registry = new DocumentRegistry({
     if (activePath() === from) openPath(to, null, { replace: true });
   },
   caughtUp: () => useUi.getState().caughtUp,
+  // Conflicts on files whose view merges semantically (drawings) resolve without the banner.
+  mergeFor: (path) => {
+    const entry = currentTree().byPath.get(path);
+    if (!entry) return undefined;
+    try {
+      return viewFor(entry).merge;
+    } catch {
+      return undefined;
+    }
+  },
 });
 
 export const documents: DocumentRegistry = registry;
