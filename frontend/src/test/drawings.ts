@@ -1,0 +1,56 @@
+// Test fixtures for drawings: elements, scenes, and Obsidian Excalidraw Markdown files as the
+// plugin writes them (frontmatter, Text Elements, Embedded Files, a %%-wrapped Drawing block).
+import { compressDrawing, type Scene, type SceneElement } from '../views/excalidraw/format';
+
+let nonce = 1000;
+
+export function el(id: string, extra: Partial<SceneElement> = {}): SceneElement {
+  return { id, type: 'rectangle', version: 1, versionNonce: nonce++, isDeleted: false, x: 0, y: 0, width: 10, height: 10, ...extra };
+}
+
+export function text(id: string, value: string, extra: Partial<SceneElement> = {}): SceneElement {
+  return el(id, { type: 'text', text: value, originalText: value, fontSize: 20, ...extra });
+}
+
+export function scene(elements: SceneElement[], extra: Partial<Scene> = {}): Scene {
+  return { type: 'excalidraw', version: 2, source: 'https://excalidraw.com', elements, appState: { gridSize: 20, viewBackgroundColor: '#ffffff' }, files: {}, ...extra };
+}
+
+export const PLUGIN_HEAD = `---
+
+excalidraw-plugin: parsed
+tags: [excalidraw]
+
+---
+==⚠  Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠== You can decompress Drawing data with the command palette: 'Decompress current Excalidraw file'. For more info check in plugin settings under 'Saving'
+
+
+# Excalidraw Data
+
+`;
+
+export interface MarkdownFixture {
+  texts?: Array<[string, string]>;
+  embedded?: Array<[string, string]>;
+  scene: Scene;
+  compressed?: boolean;
+  head?: string;
+  tail?: string;
+}
+
+/** An `.excalidraw.md` file in the plugin's layout. */
+export function markdownDrawing({ texts = [], embedded = [], scene: s, compressed = false, head = PLUGIN_HEAD, tail = '' }: MarkdownFixture): string {
+  const json = JSON.stringify(s, null, '\t');
+  return (
+    head +
+    '## Text Elements\n' +
+    texts.map(([id, raw]) => `${raw} ^${id}\n\n`).join('') +
+    (embedded.length ? '## Embedded Files\n' + embedded.map(([id, v]) => `${id}: ${v}\n\n`).join('') : '') +
+    '%%\n## Drawing\n```' +
+    (compressed ? 'compressed-json' : 'json') +
+    '\n' +
+    (compressed ? compressDrawing(json) : json) +
+    '\n```\n%%' +
+    tail
+  );
+}
