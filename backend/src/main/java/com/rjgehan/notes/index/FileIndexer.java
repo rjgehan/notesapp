@@ -12,23 +12,42 @@ import com.rjgehan.notes.vault.Hashing;
 import com.rjgehan.notes.vault.TextCodec;
 import com.rjgehan.notes.vault.VaultFs;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
  * Builds {@link IndexedFile}s: text kinds within their size limit are hashed (their version), notes are decoded and
- * parsed; binary and over-size files are described by size and mtime only (DESIGN §4.2, §5.4).
+ * parsed; binary and over-size files are described by size and mtime only (DESIGN §4.2, §5.4). A text file that a
+ * {@link DocumentIndexer} supports is decoded and handed to it, and what it returns is indexed like a note's body.
  */
 @Component
 public class FileIndexer {
+
+	private static final Logger logger = LoggerFactory.getLogger(FileIndexer.class);
 
 	private final VaultFs fs;
 
 	private final FileKinds kinds;
 
+	private final List<DocumentIndexer> documents;
+
 	public FileIndexer(VaultFs fs, FileKinds kinds) {
+		this(fs, kinds, List.of());
+	}
+
+	public FileIndexer(VaultFs fs, FileKinds kinds, List<DocumentIndexer> documents) {
 		this.fs = fs;
 		this.kinds = kinds;
+		this.documents = List.copyOf(documents);
+	}
+
+	@Autowired
+	public FileIndexer(VaultFs fs, FileKinds kinds, ObjectProvider<DocumentIndexer> documents) {
+		this(fs, kinds, documents.orderedStream().toList());
 	}
 
 	/** Reads the file from disk. */
@@ -66,7 +85,8 @@ public class FileIndexer {
 	 */
 	public boolean indexesAlike(String path, String other) {
 		return this.kinds.kindOf(path) == this.kinds.kindOf(other)
-				&& this.kinds.textLimit(path) == this.kinds.textLimit(other);
+				&& this.kinds.textLimit(path) == this.kinds.textLimit(other)
+				&& documentIndexer(path) == documentIndexer(other);
 	}
 
 	/**
@@ -85,13 +105,44 @@ public class FileIndexer {
 		}
 		String version = Hashing.blobId(bytes);
 		if (kind != FileKind.NOTE) {
-			return new IndexedFile(new FileRecord(path, kind, bytes.length, mtime, version, List.of()), disk, null,
-					null);
+			FileRecord record = new FileRecord(path, kind, bytes.length, mtime, version, List.of());
+			DocumentParse.Parsed document = document(path, bytes);
+			return (document != null) ? new IndexedFile(record, disk, document.text(), document.parse())
+					: new IndexedFile(record, disk, null, null);
 		}
 		TextCodec.Decoded decoded = TextCodec.decode(bytes);
 		NoteParse parse = MarkdownScanner.scan(decoded.text(), decoded.hadBom(), decoded.lossy());
 		FileRecord record = new FileRecord(path, kind, bytes.length, mtime, version, parse.aliases());
 		return new IndexedFile(record, disk, decoded.text(), parse);
+	}
+
+	private DocumentParse.@Nullable Parsed document(String path, byte[] bytes) {
+		DocumentIndexer indexer = documentIndexer(path);
+		if (indexer == null) {
+			return null;
+		}
+		TextCodec.Decoded decoded = TextCodec.decode(bytes);
+		if (decoded.lossy()) {
+			return null;
+		}
+		try {
+			DocumentIndexer.Document document = indexer.index(path, decoded.text());
+			return (document != null) ? DocumentParse.of(document) : null;
+		}
+		catch (RuntimeException ex) {
+			// A defect in one document type must never stop the vault from being indexed.
+			logger.warn("Cannot index {} as a document: {}", path, ex.toString());
+			return null;
+		}
+	}
+
+	private @Nullable DocumentIndexer documentIndexer(String path) {
+		for (DocumentIndexer indexer : this.documents) {
+			if (indexer.supports(path)) {
+				return indexer;
+			}
+		}
+		return null;
 	}
 
 }
