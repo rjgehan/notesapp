@@ -228,12 +228,17 @@ public class MoveService {
 		}
 	}
 
-	/** The rewrite plan; a file that will no longer be a note after the move never has its own content rewritten. */
+	/**
+	 * The rewrite plan; a file that will no longer be a note after the move never has its own content rewritten. A
+	 * document indexed through a {@code DocumentIndexer} (a {@code .tasks} list) has only non-rewritable links, so it
+	 * stays in the plan without edits and is reported as {@code not-rewritable}.
+	 */
 	private MovePlan plan(Map<String, String> moved, Settings current) {
 		MovePlan plan = this.index.planMove(moved, current.files().newLinkFormat());
 		List<MovePlan.NoteRewrite> notes = plan.rewrites()
 			.stream()
-			.filter((rewrite) -> this.indexer.kindOf(rewrite.target()) == FileKind.NOTE)
+			.filter((rewrite) -> this.indexer.kindOf(rewrite.target()) == FileKind.NOTE
+					|| this.indexer.kindOf(rewrite.source()) != FileKind.NOTE)
 			.toList();
 		return (notes.size() == plan.rewrites().size()) ? plan : new MovePlan(notes);
 	}
