@@ -508,6 +508,12 @@ Clicking an embed opens the full editor.
 
 ### 1. Nightly and off-site backups *(declined for v1)*
 
+**Status:** built (wave 1). A `restic/restic` sidecar and a `backup-scheduler` container (`docker:cli`, with host cron as the documented alternative), off until `COMPOSE_PROFILES` is set; design in DESIGN §7.10, setup, restore and drill in DEPLOY.md *Backups*. Deviations and additions:
+
+- **Consistency by a short nightly stop.** The app is stopped for the local snapshot only (seconds after the first run), because a live copy can capture `refs/` ahead of `objects/` in `.git`. The off-site copy is a `restic copy` of the local snapshots and runs with the app up.
+- **Off-site through the S3 API.** Backblaze B2 is reached through its S3-compatible endpoint, which restic recommends over its own B2 backend; Amazon S3 works the same way.
+- **Additions:** failure alerts on ntfy, an optional heartbeat URL, a weekly `restic check` with a low-priority "backups OK" report, and CI tests of the scripts against a fake Docker CLI and a real restic.
+
 **One line:** automatic nightly snapshots of the `notes-data` volume (vault plus `.git`) and `tailscale-state` to a local disk and to off-site object storage.
 
 | Value | Effort | Depends on |

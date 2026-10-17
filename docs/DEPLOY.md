@@ -280,7 +280,7 @@ Then from your devices:
 3. **iPhone:** open the same URL in Safari (Share → Add to Home Screen if you like).
 4. **Port 8080 is closed:** from `beach`, `curl -m 5 http://notes:8080` must fail.
 5. **Smoke test:** run the browser checklist in [DESIGN.md §8.3](DESIGN.md#83-browser-smoke-checklist) on rgpc and on the iPhone.
-6. **Backups:** take the first full backup and do the restore drill once (Part 2).
+6. **Backups:** set up the nightly backups and do the restore drill once (Part 2, *Backups*). Until then, the vault and its history exist on this one disk only.
 
 ---
 
@@ -291,10 +291,11 @@ Then from your devices:
 | What | Where |
 |---|---|
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
-| Secrets | `~/notesapp/deploy/.env` (mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
+| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password and off-site keys, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
 | Tailscale identity and certificates | volume `tailscale-state` |
-| Containers | `notes-tailscale-1`, `notes-notes-1`, `notes-watchtower-1` |
+| Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
+| Containers | `notes-tailscale-1`, `notes-notes-1`, `notes-watchtower-1`; with backups `notes-backup-1` and `notes-backup-scheduler-1` |
 
 ### Updates
 
@@ -337,9 +338,9 @@ Watchtower does not roll back a crash-looping image, and its cleanup deletes the
 
 Rolling back is safe for data. If the newer build wrote settings the older one does not understand, the older one shows settings as read-only instead of resetting them, until you return to `latest`.
 
-### Monthly: update Tailscale and Watchtower
+### Monthly: update Tailscale, Watchtower and the backup images
 
-Neither is updated automatically: a Tailscale restart briefly cuts the app off (Part 3), and Watchtower is pinned by digest because it holds the Docker socket. Dependabot proposes the Watchtower bump as a PR; merge it first.
+None of them is updated automatically: a Tailscale restart briefly cuts the app off (Part 3), and Watchtower, restic and the scheduler's `docker:cli` are pinned by digest (two of them hold the Docker socket). Dependabot proposes their bumps as PRs; merge those first. `docker compose up -d` pulls a changed pin by itself.
 
 ```sh
 git -C ~/notesapp pull --ff-only
@@ -388,7 +389,132 @@ crontab -e
 
 ### Backups
 
-v1 has no automatic backups (ROADMAP item 1). Everything lives on one disk, so copy backups to **another** disk or machine; `/mnt/backup` below stands for that.
+Nightly [restic](https://restic.net) snapshots (ROADMAP item 1, DESIGN §7.10) of the `notes-data` volume (the vault with its `.git`, trash and settings) and of `tailscale-state`. They go to a repository on a **second disk** on homeserver and from there to Backblaze B2 or Amazon S3, and keep 7 daily, 4 weekly and 12 monthly snapshots.
+
+Every night at 04:00 NotesApp is **stopped for the local snapshot** and started again. Stopping makes it commit its pending history, so a snapshot never holds a half-written file or a half-made commit. After the first run this takes seconds, plus the app's restart; open tabs show *Reconnecting* and recover on their own, and unsaved edits stay in the browser. The off-site copy and the clean-up run while the app is back up.
+
+Nothing runs until you set it up. Two containers do the work:
+
+- `backup` is the restic sidecar.
+- `backup-scheduler` starts each night's run and holds the Docker socket, like Watchtower. *Host cron instead of backup-scheduler* below avoids that.
+
+#### Set up the nightly backups
+
+**1. A second disk.** Mount a USB disk or a second internal disk permanently, then create the repository directory on it. The example formats a **new, empty** partition `/dev/sdX1`; skip `mkfs` for a disk that already has a filesystem, and use its label or UUID.
+
+```sh
+lsblk -f                                         # find the disk
+sudo mkfs.ext4 -L notes-backup /dev/sdX1         # ERASES the partition
+sudo install -d /mnt/backup
+echo 'LABEL=notes-backup /mnt/backup ext4 defaults,nofail,x-systemd.device-timeout=10s 0 2' | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload && sudo mount /mnt/backup
+findmnt /mnt/backup                              # must list the disk; df -h /mnt/backup /srv/notes shows two filesystems
+sudo install -d -m 700 /mnt/backup/notes-restic
+```
+
+`nofail` lets the server boot without the disk. The backup refuses a repository on the vault's own filesystem, which is what an unmounted disk would leave behind, so a missing disk fails loudly instead of quietly filling the system disk.
+
+**2. Off-site storage (recommended).** Without it, the backups share homeserver's fate (fire, theft, a power surge).
+
+- **Backblaze B2:** create a **private** bucket with the lifecycle rule *Keep only the last version of the file*. Then create an application key limited to that bucket, with read and write access. Note the bucket's S3 endpoint (for example `s3.us-west-004.backblazeb2.com`), the *keyID* and the *applicationKey*.
+- **Amazon S3:** a private bucket, and an IAM user whose policy allows only that bucket. Note its access key pair and the bucket's region.
+
+restic uses the S3 API for both (for B2, restic recommends it over its native B2 backend).
+
+**3. Secrets.** Two files in `deploy/secrets/`, which git ignores, readable only by you:
+
+```sh
+cd ~/notesapp/deploy
+install -d -m 700 secrets
+(umask 077 && openssl rand -base64 33 > secrets/restic-password)
+install -m 600 /dev/null secrets/backup-offsite-credentials
+nano secrets/backup-offsite-credentials          # leave it empty if you have no off-site bucket
+```
+
+The credentials file is in the AWS format, for B2 too:
+
+```ini
+[default]
+aws_access_key_id = <keyID>
+aws_secret_access_key = <applicationKey>
+```
+
+**Now put the content of `secrets/restic-password` into your password manager**, together with the bucket name, endpoint and keys. The snapshots are encrypted with that password, and its only other copy is on the disk the backups protect: without it, nothing can be restored.
+
+**4. `.env`.** If your `.env` was made before backups existed, append the block from `.env.example`, then edit it:
+
+```sh
+grep -q '^COMPOSE_PROFILES=' .env || sed -n '/^# ---- Backups/,$p' .env.example >> .env
+nano .env
+```
+
+| Variable | Value |
+|---|---|
+| `COMPOSE_PROFILES` | `backup`. Empty (the default) means no backups. |
+| `NOTES_BACKUP_LOCAL_REPO` | The directory from step 1, `/mnt/backup/notes-restic`. |
+| `NOTES_BACKUP_OFFSITE_REPO` | B2: `s3:https://s3.us-west-004.backblazeb2.com/<bucket>/notes`. S3: `s3:https://s3.<region>.amazonaws.com/<bucket>/notes`. Empty means the local disk only. |
+| `NOTES_BACKUP_TIME` | `04:00` (local time in `TZ`). The app's own git housekeeping runs at 03:30. |
+| `NOTES_BACKUP_NTFY_URL` | Your ntfy topic as an https URL, `https://ntfy.sh/notes-<hex>`: the same topic as Watchtower is fine. Failures are posted here. |
+| `NOTES_BACKUP_HEARTBEAT_URL` | Optional, recommended: a dead man's switch (*Monitoring backups* below). |
+
+**5. Start the sidecars and create the repositories:**
+
+```sh
+docker compose config --quiet && docker compose up -d      # starts backup and backup-scheduler
+docker compose ps backup backup-scheduler                   # both Up
+docker compose exec backup sh /backup/restic-job.sh init
+docker compose logs backup-scheduler                        # "next backup run: ... 04:00 ..."
+```
+
+**6. The first run, by hand.** It reads every file, and NotesApp is down while it does. For a large vault (gigabytes of attachments), start it at a time that suits you:
+
+```sh
+docker compose exec backup-scheduler sh /backup/nightly.sh  # ends with "backup run finished"
+docker compose exec backup sh /backup/restic-job.sh snapshots
+docker compose exec backup sh /backup/restic-job.sh snapshots offsite
+```
+
+The first off-site upload can take hours on a slow uplink. NotesApp is already running again by then, because the copy reads the local repository, not the vault.
+
+**7. Do the restore drill** (below) once, and again whenever the backup setup changes.
+
+#### Monitoring backups
+
+- **ntfy.** A failed run posts *NotesApp backup failed* (high priority) with the steps that failed and the last lines of restic's output. *NotesApp is down after the backup* (urgent) means the app could not be started again: run `docker compose up -d` at once. On Sundays, when the weekly repository check passes, a low-priority *NotesApp backups OK* arrives. **If that Sunday message stops coming, the backups have stopped**, for example because `backup-scheduler` is not running.
+- **Heartbeat (recommended).** It catches what ntfy cannot: homeserver being off, or the scheduler being gone. Create a check at [healthchecks.io](https://healthchecks.io) (or an Uptime Kuma push monitor) with a period of 1 day and a grace time of 2 hours. Set `NOTES_BACKUP_HEARTBEAT_URL` to its ping URL (`https://hc-ping.com/<uuid>`), run `docker compose up -d`, and let the check notify you, for example through the same ntfy topic. Every successful run pings it.
+- **Status:** `docker compose exec backup-scheduler cat /state/status.json` shows the last run's time and result, the snapshot, the off-site result, the last success and the failures.
+- **Logs:** `docker compose logs --since 48h backup-scheduler` (each run, with restic's output) and `docker compose logs backup`.
+
+#### Run, pause or change the backups
+
+- **Run now:** `docker compose exec backup-scheduler sh /backup/nightly.sh`. A run that is already in progress makes a second one skip.
+- **Pause:** `docker compose stop backup-scheduler`. **Resume:** `docker compose start backup-scheduler`.
+- **Another time:** change `NOTES_BACKUP_TIME` in `.env`, then `docker compose up -d`.
+- **Turn off:** set `COMPOSE_PROFILES=` in `.env`, then `docker compose --profile backup rm -s -f backup backup-scheduler`. The repositories stay as they are.
+- **List or check snapshots:** `docker compose exec backup sh /backup/restic-job.sh snapshots [offsite]`, `... check`.
+
+#### Host cron instead of backup-scheduler
+
+`backup-scheduler` holds the Docker socket, which is root-equivalent on homeserver. To avoid a second container with that access, let your own crontab start the runs; `nightly.sh` only needs the `docker` CLI, which your login user has (step 2).
+
+```sh
+cd ~/notesapp/deploy
+sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=backup-host-cron/' .env
+docker compose --profile backup rm -s -f backup-scheduler   # if it ran before
+docker compose up -d                                         # the backup sidecar only
+crontab -e
+```
+
+```
+0 4 * * * NOTES_BACKUP_NTFY_URL=https://ntfy.sh/notes-<hex> /bin/sh $HOME/notesapp/deploy/backup/nightly.sh >> $HOME/notesapp-backup.log 2>&1
+@reboot sleep 120; /bin/sh $HOME/notesapp/deploy/backup/nightly.sh --recover >> $HOME/notesapp-backup.log 2>&1
+```
+
+The `@reboot` line starts NotesApp again if the server rebooted during a snapshot. Add `NOTES_BACKUP_HEARTBEAT_URL=<url>` before `/bin/sh` in the first line for a heartbeat. The state (`status.json`) is in `~/.local/state/notesapp-backup`, and the log grows by about a kilobyte a night. Monitoring is the same as above.
+
+#### Manual backups
+
+A one-off copy, for example before a release that changes moving and renaming, the trash or the git integration (`MoveService`, `TrashService`, `GitStore`). Copy it to **another** disk or machine; `/mnt/backup` stands for that. With the nightly backups running, `docker compose exec backup-scheduler sh /backup/nightly.sh` is the simplest one.
 
 **Git history only, no downtime.** Contains every committed note and attachment and the settings, but not the trash or the last few minutes of uncommitted edits. Run **Commit pending changes now** from the command palette first, then:
 
@@ -406,11 +532,32 @@ sudo tar czf /mnt/backup/notes-$(date +%F).tgz -C /srv/notes/data vault
 docker compose start notes
 ```
 
-Take a full backup before releases that change moving and renaming, the trash or the git integration (`MoveService`, `TrashService`, `GitStore`). Keep the `alpine/git` tag current: pin the newest version from Docker Hub.
+Keep the `alpine/git` tag current: pin the newest version from Docker Hub.
 
 ### Restore
 
-Replace the vault with a backup. The current vault is moved aside, not deleted.
+For a single note, the history panel or the trash is quicker. The steps below replace the whole vault. The current vault is moved aside, never deleted.
+
+#### From the nightly backups
+
+restic restores into an **empty** scratch directory; `restic-job.sh` refuses any other target, so it can never write over the live vault. Use `offsite` instead of `local` when the second disk is gone; add a snapshot id at the end for an older snapshot than the latest.
+
+```sh
+cd ~/notesapp/deploy
+docker compose exec backup sh /backup/restic-job.sh snapshots      # pick a snapshot, or take the latest
+sudo install -d -m 700 /srv/notes/restore
+docker compose run --rm --no-deps -v /srv/notes/restore:/target backup restore local notes-data /target
+sudo ls -la /srv/notes/restore/vault                                # look before you swap
+docker compose stop notes
+sudo mv /srv/notes/data/vault /srv/notes/data/vault.before-restore
+sudo mv /srv/notes/restore/vault /srv/notes/data/vault
+sudo chown -R 1000:1000 /srv/notes/data/vault                       # restic keeps owners; this is a safety net
+docker compose start notes
+```
+
+Check as below, then remove `/srv/notes/data/vault.before-restore` and `/srv/notes/restore`.
+
+#### From a manual backup
 
 ```sh
 cd ~/notesapp/deploy
@@ -434,26 +581,54 @@ docker run --rm --user 1000:1000 -e HOME=/tmp -v /srv/notes/data:/r \
   alpine/git:2.54.0 -C /r/vault remote remove origin
 ```
 
-Then start and check:
+Then `docker compose start notes`.
+
+#### Check a restored vault
 
 ```sh
-docker compose start notes
 docker run --rm -v notes-data:/data:ro alpine/git:2.54.0 -c safe.directory='*' -C /data/vault log --oneline -5
 ```
 
-`/api/status` should show the expected `vault.notes` count and `git.head`, and the history panel the expected commits. Once you are satisfied, `sudo rm -rf /srv/notes/data/vault.before-restore`.
+`/api/status` should show the expected `vault.notes` count and `git.head`, and the history panel the expected commits.
+
+#### Rebuild homeserver from the off-site copy
+
+When homeserver or its disks are lost, you need the deploy repository, your password manager (restic password, bucket keys, `.env` values, GHCR token) and the off-site bucket.
+
+1. On the new machine, follow Part 1 steps 2, 3, 4, 7 and 8. In step 7, set the backup variables in `.env` as before, but leave `TS_AUTHKEY` out: the node identity comes back from the backup. **Stop before step 9.**
+2. Recreate `deploy/secrets/` as in *Set up the nightly backups*, step 3, with the **old** password from your password manager (not a new one).
+3. Restore both volumes. `/mnt/backup/notes-restic` must exist (step 1 of the setup, on a new second disk, or an empty directory for now):
+
+   ```sh
+   cd ~/notesapp/deploy
+   sudo install -d -m 700 /srv/notes/restore
+   docker compose run --rm --no-deps -v /srv/notes/restore:/target backup restore offsite notes-data /target
+   sudo find /srv/notes/restore -mindepth 1 -maxdepth 1 -exec mv -t /srv/notes/data/ {} +   # replaces the empty folders of step 4
+   sudo rmdir /srv/notes/restore
+   docker compose run --rm --no-deps -v tailscale-state:/target backup restore offsite tailscale-state /target
+   ```
+
+   Restore `tailscale-state` only when the old server is gone for good. Two machines with the same node key fight over the name `notes`. Without the state, Part 1 step 5 makes a new node, which needs a new auth key and new certificates.
+4. Part 1 steps 9 and 10. The app finds its vault and history, and `tailscale` comes back as `notes` with the old identity.
+5. On the new second disk: `docker compose exec backup sh /backup/restic-job.sh init`. A new local repository takes its chunker parameters from the off-site one, so the nightly copies keep deduplicating. The old snapshots stay off site and age out under the usual retention.
 
 ### Restore drill
 
-Do this once after the first deploy, and again whenever the backup routine changes. It restores the backups into a scratch directory and boots a throwaway copy of the app there, with no network at all; production keeps running.
+Do this once after setting up the backups, and again whenever the backup setup changes. It restores the latest snapshot from **both** repositories into scratch directories, checks git, and boots a throwaway copy of the app with no network at all; production keeps running.
 
 ```sh
-B=/mnt/backup/notes-$(date +%F)          # backups taken today, as above
-D=/srv/notes/drill
-sudo install -d -o 1000 -g 1000 "$D" "$D/.config"
+cd ~/notesapp/deploy
+D=/srv/notes/drill; O=/srv/notes/drill-offsite
+sudo install -d -o 1000 -g 1000 "$D" "$O"
 
-# Restore the full backup (or, to test the bundle instead, the clone command from Restore with -v "$D":/r)
-sudo tar xzf "$B.tgz" -C "$D"
+# Restore the latest snapshot from each repository; the two must be identical
+docker compose run --rm --no-deps -v "$D":/target backup restore local notes-data /target
+docker compose run --rm --no-deps -v "$O":/target backup restore offsite notes-data /target
+sudo diff -r "$D" "$O" && echo "local and off-site agree"
+
+# Git is complete: every object reachable, HEAD resolves (prints nothing on success, except dangling objects)
+docker run --rm -v "$D":/data:ro alpine/git:2.54.0 -c safe.directory='*' -C /data/vault fsck --no-progress
+docker run --rm -v "$D":/data:ro alpine/git:2.54.0 -c safe.directory='*' -C /data/vault log --oneline -3
 
 # Boot it: no network, not even a bridge, so nothing can reach it
 docker run -d --name notes-drill --network none -v "$D":/data \
@@ -461,17 +636,16 @@ docker run -d --name notes-drill --network none -v "$D":/data \
   ghcr.io/rjgehan/notesapp:latest
 for i in $(seq 60); do docker exec notes-drill curl -fsS http://127.0.0.1:8080/readyz && break; sleep 2; done; echo
 
-# Compare with production's /api/status at backup time: vault.notes, vault.files, git.head
+# Compare with production's /api/status (it may have moved on since the snapshot): vault.notes, vault.files, git.head
 docker exec notes-drill curl -fsS -H 'Host: localhost' -H 'Tailscale-User-Login: drill@localhost' \
   http://127.0.0.1:8080/api/status; echo
-docker run --rm -v "$D":/data:ro alpine/git:2.54.0 -c safe.directory='*' -C /data/vault log --oneline -3
 
 # Clean up
 docker rm -f notes-drill
-sudo rm -rf "$D"
+sudo rm -rf "$D" "$O"
 ```
 
-If `readyz` never answers, `docker logs notes-drill` shows why. The drill container has no identity allowlist configured, so the made-up login header is accepted; it is reachable only through `docker exec`.
+If `readyz` never answers, `docker logs notes-drill` shows why. The drill container has no identity allowlist configured, so the made-up login header is accepted; it is reachable only through `docker exec`. To drill a **manual** backup instead, untar it into `$D` (`sudo tar xzf /mnt/backup/notes-YYYY-MM-DD.tgz -C "$D"`) or clone the bundle as in *From a manual backup* with `-v "$D":/r`, then continue from the git checks.
 
 ### Import an existing Obsidian vault later
 
@@ -595,3 +769,19 @@ After a rollback, the settings file was written by a newer build. The older buil
 ### `external volume "notes-data" not found`
 
 Step 4 was skipped or used other names. Create the volumes as in step 4, then `docker compose up -d`.
+
+### "NotesApp backup failed"
+
+The ntfy message names the steps that failed; `docker compose logs --since 24h backup-scheduler` has restic's full output. A failed run never leaves NotesApp stopped on purpose: it starts it again first, and it alerts as *NotesApp is down after the backup* (urgent) when it cannot. Then run `docker compose up -d` and read `docker compose logs notes`.
+
+- **`the local repository ... is not initialized`:** run `docker compose exec backup sh /backup/restic-job.sh init` (setup step 5).
+- **`on the same filesystem as the vault`:** the backup disk is not mounted at `NOTES_BACKUP_LOCAL_REPO`. Check with `findmnt /mnt/backup`, mount it (`sudo mount /mnt/backup`), then `docker compose up -d --force-recreate backup`: a container only sees a disk that was mounted before it started. Do the same after unplugging and re-plugging a USB disk.
+- **`backup container notes-backup-1 is not running`** (and `docker compose up -d` cannot start it, with *bind source path does not exist*): the same cause, an unmounted disk.
+- **`wrong password` (restic exit 12):** `deploy/secrets/restic-password` is not the password the repository was created with. Restore it from your password manager.
+- **`was started or replaced during the snapshot`:** a Watchtower update, or someone started NotesApp, while restic was reading. That snapshot was discarded because it may hold a half-written state; the next night takes a new one. Nothing to do unless it repeats.
+- **`snapshot (restic exit 3, snapshot ... kept)`:** restic could not read some files: files removed over SSH while it was reading, or read errors on the vault's disk (`sudo dmesg | grep -i error`). The snapshot is kept but incomplete; restic's message in the log names the files.
+- **`the snapshot was cancelled after 1800 s`:** the first snapshot of a large vault, or a very slow disk, took longer than NotesApp may be down. Run it once by hand with more time: `docker compose exec -e NOTES_BACKUP_MAX_STOP_SECONDS=14400 backup-scheduler sh /backup/nightly.sh`.
+- **`off-site copy`:** the bucket, its keys or the network. Test with `docker compose exec backup sh /backup/restic-job.sh snapshots offsite`. The next successful run copies every snapshot that is missing off site, so nothing is lost while it is broken.
+- **`repository check`:** read restic's message in the log. If the local repository is damaged, move its directory aside, run `init` again (it takes the chunker parameters from the off-site repository) and let the next run fill it; the off-site copy keeps the history.
+- **`NotesApp backup skipped`:** the previous run was still going, typically the first off-site upload. If no run is going (`docker compose exec backup-scheduler cat /state/run.lock/pid`), `docker compose restart backup-scheduler` clears the lock.
+- **`NotesApp backup interrupted`:** homeserver rebooted or the scheduler was restarted during a snapshot. NotesApp was started again and that snapshot was cancelled; the next night takes a new one.

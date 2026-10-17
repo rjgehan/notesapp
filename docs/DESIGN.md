@@ -24,7 +24,7 @@ NotesApp is a self-hosted, single-user notes web app modelled closely on Obsidia
    - Explicit conflict UX. Any server write that replaces content the requester has not seen commits that content to git first (§5.4, *preserve before overwrite*).
    - A git history of every change, managed by JGit inside the vault.
    - Local drafts in the browser (IndexedDB) until the server acknowledges a save.
-   - **Limit.** All of this lives on one disk on `homeserver`. v1 does **not** protect against losing that disk, a mistaken `rm`, or deleting the volume. Until ROADMAP item 1 (or 2) ships, the manual backup in §7.9 is the only defence; item 1 is the recommended first post-v1 item.
+   - **Limit.** All of this lives on one disk on `homeserver`. v1 does **not** protect against losing that disk, a mistaken `rm`, or deleting the volume. Until ROADMAP item 1 (or 2) ships, the manual backup in §7.9 is the only defence; item 1 is the recommended first post-v1 item. **Item 1 is built** (§7.10): once switched on, nightly snapshots go to a second disk and off site.
 3. **Live across devices.** Server-Sent Events push every change. An open note updates in place on the other device when it has no unsaved edits.
 4. **Fast at personal scale.** The budget is 10,000 notes and 50 MB of Markdown. Search must answer in under 100 ms at p95.
 5. **Phone-first usable.** iPhone Safari gets a responsive layout, a keyboard-aware editor and 44 px tap targets.
@@ -37,7 +37,7 @@ NotesApp is a self-hosted, single-user notes web app modelled closely on Obsidia
 - Graph view.
 - Tabs and split panes.
 - Rich Markdown: Mermaid, math, callouts, code syntax highlighting in reading view. (`==highlight==` and `%%comments%%` are core Obsidian syntax and are in v1, §6.7.)
-- Nightly or offsite backups. Git history inside the volume plus the manual backup of §7.9 are the only safety nets in v1 (see goal 2).
+- Nightly or offsite backups. Git history inside the volume plus the manual backup of §7.9 are the only safety nets in v1 (see goal 2). Built since as ROADMAP item 1 (§7.10).
 - Obsidian-style Live Preview (WYSIWYG) editing. v1 uses styled source mode plus a separate reading view.
 - Multiple users, permissions, app-level login. The tailnet is the auth boundary.
 - Plugins, Canvas, Dataview-style queries, publishing.
@@ -75,6 +75,8 @@ flowchart LR
       app["notes (Spring Boot)<br/>listens on 127.0.0.1:8080 only"]
     end
     wt["watchtower 1.23.1<br/>label-enable, polls GHCR every 300 s"]
+    bk["backup (restic) + backup-scheduler<br/>optional, nightly (§7.10)"]
+    usb[("second disk<br/>local restic repository")]
     data[("volume notes-data<br/>/data/vault + .git")]
     tsstate[("volume tailscale-state")]
   end
@@ -86,6 +88,10 @@ flowchart LR
   app --> data
   ts --> tsstate
   wt -. "docker.sock: pull and recreate notes only" .-> app
+  bk -. "stop notes, snapshot, start notes" .-> app
+  bk -- "read-only" --> data & tsstate
+  bk --> usb
+  bk -- "restic copy (S3 API)" --> s3[("B2 or S3")]
 ```
 
 ### 2.2 CI/CD
@@ -160,7 +166,9 @@ NotesApp/                              (monorepo; branch main)
 │   ├── public/                        favicon.svg, apple-touch-icon.png, robots.txt, theme-boot.js (§6.17)
 │   └── src/                           (structure in §6.2)
 ├── deploy/                            WP-Infra
-│   ├── docker-compose.yml             tailscale + notes + watchtower
+│   ├── docker-compose.yml             tailscale + notes + watchtower; optional backup + backup-scheduler (§7.10)
+│   ├── backup/                        restic-job.sh, nightly.sh, scheduler.sh and their tests (§7.10)
+│   ├── secrets/                       gitignored: compose secrets files (restic password, off-site keys)
 │   ├── tailscale/serve.json           mounted as a directory (fsnotify-safe)
 │   └── .env.example                   copied to deploy/.env on homeserver (gitignored)
 ├── docs/
@@ -2128,6 +2136,7 @@ volumes:
 - **Logs** use the `local` driver with rotation for all three services; DEPLOY.md verifies it with `docker inspect --format '{{.HostConfig.LogConfig}}' notes-notes-1`. Unrotated logs live on the same filesystem as the vault and would eventually fill it.
 - **Required variables.** `${VAR:?…}` makes `docker compose up` fail with a clear message when `NOTES_ALLOWED_HOSTS`, `NOTES_IDENTITY_ALLOWED_LOGINS` or `WATCHTOWER_NOTIFICATION_URL` is missing.
 - **Digest pin.** WP-Infra fills in the digest of `nickfedor/watchtower:1.23.1` (`docker buildx imagetools inspect`); Dependabot keeps it current (§7.5).
+- **Backups.** The real file continues with the optional `backup` and `backup-scheduler` services (Compose profiles, off by default), the `backup-cache` and `backup-state` volumes and a top-level `secrets:` block (§7.10).
 
 ### 7.3 `deploy/tailscale/serve.json`
 
@@ -2170,7 +2179,7 @@ TZ=America/New_York
 ```
 
 - A one-off tagged auth key is used instead of an OAuth client. For a single node it is one fewer moving part, and with `TS_AUTH_ONCE=true` and a persistent state volume it is only ever used once. Deleting it from `.env` afterwards means it no longer sits in the container's environment (visible in `docker inspect`) for the life of the node.
-- **Future secrets** (ROADMAP items 2, 18) use compose `secrets:` files, read by the app through `*_FILE` properties, never plain variables in `.env` and never files in the vault (§4.1).
+- **Future secrets** (ROADMAP items 2, 18) use compose `secrets:` files, read by the app through `*_FILE` properties, never plain variables in `.env` and never files in the vault (§4.1). The files live in `deploy/secrets/` (gitignored, mode 600); the backups of item 1 were the first to use it (§7.10). Non-secret settings such as `COMPOSE_PROFILES` and the backup repository locations stay in `.env`.
 
 ### 7.5 GitHub Actions
 
@@ -2340,6 +2349,9 @@ If the `docker-compose` ecosystem is not available to the repository, the monthl
 |---|---|---|---|
 | `notes-data` (external; recommended bind-backed at `/srv/notes/data`) | `/data` | uid/gid 1000 | `/data/vault` (the vault, its `.git`, `.notesapp` and `.trash`), `/data/.config` (JGit's config cache), `/data/secrets` (reserved, §4.1) and `/data/.watchdog-exits` |
 | `tailscale-state` (external) | `/var/lib/tailscale` | root | Node key and TLS certificates. **Deleting it** creates a new node (`notes-1`, which changes the URL) and requests new certificates (Let's Encrypt rate limits can lock you out for about 34 hours). |
+| `backup-cache` (Compose-managed, only with the backup profiles) | `/cache` in `backup` | root | restic's cache; disposable (§7.10). |
+| `backup-state` (Compose-managed, profile `backup`) | `/state` in `backup-scheduler` | root | `status.json`, `last-success`, the run lock and the `app-stopped` marker (§7.10). |
+| *(bind)* `NOTES_BACKUP_LOCAL_REPO` on a second disk | `/repo` in `backup` | root | The local restic repository (§7.10). |
 
 - **Why uid 1000.** The app process runs as uid 1000 (`ubuntu` in the image; the image has no root process). On a typical `homeserver` uid 1000 is also the first human account, which is deliberate: with the bind-backed volume, that user can edit the vault over SSH (`vim /srv/notes/data/vault/x.md`, smoke item 19) and files keep the ownership the app needs. The cost is that inotify limits are per real uid, so the vault watcher shares `fs.inotify.max_user_watches` with that user's editors and sync tools; DEPLOY.md raises the limit, and the watcher falls back to polling if it is hit.
 - **Editing as another user.** Files or folders created as root (for example with `sudo`, or inside `/var/lib/docker/volumes`) are not writable by the app: saves there fail with `permission-denied` (not a generic `io-error`), and the rescan lists such folders in `/api/status` (`vault.unwritableDirs`). DEPLOY.md says to edit as uid 1000 (`sudo -u '#1000' …`), or to fix ownership with `sudo chown -R 1000:1000 /srv/notes/data`.
@@ -2372,7 +2384,50 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 - **Manual backup, no downtime** (git history only, which includes every committed note and attachment; run "Commit pending changes now" first): `docker run --rm -v notes-data:/data:ro -v /mnt/backup:/b alpine/git -c safe.directory='*' -C /data/vault bundle create /b/notes-$(date +%F).bundle --all` (pin a current `alpine/git` tag).
 - **Manual backup, full** (working tree, `.git`, trash and settings): `docker compose stop notes`, then `sudo tar czf /mnt/backup/notes-$(date +%F).tgz -C /srv/notes/data vault`, then `docker compose start notes`. Recommended before releases that touch `MoveService`, the trash or `GitStore`.
 - **Restore drill** (documented and tried once in DEPLOY.md): stop `notes`; create a fresh volume (or directory) owned by 1000:1000; untar the backup into it, or `git clone` the bundle into `vault/`; point `notes-data` at it; start `notes`; check `/api/status` (counts, `git.head`) and the git log.
-- Automated backups are roadmap item 1, the recommended first post-v1 item (§1.1 goal 2).
+- **Automated backups** (ROADMAP item 1) are §7.10: nightly restic snapshots, switched on with `COMPOSE_PROFILES=backup`. The manual backups above remain for a one-off copy before a risky release.
+
+### 7.10 Nightly and off-site backups (ROADMAP item 1)
+
+Two optional services in `deploy/docker-compose.yml` take a restic snapshot of the `notes-data` volume (the vault with its `.git`, `.trash` and `.notesapp`, plus `/data/.config`) and of `tailscale-state` every night, keep it in a repository on a second disk on `homeserver`, and copy it to object storage. They are off until `deploy/.env` sets `COMPOSE_PROFILES`; the runbook is DEPLOY.md, *Backups*.
+
+| Service | Image | Role |
+|---|---|---|
+| `backup` | `restic/restic:0.19.1` (digest-pinned) | The restic sidecar. Its main process idles (`restic-job.sh idle`); every job runs inside it through `docker exec`, so its configuration lives in one place: the volumes **read-only** under `/source`, the local repository (a bind mount of `NOTES_BACKUP_LOCAL_REPO`, `create_host_path: false`) at `/repo`, the secrets, and the restic cache volume. Profiles `backup` and `backup-host-cron`. |
+| `backup-scheduler` | `docker:29.8.2-cli` (digest-pinned) | Runs `nightly.sh` once a day at `NOTES_BACKUP_TIME` (default 04:00, clear of the app's 03:30 `gc`) in `TZ` (the host's `/usr/share/zoneinfo` is mounted read-only; the image has none). It holds the Docker socket to stop and start `notes` and to `docker exec` into `backup`. Profile `backup` only. |
+
+The scripts live in `deploy/backup/`, mounted read-only into both containers: `restic-job.sh` (the restic steps: `init`, `preflight`, `snapshot`, `discard`, `forget`, `offsite`, `check`, `snapshots`, `restore`), `nightly.sh` (one run, orchestrated with the Docker CLI) and `scheduler.sh` (the daily loop). The `backup-host-cron` profile starts only the sidecar, for an operator who would rather have host cron run `nightly.sh` than give a second container the Docker socket.
+
+**Consistency: the app is stopped for the snapshot.** A snapshot must never hold a half-written file or a half-made commit. Atomic writes (§5.4) make every single file consistent, but a live copy of the whole volume is not:
+
+- restic reads each directory's entries in sorted order, and in `.git`, `objects/` sorts before `packed-refs` and `refs/`. A commit that lands between the two reads leaves a snapshot whose `refs/heads/main` names a commit whose objects it does not contain; the restored repository fails with `bad object HEAD`.
+- `gc` repacks objects and deletes the loose copies and the old packs, so a copy taken during it can miss objects in both places.
+- A move with link rewriting (§5.6) changes several files and makes two commits; a live copy can capture half of it.
+
+Alternatives considered: `docker pause` freezes the JVM mid-write, which is the same as a live copy. An app-level "backup hold" (flush the batcher, then hold every git writer) would need a new control channel into the app; every writer (the batcher, immediate commits, `preserve`, `gc`, the startup import) would have to honour it, `preserve` (§5.4) would have to fail or block during the hold, and the working tree would still be live. A git-level copy (`git clone --mirror` before the snapshot) is consistent for history only, and changes the restore path. Filesystem snapshots (LVM, btrfs, ZFS) depend on how `homeserver` is set up.
+
+Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends SIGTERM: Spring's graceful shutdown drains requests, then `CommitBatcher.stop()` flushes the pending batch (§5.8), so `.git` holds every saved edit and no commit is in flight when the JVM exits. From then on nothing writes to the volume: the app is its only writer (§10 risk 7). Should Docker have to kill the JVM after the 45 s, the volume is still crash-consistent, as after a power cut: JGit writes objects before it moves a ref, and the app clears stale lock files and commits leftover edits at startup (§5.8, §5.17). restic reads only the files whose size, mtime, ctime or inode changed since the parent snapshot, so the outage is usually seconds plus the app's restart. Watchtower restarts the app the same way on every deploy, and the client keeps unsaved edits in IndexedDB and reconnects on its own (§6.9, §6.18), so a short outage at 04:00 loses nothing. `tailscale-state` is copied live: tailscaled replaces its state files atomically and nothing in it depends on cross-file consistency.
+
+**A run** (`nightly.sh`):
+
+1. Take the run lock (`/state/run.lock` with the pid; a lock whose pid is gone is taken over). If a previous run died while the app was stopped (the marker below exists), start the app first.
+2. `preflight` in the sidecar: the password file, both source volumes and the local repository are usable; the repository is **not on the vault's filesystem** (compared with `stat -c %d`; an unmounted backup disk leaves its mount point on the system disk; `NOTES_BACKUP_ALLOW_SAME_DISK=true` overrides); stale restic locks are removed. If it fails, nothing is stopped.
+3. If `notes` is running: write the marker `/state/app-stopped`, then stop it. An app that is not running stays stopped; a missing container is backed up as it is.
+4. `snapshot`: `restic backup` of `/source/notes-data` and `/source/tailscale-state`, tag `notes`, host `homeserver`, excluding `.notesapp/tmp` and `.notesapp/cache` (staging and derived data), under a time limit (`NOTES_BACKUP_MAX_STOP_SECONDS`, 30 min).
+5. Start `notes` again (retried, since after a reboot the tailscale container it joins may not be up yet) and remove the marker. If the app container's id, running state or start time changed while restic was reading (a Watchtower update, a manual start), the snapshot may hold a half-written state: it is forgotten (`discard`) and the run fails. Then wait up to 5 minutes for the app to report `healthy`.
+6. With the app running again: `forget --prune` with 7 daily, 4 weekly and 12 monthly snapshots on the local repository; `offsite`: `restic copy` of every local snapshot the off-site repository lacks (it reads the local repository, not the vault, and catches up after an outage), then the same retention there. On `NOTES_BACKUP_CHECK_DAY` (Sunday): `restic check`, reading 10 % of the local data and 2 % of the off-site data.
+7. Write `/state/status.json` (`lastRun`, `result`, `snapshot`, `offsite`, `lastSuccess`, `failures`), then alert or ping.
+
+**Recovery.** `docker stop` marks the container as stopped by hand, so after a reboot mid-run `restart: unless-stopped` would leave `notes` down. The marker in the `backup-state` volume prevents that: the scheduler runs `nightly.sh --recover` when it starts (a reboot, or its own recreation) and the next run checks it too. Recovery first cancels a restic that may still be reading (`pkill -x restic` in the sidecar; a cancelled backup saves no snapshot), then starts the app. A TERM to `nightly.sh` does the same at once: long steps run in the background and are `wait`ed for, so the trap is not held back, and the scheduler has a 2-minute `stop_grace_period`.
+
+**Off-site.** One repository URL, `NOTES_BACKUP_OFFSITE_REPO`, through restic's S3 backend: Backblaze B2 through its S3-compatible endpoint (restic's own recommendation over its B2 backend) or Amazon S3. `init` creates it with `--copy-chunker-params` from the local repository (and a new local repository from an existing off-site one), so copied snapshots deduplicate. The same password protects both.
+
+**Secrets** (§4.1): the repository password and the S3 keys (an AWS shared-credentials file, read by restic through `AWS_SHARED_CREDENTIALS_FILE`) are compose `secrets:` files in `deploy/secrets/` (gitignored, mode 600), mounted at `/run/secrets/`. They are never environment variables, which `docker inspect` shows, and never in the vault. The snapshots are encrypted; the restore needs only the password and, off site, the keys.
+
+**Monitoring.** Failures go to `NOTES_BACKUP_NTFY_URL` (priority high, or urgent when the app could not be started again) with the failing steps and the last lines of restic's output; a run without failures pings the optional `NOTES_BACKUP_HEARTBEAT_URL`, a dead man's switch such as healthchecks.io that alerts when the pings stop. On the check day a passing run also posts a low-priority weekly report, so silence is noticeable even without a heartbeat. `status.json` is in the `backup-state` volume for the status page of item 38.
+
+**Restores** never touch the live vault: the sidecar mounts the volumes read-only, and `restic-job.sh restore` writes only into an **empty** directory (`docker compose run --rm -v <dir>:/target backup restore ...`); moving the result into place is a manual step in DEPLOY.md, with the current vault moved aside rather than deleted.
+
+**Tests.** `deploy/backup/test/run-tests.sh` runs `nightly.sh` and `scheduler.sh` against a fake Docker CLI (stop and start order, the void-snapshot rule, recovery, TERM, the lock, alerts, the next run across a DST change). `restic-job-test.sh` runs every `restic-job.sh` command against a real restic in temporary directories (snapshot, excludes, copy, restore, retention, discard, check, chunker parameters). CI's `deploy-scripts` job runs ShellCheck, the first under dash and in the scheduler's image (BusyBox), and the second in the sidecar's image.
 
 ---
 
@@ -2574,7 +2629,7 @@ There are three parallel work packages with **strict file ownership**. API.md is
 | 18 | The first real Docker build happens only in CI, because rgpc has no Docker. | Medium / Low | The PR `docker-build` job builds the image before anything reaches `main`; the frontend stage uses glibc like CI, and CI asserts the lockfile's Linux bindings. |
 | 19 | The identity header is absent for tagged source devices, or non-ASCII names arrive encoded. | Medium / Low | Tagged devices are refused by the identity allowlist (the user's devices are user-owned). The RFC 2047 decoder with tests. |
 | 20 | Clock skew or time zone confusion in daily notes. | Low / Low | Dates are always computed in the browser's local zone. The server never decides "today". |
-| 21 | Disk loss, `rm`, or a deleted volume destroys the vault and its history together. | Low / High | Accepted for v1 (backups declined). External volumes stop `down -v`; manual backups and a tried restore drill (§7.9); ROADMAP item 1 recommended first after v1. |
+| 21 | Disk loss, `rm`, or a deleted volume destroys the vault and its history together. | Low / High | Accepted for v1 (backups declined). External volumes stop `down -v`; manual backups and a tried restore drill (§7.9). Since ROADMAP item 1: nightly restic snapshots to a second disk and off site, failure alerts, and a restic restore drill (§7.10). |
 | 22 | A bad release reaches production within 5 minutes. | Medium / Medium | Tests and the PR image build gate `main`; Watchtower reports every update; documented rollback to an `sha-` tag; settings survive rollbacks (§5.12). |
 | 23 | Old browser tabs keep running an old bundle after a deploy. | High / Low | `buildSha` in `hello` and `X-Notes-Build`; automatic reload when clean, banner when dirty; `vite:preloadError` handled (§6.18). |
 | 24 | The disk fills (logs, attachments, git history). | Medium / High | Rotated logs; uploads refused below 1 GiB free; free space and repository size in `/api/status`; the disk-space health indicator on the vault's filesystem. |
