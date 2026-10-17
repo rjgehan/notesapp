@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setActiveEditor } from '../../editor/activeEditor';
 import { noteContext, type NoteContext } from '../../editor/context';
+import { tableCellHost } from '../../editor/livePreview/table/facets';
 import { useUi } from '../../state/ui';
 import { MobileToolbar } from './MobileToolbar';
 import { registerBuiltins } from '../../extensions/builtins';
@@ -96,6 +97,33 @@ describe('MobileToolbar', () => {
     expect(toolbar()).toHaveClass('is-visible');
     act(() => vi.advanceTimersByTime(200));
     expect(toolbar()).not.toHaveClass('is-visible');
+  });
+
+  it('offers Previous and Next cell in a table cell, and undoes in its note', () => {
+    const note = mountEditor('note');
+    note.dispatch({ changes: { from: 4, insert: '!' } });
+    const ctx = { path: () => 'Note.md' } as unknown as NoteContext;
+    view = new EditorView({ state: EditorState.create({ doc: 'cell', extensions: [noteContext.of(ctx), tableCellHost.of(note)] }), parent: document.body });
+    setActiveEditor(view);
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    expect(button('Previous cell')).toBeInTheDocument();
+    expect(button('Next cell')).toBeInTheDocument();
+    for (const name of ['Toggle checklist', 'Horizontal rule', 'Insert table', 'Insert image', 'Indent']) {
+      expect(screen.queryByRole('button', { name, hidden: true })).toBeNull();
+    }
+    fireEvent.click(button('Undo'));
+    expect(note.state.doc.toString()).toBe('note');
+    note.destroy();
+  });
+
+  it('inserts a table from the toolbar', () => {
+    view = mountEditor('');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    expect(screen.queryByRole('button', { name: 'Previous cell', hidden: true })).toBeNull();
+    fireEvent.click(button('Insert table'));
+    expect(view.state.doc.toString()).toBe(['|     |     |', '| --- | --- |', '|     |     |', '|     |     |'].join('\n'));
   });
 
   it('offers only the generic tools in a plain-text editor', () => {

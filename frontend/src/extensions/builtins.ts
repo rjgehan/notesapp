@@ -30,6 +30,7 @@ import { confirmDelete, promptNewFolder } from '../components/explorer/rowAction
 import { activeEditor } from '../editor/activeEditor';
 import { insertWikilink } from '../editor/completion';
 import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, toggleItalic } from '../editor/editorCommands';
+import { insertTable } from '../editor/livePreview/table';
 import { pickAndInsertAttachments } from '../features/attachments';
 import { getCommand, setViewCommandSource } from '../features/commands';
 import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../features/daily';
@@ -236,6 +237,7 @@ export function registerBuiltins(): void {
   editorCommand('editor.italic', 'Toggle italic', toggleItalic, 'Mod-i');
   editorCommand('editor.insertLink', 'Insert Markdown link', insertMarkdownLink, 'Mod-k');
   editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
+  editorCommand('editor.insertTable', 'Insert table', insertTable);
   editorCommand('editor.find', 'Find/replace in current note', openSearchPanel, 'Mod-f');
   registerCommand({
     id: 'editor.insertAttachment',

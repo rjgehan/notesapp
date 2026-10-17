@@ -3,14 +3,35 @@
 // "editor focused or toolbar in use" state: unmounting it on blur would remove a button before
 // its click arrives. Buttons never take focus (tabIndex -1, pointerdown default prevented), so
 // the editor keeps the focus and the keyboard stays open while they dispatch to the EditorView.
+// In a table cell being edited (DESIGN §6.6.1) it offers Previous and Next cell instead of the
+// tools that insert whole lines.
 import { indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import type { EditorView } from '@codemirror/view';
-import { Brackets, Code, Command as CommandIcon, Hash, ImagePlus, KeyboardOff, ListIndentDecrease, ListIndentIncrease, Minus, Redo2, SquareArrowOutUpRight, SquareCheck, Undo2, type LucideIcon } from 'lucide-react';
+import {
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  Brackets,
+  Code,
+  Command as CommandIcon,
+  Hash,
+  ImagePlus,
+  KeyboardOff,
+  ListIndentDecrease,
+  ListIndentIncrease,
+  Minus,
+  Redo2,
+  SquareArrowOutUpRight,
+  SquareCheck,
+  Table,
+  Undo2,
+  type LucideIcon,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { activeEditor } from '../../editor/activeEditor';
 import { insertWikilink } from '../../editor/completion';
 import { noteContext } from '../../editor/context';
 import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox, toggleInlineCode } from '../../editor/editorCommands';
+import { historyEditor, insertTable, isTableCell, moveToCell } from '../../editor/livePreview/table';
 import { revealCaret } from '../../editor/mobileViewport';
 import { pickAndInsertAttachments } from '../../features/attachments';
 import { runCommand } from '../../features/commands';
@@ -26,19 +47,27 @@ interface Tool {
   icon: LucideIcon;
   /** Only for Markdown notes (the plain-text editor gets the generic tools). */
   markdown?: boolean;
+  /** Inserts whole lines: not in a table cell. */
+  lines?: boolean;
+  /** Only in a table cell. */
+  cell?: boolean;
   run(view: EditorView): void;
 }
 
 const TOOLS: Tool[] = [
   { id: 'wikilink', label: 'Insert internal link', icon: Brackets, markdown: true, run: (v) => insertWikilink(v) },
   { id: 'tag', label: 'Insert tag', icon: Hash, markdown: true, run: (v) => insertTagSign(v) },
-  { id: 'checkbox', label: 'Toggle checklist', icon: SquareCheck, markdown: true, run: (v) => toggleCheckbox(v) },
+  { id: 'cell-previous', label: 'Previous cell', icon: ArrowLeftToLine, cell: true, run: (v) => moveToCell(v, -1) },
+  { id: 'cell-next', label: 'Next cell', icon: ArrowRightToLine, cell: true, run: (v) => moveToCell(v, 1) },
+  { id: 'checkbox', label: 'Toggle checklist', icon: SquareCheck, markdown: true, lines: true, run: (v) => toggleCheckbox(v) },
   { id: 'code', label: 'Inline code', icon: Code, markdown: true, run: (v) => toggleInlineCode(v) },
-  { id: 'rule', label: 'Horizontal rule', icon: Minus, markdown: true, run: (v) => insertHorizontalRule(v) },
-  { id: 'outdent', label: 'Outdent', icon: ListIndentDecrease, run: (v) => indentLess(v) },
-  { id: 'indent', label: 'Indent', icon: ListIndentIncrease, run: (v) => indentMore(v) },
-  { id: 'undo', label: 'Undo', icon: Undo2, run: (v) => undo(v) },
-  { id: 'redo', label: 'Redo', icon: Redo2, run: (v) => redo(v) },
+  { id: 'rule', label: 'Horizontal rule', icon: Minus, markdown: true, lines: true, run: (v) => insertHorizontalRule(v) },
+  { id: 'table', label: 'Insert table', icon: Table, markdown: true, lines: true, run: (v) => insertTable(v) },
+  { id: 'outdent', label: 'Outdent', icon: ListIndentDecrease, lines: true, run: (v) => indentLess(v) },
+  { id: 'indent', label: 'Indent', icon: ListIndentIncrease, lines: true, run: (v) => indentMore(v) },
+  // A cell's undo history is its note's.
+  { id: 'undo', label: 'Undo', icon: Undo2, run: (v) => undo(historyEditor(v)) },
+  { id: 'redo', label: 'Redo', icon: Redo2, run: (v) => redo(historyEditor(v)) },
   {
     id: 'follow',
     label: 'Follow link',
@@ -54,6 +83,7 @@ const TOOLS: Tool[] = [
     label: 'Insert image',
     icon: ImagePlus,
     markdown: true,
+    lines: true,
     run: (v) => {
       // The picker blurs the editor; the session remembers where to insert before it opens.
       const ctx = v.state.facet(noteContext);
@@ -73,6 +103,7 @@ function focusedEditor(): EditorView | null {
 export function MobileToolbar() {
   const [visible, setVisible] = useState(false);
   const [markdown, setMarkdown] = useState(true);
+  const [cell, setCell] = useState(false);
   const inUse = useRef(false);
   const update = useRef<() => void>(() => {});
 
@@ -80,7 +111,10 @@ export function MobileToolbar() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const evaluate = () => {
       const view = focusedEditor();
-      if (view) setMarkdown(view.state.facet(noteContext) !== null);
+      if (view) {
+        setMarkdown(view.state.facet(noteContext) !== null);
+        setCell(isTableCell(view));
+      }
       return view !== null || inUse.current;
     };
     // Shown at once; hidden only once the state has stayed false for a moment, so focus moving
@@ -113,7 +147,7 @@ export function MobileToolbar() {
   return (
     <div className={`mobile-toolbar${visible ? ' is-visible' : ''}`} role="toolbar" aria-label="Editing tools" aria-hidden={!visible}>
       <div className="mobile-toolbar-scroll" onPointerDown={() => setInUse(true)} onPointerUp={() => setInUse(false)} onPointerCancel={() => setInUse(false)}>
-        {TOOLS.filter((t) => markdown || !t.markdown).map((tool) => {
+        {TOOLS.filter((t) => (markdown || !t.markdown) && (cell ? !t.lines : !t.cell)).map((tool) => {
           const Icon = tool.icon;
           return (
             <button
