@@ -194,10 +194,84 @@ describe('.excalidraw.md (Obsidian Excalidraw)', () => {
 
   it('classifies embedded file values', () => {
     expect(parseEmbeddedValue('[[Folder/pic.png|100]]')).toEqual({ kind: 'link', target: 'Folder/pic.png' });
+    expect(parseEmbeddedValue('[[Notes/Plan#Costs]]')).toEqual({ kind: 'link', target: 'Notes/Plan', subpath: 'Costs' });
     expect(parseEmbeddedValue('[[pic.png]] {"#000":"#fff"}')).toEqual({ kind: 'link', target: 'pic.png' });
     expect(parseEmbeddedValue('$$e=mc^2$$')).toEqual({ kind: 'latex', latex: 'e=mc^2' });
     expect(parseEmbeddedValue('https://example.com/a.png')).toEqual({ kind: 'url', url: 'https://example.com/a.png' });
     expect(parseEmbeddedValue('something else')).toEqual({ kind: 'other' });
+  });
+});
+
+describe('Element Links (Obsidian Excalidraw)', () => {
+  const linked = scene([
+    text('Ab12Cd34', 'Hello', { link: '[[Old]]' }),
+    el('Rr11Ss22', { link: '[[Shape]]' }),
+    el('long-id-0123456789abcd', { link: '[[Json only]]' }),
+    text('Tt33Uu44', 'See Synced', { link: '[[Synced]]' }),
+  ]);
+  const file = markdownDrawing({
+    texts: [
+      ['Ab12Cd34', 'Hello'],
+      ['Tt33Uu44', 'See [[Synced]]'],
+    ],
+    links: [
+      ['Ab12Cd34', '[[Renamed]]'],
+      ['Rr11Ss22', '[[Shape]]'],
+    ],
+    scene: linked,
+  });
+  const raw = (d: Drawing) => (e: { id: string }) => d.markdown!.texts.find((t) => t.id === e.id)?.raw;
+
+  it('takes links from the section over the JSON, as the plugin does', () => {
+    const d = parsed('markdown', file);
+    expect(d.markdown!.links).toEqual([
+      { id: 'Ab12Cd34', link: '[[Renamed]]' },
+      { id: 'Rr11Ss22', link: '[[Shape]]' },
+    ]);
+    expect(d.scene.elements.map((e) => e.link)).toEqual(['[[Renamed]]', '[[Shape]]', '[[Json only]]', '[[Synced]]']);
+    // The texts stop at the section, which is not a text entry.
+    expect(d.markdown!.texts.map((t) => t.id)).toEqual(['Ab12Cd34', 'Tt33Uu44']);
+  });
+
+  it('leaves the section as it is while no link changed', () => {
+    const d = parsed('markdown', file);
+    const moved = { ...d.scene, elements: d.scene.elements.map((e) => (e.id === 'Rr11Ss22' ? { ...e, x: 40, version: 9 } : e)) };
+    const out = writeDrawing(d, moved, { rawText: raw(d) });
+    const before = markdownParts(file);
+    const after = markdownParts(out);
+    expect(out.slice(after.linkSection!.from, after.linkSection!.to)).toBe(file.slice(before.linkSection!.from, before.linkSection!.to));
+    expect(markdownRest(after)).toBe(markdownRest(before));
+    // The JSON now carries the section's link.
+    expect(parsed('markdown', out).scene.elements[0].link).toBe('[[Renamed]]');
+  });
+
+  it('updates, drops and adds entries as links change, and leaves other links in the JSON', () => {
+    const d = parsed('markdown', file);
+    const [hello, shape, long, synced] = d.scene.elements;
+    const elements = [
+      { ...hello, link: null },
+      { ...shape, link: '[[New shape]]' },
+      { ...long, link: '[[Still json]]' },
+      synced,
+      text('New12345', 'Fresh', { link: 'Folder/Fresh.md' }),
+    ];
+    const out = writeDrawing(d, { ...d.scene, elements }, { rawText: raw(d) });
+    const parts = markdownParts(out);
+    expect(out.slice(parts.linkSection!.from, parts.linkSection!.to)).toBe('Rr11Ss22: [[New shape]]\n\nNew12345: Folder/Fresh.md\n\n');
+    expect(parsed('markdown', out).scene.elements.map((e) => e.link ?? null)).toEqual([null, '[[New shape]]', '[[Still json]]', '[[Synced]]', 'Folder/Fresh.md']);
+  });
+
+  it('creates the section after the text elements for the first link', () => {
+    const plain = markdownDrawing({ texts: [['Ab12Cd34', 'Hello']], scene: scene([text('Ab12Cd34', 'Hello')]) });
+    const d = parsed('markdown', plain);
+    const out = writeDrawing(d, { ...d.scene, elements: [{ ...d.scene.elements[0], link: '[[Target]]' }] });
+    expect(out).toContain('## Text Elements\nHello ^Ab12Cd34\n\n## Element Links\nAb12Cd34: [[Target]]\n\n%%\n## Drawing\n');
+    const again = parsed('markdown', out);
+    expect(again.markdown!.texts).toEqual([{ id: 'Ab12Cd34', raw: 'Hello' }]);
+    expect(again.markdown!.links).toEqual([{ id: 'Ab12Cd34', link: '[[Target]]' }]);
+    // A link on a shape with Excalidraw's long id stays in the JSON; the plugin lists it when it next saves.
+    const shape = writeDrawing(d, { ...d.scene, elements: [...d.scene.elements, el('long-id-0123456789abcd', { link: '[[X]]' })] });
+    expect(markdownParts(shape).linkSection).toBeNull();
   });
 });
 

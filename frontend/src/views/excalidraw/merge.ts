@@ -108,8 +108,11 @@ export function mergeElements(base: readonly SceneElement[], mine: readonly Scen
       side = !base || !unchanged(theirsEl!, base) ? 'theirs' : null;
     }
     if (!side) continue;
-    const element = side === 'mine' ? mineEl! : theirsEl!;
+    let element = side === 'mine' ? mineEl! : theirsEl!;
     if (element.isDeleted) continue;
+    // Both changed it: a link that only the other side changed (a rename rewrote it there) stays.
+    const other = side === 'mine' ? theirsEl : mineEl;
+    if (base && other && deepEqual(element.link, base.link) && !deepEqual(other.link, base.link)) element = { ...element, link: other.link };
     elements.push(element);
     from.set(id, side);
   }
@@ -173,12 +176,18 @@ export function mergeDrawingTexts(format: DrawingFormat, baseText: string, mineT
     mine: new Map(mine.scene.elements.filter(isLiveText).map((e) => [e.id, e.originalText])),
     theirs: new Map(theirs.scene.elements.filter(isLiveText).map((e) => [e.id, e.originalText])),
   };
+  const baseTexts = new Map(base.markdown.texts.map((e) => [e.id, e.raw]));
+  /** A side's Markdown source of `e`, while its text is the one that side has. */
+  const sourceOf = (side: Side, e: SceneElement) => (originals[side].get(e.id) === e.originalText ? texts[side].get(e.id) : undefined);
   return writeDrawing(container, scene, {
-    // Each text keeps the Markdown source of the side its element came from.
+    // Each text keeps the Markdown source of the side its element came from, unless only the
+    // other side changed that source (a rename rewrote a link in it).
     rawText: (e) => {
       const side = from.get(e.id);
-      if (!side || originals[side].get(e.id) !== e.originalText) return undefined;
-      return texts[side].get(e.id);
+      if (!side) return undefined;
+      const own = sourceOf(side, e);
+      const other = sourceOf(side === 'mine' ? 'theirs' : 'mine', e);
+      return own !== undefined && own === baseTexts.get(e.id) && other !== undefined && other !== own ? other : own;
     },
     addEmbedded: other.markdown!.embedded.map((e) => ({ id: e.id, value: e.value })),
   });

@@ -5,8 +5,9 @@
 //
 // Pure functions without the Excalidraw package: parsing, writing and merging run in the main
 // chunk (the session's merge hook), while the editor itself is a lazy chunk. Writing a Markdown
-// drawing replaces only the drawing block, the text-elements section and, for images added here,
-// appends to the embedded-files section; every other byte of the file stays as it was.
+// drawing replaces only the drawing block, the text-elements and element-links sections and, for
+// images added here, appends to the embedded-files section; every other byte of the file stays as
+// it was.
 import { compressToBase64, decompressFromBase64 } from 'lz-string';
 import { parseWikiBody } from '../../features/syntax';
 
@@ -57,8 +58,14 @@ export interface TextEntry {
   raw: string;
 }
 
+/** One `id: link` entry of the Element Links section. */
+export interface LinkEntry {
+  id: string;
+  link: string;
+}
+
 export type EmbeddedRef =
-  | { kind: 'link'; target: string }
+  | { kind: 'link'; target: string; subpath?: string }
   | { kind: 'url'; url: string }
   | { kind: 'latex'; latex: string }
   | { kind: 'other' };
@@ -78,6 +85,9 @@ export interface MarkdownParts {
   /** The Text Elements section's body (after its heading line). */
   textSection: TextRange | null;
   texts: TextEntry[];
+  /** The Element Links section's body (after its heading line). */
+  linkSection: TextRange | null;
+  links: LinkEntry[];
   /** The Embedded Files section's body (after its heading line). */
   embeddedSection: TextRange | null;
   embedded: EmbeddedEntry[];
@@ -207,6 +217,9 @@ const FENCE_OPEN = /^```(json|compressed-json)[ \t]*$/;
 const FENCE_CLOSE = /^```[ \t]*$/;
 const TEXT_HEADING = /^#{1,2} Text Elements[ \t]*$/;
 const EMBEDDED_HEADING = /^#{1,2} Embedded [Ff]iles[ \t]*$/;
+const LINKS_HEADING = /^#{1,2} Element Links[ \t]*$/;
+/** An Element Links line: the plugin reads `^(.{8}):\s*(.*)$`. */
+const LINK_LINE = /^([^\s:]{8}):[ \t]*(.*?)[ \t]*$/;
 const TEXT_SECTION_END = /^#{1,2} (Element Links|Embedded [Ff]iles|Drawing)[ \t]*$/;
 const COMMENT_LINE = /^%%[ \t]*$/;
 const ANY_HEADING = /^#{1,6} /;
@@ -232,11 +245,23 @@ export function parseTextEntries(body: string): TextEntry[] {
 export function parseEmbeddedValue(value: string): EmbeddedRef {
   const v = value.trim();
   const link = /^!?\[\[([^\]\n]+)\]\]/.exec(v);
-  if (link) return { kind: 'link', target: parseWikiBody(link[1]).target };
+  if (link) {
+    const { target, subpath } = parseWikiBody(link[1]);
+    return subpath ? { kind: 'link', target, subpath } : { kind: 'link', target };
+  }
   const latex = /^\$\$([\s\S]*)\$\$$/.exec(v);
   if (latex) return { kind: 'latex', latex: latex[1] };
   if (/^https?:\/\//i.test(v)) return { kind: 'url', url: v.split(/\s/)[0] };
   return { kind: 'other' };
+}
+
+function parseLinkEntries(body: string): LinkEntry[] {
+  const entries: LinkEntry[] = [];
+  for (const line of body.split('\n')) {
+    const m = LINK_LINE.exec(line);
+    if (m && m[2] !== '') entries.push({ id: m[1], link: m[2] });
+  }
+  return entries;
 }
 
 function parseEmbeddedEntries(body: string): EmbeddedEntry[] {
@@ -273,9 +298,27 @@ export function markdownParts(text: string): MarkdownParts {
   const limit = drawingLine >= 0 ? drawingLine : lines.length;
 
   let textSection: TextRange | null = null;
+  let linkSection: TextRange | null = null;
   let embeddedSection: TextRange | null = null;
+  /** A section's body: from after line `i` to the next heading or `%%` line. */
+  const sectionAfter = (i: number): TextRange => {
+    const from = lineEnd(text, lines[i]);
+    let end = limit < lines.length ? lines[limit].from : text.length;
+    for (let j = i + 1; j < limit; j++) {
+      const t = lines[j].text;
+      if (ANY_HEADING.test(t) || COMMENT_LINE.test(t)) {
+        end = lines[j].from;
+        break;
+      }
+    }
+    return { from, to: Math.max(from, end) };
+  };
   for (let i = 0; i < limit; i++) {
     const line = lines[i];
+    if (!linkSection && LINKS_HEADING.test(line.text)) {
+      linkSection = sectionAfter(i);
+      continue;
+    }
     if (!textSection && TEXT_HEADING.test(line.text)) {
       const from = lineEnd(text, line);
       let end = limit < lines.length ? lines[limit].from : text.length;
@@ -288,16 +331,7 @@ export function markdownParts(text: string): MarkdownParts {
       }
       textSection = { from, to: Math.max(from, end) };
     } else if (!embeddedSection && EMBEDDED_HEADING.test(line.text) && (!textSection || line.from >= textSection.to)) {
-      const from = lineEnd(text, line);
-      let end = limit < lines.length ? lines[limit].from : text.length;
-      for (let j = i + 1; j < limit; j++) {
-        const t = lines[j].text;
-        if (ANY_HEADING.test(t) || COMMENT_LINE.test(t)) {
-          end = lines[j].from;
-          break;
-        }
-      }
-      embeddedSection = { from, to: Math.max(from, end) };
+      embeddedSection = sectionAfter(i);
     }
   }
 
@@ -311,6 +345,8 @@ export function markdownParts(text: string): MarkdownParts {
     drawing,
     textSection,
     texts: textSection ? parseTextEntries(text.slice(textSection.from, textSection.to)) : [],
+    linkSection,
+    links: linkSection ? parseLinkEntries(text.slice(linkSection.from, linkSection.to)) : [],
     embeddedSection,
     embedded: embeddedSection ? parseEmbeddedEntries(text.slice(embeddedSection.from, embeddedSection.to)) : [],
     insertAt,
@@ -322,7 +358,7 @@ export function markdownParts(text: string): MarkdownParts {
  * same rest differ only in the drawing (merging, DESIGN §6.8.1).
  */
 export function markdownRest(parts: MarkdownParts): string {
-  const ranges = [parts.drawing?.range, parts.textSection, parts.embeddedSection].filter((r): r is TextRange => !!r).sort((a, b) => a.from - b.from);
+  const ranges = [parts.drawing?.range, parts.textSection, parts.linkSection, parts.embeddedSection].filter((r): r is TextRange => !!r).sort((a, b) => a.from - b.from);
   let out = '';
   let pos = 0;
   for (const r of ranges) {
@@ -357,7 +393,24 @@ export function parseDrawing(format: DrawingFormat, text: string): ParseResult {
   if (json.trim() === '') return { ok: true, drawing: { format, scene: emptyScene(), markdown: parts } };
   const scene = parseSceneJson(json);
   if (typeof scene === 'string') return { ok: false, reason: 'malformed', message: scene };
-  return { ok: true, drawing: { format, scene, markdown: parts } };
+  return { ok: true, drawing: { format, scene: withSectionLinks(scene, parts), markdown: parts } };
+}
+
+/**
+ * The Element Links section takes priority over the JSON, as in the plugin: a link that a rename
+ * rewrote there (the server updates the links of notes) is the one the drawing shows and saves.
+ */
+function withSectionLinks(scene: Scene, parts: MarkdownParts): Scene {
+  if (parts.links.length === 0) return scene;
+  const links = new Map(parts.links.map((e) => [e.id, e.link]));
+  let changed = false;
+  const elements = scene.elements.map((e) => {
+    const link = links.get(e.id);
+    if (link === undefined || e.link === link) return e;
+    changed = true;
+    return { ...e, link };
+  });
+  return changed ? { ...scene, elements } : scene;
 }
 
 // ---------- writing ----------
@@ -396,6 +449,43 @@ function textEntriesFor(parts: MarkdownParts, elements: readonly SceneElement[],
   return same && parts.textSection ? null : out;
 }
 
+function liveLink(e: SceneElement): string | null {
+  return !e.isDeleted && typeof e.link === 'string' && e.link.trim() !== '' ? e.link : null;
+}
+
+/**
+ * The Element Links entries for `elements`: listed elements keep their place with their current
+ * link, or lose their entry with it; an element with an 8-character id (the plugin's ids, which
+ * its section requires) whose link changed since `loaded` gets a new entry. Other links stay in
+ * the JSON only, as the plugin keeps the link it derives from a text's [[link]], and as it adopts
+ * links of longer ids when it next saves. Returns null when nothing changed (the body stays
+ * byte-identical).
+ */
+function linkEntriesFor(parts: MarkdownParts, loaded: readonly SceneElement[], elements: readonly SceneElement[]): LinkEntry[] | null {
+  const live = new Map<string, string>();
+  for (const e of elements) {
+    const link = liveLink(e);
+    if (link !== null) live.set(e.id, link);
+  }
+  const before = new Map(loaded.map((e) => [e.id, liveLink(e)]));
+  const out: LinkEntry[] = [];
+  const listed = new Set<string>();
+  for (const entry of parts.links) {
+    listed.add(entry.id);
+    const link = live.get(entry.id);
+    if (link !== undefined) out.push({ id: entry.id, link });
+  }
+  for (const [id, link] of live) {
+    if (!listed.has(id) && isMarkdownTextId(id) && before.get(id) !== link) out.push({ id, link });
+  }
+  const same = out.length === parts.links.length && out.every((e, i) => e.id === parts.links[i].id && e.link === parts.links[i].link);
+  return same ? null : out;
+}
+
+function linkBody(entries: readonly LinkEntry[]): string {
+  return entries.map((e) => `${e.id}: ${e.link}\n\n`).join('');
+}
+
 function textBody(entries: readonly TextEntry[]): string {
   return entries.map((e) => `${e.raw} ^${e.id}\n\n`).join('');
 }
@@ -424,8 +514,8 @@ export function sceneJson(format: DrawingFormat, scene: Scene): string {
 
 /**
  * The file text for `scene`, written into `drawing` (the parsed file it replaces). A Markdown
- * drawing keeps every byte outside its drawing block, Text Elements section and (when images
- * were added) Embedded Files section.
+ * drawing keeps every byte outside its drawing block, its Text Elements and Element Links
+ * sections and (when images were added) its Embedded Files section.
  */
 export function writeDrawing(drawing: Drawing, scene: Scene, opts: WriteOptions = {}): string {
   if (drawing.format === 'excalidraw' || !drawing.markdown) return sceneJson('excalidraw', scene);
@@ -437,6 +527,8 @@ export function writeDrawing(drawing: Drawing, scene: Scene, opts: WriteOptions 
   const encoding = parts.drawing?.encoding ?? 'json';
   const block = (encoding === 'compressed-json' ? compressDrawing(json) : json) + '\n';
   const entries = textEntriesFor(parts, elements, rawText);
+  const links = linkEntriesFor(parts, drawing.scene.elements, elements);
+  const newLinkSection = links && links.length > 0 && !parts.linkSection ? '## Element Links\n' + linkBody(links) : '';
   const known = new Set(parts.embedded.map((e) => e.id));
   const added: Array<{ id: string; value: string }> = [];
   for (const e of opts.addEmbedded ?? []) {
@@ -452,6 +544,7 @@ export function writeDrawing(drawing: Drawing, scene: Scene, opts: WriteOptions 
       base +
       '\n# Excalidraw Data\n\n## Text Elements\n' +
       textBody(entries ?? []) +
+      newLinkSection +
       (added.length > 0 ? '## Embedded Files\n' + embeddedBody(added) : '') +
       '%%\n## Drawing\n```json\n' +
       block +
@@ -461,9 +554,17 @@ export function writeDrawing(drawing: Drawing, scene: Scene, opts: WriteOptions 
 
   const replacements: Replacement[] = [{ ...parts.drawing.range, insert: block }];
   let inserted = '';
-  if (entries) {
-    if (parts.textSection) replacements.push({ ...parts.textSection, insert: textBody(entries) });
-    else if (entries.length > 0) inserted += '## Text Elements\n' + textBody(entries);
+  if (links && parts.linkSection) replacements.push({ ...parts.linkSection, insert: linkBody(links) });
+  if (parts.textSection) {
+    // A new Element Links section follows the text elements, where the plugin writes it.
+    if (entries || newLinkSection) {
+      const body = entries ? textBody(entries) : parts.text.slice(parts.textSection.from, parts.textSection.to);
+      const gap = !newLinkSection || body === '' || body.endsWith('\n\n') ? '' : body.endsWith('\n') ? '\n' : '\n\n';
+      replacements.push({ ...parts.textSection, insert: body + gap + newLinkSection });
+    }
+  } else {
+    if (entries && entries.length > 0) inserted += '## Text Elements\n' + textBody(entries);
+    inserted += newLinkSection;
   }
   if (added.length > 0) {
     if (parts.embeddedSection) {

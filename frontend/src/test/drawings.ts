@@ -1,5 +1,6 @@
 // Test fixtures for drawings: elements, scenes, and Obsidian Excalidraw Markdown files as the
-// plugin writes them (frontmatter, Text Elements, Embedded Files, a %%-wrapped Drawing block).
+// plugin writes them (frontmatter, Text Elements, Element Links, Embedded Files, a %%-wrapped
+// Drawing block).
 import { compressDrawing, type Scene, type SceneElement } from '../views/excalidraw/format';
 
 let nonce = 1000;
@@ -31,6 +32,7 @@ tags: [excalidraw]
 
 export interface MarkdownFixture {
   texts?: Array<[string, string]>;
+  links?: Array<[string, string]>;
   embedded?: Array<[string, string]>;
   scene: Scene;
   compressed?: boolean;
@@ -39,12 +41,13 @@ export interface MarkdownFixture {
 }
 
 /** An `.excalidraw.md` file in the plugin's layout. */
-export function markdownDrawing({ texts = [], embedded = [], scene: s, compressed = false, head = PLUGIN_HEAD, tail = '' }: MarkdownFixture): string {
+export function markdownDrawing({ texts = [], links = [], embedded = [], scene: s, compressed = false, head = PLUGIN_HEAD, tail = '' }: MarkdownFixture): string {
   const json = JSON.stringify(s, null, '\t');
   return (
     head +
     '## Text Elements\n' +
     texts.map(([id, raw]) => `${raw} ^${id}\n\n`).join('') +
+    (links.length ? '## Element Links\n' + links.map(([id, v]) => `${id}: ${v}\n\n`).join('') : '') +
     (embedded.length ? '## Embedded Files\n' + embedded.map(([id, v]) => `${id}: ${v}\n\n`).join('') : '') +
     '%%\n## Drawing\n```' +
     (compressed ? 'compressed-json' : 'json') +

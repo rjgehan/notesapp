@@ -158,6 +158,31 @@ describe('merging .excalidraw.md files', () => {
     expect(mergeDrawingTexts('markdown', base, mine, theirs)).toBeNull();
   });
 
+  it('keeps a rename’s rewritten links while merging an edit of the same elements', () => {
+    // The server renamed World to Earth and Shape to Form in the Markdown sections (theirs); this
+    // device moved both elements meanwhile (mine).
+    const shape = el('Rr11Ss22', { link: '[[Shape]]' });
+    const linkedBase = markdownDrawing({ texts: [['Ab12Cd34', 'Hello [[World]]']], links: [['Rr11Ss22', '[[Shape]]']], scene: scene([t1, shape]) });
+    const theirs = linkedBase.replace('Hello [[World]] ^', 'Hello [[Earth]] ^').replace('Rr11Ss22: [[Shape]]', 'Rr11Ss22: [[Form]]');
+    const mine = markdownDrawing({
+      texts: [['Ab12Cd34', 'Hello [[World]]']],
+      links: [['Rr11Ss22', '[[Shape]]']],
+      scene: scene([edit(t1, { x: 5 }), edit(shape, { x: 7 })]),
+    });
+    const out = mergeDrawingTexts('markdown', linkedBase, mine, theirs)!;
+    const parts = markdownParts(out);
+    expect(parts.texts).toEqual([{ id: 'Ab12Cd34', raw: 'Hello [[Earth]]' }]);
+    expect(parts.links).toEqual([{ id: 'Rr11Ss22', link: '[[Form]]' }]);
+    const merged = mergedScene('markdown', linkedBase, mine, theirs);
+    expect(merged.elements.map((e) => [e.id, e.x, e.link ?? null])).toEqual([
+      ['Ab12Cd34', 5, null],
+      ['Rr11Ss22', 7, '[[Form]]'],
+    ]);
+    // A link this side changed itself wins as before.
+    const relinked = markdownDrawing({ texts: [['Ab12Cd34', 'Hello [[World]]']], links: [['Rr11Ss22', '[[Mine]]']], scene: scene([t1, edit(shape, { link: '[[Mine]]' })]) });
+    expect(markdownParts(mergeDrawingTexts('markdown', linkedBase, relinked, theirs)!).links).toEqual([{ id: 'Rr11Ss22', link: '[[Mine]]' }]);
+  });
+
   it('keeps Embedded Files entries from both sides', () => {
     const img = (id: string, fileId: string) => el(id, { type: 'image', fileId });
     const mine = markdownDrawing({ texts: [['Ab12Cd34', 'Hello [[World]]']], embedded: [['f1', '[[one.png]]']], scene: scene([t1, r, img('i1', 'f1')]) });
