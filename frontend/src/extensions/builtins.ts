@@ -2,6 +2,7 @@
 import { openSearchPanel } from '@codemirror/search';
 import {
   CalendarDays,
+  CloudUpload,
   Command as CommandIcon,
   FileBraces,
   FileImage,
@@ -36,6 +37,7 @@ import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../feat
 import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
 import { navigateTo, openSearch } from '../features/navigation';
+import { mirrorConfigured, pushMirrorNow } from '../features/mirror';
 import { toggleNoteMode } from '../features/noteMode';
 import { basenameOf, folderOf, isNotePath } from '../features/paths';
 import { promptText } from '../state/dialogs';
@@ -291,6 +293,7 @@ export function registerBuiltins(): void {
       }
     },
   });
+  registerCommand({ id: 'mirror.push', name: 'Push history to the mirror now', icon: CloudUpload, when: () => mirrorConfigured(), run: pushMirrorNow });
   registerCommand({ id: 'nav.back', name: 'Navigate back', hotkey: 'Mod-Alt-ArrowLeft', run: () => window.history.back() });
   registerCommand({ id: 'nav.forward', name: 'Navigate forward', hotkey: 'Mod-Alt-ArrowRight', run: () => window.history.forward() });
   registerCommand({ id: 'trash.open', name: 'Open trash', icon: Trash, run: () => goTo('/trash') });

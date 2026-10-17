@@ -13,6 +13,7 @@ import type {
   HistoryRestoreRequest,
   HistoryRestoreResult,
   MeResponse,
+  MirrorStatus,
   MoveRequest,
   MoveResult,
   NoteMeta,
@@ -89,6 +90,7 @@ export interface Endpoints {
   getHistoryContent(path: string, commit: string): Promise<HistoryContent>;
   restoreHistory(req: HistoryRestoreRequest): Promise<HistoryRestoreResult>;
   commitHistory(): Promise<CommitResult>;
+  pushMirror(): Promise<MirrorStatus>;
   getTemplates(): Promise<TemplatesResponse>;
   /** Content-addressed raw URL (API.md §9.1). */
   rawUrl(entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>, opts?: { download?: boolean }): string;
@@ -140,6 +142,7 @@ export const httpEndpoints: Endpoints = {
   getHistoryContent: (path, commit) => apiFetch('/api/history/content' + query({ path, commit })),
   restoreHistory: (req) => apiFetch('/api/history/restore', { method: 'POST', json: req }),
   commitHistory: () => apiFetch('/api/history/commit', { method: 'POST' }),
+  pushMirror: () => apiFetch('/api/mirror/push', { method: 'POST' }),
   getTemplates: () => apiFetch('/api/templates'),
   rawUrl: (entry, opts) =>
     '/api/files/raw?path=' +

@@ -12,6 +12,8 @@ import { queryKeys } from '../../api/queryKeys';
 import type { Settings, SettingsResponse } from '../../api/types';
 import { unsupportedTokens } from '../../features/dates';
 import { formatBytes, formatDateTime, formatRelative } from '../../features/format';
+import { formatLimit } from '../../features/largeFiles';
+import { mirrorSummary } from '../../features/mirror';
 import { openPath } from '../../features/navigation';
 import { displayName, newNameError, pathSafetyError } from '../../features/paths';
 import { DEFAULT_SETTINGS } from '../../features/settings';
@@ -498,6 +500,13 @@ function AboutSection() {
           {item('Started', formatDateTime(status.startedAt))}
           {item('Vault', `${status.vault.notes} notes · ${status.vault.files} files · ${status.vault.folders} folders · ${formatBytes(status.vault.bytes)}`)}
           {item('History', status.git.enabled ? `${status.git.state}${status.git.lastCommitAt ? ` · last commit ${formatRelative(status.git.lastCommitAt)}` : ''}${status.git.lastError ? ` · ${status.git.lastError}` : ''}` : `disabled${status.git.reason ? `: ${status.git.reason}` : ''}`)}
+          {status.git.enabled && status.disk.repoBytes !== null && item('History size', formatBytes(status.disk.repoBytes))}
+          {status.git.enabled && status.git.largeFiles.limitBytes !== null &&
+            item(
+              'Kept out of history',
+              `${status.git.largeFiles.files} ${status.git.largeFiles.files === 1 ? 'file' : 'files'} larger than ${formatLimit(status.git.largeFiles.limitBytes)}${status.git.largeFiles.files > 0 ? ` · ${formatBytes(status.git.largeFiles.bytes)}` : ''}`,
+            )}
+          {item('Mirror', mirrorSummary(status.mirror))}
           {item('File watcher', status.watcher.mode)}
           {item('Free disk space', formatBytes(status.disk.freeBytes))}
           {status.vault.skipped.length > 0 && item('Skipped files', status.vault.skipped.map((s) => `${s.name} (${s.reason})`).join(', '))}

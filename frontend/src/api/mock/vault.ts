@@ -18,6 +18,7 @@ import type {
   HistoryContent,
   HistoryEntry,
   HistoryResponse,
+  MirrorStatus,
   HistoryRestoreRequest,
   HistoryRestoreResult,
   Mention,
@@ -49,6 +50,8 @@ import { seedFiles } from './seed';
 import { blobId } from './sha1';
 
 const TEXT_LIMIT = 5 * 1024 * 1024;
+/** The server's default large-file threshold (DESIGN §5.8): larger files are kept out of history. */
+const LARGE_FILE_LIMIT = 25 * 1024 * 1024;
 const TEXT_EXTENSIONS = new Set('txt markdown json canvas excalidraw sheet tasks csv tsv yaml yml'.split(' '));
 const KIND_BY_EXT: Record<string, FileKind> = {};
 for (const e of 'png jpg jpeg gif webp avif bmp svg'.split(' ')) KIND_BY_EXT[e] = 'image';
@@ -330,6 +333,7 @@ export class MockVault {
   getStatus(): StatusResponse {
     const files = [...this.files.values()];
     const last = this.commits[this.commits.length - 1];
+    const large = files.filter((f) => f.bytes.length > LARGE_FILE_LIMIT);
     return {
       appVersion: '0.0.1-mock',
       buildSha: this.hub.buildSha,
@@ -355,11 +359,37 @@ export class MockVault {
         lastCommitAt: last ? isoMs(last.time) : null,
         lastError: null,
         failingSince: null,
+        largeFiles: {
+          limitBytes: LARGE_FILE_LIMIT,
+          files: large.length,
+          bytes: large.reduce((n, f) => n + f.bytes.length, 0),
+        },
       },
       watcher: { mode: 'disabled' },
       disk: { freeBytes: 50 * 1024 ** 3, repoBytes: null },
       settings: { readOnly: false, reason: null },
+      mirror: this.mirrorStatus(),
     };
+  }
+
+  /** The mock has no mirror: it reports what an unconfigured server does. */
+  private mirrorStatus(): MirrorStatus {
+    return {
+      state: 'disabled',
+      reason: 'not configured',
+      remote: null,
+      branch: null,
+      pushing: false,
+      pushedCommit: null,
+      lastPushAt: null,
+      nextPushAt: null,
+      lastError: null,
+      failingSince: null,
+    };
+  }
+
+  pushMirror(): MirrorStatus {
+    return fail('bad-request', 'The mirror is off: not configured');
   }
 
   // ---------- tree and text files ----------
@@ -986,7 +1016,9 @@ export class MockVault {
       });
       if (change.renamedFrom) current = change.renamedFrom;
     }
-    return { path, pending: false, hasMore: entries.length > offset + limit, entries: entries.slice(offset, offset + limit) };
+    const size = this.files.get(path)?.bytes.length ?? 0;
+    const excluded = size > LARGE_FILE_LIMIT ? { reason: 'large-file' as const, size, limitBytes: LARGE_FILE_LIMIT } : null;
+    return { path, pending: false, hasMore: entries.length > offset + limit, entries: entries.slice(offset, offset + limit), excluded };
   }
 
   private bytesAt(path: string, commit: string): Uint8Array {

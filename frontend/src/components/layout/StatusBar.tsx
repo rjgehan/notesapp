@@ -1,16 +1,18 @@
-// Desktop status bar (DESIGN §6.5): connection, save summary, history warning, the open note's
-// word and character counts, and its backlink count.
-import { CircleAlert, History } from 'lucide-react';
+// Desktop status bar (DESIGN §6.5): connection, save summary, history and mirror warnings, the
+// open note's word and character counts, and its backlink count.
+import { CircleAlert, CloudAlert, History } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
 import { useBacklinks } from '../../api/hooks';
 import { countWords } from '../../features/format';
+import { mirrorWarningDetail, pushMirrorNow } from '../../features/mirror';
 import { isNotePath, pathFromLocation } from '../../features/paths';
 import { useUi, type SaveSummary } from '../../state/ui';
 import { useDocumentSession, useSessionChangeCount } from '../../sync/useTextDocument';
 import { ConnectionIndicator } from '../ConnectionIndicator';
 import { showPanel } from './showPanel';
 import { useHistoryWarning } from './useHistoryWarning';
+import { useMirrorWarning } from './useMirrorWarning';
 
 const SUMMARY: Record<SaveSummary, string> = {
   saved: 'All changes saved',
@@ -51,6 +53,7 @@ export function StatusBar() {
   const summary = useUi((s) => s.saveSummary);
   const draftsFailing = useUi((s) => s.draftsFailing);
   const historyWarning = useHistoryWarning();
+  const mirrorWarning = useMirrorWarning();
   const path = pathFromLocation(useLocation().pathname);
   const note = path !== null && isNotePath(path);
   return (
@@ -60,6 +63,11 @@ export function StatusBar() {
         <span className="status-item tone-warning">
           <History size={13} aria-hidden /> {historyWarning}
         </span>
+      )}
+      {mirrorWarning && (
+        <button type="button" className="status-item status-button tone-warning" title={mirrorWarningDetail(mirrorWarning.mirror)} onClick={() => void pushMirrorNow()}>
+          <CloudAlert size={13} aria-hidden /> {mirrorWarning.text}
+        </button>
       )}
       {draftsFailing && (
         <span className="status-item tone-warning" title="The browser refused to store drafts (storage full or blocked)">

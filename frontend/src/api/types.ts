@@ -73,10 +73,25 @@ export interface StatusResponse {
   index: { builtInMs: number; lastRescanAt: IsoInstant | null };
   git: { enabled: boolean; state: 'ready' | 'importing' | 'failing' | 'disabled'; reason: string | null;
          head: string | null; pendingPaths: number; nextCommitAt: IsoInstant | null;
-         lastCommitAt: IsoInstant | null; lastError: string | null; failingSince: IsoInstant | null };
+         lastCommitAt: IsoInstant | null; lastError: string | null; failingSince: IsoInstant | null;
+         largeFiles: { limitBytes: number | null; files: number; bytes: number } };   // kept out of history (§14.1)
   watcher: { mode: 'inotify' | 'polling' | 'disabled' };
   disk: { freeBytes: number; repoBytes: number | null };
   settings: { readOnly: boolean; reason: string | null };
+  mirror: MirrorStatus;
+}
+
+export interface MirrorStatus {
+  state: 'disabled' | 'ready' | 'failing' | 'diverged';
+  reason: string | null;          // why it is disabled: "not configured", "history is disabled" or a configuration error
+  remote: string | null;          // the mirror's URL; never contains credentials
+  branch: string | null;          // the branch pushed, e.g. "main"
+  pushing: boolean;
+  pushedCommit: string | null;    // the last commit the mirror is known to have (this server run)
+  lastPushAt: IsoInstant | null;  // the last successful push (this server run)
+  nextPushAt: IsoInstant | null;  // null when up to date, disabled or diverged
+  lastError: string | null;
+  failingSince: IsoInstant | null;
 }
 
 // ---------- settings (§5) ----------
@@ -251,7 +266,14 @@ export interface HistoryEntry {
   change: ChangeType;
   renamedFrom: VaultPath | null;
 }
-export interface HistoryResponse { path: VaultPath; pending: boolean; hasMore: boolean; entries: HistoryEntry[] }
+export interface HistoryResponse {
+  path: VaultPath;
+  pending: boolean;
+  hasMore: boolean;
+  entries: HistoryEntry[];
+  excluded: HistoryExclusion | null;  // set when new versions of the file are not kept in history
+}
+export interface HistoryExclusion { reason: 'large-file'; size: number; limitBytes: number }
 export interface HistoryContent {
   commitId: string;
   path: VaultPath;
@@ -294,7 +316,7 @@ export interface HistoryCommittedEvent {
   truncated: boolean;
 }
 export interface SettingsChangedEvent { version: Version; origin: string | null }
-export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' }
+export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' | 'mirror' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
 
 export interface VaultEventMap {
