@@ -2124,7 +2124,7 @@ Every change answers `TaskWriteResult`: the task after the change (`task`), othe
 |---|---|
 | `GET /api/tasks/lists` | `200 TaskListsResponse`: every usable list in order, and the problems |
 | `POST /api/tasks/lists` | `{name, color?, icon?}`: a new list, last in the order, in `Tasks/<Name>.tasks`. The file name is the name made into a valid new name (`Q4: Plans/Ideas` gives `Q4- Plans-Ideas.tasks`), with ` 1`, ` 2`, ... when it is taken. `201 TaskListWriteResult`. |
-| `PATCH /api/tasks/lists/{id}` | `UpdateTaskListRequest`: `name`, `color`, `icon` and `archived`, with the same per-field `base` check as tasks (`409 task-conflict` carries `list`). A new name also renames the file in its folder (through §10.3, so links to it follow); `moved` gives the old and new paths. |
+| `PATCH /api/tasks/lists/{id}` | `UpdateTaskListRequest`: `name`, `color`, `icon` and `archived`, with the same per-field `base` check as tasks (`409 task-conflict` carries `list`). A new name also renames the file in its folder (through §10.3, so links to it follow); `moved` gives the old and new paths. The links rewritten in other notes are not listed, and their `file.changed` events are not sent to the calling client: it fetches the tree again (§7) before its open notes save. |
 | `DELETE /api/tasks/lists/{id}` | Moves the list's file to the trash (§13), from where it can be restored with its tasks; `trash` is the entry. Its archive files stay. |
 | `POST /api/tasks/lists/reorder` | `ReorderRequest {ids, after}`: like task reordering, over the lists |
 | `POST /api/tasks/lists/{id}/sections` | `{name}`: a new section, last (at most 100). `201`. |
@@ -2166,7 +2166,7 @@ Every night (`notes.tasks.archive-cron`, 03:20), tasks closed more than 90 days 
 
 - They are content events: not delivered to the client whose `X-Client-Id` made the change (§16.4), and replayed like any other event.
 - One task operation publishes, in this order: `folder.created` and `file.created` or `file.changed` for each list file written, then the task events, then (later, with the batch) `history.committed`.
-- **Changes made outside the task API** (a hand edit over SSH or in Obsidian, a save through §8, a history restore, a trash restore, a move, or a deleted file) produce only the usual `file.*`, `entry.moved` and `folder.deleted` events. A client showing tasks therefore refetches its task views (debounced, about one second) on any of those events that touches a `.tasks` path; on other devices a task operation is then applied twice, once from the task event and once by the refetch, which is harmless.
+- **Changes made outside the task API** (a hand edit over SSH or in Obsidian, a save through §8, a history restore, a trash restore, a move, or a deleted file) produce only the usual `file.*`, `entry.moved` and `folder.deleted` events. A client showing tasks therefore refetches its task views (debounced, about one second) on any of those events that touches a `.tasks` path; on other devices a task operation is then applied twice, once from the task event and once by the refetch, which is harmless. (The web client compares the versions of the `.tasks` files in its tree, which those events and its own saves of a list file as text both update; DESIGN §6.22.)
 - The tasks feature registers these names (`TASK_EVENT_NAMES`) with `registerEventHandler` (DESIGN §6.8), and refetches its views after `hello {resync: true}` and `resync`.
 
 ### 20.9 Tasks in search, backlinks and tags
