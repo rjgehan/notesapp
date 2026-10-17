@@ -16,6 +16,13 @@ export interface SheetActions {
   addSheet(): void;
   openNamedRanges(): void;
   openColumnWidth(): void;
+  openNumberFormat(): void;
+  increaseDecimals(): void;
+  decreaseDecimals(): void;
+  insertChart(): void;
+  importFile(): void;
+  exportCsv(): void;
+  exportXlsx(): void;
 }
 
 let active: SheetActions | null = null;

@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { FileSpreadsheet } from 'lucide-react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FileEntry } from '../../api/types';
+import { allCommands } from '../../features/commands';
 import { activeSheet, setActiveSheet, type SheetActions } from '../../sheets/activeSheet';
 import { parseSheet } from '../../sheets/format';
 import { mergeSheetText } from '../../sheets/merge';
@@ -32,6 +33,17 @@ describe('the sheet view descriptor', () => {
     expect(created.ok && created.file.sheets.map((s) => [s.name, Object.keys(s.cells).length])).toEqual([['Sheet1', 0]]);
     expect(d.commands).toBe(SHEET_COMMANDS);
     expect((await d.load()).default).toBeTypeOf('function');
+    // Embeds load their own small chunk (§6.21.7).
+    expect((await d.loadEmbed!()).default).toBeTypeOf('function');
+  });
+
+  it('offers number formats, charts, import and export on the open sheet, and import as a new file anywhere', () => {
+    registerSheetView();
+    const ids = SHEET_COMMANDS.map((c) => c.id);
+    expect(ids).toEqual(expect.arrayContaining(['sheet.numberFormat', 'sheet.increaseDecimals', 'sheet.decreaseDecimals', 'sheet.insertChart', 'sheet.importFile', 'sheet.exportCsv', 'sheet.exportXlsx']));
+    const global = allCommands().find((c) => c.id === 'sheet.importAsFile');
+    expect(global?.name).toBe('Import spreadsheet from CSV or Excel…');
+    expect(global?.when).toBeUndefined();
   });
 
   it('offers its palette commands only while a spreadsheet shows the open file, edits only when editable', () => {

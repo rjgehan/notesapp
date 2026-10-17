@@ -290,6 +290,168 @@
   accent-color: var(--interactive-accent);
 }
 
+/* ---------- charts pane (§6.21.9) ---------- */
+
+.sheet-charts {
+  flex: none;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.sheet-charts-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px var(--sheet-gutter);
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sheet-charts-list {
+  display: flex;
+  gap: 12px;
+  padding: 0 var(--sheet-gutter) 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.sheet-charts-card {
+  flex: none;
+  width: min(360px, calc(100vw - 2 * var(--sheet-gutter)));
+  padding: 4px 8px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.sheet-charts-card .icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+/* ---------- number format, chart and import dialogs ---------- */
+
+.sheet-format-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  max-height: min(50vh, 420px);
+  margin: 0 0 12px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.sheet-format-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: var(--font-ui-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheet-format-option:hover,
+.sheet-format-option:focus-visible {
+  background: var(--background-modifier-hover);
+  outline: none;
+}
+
+.sheet-format-option[aria-pressed='true'] {
+  background: var(--background-modifier-active-hover);
+  color: var(--interactive-accent);
+}
+
+.sheet-format-sample {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-format-custom {
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.sheet-format-input {
+  font-family: var(--font-mono);
+}
+
+.sheet-format-preview {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-chart-dialog .dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sheet-chart-kinds {
+  display: flex;
+  gap: 6px;
+}
+
+.sheet-chart-kind {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.sheet-chart-kind[aria-checked='true'] {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
+
+.sheet-chart-preview {
+  min-height: 40px;
+  padding: 4px 8px;
+  border-radius: var(--radius-m);
+  background: var(--background-primary-alt);
+}
+
+.sheet-chart-preview .sheet-chart {
+  --chart-surface: var(--background-primary-alt);
+}
+
+.sheet-import-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: none;
+}
+
+.sheet-import-targets legend {
+  margin-bottom: 6px;
+}
+
 /* ---------- touch and phones ---------- */
 
 @media (pointer: coarse) {
@@ -318,6 +480,22 @@
   .sheet-named-name {
     min-height: 44px;
   }
+
+  .sheet-format-option,
+  .sheet-chart-kind,
+  .sheet-charts-toggle,
+  .sheet-charts-card .icon-button {
+    min-height: 44px;
+  }
+
+  .sheet-charts-card .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .sheet-format-input {
+    font-size: 16px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -336,7 +514,12 @@
   /* The keyboard leaves little room: the title and toolbar give way to the formula bar and grid. */
   .keyboard-open .sheet-header,
   .keyboard-open .sheet-toolbar,
+  .keyboard-open .sheet-charts,
   .keyboard-open .sheet-tabs {
     display: none;
+  }
+
+  .sheet-charts-card {
+    width: calc(100vw - 2 * var(--sheet-gutter));
   }
 }

@@ -60,7 +60,12 @@ let count = 0;
 
 beforeAll(() => {
   const fake = fakeApi(vault);
-  installEndpoints({ ...httpEndpoints, readFile: fake.api.readFile, saveFile: fake.api.saveFile });
+  installEndpoints({
+    ...httpEndpoints,
+    readFile: fake.api.readFile,
+    saveFile: fake.api.saveFile,
+    createFile: async (req, opts) => structuredClone(vault.createFile(req, 'me-0000001', opts?.idempotencyKey)),
+  });
 });
 
 afterEach(() => {
@@ -77,12 +82,12 @@ function entry(path: string): FileEntry {
 }
 
 /** A new file per test (sessions are cached by path for the page's lifetime). */
-async function open(content: unknown = BUDGET) {
+async function open(content: unknown = BUDGET, hash = '') {
   const path = `Sheet ${++count}.sheet`;
   vault.createFile({ path, content: typeof content === 'string' ? content : JSON.stringify(content) }, 'other-device-1');
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/n/${path}`]}>
+      <MemoryRouter initialEntries={[`/n/${path}${hash}`]}>
         <SheetView path={path} entry={entry(path)} mode="edit" />
         <Dialogs />
         <Toasts />
@@ -92,8 +97,8 @@ async function open(content: unknown = BUDGET) {
   return path;
 }
 
-async function openGrid(content: unknown = BUDGET) {
-  const path = await open(content);
+async function openGrid(content: unknown = BUDGET, hash = '') {
+  const path = await open(content, hash);
   await screen.findByTestId('grid', {}, { timeout: 5000 });
   return path;
 }
@@ -413,5 +418,155 @@ describe('the spreadsheet view', () => {
     expect(formulaInput()).toHaveAttribute('enterkeyhint', 'next');
     fireEvent.blur(formulaInput());
     expect((await saved(path)).sheets[0].cells.B2).toEqual({ v: 1500 });
+  });
+});
+
+describe('number formats, charts, import and export (6b, 6c)', () => {
+  const button = (name: string) => screen.getByRole('button', { name });
+  const option = (label: string) => within(screen.getByRole('dialog')).getByText(label).closest('button') as HTMLButtonElement;
+
+  it('formats the selection, whole columns and typed values, and shows them formatted', async () => {
+    const path = await openGrid();
+    select(1, 0, 1, 2); // B2:B3
+    fireEvent.click(button('Number format'));
+    expect(within(screen.getByRole('dialog')).getByText('For B2:B3')).toBeInTheDocument();
+    fireEvent.click(option('Currency'));
+    expect(screen.getByTestId('cell-B0')).toHaveTextContent('$1,450.00');
+    let cells = (await saved(path)).sheets[0].cells;
+    expect(cells.B2).toEqual({ v: 1450, fmt: '$#,##0.00' });
+    expect(cells.B3).toEqual({ v: 487.5, fmt: '$#,##0.00' });
+    // One more decimal place, on every selected cell.
+    fireEvent.click(button('Increase decimal places'));
+    expect(screen.getByTestId('cell-B1')).toHaveTextContent('$487.500');
+    // A typed percentage brings its format; the formula bar shows it as typed.
+    select(3, 0);
+    fireEvent.focus(formulaInput());
+    fireEvent.change(formulaInput(), { target: { value: '12.5%' } });
+    fireEvent.keyDown(formulaInput(), { key: 'Enter' });
+    expect(screen.getByTestId('cell-D0')).toHaveTextContent('12.5%');
+    select(3, 0);
+    expect(formulaInput().value).toBe('12.5%');
+    // Whole columns take a column format, and their cells lose their own.
+    const { CompactSelection } = await import('@glideapps/glide-data-grid');
+    fireEvent.pointerDown(screen.getByTestId('grid'), { clientY: 500, pointerType: 'mouse' });
+    act(() => gridProps().onGridSelectionChange!({ columns: CompactSelection.fromSingleSelection(1), rows: CompactSelection.empty() }));
+    fireEvent.click(button('Number format'));
+    expect(within(screen.getByRole('dialog')).getByText('For column B')).toBeInTheDocument();
+    fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('Custom format'), { target: { value: '#,##0' } });
+    expect(within(screen.getByRole('dialog')).getByLabelText('Preview')).toHaveTextContent('1,235');
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Apply' }));
+    const file = await saved(path);
+    cells = file.sheets[0].cells;
+    expect(file.sheets[0].cols.B).toEqual({ fmt: '#,##0' });
+    expect(cells.B2).toEqual({ v: 1450 });
+    expect(cells.D2).toEqual({ v: 0.125, fmt: '0.0%' });
+    expect(screen.getByTestId('cell-B3')).toHaveTextContent('1,938');
+    // Undo brings the cell formats back in one step.
+    act(() => void activeSheet(path)!.undo());
+    expect((await saved(path)).sheets[0].cells.B2).toEqual({ v: 1450, fmt: '$#,##0.000' });
+  });
+
+  it('inserts a chart of the selection, edits and deletes it', async () => {
+    const path = await openGrid();
+    fireEvent.change(nameBox(), { target: { value: 'A1:B3' } });
+    fireEvent.keyDown(nameBox(), { key: 'Enter' });
+    fireEvent.click(button('Insert chart'));
+    const dialog = screen.getByRole('dialog');
+    expect((within(dialog).getByLabelText('Range') as HTMLInputElement).value).toBe('A1:B3');
+    expect(within(dialog).getByLabelText('Row 1 names the series')).toBeChecked();
+    expect(within(dialog).getByLabelText('Column A labels the categories')).toBeChecked();
+    fireEvent.change(within(dialog).getByLabelText('Title'), { target: { value: 'Costs' } });
+    expect(within(dialog).getByRole('figure')).toHaveAttribute('aria-label', 'Bar chart: Costs');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Insert' }));
+    let charts = (await saved(path)).sheets[0].charts;
+    const [id] = Object.keys(charts);
+    expect(charts[id]).toEqual({ type: 'bar', range: 'A1:B3', title: 'Costs', headers: true, labels: true });
+    const pane = screen.getByRole('region', { name: 'Charts' });
+    expect(within(pane).getByRole('figure')).toHaveAttribute('aria-label', 'Bar chart: Costs');
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Edit chart Costs' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio', { name: 'Pie' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
+    charts = (await saved(path)).sheets[0].charts;
+    expect(charts[id].type).toBe('pie');
+
+    fireEvent.click(within(pane).getByRole('button', { name: 'Delete chart Costs' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull());
+    expect((await saved(path)).sheets[0].charts).toEqual({});
+    act(() => void activeSheet(path)!.undo());
+    expect(Object.keys((await saved(path)).sheets[0].charts)).toEqual([id]);
+  });
+
+  it('refuses a chart range on another sheet', async () => {
+    await openGrid();
+    fireEvent.click(button('Insert chart'));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Range'), { target: { value: 'Notes!A1:A3' } });
+    expect(within(dialog).getByText('A chart shows a range of its own sheet.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Insert' })).toBeDisabled();
+  });
+
+  it('imports a CSV file into a new sheet, and downloads the sheet as CSV and the workbook as Excel', async () => {
+    const { setFilePicker } = await import('../../features/attachments');
+    const csv = new File(['Date;Amount\n2026-10-17;12\n'], 'Bank.csv', { type: 'text/csv' });
+    setFilePicker(async () => [csv]);
+    const path = await openGrid();
+    fireEvent.click(button('Import CSV or Excel'));
+    const dialog = await screen.findByRole('dialog', { name: 'Import Bank.csv' });
+    expect((within(dialog).getByLabelText('Separator') as HTMLSelectElement).value).toBe(';');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
+    await screen.findByRole('tab', { name: 'Bank' });
+    const file = await saved(path);
+    expect(file.sheets.map((s) => s.name)).toEqual(['Budget', 'Notes', 'Bank']);
+    expect(file.sheets[2].cells).toMatchObject({ A2: { v: 46312, fmt: 'yyyy-mm-dd' }, B2: { v: 12 } });
+    setFilePicker(null);
+
+    const blobs: Blob[] = [];
+    const create = vi.fn((b: Blob) => {
+      blobs.push(b);
+      return 'blob:test';
+    });
+    const urls = { createObjectURL: URL.createObjectURL, revokeObjectURL: URL.revokeObjectURL };
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    fireEvent.click(screen.getByRole('tab', { name: 'Budget' }));
+    fireEvent.click(button('Download as CSV or Excel'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Download “Budget” as CSV' }));
+    expect(await blobs[0].text()).toBe('Item,Cost,\r\nRent,1450,0.7483870968\r\nFood,487.5,\r\n,,\r\n,1937.5,\r\n');
+    fireEvent.click(button('Download as CSV or Excel'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Download as Excel (.xlsx)' }));
+    await waitFor(() => expect(blobs).toHaveLength(2), { timeout: 5000 });
+    const XLSX = await import('xlsx');
+    const book = XLSX.read(new Uint8Array(await blobs[1].arrayBuffer()), { type: 'array', cellFormula: true });
+    expect(book.SheetNames).toEqual(['Budget', 'Notes', 'Bank']);
+    expect(book.Sheets.Budget.B5).toMatchObject({ f: 'SUM(B2:B4)', v: 1937.5 });
+    click.mockRestore();
+    Object.assign(URL, urls);
+  });
+
+  it('imports into a new spreadsheet file next to the open one', async () => {
+    const { setFilePicker } = await import('../../features/attachments');
+    setFilePicker(async () => [new File(['a,b\n1,2\n'], 'Small.csv', { type: 'text/csv' })]);
+    await openGrid();
+    fireEvent.click(button('Import CSV or Excel'));
+    const dialog = await screen.findByRole('dialog', { name: 'Import Small.csv' });
+    fireEvent.click(within(dialog).getByLabelText('A new spreadsheet file'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
+    await waitFor(() => expect(() => vault.readFile('Small.sheet')).not.toThrow());
+    const parsed = parseSheet(vault.readFile('Small.sheet').content);
+    expect(parsed.ok && parsed.file.sheets[0].cells).toEqual({ A1: { v: 'a' }, B1: { v: 'b' }, A2: { v: 1 }, B2: { v: 2 } });
+    expect(parsed.ok && parsed.file.engine).toBe('');
+    setFilePicker(null);
+  });
+
+  it('opens at the sheet the route names', async () => {
+    await openGrid(BUDGET, '#Notes');
+    expect(screen.getByRole('tab', { name: 'Notes' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens with the range a link names selected', async () => {
+    await openGrid(BUDGET, `#${encodeURIComponent('Budget!B2:C3')}`);
+    expect(nameBox().value).toBe('B2:C3');
   });
 });

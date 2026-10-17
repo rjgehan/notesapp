@@ -5,9 +5,9 @@
 // the frozen rows.
 import { CompactSelection, GridCellKind, type GridCell, type GridColumn, type GridSelection, type Theme } from '@glideapps/glide-data-grid';
 import { columnLetters, MAX_COLUMNS, MAX_ROWS, toA1 } from '../../sheets/a1';
-import { formatValue, valueAlign } from '../../sheets/display';
+import { effectiveFormat, shownCell, type ShownCell } from '../../sheets/display';
 import { usedExtent } from '../../sheets/edits';
-import { cellText, cellValue, isCellError, type Sheet } from '../../sheets/format';
+import { cellText, type Sheet } from '../../sheets/format';
 import type { CellRange } from '../../sheets/refs';
 
 /** Height of the column letters above the frozen rows (taller on touch devices). */
@@ -110,28 +110,32 @@ export function gridColumns(sheet: Sheet, layout: GridLayout, sizing: ReadonlyMa
   return columns;
 }
 
+/** Text colours: error results, and the colours a number format can ask for ([Red]). */
+export type CellColors = Record<NonNullable<ShownCell['color']>, string>;
+
 export interface CellOptions {
   /** Glide's own overlay editor opens on the cell (desktop); otherwise the formula bar edits it. */
   overlay: boolean;
   readonly: boolean;
-  errorColor: string;
+  colors: CellColors;
 }
 
-/** What the grid shows and edits for a cell: its value as text, and its formula or value to edit. */
+/**
+ * What the grid shows and edits for a cell: its value as text in its number format, and its
+ * formula or value to edit (dates as dates, percentages as percentages).
+ */
 export function gridCell(sheet: Sheet, col: number, row: number, opts: CellOptions): GridCell {
   const cell = sheet.cells[toA1(col, row)];
-  const value = cellValue(cell);
-  const shown = formatValue(value);
-  const error = isCellError(value);
-  const themeOverride: Partial<Theme> | undefined = error ? { textDark: opts.errorColor } : undefined;
+  const shown = shownCell(sheet, col, row);
+  const themeOverride: Partial<Theme> | undefined = shown.color ? { textDark: opts.colors[shown.color] } : undefined;
   return {
     kind: GridCellKind.Text,
-    data: cellText(cell),
-    displayData: shown,
+    data: cellText(cell, effectiveFormat(sheet, col, row)),
+    displayData: shown.text,
     allowOverlay: opts.overlay,
     readonly: opts.readonly,
-    contentAlign: valueAlign(value),
-    copyData: shown,
+    contentAlign: shown.align,
+    copyData: shown.text,
     ...(themeOverride ? { themeOverride } : {}),
   };
 }

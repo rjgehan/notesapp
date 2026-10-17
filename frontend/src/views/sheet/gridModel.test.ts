@@ -70,12 +70,29 @@ describe('columns and cells', () => {
 
   it('shows the value and edits the formula or the typed text', () => {
     const s = sheet({ cells: { A1: { f: '=1/3', c: 1 / 3 }, B1: { v: '007' }, C1: { f: '=1/0', c: { e: '#DIV/0!' } }, D1: { v: true } } });
-    const o = { overlay: true, readonly: false, errorColor: '#f00' };
+    const o = { overlay: true, readonly: false, colors: { error: '#f00', red: '#e00', green: '#0f0', blue: '#00f' } };
     expect(gridCell(s, 0, 0, o)).toMatchObject({ kind: GridCellKind.Text, data: '=1/3', displayData: '0.3333333333', contentAlign: 'right', allowOverlay: true, copyData: '0.3333333333' });
     expect(gridCell(s, 1, 0, o)).toMatchObject({ data: "'007", displayData: '007', contentAlign: 'left' });
     expect(gridCell(s, 2, 0, o)).toMatchObject({ displayData: '#DIV/0!', contentAlign: 'center', themeOverride: { textDark: '#f00' } });
     expect(gridCell(s, 3, 0, o)).toMatchObject({ data: 'TRUE', displayData: 'TRUE' });
     expect(gridCell(s, 4, 0, { ...o, overlay: false, readonly: true })).toMatchObject({ data: '', displayData: '', allowOverlay: false, readonly: true });
+  });
+
+  it('shows values in their number format: the cell’s, else the row’s, else the column’s', () => {
+    const s = sheet({
+      cells: { A1: { v: 1450, fmt: '$#,##0.00' }, A2: { v: 0.25 }, B2: { v: 46312 }, A3: { v: -5, fmt: '0;[Red]-0' }, C3: { v: 'text' } },
+      rows: { '2': { fmt: '0%' } },
+      cols: { B: { fmt: 'yyyy-mm-dd' }, C: { fmt: '0.00' } },
+    });
+    const o = { overlay: true, readonly: false, colors: { error: '#f00', red: '#e00', green: '#0f0', blue: '#00f' } };
+    expect(gridCell(s, 0, 0, o)).toMatchObject({ data: '1450', displayData: '$1,450.00', contentAlign: 'right' });
+    expect(gridCell(s, 0, 1, o)).toMatchObject({ data: '25%', displayData: '25%' });
+    // The row's format comes before the column's.
+    expect(gridCell(s, 1, 1, o)).toMatchObject({ displayData: '4631200%' });
+    expect(gridCell(s, 0, 2, o)).toMatchObject({ displayData: '-5', themeOverride: { textDark: '#e00' } });
+    expect(gridCell(s, 2, 2, o)).toMatchObject({ displayData: 'text', contentAlign: 'left' });
+    const dates = sheet({ cells: { B1: { v: 46312 } }, cols: { B: { fmt: 'yyyy-mm-dd' } } });
+    expect(gridCell(dates, 1, 0, o)).toMatchObject({ data: '2026-10-17', displayData: '2026-10-17' });
   });
 });
 

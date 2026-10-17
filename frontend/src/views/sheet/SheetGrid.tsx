@@ -15,9 +15,9 @@ import {
   type Rectangle,
 } from '@glideapps/glide-data-grid';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { columnLetters, toA1 } from '../../sheets/a1';
-import { formatValue, valueAlign } from '../../sheets/display';
-import { cellValue, isCellError, type Sheet } from '../../sheets/format';
+import { columnLetters } from '../../sheets/a1';
+import { shownCell } from '../../sheets/display';
+import type { Sheet } from '../../sheets/format';
 import type { CellRange } from '../../sheets/refs';
 import { isApple } from '../../features/platform';
 import {
@@ -136,7 +136,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
   const columns = useMemo(() => gridColumns(model.sheet, layout, sizing, theme), [model, layout, sizing, theme]);
   const gridSelection = useMemo(() => toGridSelection(selection, layout), [selection, layout]);
 
-  const cellOptions = useMemo(() => ({ overlay: editable && !touch, readonly: !editable, errorColor: theme.error }), [editable, touch, theme.error]);
+  const cellOptions = useMemo(() => ({ overlay: editable && !touch, readonly: !editable, colors: theme.colors }), [editable, touch, theme.colors]);
   const getCellContent = useCallback(([col, row]: Item): GridCell => gridCell(model.sheet, col, row + f, cellOptions), [model, f, cellOptions]);
 
   const rowHeight = useCallback((row: number) => layout.rowHeight(row + f), [layout, f]);
@@ -189,8 +189,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
           ctx.fillStyle = g.accentLight ?? 'rgba(138, 92, 245, 0.16)';
           ctx.fillRect(rect.x, y, rect.width, h);
         }
-        const value = cellValue(sheet.cells[toA1(col, r)]);
-        const text = formatValue(value);
+        const { text, align, color } = shownCell(sheet, col, r);
         if (text !== '') {
           ctx.save();
           ctx.beginPath();
@@ -198,8 +197,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
           ctx.clip();
           const bold = columnBold || sheet.rows[String(r + 1)]?.bold === true;
           ctx.font = `${bold ? '700 ' : ''}${theme.fontSize}px ${fontFamily}`;
-          ctx.fillStyle = isCellError(value) ? theme.error : (g.textDark ?? '#dadada');
-          const align = valueAlign(value);
+          ctx.fillStyle = color ? theme.colors[color] : (g.textDark ?? '#dadada');
           const pad = g.cellHorizontalPadding ?? 6;
           ctx.textAlign = align;
           const x = align === 'left' ? rect.x + pad : align === 'right' ? rect.x + rect.width - pad : rect.x + rect.width / 2;

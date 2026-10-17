@@ -2,26 +2,66 @@
 // one Workbook. Every change goes through the workbook (one undo step per action), which marks the
 // session dirty (useSheetDocument), so autosave, drafts, conflicts and history work as for notes.
 import type { DataEditorRef } from '@glideapps/glide-data-grid';
-import { ArrowDownToLine, ArrowRightToLine, Bold, MoveHorizontal, Redo2, Snowflake, Tag, Undo2 } from 'lucide-react';
+import {
+  ArrowDownToLine,
+  ArrowRightToLine,
+  Bold,
+  ChartColumn,
+  DecimalsArrowLeft,
+  DecimalsArrowRight,
+  Download,
+  Hash,
+  Import,
+  MoveHorizontal,
+  Redo2,
+  Snowflake,
+  Tag,
+  Undo2,
+} from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
 import { SaveStatus } from '../../components/SaveStatus';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
 import { ContextMenu, type MenuEntry } from '../../components/overlays/ContextMenu';
+import { pickFiles } from '../../features/attachments';
+import { toastError } from '../../features/errors';
 import { wantsNoteFocus } from '../../features/focus';
+import { folderOf } from '../../features/paths';
 import { keyLabel } from '../../features/platform';
-import { columnLetters, toA1 } from '../../sheets/a1';
+import { columnLetters, parseA1, toA1 } from '../../sheets/a1';
 import { setActiveSheet, type SheetActions } from '../../sheets/activeSheet';
-import { clearEdits, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, type SheetClip } from '../../sheets/edits';
-import type { CellEdit, Workbook } from '../../sheets/engine';
-import { cellInput, cellText, cellValue, isCellError, sameName, sheetById, sheetByName, sheetNameProblem, type Sheet } from '../../sheets/format';
-import { absoluteRangeText, parseRangeText, rangeText } from '../../sheets/refs';
+import { guessChartOptions } from '../../sheets/charts';
+import type { Separator } from '../../sheets/csv';
+import { effectiveFormat } from '../../sheets/display';
+import { clearEdits, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, typedEdit, type SheetClip } from '../../sheets/edits';
+import type { CellEdit, FormatEdit, Workbook } from '../../sheets/engine';
+import { cellText, cellValue, isCellError, sameName, sheetById, sheetByName, sheetNameProblem, type ChartProps, type Sheet } from '../../sheets/format';
+import { changeDecimals, isGeneral } from '../../sheets/numfmt';
+import { absoluteRangeText, parseRangeText, rangeText, type CellRange } from '../../sheets/refs';
+import { resolveTarget, usedRange } from '../../sheets/target';
+import type { ImportedBook } from '../../sheets/xlsx';
 import { confirmAction, promptText } from '../../state/dialogs';
 import { toast } from '../../state/toasts';
 import type { SessionSnapshot } from '../../sync/DocumentSession';
 import { InlineTitle } from '../markdown/InlineTitle';
+import { ChartsPane } from './ChartsPane';
 import { FormulaBar, type EditTarget, type FormulaBarHandle, type Move } from './FormulaBar';
 import { cellSelection, clampSelection, gridLayout, HEADER_BAND, TOUCH_HEADER_BAND, type CellAt, type SheetSelection } from './gridModel';
-import { ColumnWidthDialog, NamedRangesDialog } from './SheetDialogs';
+import {
+  addToWorkbook,
+  baseName,
+  bookToFile,
+  createSheetFile,
+  csvBook,
+  exportCsv,
+  exportXlsx,
+  IMPORT_ACCEPT,
+  importKind,
+  readCsvFile,
+  readWorkbookFile,
+  type ImportKind,
+} from './importExport';
+import { ChartDialog, ColumnWidthDialog, ImportDialog, NamedRangesDialog, NumberFormatDialog, type ImportChoice } from './SheetDialogs';
 import { SheetGrid, type SheetGridHandlers } from './SheetGrid';
 import { SheetTabs } from './SheetTabs';
 import { useCoarsePointer, useSheetTheme } from './theme';
@@ -33,14 +73,31 @@ interface Props {
   version: number;
 }
 
-/** Per file, while the page lives: the open sheet and each sheet's selection. */
-const remembered = new Map<string, { sheetId: string; selections: ReadonlyMap<string, SheetSelection> }>();
+/** Per file, while the page lives: the open sheet, each sheet's selection, and whether the charts pane is folded. */
+const remembered = new Map<string, { sheetId: string; selections: ReadonlyMap<string, SheetSelection>; chartsOpen: boolean }>();
 
 /** The last copy made in any spreadsheet, so a paste in this app brings formulas. */
 let lastClip: SheetClip | null = null;
 
 /** Rows at most that "Bold" changes in one go (a whole-column selection bolds columns instead). */
 const BOLD_LIMIT = 5000;
+/** Cells at most that a number format is set on one by one; whole columns or rows take a column or row format. */
+const FORMAT_LIMIT = 10000;
+
+type Dialog =
+  | { kind: 'named' | 'width' | 'format' }
+  | { kind: 'chart'; id: string | null; initial: ChartProps }
+  | { kind: 'import'; file: File; type: ImportKind; separator: Separator; text?: string; book?: ImportedBook };
+
+/** The route's `#Summary` or `#Budget!A1:C3`, decoded. */
+function decodeHash(hash: string): string | null {
+  if (!hash || hash === '#') return null;
+  try {
+    return decodeURIComponent(hash.slice(1));
+  } catch {
+    return hash.slice(1);
+  }
+}
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -93,8 +150,12 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   const [sheetId, setSheetId] = useState(() => remembered.get(path)?.sheetId ?? workbook.file.sheets[0].id);
   const [selections, setSelections] = useState<ReadonlyMap<string, SheetSelection>>(() => remembered.get(path)?.selections ?? new Map());
   const [growth, setGrowth] = useState<ReadonlyMap<string, { rows: number; cols: number }>>(new Map());
-  const [dialog, setDialog] = useState<'named' | 'width' | null>(null);
+  const [dialog, setDialog] = useState<Dialog | null>(null);
   const [freezeMenu, setFreezeMenu] = useState<{ x: number; y: number } | null>(null);
+  const [exportMenu, setExportMenu] = useState<{ x: number; y: number } | null>(null);
+  // On a phone the charts start folded, so the grid keeps its room.
+  const [chartsOpen, setChartsOpen] = useState(() => remembered.get(path)?.chartsOpen ?? !phone);
+  const location = useLocation();
   const [gridHeight, setGridHeight] = useState(600);
   const gridRef = useRef<DataEditorRef | null>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
@@ -122,12 +183,14 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   const activeRef = toA1(selection.active.col, selection.active.row);
   const activeCell = sheet.cells[activeRef];
   const activeValue = cellValue(activeCell);
+  const activeFormat = effectiveFormat(sheet, selection.active.col, selection.active.row);
   const single = selection.range.width === 1 && selection.range.height === 1;
   const wholeColumns = selection.range.row === 0 && selection.range.height >= layout.rows;
+  const wholeRows = !wholeColumns && selection.range.col === 0 && selection.range.width >= layout.cols;
 
   useEffect(() => {
-    remembered.set(path, { sheetId: sheet.id, selections });
-  }, [path, sheet.id, selections]);
+    remembered.set(path, { sheetId: sheet.id, selections, chartsOpen });
+  }, [path, sheet.id, selections, chartsOpen]);
 
   useLayoutEffect(() => {
     const el = gridBox.current;
@@ -160,20 +223,23 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     if (edits.length > 0) run(() => workbook.setCells(edits));
   };
 
+  /** The text the formula bar edits for a cell: its formula, or its value as typed (dates as dates). */
+  const editText = (s: Sheet, at: CellAt) => cellText(s.cells[toA1(at.col, at.row)], effectiveFormat(s, at.col, at.row));
+
   const edit = (at: CellAt, initial?: string) => {
-    bar.current?.edit({ ...at, sheet: sheet.id }, cellText(sheet.cells[toA1(at.col, at.row)]), initial);
+    bar.current?.edit({ ...at, sheet: sheet.id }, editText(sheet, at), initial);
   };
 
   const commit = (target: EditTarget, text: string, move: Move) => {
     const s = sheetById(workbook.file, target.sheet);
     if (!s) return;
-    const ref = toA1(target.col, target.row);
-    if (text !== cellText(s.cells[ref])) run(() => workbook.setCell(s.id, ref, cellInput(text)));
+    // Typed input brings the format it implies (`10%`) into a cell without one.
+    if (text !== editText(s, target)) run(() => workbook.setCells([typedEdit(s, target.col, target.row, text)]));
     if (move === 'none' || s.id !== sheet.id) return;
     const next = step(target, move);
     select(cellSelection(next.col, next.row));
     // On a phone the keyboard stays up for the next cell; elsewhere the grid takes the keys again.
-    if (touch && editable) bar.current?.edit({ ...next, sheet: s.id }, cellText(s.cells[toA1(next.col, next.row)]));
+    if (touch && editable) bar.current?.edit({ ...next, sheet: s.id }, editText(s, next));
     else focusGrid();
   };
 
@@ -230,6 +296,149 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     );
   };
 
+  // ---------- number formats ----------
+
+  /** The selection for messages: `B3`, `A1:C4`, `columns B–D`, `rows 2–5`. */
+  const selectionLabel = (() => {
+    const r = selection.range;
+    if (wholeColumns) return r.width === 1 ? `column ${columnLetters(r.col)}` : `columns ${columnLetters(r.col)}–${columnLetters(r.col + r.width - 1)}`;
+    if (wholeRows) return r.height === 1 ? `row ${r.row + 1}` : `rows ${r.row + 1}–${r.row + r.height}`;
+    return single ? activeRef : rangeText(r);
+  })();
+
+  /**
+   * Sets the number format of the selection (undefined: Automatic) as one undo step: whole columns
+   * or rows get a column or row format (and their cells lose their own), other selections a format
+   * per cell. Automatic on a cell whose row or column has a format stores `General`, which wins.
+   */
+  const applyFormat = (fmt: string | undefined) => {
+    const r = selection.range;
+    const inRange = (ref: string) => {
+      const at = parseA1(ref);
+      return at !== null && at.col >= r.col && at.col < r.col + r.width && at.row >= r.row && at.row < r.row + r.height;
+    };
+    run(() =>
+      workbook.transact(() => {
+        if (wholeColumns || wholeRows) {
+          const keys = wholeColumns
+            ? Array.from({ length: Math.min(r.width, 1000) }, (_, i) => columnLetters(r.col + i))
+            : Array.from({ length: Math.min(r.height, BOLD_LIMIT) }, (_, i) => String(r.row + i + 1));
+          for (const key of keys) {
+            const props = { ...(wholeColumns ? sheet.cols[key] : sheet.rows[key]) };
+            if (fmt === undefined) delete props.fmt;
+            else props.fmt = fmt;
+            if (wholeColumns) workbook.setColumn(sheet.id, key, props);
+            else workbook.setRow(sheet.id, key, props);
+          }
+          const own: FormatEdit[] = Object.entries(sheet.cells)
+            .filter(([ref, c]) => c.fmt !== undefined && inRange(ref))
+            .map(([ref]) => ({ sheet: sheet.id, ref, fmt: null }));
+          workbook.setFormats(own);
+          return;
+        }
+        if (r.width * r.height > FORMAT_LIMIT) throw new Error(`Select whole columns or rows to format more than ${FORMAT_LIMIT.toLocaleString('en-US')} cells.`);
+        const edits: FormatEdit[] = [];
+        for (let row = r.row; row < r.row + r.height; row++) {
+          for (let col = r.col; col < r.col + r.width; col++) {
+            const ref = toA1(col, row);
+            const inherited = sheet.rows[String(row + 1)]?.fmt ?? sheet.cols[columnLetters(col)]?.fmt;
+            const next = fmt ?? (isGeneral(inherited) ? null : 'General');
+            if ((sheet.cells[ref]?.fmt ?? null) !== next) edits.push({ sheet: sheet.id, ref, fmt: next });
+          }
+        }
+        workbook.setFormats(edits);
+      }),
+    );
+  };
+
+  const changeSelectionDecimals = (delta: 1 | -1) => {
+    const next = changeDecimals(activeFormat, delta, typeof activeValue === 'number' ? activeValue : null);
+    if (next === null) toast('Dates, times and text have no decimal places to change.');
+    else applyFormat(next);
+  };
+
+  // ---------- charts ----------
+
+  const insertChart = () => {
+    // A single cell charts the sheet's data; a selection charts itself.
+    const range = single ? (usedRange(sheet) ?? selection.range) : selection.range;
+    setDialog({ kind: 'chart', id: null, initial: { type: 'bar', range: rangeText(range), ...guessChartOptions(sheet, range) } });
+  };
+
+  const saveChart = (id: string | null, props: ChartProps) => {
+    setDialog(null);
+    run(() => {
+      if (id === null) workbook.addChart(sheet.id, props);
+      else workbook.setChart(sheet.id, id, props);
+    });
+    setChartsOpen(true);
+  };
+
+  const deleteChart = async (id: string) => {
+    const chart = sheet.charts[id];
+    if (!chart) return;
+    const ok = await confirmAction({
+      title: `Delete the chart${chart.title ? ` “${chart.title}”` : ''}?`,
+      message: 'Undo brings it back.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (ok) run(() => workbook.setChart(sheet.id, id, null));
+  };
+
+  // ---------- import and export ----------
+
+  const startImport = async () => {
+    const [file] = await pickFiles({ accept: IMPORT_ACCEPT, multiple: false });
+    if (!file) return;
+    const type = importKind(file.name);
+    if (!type) {
+      toast('Choose a CSV, TSV or Excel file to import.', { kind: 'error' });
+      return;
+    }
+    try {
+      if (type === 'csv') {
+        const { text, separator } = await readCsvFile(file);
+        setDialog({ kind: 'import', file, type, separator, text });
+      } else setDialog({ kind: 'import', file, type, separator: ',', book: await readWorkbookFile(file) });
+    } catch (e) {
+      toastError(e, `Could not read ${file.name}`);
+    }
+  };
+
+  const finishImport = async (d: Extract<Dialog, { kind: 'import' }>, choice: ImportChoice) => {
+    setDialog(null);
+    const book = d.type === 'csv' ? csvBook(d.file.name, d.text ?? '', choice.separator, choice.convert) : d.book;
+    if (!book) return;
+    const report = (skipped: string[]) =>
+      toast([`Imported “${d.file.name}”.`, ...skipped.slice(0, 3)].join(' '), { timeout: skipped.length > 0 ? 10000 : 4000 });
+    if (choice.target === 'sheet') {
+      try {
+        const { sheetId: id, skipped } = addToWorkbook(workbook, book);
+        if (id) setSheetId(id);
+        report(skipped);
+      } catch (e) {
+        toast(errorText(e), { kind: 'error' });
+      }
+      return;
+    }
+    try {
+      await createSheetFile(folderOf(path), baseName(d.file.name), bookToFile(book));
+      report(book.skipped);
+    } catch (e) {
+      toastError(e, `Could not import ${d.file.name}`);
+    }
+  };
+
+  const exportItems: MenuEntry[] = [
+    { id: 'csv', label: `Download “${sheet.name}” as CSV`, run: () => exportCsv(path, workbook.file, sheet) },
+    {
+      id: 'xlsx',
+      label: 'Download as Excel (.xlsx)',
+      run: () => void exportXlsx(path, workbook.file).catch((e: unknown) => toastError(e, 'Could not export the workbook')),
+    },
+  ];
+
   const addSheet = () => run(() => setSheetId(workbook.addSheet()));
 
   const renameSheet = async (id: string) => {
@@ -269,7 +478,14 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     if (!target) return false;
     const dest = target.sheet !== null ? sheetByName(file, target.sheet) : sheet;
     if (!dest) return false;
-    const r = target.range;
+    showRange(dest, target.range);
+    // The grid scrolls to the new selection itself.
+    focusGrid();
+    return true;
+  };
+
+  /** Opens sheet `dest` with `r` selected. */
+  const showRange = (dest: Sheet, r: CellRange) => {
     setSheetId(dest.id);
     select({ active: { col: r.col, row: r.row }, range: r }, dest.id);
     // The selection may lie beyond the rows the grid has shown so far.
@@ -277,10 +493,22 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
       const g = m.get(dest.id);
       return new Map(m).set(dest.id, { rows: Math.max(g?.rows ?? 0, r.row + r.height + 100), cols: Math.max(g?.cols ?? 0, r.col + r.width + 4) });
     });
-    // The grid scrolls to the new selection itself.
-    focusGrid();
-    return true;
   };
+
+  // A link or embed that opened `Budget.sheet#Summary` or `#Budget!A1:C3` (DESIGN §6.21.7).
+  const hashTarget = decodeHash(location.hash);
+  const followHash = useRef<(text: string) => void>(() => {});
+  useLayoutEffect(() => {
+    followHash.current = (text) => {
+      const t = resolveTarget(workbook.file, text);
+      if (!t) return;
+      if (t.range) showRange(t.sheet, t.range);
+      else setSheetId(t.sheet.id);
+    };
+  });
+  useEffect(() => {
+    if (hashTarget !== null) followHash.current(hashTarget);
+  }, [hashTarget, path]);
 
   // ---------- the clipboard (frozen cells included, so not Glide's) ----------
 
@@ -336,8 +564,15 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
       freezeColumns: () => setFrozen(sheet.frozen.rows, selection.active.col + 1),
       unfreeze: () => setFrozen(0, 0),
       addSheet,
-      openNamedRanges: () => setDialog('named'),
-      openColumnWidth: () => setDialog('width'),
+      openNamedRanges: () => setDialog({ kind: 'named' }),
+      openColumnWidth: () => setDialog({ kind: 'width' }),
+      openNumberFormat: () => setDialog({ kind: 'format' }),
+      increaseDecimals: () => changeSelectionDecimals(1),
+      decreaseDecimals: () => changeSelectionDecimals(-1),
+      insertChart,
+      importFile: () => void startImport(),
+      exportCsv: () => exportCsv(path, workbook.file, sheet),
+      exportXlsx: () => void exportXlsx(path, workbook.file).catch((e: unknown) => toastError(e, 'Could not export the workbook')),
     };
   });
   useEffect(() => {
@@ -356,6 +591,13 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
       addSheet: call('addSheet'),
       openNamedRanges: call('openNamedRanges'),
       openColumnWidth: call('openColumnWidth'),
+      openNumberFormat: call('openNumberFormat'),
+      increaseDecimals: call('increaseDecimals'),
+      decreaseDecimals: call('decreaseDecimals'),
+      insertChart: call('insertChart'),
+      importFile: call('importFile'),
+      exportCsv: call('exportCsv'),
+      exportXlsx: call('exportXlsx'),
     });
   }, [path]);
 
@@ -437,11 +679,38 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
         >
           <Snowflake size={16} />
         </ToolButton>
-        <ToolButton title="Column width" disabled={!editable} onClick={() => setDialog('width')}>
+        <ToolButton title="Column width" disabled={!editable} onClick={() => setDialog({ kind: 'width' })}>
           <MoveHorizontal size={16} />
         </ToolButton>
-        <ToolButton title="Named ranges" onClick={() => setDialog('named')}>
+        <span className="sheet-toolbar-sep" aria-hidden />
+        <ToolButton title="Decrease decimal places" disabled={!editable} onClick={() => changeSelectionDecimals(-1)}>
+          <DecimalsArrowLeft size={16} />
+        </ToolButton>
+        <ToolButton title="Increase decimal places" disabled={!editable} onClick={() => changeSelectionDecimals(1)}>
+          <DecimalsArrowRight size={16} />
+        </ToolButton>
+        <ToolButton title="Number format" disabled={!editable} pressed={!isGeneral(activeFormat)} onClick={() => setDialog({ kind: 'format' })}>
+          <Hash size={16} />
+        </ToolButton>
+        <span className="sheet-toolbar-sep" aria-hidden />
+        <ToolButton title="Insert chart" disabled={!editable} onClick={insertChart}>
+          <ChartColumn size={16} />
+        </ToolButton>
+        <ToolButton title="Named ranges" onClick={() => setDialog({ kind: 'named' })}>
           <Tag size={16} />
+        </ToolButton>
+        <span className="sheet-toolbar-sep" aria-hidden />
+        <ToolButton title="Import CSV or Excel" disabled={!snapshot.loaded} onClick={() => void startImport()}>
+          <Import size={16} />
+        </ToolButton>
+        <ToolButton
+          title="Download as CSV or Excel"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setExportMenu({ x: r.left, y: r.bottom + 4 });
+          }}
+        >
+          <Download size={16} />
         </ToolButton>
       </div>
       <FormulaBar
@@ -449,7 +718,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
         label={single ? activeRef : rangeText(selection.range)}
         active={selection.active}
         sheet={sheet.id}
-        text={cellText(activeCell)}
+        text={cellText(activeCell, activeFormat)}
         editable={editable}
         touch={touch}
         error={isCellError(activeValue) ? workbook.errorMessage(sheet.id, activeRef) : null}
@@ -471,6 +740,14 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
           portalRef={portalRef}
         />
       </div>
+      <ChartsPane
+        sheet={sheet}
+        editable={editable}
+        open={chartsOpen}
+        onToggle={() => setChartsOpen((o) => !o)}
+        onEdit={(id) => setDialog({ kind: 'chart', id, initial: sheet.charts[id] })}
+        onDelete={(id) => void deleteChart(id)}
+      />
       <SheetTabs
         sheets={model.file.sheets}
         activeId={sheet.id}
@@ -483,7 +760,8 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
       />
       <div ref={portalRef} className="sheet-portal" />
       {freezeMenu && <ContextMenu x={freezeMenu.x} y={freezeMenu.y} label="Freeze" items={freezeItems} onClose={() => setFreezeMenu(null)} />}
-      {dialog === 'named' && (
+      {exportMenu && <ContextMenu x={exportMenu.x} y={exportMenu.y} label="Download" items={exportItems} onClose={() => setExportMenu(null)} />}
+      {dialog?.kind === 'named' && (
         <NamedRangesDialog
           workbook={workbook}
           editable={editable}
@@ -495,7 +773,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === 'width' && (
+      {dialog?.kind === 'width' && (
         <ColumnWidthDialog
           label={widthLabel}
           width={layout.columnWidth(selection.active.col)}
@@ -503,6 +781,33 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
             setDialog(null);
             setWidths(widthColumns, width);
           }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'format' && (
+        <NumberFormatDialog
+          current={activeFormat}
+          value={activeValue}
+          target={selectionLabel}
+          onApply={(fmt) => {
+            setDialog(null);
+            applyFormat(fmt);
+            focusGrid();
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === 'chart' && (
+        <ChartDialog sheet={sheet} initial={dialog.initial} editing={dialog.id !== null} onSave={(props) => saveChart(dialog.id, props)} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === 'import' && (
+        <ImportDialog
+          fileName={dialog.file.name}
+          kind={dialog.type}
+          separator={dialog.separator}
+          sheetCount={dialog.book?.sheets.length}
+          canAddSheets={editable}
+          onImport={(choice) => void finishImport(dialog, choice)}
           onClose={() => setDialog(null)}
         />
       )}

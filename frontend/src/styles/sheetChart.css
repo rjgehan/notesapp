@@ -1,0 +1,130 @@
+/* Charts of sheets (DESIGN §6.21.9), in the grid view's chart pane and in embeds. The eight series
+   colours are the validated categorical palette in its fixed order, stepped separately for the dark
+   (default) and the light theme; text keeps the text colours. */
+
+.sheet-chart {
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #008300;
+  --chart-7: #9085e9;
+  --chart-8: #e66767;
+  --chart-surface: var(--background-primary);
+  margin: 0;
+  min-width: 0;
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+}
+
+:root[data-theme='light'] .sheet-chart {
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-8: #e34948;
+}
+
+.sheet-chart-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+}
+
+.sheet-chart-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0 0 4px;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  list-style: none;
+}
+
+.sheet-chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sheet-chart-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.sheet-chart-plot {
+  position: relative;
+  overflow: hidden;
+}
+
+.sheet-chart-svg {
+  display: block;
+  overflow: visible;
+}
+
+.sheet-chart-grid,
+.sheet-chart-baseline {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.sheet-chart-baseline {
+  stroke: var(--background-modifier-border-hover);
+}
+
+.sheet-chart-tick {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-chart-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The surface ring keeps markers legible where lines cross. */
+.sheet-chart-dot {
+  stroke: var(--chart-surface);
+  stroke-width: 2;
+}
+
+/* The surface gap between slices. */
+.sheet-chart-slice {
+  stroke: var(--chart-surface);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.sheet-chart-mark:hover,
+.sheet-chart-dot:hover,
+.sheet-chart-slice:hover {
+  opacity: 0.85;
+}
+
+.sheet-chart-empty,
+.sheet-chart-note {
+  margin: 4px 0;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}

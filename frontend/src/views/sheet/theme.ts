@@ -10,6 +10,8 @@ export interface SheetTheme {
   grid: Partial<Theme>;
   /** Colour of error results (`#DIV/0!`). */
   error: string;
+  /** Text colours of error results and of number formats' [Red], [Green] and [Blue]. */
+  colors: { error: string; red: string; green: string; blue: string };
   /** Font size of cells in px; bold rows and frozen cells use it too. */
   fontSize: number;
 }
@@ -23,9 +25,11 @@ export function sheetTheme(touch: boolean): SheetTheme {
   const v = (name: string, fallback: string) => read(s, name, fallback);
   const accent = v('--interactive-accent', '#8a5cf5');
   const fontSize = touch ? 15 : 13;
+  const error = v('--text-error', '#fb464c');
   return {
     touch,
-    error: v('--text-error', '#fb464c'),
+    error,
+    colors: { error, red: error, green: v('--text-success', '#44cf6e'), blue: v('--link', '#a68af9') },
     fontSize,
     grid: {
       accentColor: accent,
