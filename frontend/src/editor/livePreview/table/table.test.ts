@@ -280,6 +280,14 @@ describe('editing a cell', () => {
     expect(cellEditor(view).state.doc.toString()).toBe('Tea');
   });
 
+  it('finds in the note from a cell', () => {
+    const view = editor(TABLE);
+    grid(view).activate(1, 0);
+    press(cellEditor(view), 'f', { ctrlKey: true });
+    expect(view.dom.querySelector('.cm-search')).not.toBeNull();
+    expect(cellEditor(view).dom.querySelector('.cm-search')).toBeNull();
+  });
+
   it('marks the note changed and keeps the note’s selection on the cell', () => {
     const onLocalChange = vi.fn();
     const state = EditorState.create({

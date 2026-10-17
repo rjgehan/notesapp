@@ -8,8 +8,10 @@ import { buildVaultTree } from '../api/vaultTree';
 import { basenameOf, extensionOf, lastSegment } from '../features/paths';
 import { DEFAULT_SETTINGS } from '../features/settings';
 import { headingSource, tagSource, wikilinkSource } from './completion';
-import type { NoteContext } from './context';
+import { noteContext, type NoteContext } from './context';
 import { noteExtensions } from './editorSetup';
+import { cellLanguage } from './livePreview/table';
+import { tableCellHost } from './livePreview/table/facets';
 
 function entry(path: string, aliases: string[] = [], mtime = '2026-10-16T10:00:00.000Z'): FileEntry {
   const ext = extensionOf(path);
@@ -158,6 +160,13 @@ describe('heading completion', () => {
     expect(result.options.map((o) => o.label)).toEqual(['Title', 'Second part']);
     pick(view, result, 'Second part');
     expect(view.state.doc.toString()).toBe('# Title\n\n## Second part\n\n[[#Second part]]');
+  });
+
+  it('[[# in a table cell lists the note’s headings', async () => {
+    const note = makeView('# Title\n\n## Second part\n\n| a |\n|---|\n| b |', 0);
+    const cell = EditorState.create({ doc: '[[#Sec', selection: EditorSelection.cursor(6), extensions: [noteContext.of(context()), tableCellHost.of(note), cellLanguage] });
+    const result = (await headingSource(new CompletionContext(cell, 6, false))) as CompletionResult;
+    expect(result.options.map((o) => o.label)).toEqual(['Second part']);
   });
 
   it('[[Other# uses the note metadata', async () => {

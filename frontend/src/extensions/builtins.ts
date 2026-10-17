@@ -30,7 +30,7 @@ import { confirmDelete, promptNewFolder } from '../components/explorer/rowAction
 import { activeEditor } from '../editor/activeEditor';
 import { insertWikilink } from '../editor/completion';
 import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, toggleItalic } from '../editor/editorCommands';
-import { insertTable } from '../editor/livePreview/table';
+import { historyEditor, insertTable } from '../editor/livePreview/table';
 import { pickAndInsertAttachments } from '../features/attachments';
 import { getCommand, setViewCommandSource } from '../features/commands';
 import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../features/daily';
@@ -66,8 +66,8 @@ function editorCommand(id: string, name: string, run: (view: NonNullable<ReturnT
       if (view) {
         run(view);
         // Back to the text from the palette or toolbar, unless the command moved the focus into
-        // the editor itself (the find panel's search field).
-        if (!view.dom.contains(document.activeElement)) view.focus();
+        // the editor itself (the find panel's search field, which a table cell's is the note's).
+        if (!historyEditor(view).dom.contains(document.activeElement)) view.focus();
       }
     },
   });
@@ -238,7 +238,8 @@ export function registerBuiltins(): void {
   editorCommand('editor.insertLink', 'Insert Markdown link', insertMarkdownLink, 'Mod-k');
   editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
   editorCommand('editor.insertTable', 'Insert table', insertTable);
-  editorCommand('editor.find', 'Find/replace in current note', openSearchPanel, 'Mod-f');
+  // In a table cell, find searches the note.
+  editorCommand('editor.find', 'Find/replace in current note', (v) => openSearchPanel(historyEditor(v)), 'Mod-f');
   registerCommand({
     id: 'editor.insertAttachment',
     name: 'Insert attachment…',

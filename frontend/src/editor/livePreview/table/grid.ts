@@ -5,6 +5,7 @@
 import { isolateHistory, redo, undo } from '@codemirror/commands';
 import { diff } from '@codemirror/merge';
 import { ensureSyntaxTree } from '@codemirror/language';
+import { openSearchPanel } from '@codemirror/search';
 import { EditorSelection, EditorState, MapMode, Prec, Transaction, type ChangeSpec, type Extension } from '@codemirror/state';
 import { EditorView, keymap, WidgetType, type Rect, type ViewUpdate } from '@codemirror/view';
 import { resolve } from '../../../features/links';
@@ -553,6 +554,7 @@ export class TableGrid {
           { key: 'ArrowRight', run: (e) => this.horizontal(e, 1) },
           { key: 'Mod-z', run: () => undo(this.view), preventDefault: true },
           { key: 'Mod-y', mac: 'Mod-Shift-z', run: () => redo(this.view), preventDefault: true },
+          { key: 'Mod-f', run: () => openSearchPanel(this.view), preventDefault: true },
           { key: 'Shift-F10', run: () => this.menuForActive() },
           { key: 'ContextMenu', run: () => this.menuForActive() },
         ]),

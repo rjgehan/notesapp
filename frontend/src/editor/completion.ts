@@ -10,6 +10,7 @@ import { encodeMdPath, linkText, resolve } from '../features/links';
 import { displayName, folderOf, stripMd } from '../features/paths';
 import { noteContext, type NoteContext } from './context';
 import { inCodeOrComment, inFrontmatter } from './linkAt';
+import { tableCellHost } from './livePreview/table/facets';
 import { headingsFromState } from './outline';
 
 const MAX_OPTIONS = 50;
@@ -113,7 +114,8 @@ export const headingSource: CompletionSource = async (context: CompletionContext
 
   let headings: Array<{ text: string; level: number }>;
   if (resolved === source) {
-    headings = headingsFromState(context.state);
+    // In a table cell, the headings are the note's.
+    headings = headingsFromState(context.state.facet(tableCellHost)?.state ?? context.state);
   } else {
     if (!resolved.toLowerCase().endsWith('.md')) return null;
     try {
