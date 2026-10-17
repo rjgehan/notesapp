@@ -34,6 +34,7 @@ import type {
   Settings,
   SettingsResponse,
   SettingsUpdateRequest,
+  StatusDetails,
   StatusResponse,
   TagCount,
   TemplatesResponse,
@@ -369,6 +370,27 @@ export class MockVault {
       disk: { freeBytes: 50 * 1024 ** 3, repoBytes: null },
       settings: { readOnly: false, reason: null },
       mirror: this.mirrorStatus(),
+    };
+  }
+
+  /** What a server without backups or ntfy reports (API.md §6.5). */
+  getStatusDetails(): StatusDetails {
+    const large = [...this.files.values()]
+      .filter((f) => f.bytes.length > LARGE_FILE_LIMIT)
+      .sort((a, b) => b.bytes.length - a.bytes.length);
+    return {
+      runtime: { javaVersion: 'mock', javaVendor: 'in-memory', aotCache: 'off', heapUsedBytes: 0, heapMaxBytes: 0, processors: 1 },
+      events: { clients: this.hub.clientCount() },
+      git: {
+        commits: this.commits.length,
+        commitsThisRun: this.commits.length,
+        failedCommitsThisRun: 0,
+        largeFiles: large.slice(0, 100).map((f) => ({ path: f.path, bytes: f.bytes.length })),
+        largeFilesTruncated: large.length > 100,
+      },
+      disk: { totalBytes: 100 * 1024 ** 3 },
+      backup: { state: 'unknown', reason: 'The mock has no backups', lastRun: null, lastSuccess: null, snapshot: null, offsite: null, failures: null },
+      alerts: { state: 'off', reason: 'not configured', server: null, sent: 0, dropped: 0, lastSentAt: null, lastError: null, lastErrorAt: null, recent: [] },
     };
   }
 

@@ -44,6 +44,10 @@ select {
     min-height: 44px;
   }
 
+  .status-file-link {
+    min-height: 44px;
+  }
+
   .outline-item {
     min-height: 44px;
     padding-block: 10px;

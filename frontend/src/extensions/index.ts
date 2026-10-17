@@ -5,6 +5,7 @@ import type { ComponentType } from 'react';
 import { useSyncExternalStore } from 'react';
 import { registerCommand } from '../features/commands';
 import { navigateTo } from '../features/navigation';
+import { useUi } from '../state/ui';
 
 export { registerView, viewFor, registeredViews, type EmbedProps, type FileViewDescriptor, type FileViewProps } from '../views/registry';
 export { registerCommand, type Command, type CommandContext } from '../features/commands';
@@ -48,12 +49,23 @@ export function pageRoute(p: Pick<PageDescriptor, 'route'>): string {
   return '/x/' + p.route;
 }
 
-/** Adds a route under /x/, a ribbon and drawer entry, and a palette command. */
+/**
+ * Adds a route under /x/, a ribbon and drawer entry, and a palette command. The command closes the
+ * phone drawer first, as every built-in navigation does, since navigating keeps open overlays open.
+ */
 export function registerPage(p: PageDescriptor): void {
   const i = pages.findIndex((x) => x.route === p.route);
   if (i >= 0) pages.splice(i, 1, p);
   else pages.push(p);
-  registerCommand({ id: `page.${p.route}`, name: `Open ${p.title}`, icon: p.icon, run: () => navigateTo(pageRoute(p)) });
+  registerCommand({
+    id: `page.${p.route}`,
+    name: `Open ${p.title}`,
+    icon: p.icon,
+    run: () => {
+      useUi.getState().setDrawerOpen(false);
+      navigateTo(pageRoute(p));
+    },
+  });
   changed();
 }
 

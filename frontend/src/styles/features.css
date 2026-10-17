@@ -1376,6 +1376,154 @@ mark.match {
   overflow-wrap: anywhere;
 }
 
+/* ---------- status page (/x/status, DESIGN §6.18.1) ---------- */
+
+.status-page {
+  max-width: calc(64rem + 2 * var(--content-gutter));
+}
+
+.status-refresh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--font-ui-small);
+}
+
+.status-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.status-summary.is-ok,
+.status-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.status-summary.is-ok {
+  flex-direction: row;
+  align-items: center;
+  color: var(--text-success);
+}
+
+.status-problem.is-warning {
+  background: rgba(224, 172, 0, 0.1);
+  color: var(--text-warning);
+}
+
+.status-problem.is-error {
+  background: rgba(233, 49, 71, 0.1);
+  color: var(--text-error);
+}
+
+.status-problem svg,
+.status-summary.is-ok svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.status-summary.is-ok svg {
+  margin-top: 0;
+}
+
+.status-problem span {
+  overflow-wrap: anywhere;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.status-card {
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary-alt);
+}
+
+.status-card-title {
+  margin: 0 0 4px;
+  font-size: 1.05em;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.status-card .about-row {
+  grid-template-columns: 112px minmax(0, 1fr);
+}
+
+.status-card .about-row:last-child {
+  border-bottom: 0;
+}
+
+.status-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.status-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.status-list li + li {
+  margin-top: 2px;
+}
+
+.status-file-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--link);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.status-file-link:hover {
+  text-decoration: underline;
+}
+
+.status-error {
+  color: var(--text-error);
+}
+
+.status-pre {
+  white-space: pre-wrap;
+}
+
+.status-meter {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+
+.status-meter-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--interactive-accent);
+}
+
+.status-meter.is-low .status-meter-bar {
+  background: var(--text-error);
+}
+
 /* ---------- status bar, drawer, connection ---------- */
 
 .connection-indicator {
@@ -1519,9 +1667,18 @@ mark.match {
     justify-content: flex-start;
   }
 
-  .about-row {
+  .about-row,
+  .status-card .about-row {
     grid-template-columns: 1fr;
     gap: 2px;
+  }
+
+  .status-refresh .muted {
+    display: none;
+  }
+
+  .status-card {
+    padding: 10px 12px;
   }
 
   .trash-row {

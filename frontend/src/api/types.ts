@@ -94,6 +94,42 @@ export interface MirrorStatus {
   failingSince: IsoInstant | null;
 }
 
+// ---------- status page (§6.5) ----------
+export interface StatusDetails {
+  runtime: { javaVersion: string; javaVendor: string; aotCache: 'in-use' | 'not-used' | 'off' | 'unknown';
+             heapUsedBytes: number; heapMaxBytes: number; processors: number };
+  events: { clients: number };    // open live-sync (SSE) connections: browser tabs and app windows
+  git: { commits: number | null;  // in the history; null when history is off
+         commitsThisRun: number; failedCommitsThisRun: number;
+         largeFiles: Array<{ path: VaultPath; bytes: number }>;   // kept out of history, largest first, at most 100
+         largeFilesTruncated: boolean };
+  disk: { totalBytes: number | null };
+  backup: BackupStatus;
+  alerts: AlertsStatus;
+}
+
+export interface BackupStatus {
+  state: 'unknown' | 'ok' | 'failed' | 'stale';
+  reason: string | null;          // why it is unknown
+  lastRun: IsoInstant | null;
+  lastSuccess: IsoInstant | null;
+  snapshot: string | null;        // the restic snapshot id of the last run
+  offsite: string | null;         // 'ok', 'off' or 'failed'
+  failures: string | null;        // the failed steps of the last run
+}
+
+export interface AlertsStatus {
+  state: 'off' | 'on' | 'error';
+  reason: string | null;          // why it is off, or what is wrong with ntfy.json
+  server: string | null;          // the ntfy server; never the topic or the token
+  sent: number;                   // this server run
+  dropped: number;                // held back by the rate limit, this server run
+  lastSentAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+  recent: Array<{ marker: string; count: number; lastAt: IsoInstant }>;   // logged since the server started
+}
+
 // ---------- settings (§5) ----------
 export interface FilesSettings {
   newNoteLocation: 'root' | 'current' | 'folder';

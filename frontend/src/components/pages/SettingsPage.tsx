@@ -3,7 +3,7 @@
 // holds the per-device preferences and the recently discarded edits.
 import { ArrowLeft, Copy, Info, Laptop, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router';
+import { Link, NavLink, useLocation } from 'react-router';
 import { errorMessage } from '../../api/client';
 import { api } from '../../api/endpoints';
 import { useMe, useSettings, useStatus, useTree } from '../../api/hooks';
@@ -512,6 +512,7 @@ function AboutSection() {
           {status.vault.skipped.length > 0 && item('Skipped files', status.vault.skipped.map((s) => `${s.name} (${s.reason})`).join(', '))}
         </>
       )}
+      {item('Status page', <Link to="/x/status">Uptime, history, disk, backups and alerts</Link>)}
     </dl>
   );
 }

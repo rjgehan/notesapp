@@ -16,6 +16,8 @@ export const queryKeys = {
   settings: () => ['settings'] as const,
   me: () => ['me'] as const,
   status: () => ['status'] as const,
+  /** Under status(), so every invalidation of the status refreshes the status page too. */
+  statusDetails: () => ['status', 'details'] as const,
   templates: () => ['templates'] as const,
 };
 
@@ -32,5 +34,6 @@ export const STALE = {
   settings: Infinity,
   me: Infinity,
   status: 10_000,
+  statusDetails: 5_000,
   templates: 60_000,
 } as const;

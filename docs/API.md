@@ -388,6 +388,39 @@ No body. Pushes the history to the mirror now instead of waiting for the delay, 
 |---|
 | `400 bad-request` when the mirror is off (`detail` says why) |
 
+### 6.5 `GET /api/status/details`
+
+What the status page (`/x/status`, ROADMAP item 38) shows beyond §6.2. Some of it costs more to gather (the commit count walks the history; it is cached per `HEAD`), so the status bar never asks for it. `200 StatusDetails`:
+
+```json
+{
+  "runtime": { "javaVersion": "25.0.4.1+1-LTS", "javaVendor": "Eclipse Adoptium", "aotCache": "in-use",
+               "heapUsedBytes": 83886080, "heapMaxBytes": 805306368, "processors": 4 },
+  "events": { "clients": 3 },
+  "git": { "commits": 4312, "commitsThisRun": 12, "failedCommitsThisRun": 0,
+           "largeFiles": [ { "path": "Media/Talk.mp4", "bytes": 314572800 } ], "largeFilesTruncated": false },
+  "disk": { "totalBytes": 499963174912 },
+  "backup": { "state": "ok", "reason": null, "lastRun": "2026-10-17T08:00:41.000Z",
+              "lastSuccess": "2026-10-17T08:00:41.000Z", "snapshot": "4f1c2a9b", "offsite": "ok", "failures": null },
+  "alerts": { "state": "on", "reason": null, "server": "https://ntfy.sh", "sent": 2, "dropped": 0,
+              "lastSentAt": "2026-10-17T10:12:03.551Z", "lastError": null, "lastErrorAt": null,
+              "recent": [ { "marker": "GIT_MIRROR_FAILED", "count": 2, "lastAt": "2026-10-17T10:12:03.204Z" } ] }
+}
+```
+
+| Field | Values |
+|---|---|
+| `runtime.aotCache` | The JVM's AOT cache (DESIGN §7.1): `in-use`; `not-used` (the JVM was given the image's cache but could not use it, for example a cache made by another JVM build); `off` (no cache given: outside the image, or a JVM older than 25); `unknown` (the JVM does not say) |
+| `events.clients` | Open live-sync connections (§16): one per browser tab or app window, the asking one included |
+| `git.commits` | Commits reachable from `HEAD`; `null` when history is off. `commitsThisRun` and `failedCommitsThisRun` (failed commit attempts, retries included) count from the server's start. |
+| `git.largeFiles` | The files kept out of history (§14.1, DESIGN §5.8), largest first, at most 100; `largeFilesTruncated` when there are more. Their count and total are in `/api/status` (`git.largeFiles`). |
+| `disk.totalBytes` | The size of the vault's filesystem; `null` when it cannot be read. Free space is `disk.freeBytes` in §6.2. |
+| `backup` | The nightly backups (ROADMAP item 1), from the last run's `status.json`, mounted read-only into the app (DESIGN §7.10). `state`: `ok`; `failed` (the last run failed; `failures` lists the failed steps); `stale` (the last success is older than 36 hours, or there has been none); `unknown` (no status file: backups are not set up or not mounted; `reason` says so, and the other fields are `null`). `offsite` is `ok`, `off` (no off-site repository) or `failed`. |
+| `alerts` | App-error alerts (DESIGN §5.18.1). `state`: `on` (markers are pushed to ntfy at `server`); `off` (`reason`: `"not configured"` when there is no `ntfy.json`, or `"switched off in ntfy.json"`); `error` (`ntfy.json` exists but cannot be used; `reason` says why). `server` never contains the topic or the token. `sent`, `dropped` (held back by the rate limit), `lastSentAt`, `lastError` and `lastErrorAt` cover this server run. |
+| `alerts.recent` | The stable log markers (DESIGN §5.18) logged since the server started, whether or not alerts are on, most recent first |
+
+No `status.changed` event is sent for these fields: the page refreshes them every 30 seconds, and whenever it refreshes `/api/status`.
+
 ---
 
 ## 7. Tree (also the note list for the quick switcher and autocomplete)
@@ -1574,6 +1607,42 @@ export interface MirrorStatus {
   failingSince: IsoInstant | null;
 }
 
+// ---------- status page (§6.5) ----------
+export interface StatusDetails {
+  runtime: { javaVersion: string; javaVendor: string; aotCache: 'in-use' | 'not-used' | 'off' | 'unknown';
+             heapUsedBytes: number; heapMaxBytes: number; processors: number };
+  events: { clients: number };    // open live-sync (SSE) connections: browser tabs and app windows
+  git: { commits: number | null;  // in the history; null when history is off
+         commitsThisRun: number; failedCommitsThisRun: number;
+         largeFiles: Array<{ path: VaultPath; bytes: number }>;   // kept out of history, largest first, at most 100
+         largeFilesTruncated: boolean };
+  disk: { totalBytes: number | null };
+  backup: BackupStatus;
+  alerts: AlertsStatus;
+}
+
+export interface BackupStatus {
+  state: 'unknown' | 'ok' | 'failed' | 'stale';
+  reason: string | null;          // why it is unknown
+  lastRun: IsoInstant | null;
+  lastSuccess: IsoInstant | null;
+  snapshot: string | null;        // the restic snapshot id of the last run
+  offsite: string | null;         // 'ok', 'off' or 'failed'
+  failures: string | null;        // the failed steps of the last run
+}
+
+export interface AlertsStatus {
+  state: 'off' | 'on' | 'error';
+  reason: string | null;          // why it is off, or what is wrong with ntfy.json
+  server: string | null;          // the ntfy server; never the topic or the token
+  sent: number;                   // this server run
+  dropped: number;                // held back by the rate limit, this server run
+  lastSentAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+  recent: Array<{ marker: string; count: number; lastAt: IsoInstant }>;   // logged since the server started
+}
+
 // ---------- settings (§5) ----------
 export interface FilesSettings {
   newNoteLocation: 'root' | 'current' | 'folder';
@@ -1830,6 +1899,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 |---|---|---|---|---|
 | GET | `/api/me` | | 200 `MeResponse` | 6.1 |
 | GET | `/api/status` | | 200 `StatusResponse` | 6.2 |
+| GET | `/api/status/details` | | 200 `StatusDetails` | 6.5 |
 | POST | `/api/mirror/push` | | 202 `MirrorStatus` | 6.4 |
 | GET | `/api/settings` | | 200 `SettingsResponse` | 5 |
 | PUT | `/api/settings` | `SettingsUpdateRequest` | 200 `SettingsResponse` | 5 |
@@ -1878,6 +1948,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `MeResponse` | `MeResponse` | |
 | `StatusResponse`, `SkippedEntry` | `StatusResponse` with nested `VaultStats`, `IndexStats`, `GitStatus` (with nested `LargeFilesStats`), `WatcherStatus`, `DiskStatus`, `SettingsStatus`; `SkippedEntry(String name, SkipReason reason)` | Enums `GitState` and `SkipReason` serialize as their lower-case strings |
 | `MirrorStatus` | Same | Enum `MirrorState` serializes as its lower-case string |
+| `StatusDetails`, `BackupStatus`, `AlertsStatus` | `StatusDetails` with nested `RuntimeStatus`, `EventsStatus`, `GitDetails` (with nested `LargeFile`), `DiskDetails`; `BackupStatus`; `AlertsStatus` with nested `MarkerCount` | Enums `AotCacheState` (`in-use`, `not-used`, `off`, `unknown`), `BackupState` and `AlertsState` serialize as their lower-case strings |
 | `Settings`, `FilesSettings`, `DailyNotesSettings`, `TemplatesSettings`, `EditorSettings` | Same names in `com.rjgehan.notes.settings` | Enums: `NewNoteLocation`, `LinkFormat`, `AttachmentLocation`, `EditorMode` |
 | `SettingsResponse`, `SettingsUpdateRequest` | Same | |
 | `FileEntry`, `FolderEntry`, `TreeResponse` | Same | |

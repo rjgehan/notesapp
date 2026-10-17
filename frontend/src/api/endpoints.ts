@@ -26,6 +26,7 @@ import type {
   SearchResponse,
   SettingsResponse,
   SettingsUpdateRequest,
+  StatusDetails,
   StatusResponse,
   TagsResponse,
   TemplatesResponse,
@@ -65,6 +66,7 @@ export interface SearchOptions {
 export interface Endpoints {
   getMe(): Promise<MeResponse>;
   getStatus(): Promise<StatusResponse>;
+  getStatusDetails(): Promise<StatusDetails>;
   getSettings(): Promise<SettingsResponse>;
   putSettings(req: SettingsUpdateRequest): Promise<SettingsResponse>;
   getTree(): Promise<TreeResponse>;
@@ -104,6 +106,7 @@ const p = (path: string) => ({ path });
 export const httpEndpoints: Endpoints = {
   getMe: () => apiFetch('/api/me'),
   getStatus: () => apiFetch('/api/status'),
+  getStatusDetails: () => apiFetch('/api/status/details'),
   getSettings: () => apiFetch('/api/settings'),
   putSettings: (req) => apiFetch('/api/settings', { method: 'PUT', json: req }),
   getTree: () => apiFetch('/api/tree'),
