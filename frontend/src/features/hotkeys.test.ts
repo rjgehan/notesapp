@@ -53,6 +53,20 @@ describe('global hotkeys', () => {
     expect(local).not.toHaveBeenCalled();
   });
 
+  it('runs a command that asks for it (globalHotkey) inside text fields and the editor too', () => {
+    const add = vi.fn();
+    registerCommand({ id: 'test.quickAdd', name: 'Add task', hotkey: 'Mod-Alt-t', globalHotkey: true, run: add });
+    const editor = document.createElement('div');
+    editor.className = 'cm-editor';
+    const content = document.createElement('div');
+    editor.appendChild(content);
+    const input = document.createElement('input');
+    document.body.append(editor, input);
+    press(content, { key: 't', code: 'KeyT', altKey: true, ...mod });
+    press(input, { key: 't', code: 'KeyT', altKey: true, ...mod });
+    expect(add).toHaveBeenCalledTimes(2);
+  });
+
   it('runs F2 without modifiers and ignores plain keys', () => {
     const rename = vi.fn();
     registerCommand({ id: 'file.rename', name: 'Rename', hotkey: 'F2', run: rename });

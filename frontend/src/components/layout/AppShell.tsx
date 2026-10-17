@@ -8,10 +8,11 @@ import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } fr
 import { setFilePicker } from '../../features/attachments';
 import { runCommand } from '../../features/commands';
 import { useFocusRequests } from '../../features/focus';
-import { registeredPages, useExtensionsVersion } from '../../extensions';
+import { menuPages, registeredOverlays, useExtensionsVersion } from '../../extensions';
 import { activePath } from '../../features/navigation';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
 import { LEFT_WIDTH, RIGHT_WIDTH, useUi } from '../../state/ui';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { MoveDialog } from '../explorer/MoveDialog';
 import { CommandPalette } from '../overlays/CommandPalette';
 import { Dialogs } from '../overlays/Dialogs';
@@ -60,6 +61,7 @@ function Banners() {
 }
 
 function Overlays() {
+  useExtensionsVersion();
   const overlay = useUi((s) => s.overlay);
   return (
     <>
@@ -68,6 +70,12 @@ function Overlays() {
       {overlay === 'templates' && <TemplatePicker mode="insert" />}
       {overlay === 'templates-new' && <TemplatePicker mode="new" />}
       <MoveDialog />
+      {/* Hosts registered with registerOverlay (DESIGN §6.8): mounted once, dialogs portaled. */}
+      {registeredOverlays().map(({ id, component: Host }) => (
+        <ErrorBoundary key={id} label={`${id} dialog`} fallback={null}>
+          <Host />
+        </ErrorBoundary>
+      ))}
       <Dialogs />
     </>
   );
@@ -122,7 +130,7 @@ function LiveRegion() {
 function DrawerActions() {
   useExtensionsVersion();
   const run = (id: string) => runCommand(id, { activePath: activePath() });
-  const pages = registeredPages();
+  const pages = menuPages();
   return (
     <>
       <div className="drawer-actions">

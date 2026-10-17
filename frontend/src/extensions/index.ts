@@ -10,11 +10,16 @@ export { registerView, viewFor, registeredViews, type EmbedProps, type FileViewD
 export { registerCommand, type Command, type CommandContext } from '../features/commands';
 
 export interface PageDescriptor {
-  /** Route under /x/, e.g. 'tasks/today'. */
+  /** Route under /x/, e.g. 'tasks/today'; it may hold react-router params ('tasks/list/:id'). */
   route: string;
   title: string;
   icon: LucideIcon;
   load(): Promise<{ default: ComponentType }>;
+  /**
+   * A route only: no ribbon, drawer or palette entry. For pages reached from another page, such
+   * as one task list (`tasks/list/:id`), whose route cannot be opened without its params.
+   */
+  hidden?: boolean;
 }
 
 export interface PanelDescriptor {
@@ -30,10 +35,22 @@ export interface PanelDescriptor {
   component?: ComponentType<{ activePath: string | null }>;
 }
 
+/**
+ * A component the shell mounts once, for dialogs that belong to no page or panel (a feature's
+ * quick-add dialog, a detail sheet opened from anywhere). It renders nothing while closed, keeps
+ * its own open state, and must stay small: it lazy-loads its heavy parts itself. It is eager so
+ * that a dialog opened by a key press or a tap can focus its input inside that gesture (iOS).
+ */
+export interface OverlayDescriptor {
+  id: string;
+  component: ComponentType;
+}
+
 export type EventHandler = (data: unknown, eventId: string) => void;
 
 const pages: PageDescriptor[] = [];
 const panels: PanelDescriptor[] = [];
+const overlays: OverlayDescriptor[] = [];
 const eventHandlers = new Map<string, EventHandler[]>();
 const listeners = new Set<() => void>();
 let version = 0;
@@ -48,12 +65,20 @@ export function pageRoute(p: Pick<PageDescriptor, 'route'>): string {
   return '/x/' + p.route;
 }
 
-/** Adds a route under /x/, a ribbon and drawer entry, and a palette command. */
+/** Adds a route under /x/ and, unless the page is hidden, a ribbon and drawer entry and a palette command. */
 export function registerPage(p: PageDescriptor): void {
   const i = pages.findIndex((x) => x.route === p.route);
   if (i >= 0) pages.splice(i, 1, p);
   else pages.push(p);
-  registerCommand({ id: `page.${p.route}`, name: `Open ${p.title}`, icon: p.icon, run: () => navigateTo(pageRoute(p)) });
+  if (!p.hidden) registerCommand({ id: `page.${p.route}`, name: `Open ${p.title}`, icon: p.icon, run: () => navigateTo(pageRoute(p)) });
+  changed();
+}
+
+/** Mounts a dialog host in the shell (see OverlayDescriptor). */
+export function registerOverlay(o: OverlayDescriptor): void {
+  const i = overlays.findIndex((x) => x.id === o.id);
+  if (i >= 0) overlays.splice(i, 1, o);
+  else overlays.push(o);
   changed();
 }
 
@@ -76,8 +101,18 @@ export function registerEventHandler(name: string, fn: EventHandler): void {
   changed();
 }
 
+/** Every page, hidden ones included (the routes). */
 export function registeredPages(): readonly PageDescriptor[] {
   return pages;
+}
+
+/** The pages that get a ribbon and a drawer entry. */
+export function menuPages(): PageDescriptor[] {
+  return pages.filter((p) => !p.hidden);
+}
+
+export function registeredOverlays(): readonly OverlayDescriptor[] {
+  return overlays;
 }
 
 export function registeredPanels(side: 'left' | 'right'): PanelDescriptor[] {

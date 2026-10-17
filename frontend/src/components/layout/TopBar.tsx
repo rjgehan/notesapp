@@ -3,7 +3,8 @@
 // On tablets it also toggles the right sidebar overlay.
 import { CalendarDays, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useLocation } from 'react-router';
+import { matchPath, useLocation } from 'react-router';
+import { registeredPages } from '../../extensions';
 import { useTree } from '../../api/hooks';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
 import { setNoteMode, useNoteMode } from '../../features/noteMode';
@@ -103,7 +104,18 @@ export function TopBar() {
   const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen]);
   const descriptor = entry && !pending ? viewFor(entry) : null;
   const phone = useBreakpoint() === 'phone';
-  const title = pending ? pending.title || 'New note' : path ? displayName(path) : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
+  const page = location.pathname.startsWith('/x/') ? registeredPages().find((p) => matchPath(`/x/${p.route}`, location.pathname)) : undefined;
+  const title = pending
+    ? pending.title || 'New note'
+    : path
+      ? displayName(path)
+      : location.pathname.startsWith('/settings')
+        ? 'Settings'
+        : location.pathname === '/trash'
+          ? 'Trash'
+          : location.pathname === '/search'
+            ? 'Search'
+            : (page?.title ?? 'Notes');
 
   return (
     <header className="top-bar">

@@ -4,6 +4,8 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 interface Props {
   label: string;
   children: ReactNode;
+  /** Rendered instead of the error panel (an overlay host shows nothing rather than a panel in the shell's grid). */
+  fallback?: ReactNode;
 }
 
 interface State {
@@ -25,6 +27,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   override render(): ReactNode {
     if (!this.state.error) return this.props.children;
+    if (this.props.fallback !== undefined) return this.props.fallback;
     return (
       <div className="error-panel" role="alert">
         <p className="error-panel-title">Something went wrong in this {this.props.label}.</p>

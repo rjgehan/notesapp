@@ -1,7 +1,7 @@
 // Ribbon (desktop) and collapsed icon rail (tablet): one tap to every entry point (DESIGN §6.5,
 // §6.16). Entries appear once their command or page is registered.
 import { CalendarDays, Command as CommandIcon, FilePlus, FileSearch, LayoutTemplate, Moon, PanelLeft, Search, Settings, Sun, Trash, type LucideIcon } from 'lucide-react';
-import { pageRoute, registeredPages, useExtensionsVersion } from '../../extensions';
+import { menuPages, pageRoute, useExtensionsVersion } from '../../extensions';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
 import { activePath, navigateTo } from '../../features/navigation';
 import { keyLabel } from '../../features/platform';
@@ -54,7 +54,7 @@ export function Ribbon() {
         {TOP.map(([id, icon]) => (
           <RibbonButton key={id} id={id} icon={icon} />
         ))}
-        {registeredPages().map((p) => {
+        {menuPages().map((p) => {
           const Icon = p.icon;
           return (
             <button key={p.route} type="button" className="ribbon-button" aria-label={p.title} title={p.title} onClick={() => navigateTo(pageRoute(p))}>
