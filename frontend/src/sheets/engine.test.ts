@@ -465,7 +465,7 @@ describe('replace', () => {
     wb.replace(
       edit(wb, (f) => {
         f.sheets[0].cells.B2 = { v: 2 };
-        f.sheets.push({ id: 'sx', name: 'Theirs', cells: { A1: { f: '=Budget!B2' } }, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 } });
+        f.sheets.push({ id: 'sx', name: 'Theirs', cells: { A1: { f: '=Budget!B2' } }, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 }, charts: {} });
       }),
       { undoable: true },
     );
@@ -493,11 +493,98 @@ describe('replace', () => {
   it('applies sheets added and removed elsewhere', () => {
     const wb = Workbook.open(file(BUDGET));
     const next = edit(wb, (f) => {
-      f.sheets = [{ id: 'sy', name: 'Fresh', cells: { A1: { v: 3 }, A2: { f: '=A1*3' } }, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 } }];
+      f.sheets = [{ id: 'sy', name: 'Fresh', cells: { A1: { v: 3 }, A2: { f: '=A1*3' } }, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 }, charts: {} }];
       f.named = {};
     });
     wb.replace(next, { undoable: false });
     expect(wb.file.sheets.map((s) => s.name)).toEqual(['Fresh']);
     expect(value(wb, 'A2', 'sy')).toBe(9);
+  });
+});
+
+describe('number formats and charts (6c)', () => {
+  it('sets and removes cell formats without touching contents or cached values', () => {
+    const wb = Workbook.open(file(BUDGET));
+    const seen: WorkbookChange[] = [];
+    wb.subscribe((c) => seen.push(c));
+    wb.setFormats([
+      { sheet: 's1', ref: 'B10', fmt: '$#,##0' },
+      { sheet: 's1', ref: 'C1', fmt: '0%' },
+    ]);
+    expect(wb.cell('s1', 'B10')).toEqual({ f: '=SUM(B2:B9)', c: 1937.5, fmt: '$#,##0' });
+    expect(wb.cell('s1', 'C1')).toEqual({ fmt: '0%' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].cells?.get('s1')).toEqual(new Set(['B10', 'C1']));
+    wb.undo();
+    expect(wb.cell('s1', 'B10')).toEqual({ f: '=SUM(B2:B9)', c: 1937.5 });
+    expect(wb.cell('s1', 'C1')).toBeUndefined();
+    wb.redo();
+    wb.setFormats([{ sheet: 's1', ref: 'C1', fmt: null }]);
+    expect(wb.cell('s1', 'C1')).toBeUndefined();
+    expect(() => wb.setFormats([{ sheet: 's1', ref: 'nope', fmt: '0' }])).toThrow();
+  });
+
+  it('formats a spilled value without breaking the spill', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { f: '=SEQUENCE(3)' } } }]);
+    wb.setFormats([{ sheet: 's1', ref: 'A2', fmt: '0.00' }]);
+    expect(wb.cell('s1', 'A2')).toEqual({ c: 2, fmt: '0.00' });
+    wb.setCell('s1', 'A1', { f: '=SEQUENCE(3, 1, 10, 10)' });
+    expect(wb.cell('s1', 'A2')).toEqual({ c: 20, fmt: '0.00' });
+    expect(value(wb, 'A3')).toBe(30);
+  });
+
+  it('keeps a cell’s format when its content changes, and takes a typed one when asked', () => {
+    const wb = Workbook.open(file(BUDGET));
+    wb.setFormats([{ sheet: 's1', ref: 'B2', fmt: '$#,##0.00' }]);
+    wb.setCell('s1', 'B2', { v: 1500 });
+    expect(wb.cell('s1', 'B2')).toEqual({ v: 1500, fmt: '$#,##0.00' });
+    wb.setCell('s1', 'B2', null);
+    expect(wb.cell('s1', 'B2')).toEqual({ fmt: '$#,##0.00' });
+    wb.setCells([{ sheet: 's1', ref: 'B2', content: { v: 0.1 }, fmt: '0%' }]);
+    expect(wb.cell('s1', 'B2')).toEqual({ v: 0.1, fmt: '0%' });
+    wb.setCells([{ sheet: 's1', ref: 'B2', content: { v: 3 }, fmt: null }]);
+    expect(wb.cell('s1', 'B2')).toEqual({ v: 3 });
+    expect(value(wb, 'B10')).toBe(490.5);
+  });
+
+  it('adds, changes and removes charts as undoable steps', () => {
+    const wb = Workbook.open(file(BUDGET));
+    const id = wb.addChart('s1', { type: 'bar', range: 'A1:B3', headers: true, labels: true });
+    expect(wb.file.sheets[0].charts[id]).toEqual({ type: 'bar', range: 'A1:B3', headers: true, labels: true });
+    wb.setChart('s1', id, { type: 'pie', range: 'A1:B3', title: 'Split' });
+    expect(wb.file.sheets[0].charts[id]).toEqual({ type: 'pie', range: 'A1:B3', title: 'Split' });
+    wb.undo();
+    expect(wb.file.sheets[0].charts[id].type).toBe('bar');
+    wb.setChart('s1', id, null);
+    expect(wb.file.sheets[0].charts).toEqual({});
+    wb.undo();
+    expect(Object.keys(wb.file.sheets[0].charts)).toEqual([id]);
+    expect(wb.serialize()).toContain(`"${id}": { "type": "bar", "range": "A1:B3", "headers": true, "labels": true }`);
+  });
+
+  it('brings back a removed sheet’s charts and formats with it', () => {
+    const wb = Workbook.open(file(BUDGET));
+    const s2 = wb.addSheet('Extra');
+    wb.setCells([{ sheet: s2, ref: 'A1', content: { v: 0.5 }, fmt: '0%' }]);
+    const chart = wb.addChart(s2, { type: 'line', range: 'A1:A1' });
+    wb.removeSheet(s2);
+    expect(wb.file.sheets).toHaveLength(1);
+    wb.undo();
+    const back = wb.file.sheets[1];
+    expect(back.cells.A1).toEqual({ v: 0.5, fmt: '0%' });
+    expect(back.charts[chart]).toEqual({ type: 'line', range: 'A1:A1' });
+  });
+
+  it('takes formats and charts from another device’s file', () => {
+    const wb = Workbook.open(file(BUDGET));
+    const next = file(JSON.parse(wb.serialize()));
+    next.sheets[0].cells.B10 = { ...next.sheets[0].cells.B10, fmt: '0.0' };
+    next.sheets[0].charts = { c1: { type: 'pie', range: 'A2:B3', labels: true } };
+    const seen: WorkbookChange[] = [];
+    wb.subscribe((c) => seen.push(c));
+    wb.replace(next, { undoable: false });
+    expect(wb.cell('s1', 'B10')).toEqual({ f: '=SUM(B2:B9)', c: 1937.5, fmt: '0.0' });
+    expect(wb.file.sheets[0].charts).toEqual({ c1: { type: 'pie', range: 'A2:B3', labels: true } });
+    expect(seen[0].layout).toBe(true);
   });
 });

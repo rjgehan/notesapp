@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearEdits, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, usedExtent } from './edits';
+import { clearEdits, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, typedEdit, usedExtent } from './edits';
 import { emptySheet, type Sheet, type SheetCell } from './format';
 
 function sheet(cells: Record<string, SheetCell>): Sheet {
@@ -117,5 +117,40 @@ describe('copy and paste', () => {
 
   it('pastes nothing for empty text', () => {
     expect(pasteEdits(s, { col: 0, row: 0, width: 1, height: 1 }, '', null).edits).toEqual([]);
+  });
+});
+
+describe('number formats in fill, copy and paste (6c)', () => {
+  it('fills formats along with contents, and only where they differ', () => {
+    const s = sheet({ A1: { v: 0.5, fmt: '0%' }, A2: { v: 1 }, A3: { v: 0.5, fmt: '0%' } });
+    expect(fillEdits(s, { col: 0, row: 0, width: 1, height: 1 }, { col: 0, row: 0, width: 1, height: 3 })).toEqual([{ ...edit('A2', { v: 0.5 }), fmt: '0%' }]);
+    const t = sheet({ A1: { v: 1 }, A2: { v: 1, fmt: '0.00' } });
+    expect(fillEdits(t, { col: 0, row: 0, width: 1, height: 1 }, { col: 0, row: 0, width: 1, height: 2 })).toEqual([{ ...edit('A2', { v: 1 }), fmt: null }]);
+  });
+
+  it('copies values as they show and pastes its own copy with the cells’ formats', () => {
+    const s = sheet({ A1: { v: 1450, fmt: '$#,##0.00' }, B1: { v: 46312 } });
+    const clip = copyRange(s, { col: 0, row: 0, width: 2, height: 1 });
+    expect(clip.text).toBe('$1,450.00\t46312');
+    expect(pasteEdits(s, { col: 0, row: 4, width: 1, height: 1 }, clip.text, clip).edits).toEqual([{ ...edit('A5', { v: 1450 }), fmt: '$#,##0.00' }, edit('B5', { v: 46312 })]);
+  });
+
+  it('reads pasted text with the formats it implies, unless the cell already has a format', () => {
+    const s = sheet({ B1: { fmt: '0.0' } });
+    const { edits } = pasteEdits(s, { col: 0, row: 0, width: 1, height: 1 }, '$1,450.00\t12%\t2026-10-17', null);
+    expect(edits).toEqual([{ ...edit('A1', { v: 1450 }), fmt: '$#,##0.00' }, edit('B1', { v: 0.12 }), { ...edit('C1', { v: 46312 }), fmt: 'yyyy-mm-dd' }]);
+  });
+
+  it('takes text as it is in a plain-text cell', () => {
+    const s = { ...sheet({}), cols: { A: { fmt: '@' } } };
+    expect(typedEdit(s, 0, 0, '007')).toEqual(edit('A1', { v: '007' }));
+    expect(typedEdit(s, 1, 0, '007')).toEqual(edit('B1', { v: 7 }));
+    expect(typedEdit(s, 1, 0, '5%')).toEqual({ ...edit('B1', { v: 0.05 }), fmt: '0%' });
+  });
+
+  it('counts only cells that show something for the extent of values', () => {
+    const s = sheet({ A1: { v: 1 }, D9: { fmt: '0%' } });
+    expect(usedExtent(s)).toEqual({ rows: 8, cols: 3 });
+    expect(usedExtent(s, { values: true })).toEqual({ rows: 0, cols: 0 });
   });
 });

@@ -24,6 +24,7 @@ import { MAX_COLUMNS, MAX_ROWS, parseA1, toA1 } from './a1';
 import {
   emptySheet,
   isEmptyCell,
+  newChartId,
   newSheetId,
   nextSheetName,
   sameName,
@@ -31,6 +32,7 @@ import {
   sheetById,
   sheetNameProblem,
   type CachedValue,
+  type ChartProps,
   type ColumnProps,
   type Extra,
   type Frozen,
@@ -78,6 +80,7 @@ type Change =
   | { kind: 'cell'; id: string; ref: string; before?: SheetCell; after?: SheetCell }
   | { kind: 'col'; id: string; key: string; before?: ColumnProps; after?: ColumnProps }
   | { kind: 'row'; id: string; key: string; before?: RowProps; after?: RowProps }
+  | { kind: 'chart'; id: string; key: string; before?: ChartProps; after?: ChartProps }
   | { kind: 'named'; name: string; before?: string; after?: string }
   | { kind: 'extra'; key: string; before?: Json; after?: Json };
 
@@ -93,6 +96,7 @@ function slotKey(c: Change): string {
       return `cell:${c.id}:${c.ref}`;
     case 'col':
     case 'row':
+    case 'chart':
       return `${c.kind}:${c.id}:${c.key}`;
     case 'named':
       return `named:${c.name}`;
@@ -126,7 +130,7 @@ function meta(s: Sheet): SheetMeta {
   return m;
 }
 
-function diffKeyed<T>(kind: 'col' | 'row', id: string, a: Record<string, T>, b: Record<string, T>, out: Patch): void {
+function diffKeyed<T>(kind: 'col' | 'row' | 'chart', id: string, a: Record<string, T>, b: Record<string, T>, out: Patch): void {
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
     if (!same(a[key], b[key])) out.push({ kind, id, key, before: a[key], after: b[key] } as Change);
   }
@@ -150,6 +154,7 @@ function diff(a: SheetFile, b: SheetFile): Patch {
     }
     diffKeyed('col', id, sa?.cols ?? {}, sb?.cols ?? {}, out);
     diffKeyed('row', id, sa?.rows ?? {}, sb?.rows ?? {}, out);
+    diffKeyed('chart', id, sa?.charts ?? {}, sb?.charts ?? {}, out);
   }
   const oa = a.sheets.map((s) => s.id);
   const ob = b.sheets.map((s) => s.id);
@@ -216,6 +221,15 @@ export interface CellEdit {
   ref: string;
   /** The new value or formula; null clears the cell (its formatting stays). */
   content: Pick<SheetCell, 'v' | 'f'> | null;
+  /** A new number format for the cell (null removes it); left out, the cell keeps its own. */
+  fmt?: string | null;
+}
+
+export interface FormatEdit {
+  sheet: string;
+  ref: string;
+  /** The cell's number format; null removes it (the row's or column's applies again). */
+  fmt: string | null;
 }
 
 function noteCell(change: WorkbookChange, id: string, ref: string): void {
@@ -313,22 +327,55 @@ export class Workbook {
   /** Several cells as one undo step (a paste, a fill, clearing a selection). */
   setCells(edits: CellEdit[]): void {
     const patch: Patch = [];
-    for (const { sheet: id, ref, content: next } of edits) {
+    for (const { sheet: id, ref, content: next, fmt } of edits) {
       const sheet = this.requireSheet(id);
       if (!parseA1(ref)) throw new Error(`Not a cell reference: ${ref}`);
       if (next?.f !== undefined && !next.f.startsWith('=')) throw new Error('A formula starts with "=".');
       if (typeof next?.v === 'number' && !Number.isFinite(next.v)) throw new Error('Not a number.');
       const before = content(sheet.cells[ref]);
       // Formatting and unknown keys stay with the cell; what it held is replaced.
-      const kept = Object.entries(before?.extra ?? {}).filter(([k]) => k !== 'v' && k !== 'f' && k !== 'c');
+      const kept = Object.entries(before?.extra ?? {}).filter(([k]) => k !== 'v' && k !== 'f' && k !== 'c' && k !== 'fmt');
       const after: SheetCell = {};
       if (next?.f !== undefined) after.f = next.f;
       else if (next?.v !== undefined) after.v = next.v;
+      const format = fmt === undefined ? before?.fmt : (fmt ?? undefined);
+      if (format !== undefined) after.fmt = format;
       if (kept.length > 0) after.extra = Object.fromEntries(kept);
       const cleaned = content(after);
       if (!same(before, cleaned)) patch.push({ kind: 'cell', id, ref, before, after: cleaned });
     }
     this.record(patch);
+  }
+
+  /** Sets or removes the number format of cells, as one undo step; their contents stay. */
+  setFormats(edits: FormatEdit[]): void {
+    const patch: Patch = [];
+    for (const { sheet: id, ref, fmt } of edits) {
+      const sheet = this.requireSheet(id);
+      if (!parseA1(ref)) throw new Error(`Not a cell reference: ${ref}`);
+      const before = content(sheet.cells[ref]);
+      const after: SheetCell = { ...before };
+      if (fmt === null) delete after.fmt;
+      else after.fmt = fmt;
+      const cleaned = content(after);
+      if (!same(before, cleaned)) patch.push({ kind: 'cell', id, ref, before, after: cleaned });
+    }
+    this.record(patch);
+  }
+
+  /** Adds a chart to a sheet and returns its id. */
+  addChart(sheetId: string, props: ChartProps): string {
+    const sheet = this.requireSheet(sheetId);
+    const key = newChartId(sheet);
+    this.record([{ kind: 'chart', id: sheetId, key, after: { ...props } }]);
+    return key;
+  }
+
+  /** Changes (or, with null, removes) a chart. */
+  setChart(sheetId: string, key: string, props: ChartProps | null): void {
+    const sheet = this.requireSheet(sheetId);
+    const after = props ? { ...props } : undefined;
+    if (!same(sheet.charts[key], after)) this.record([{ kind: 'chart', id: sheetId, key, before: sheet.charts[key], after }]);
   }
 
   /** Adds a sheet after the last one and returns its id. */
@@ -364,6 +411,7 @@ export class Workbook {
     }
     for (const [key, before] of Object.entries(sheet.cols)) patch.push({ kind: 'col', id, key, before });
     for (const [key, before] of Object.entries(sheet.rows)) patch.push({ kind: 'row', id, key, before });
+    for (const [key, before] of Object.entries(sheet.charts)) patch.push({ kind: 'chart', id, key, before });
     patch.push({ kind: 'sheet', id, before: meta(sheet) }, { kind: 'order', before: order, after: order.filter((x) => x !== id) });
     this.record(patch);
   }
@@ -559,6 +607,16 @@ export class Workbook {
         case 'cell': {
           const sheet = sheetById(this.model, c.id);
           if (!sheet) break;
+          if (c.before?.v === c.after?.v && c.before?.f === c.after?.f) {
+            // Only the format (or an unknown key) changed: the engine and the cached value stay.
+            const next: SheetCell = { ...c.after };
+            const cached = sheet.cells[c.ref]?.c;
+            if (cached !== undefined) next.c = cached;
+            if (isEmptyCell(next)) delete sheet.cells[c.ref];
+            else sheet.cells[c.ref] = next;
+            noteCell(change, c.id, c.ref);
+            break;
+          }
           if (c.after) sheet.cells[c.ref] = { ...c.after };
           else delete sheet.cells[c.ref];
           const refs = cells.get(c.id) ?? new Set<string>();
@@ -568,10 +626,11 @@ export class Workbook {
           break;
         }
         case 'col':
-        case 'row': {
+        case 'row':
+        case 'chart': {
           const sheet = sheetById(this.model, c.id);
           if (!sheet) break;
-          const map: Record<string, ColumnProps | RowProps> = c.kind === 'col' ? sheet.cols : sheet.rows;
+          const map: Record<string, ColumnProps | RowProps | ChartProps> = c.kind === 'col' ? sheet.cols : c.kind === 'row' ? sheet.rows : sheet.charts;
           if (c.after) map[c.key] = c.after;
           else delete map[c.key];
           change.layout = true;

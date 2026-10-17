@@ -215,6 +215,38 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
   return out;
 }
 
+/**
+ * `formula` with references to sheet `from` (any case, quoted or not) pointing at `to` instead: an
+ * imported sheet that had to be renamed keeps its formulas. Strings are never changed.
+ */
+export function renameSheetInFormula(formula: string, from: string, to: string): string {
+  if (!formula.startsWith('=')) return formula;
+  const target = formulaSheetName(to);
+  const matches = (name: string) => name.toLowerCase() === from.toLowerCase();
+  let out = '';
+  let i = 0;
+  while (i < formula.length) {
+    const ch = formula[i];
+    if (ch === '"' || ch === "'") {
+      const end = quotedEnd(formula, i);
+      const quoted = formula.slice(i, end);
+      if (ch === "'" && formula[end] === '!' && matches(quoted.slice(1, -1).replace(/''/g, "'"))) out += target;
+      else out += quoted;
+      i = end;
+      continue;
+    }
+    if (isWordChar(ch) && !isWordChar(formula[i - 1])) {
+      const word = readWord(formula, i);
+      out += formula[i + word.length] === '!' && matches(word) ? target : word;
+      i += word.length;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 // ---------- ranges as text ----------
 
 /** `B3`, or `B3:D7` for a larger range. */

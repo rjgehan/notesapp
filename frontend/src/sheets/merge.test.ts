@@ -175,7 +175,7 @@ describe('mergeSheetText', () => {
 
   describe('sheets', () => {
     const add = (f: SheetFile, id: string, name: string, after?: string) => {
-      const sheet = { id, name, cells: { A1: { v: name } }, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 } };
+      const sheet = { id, name, cells: { A1: { v: name } }, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 }, charts: {} };
       const at = after ? f.sheets.findIndex((s) => s.id === after) + 1 : f.sheets.length;
       f.sheets.splice(at, 0, sheet);
     };
@@ -275,5 +275,65 @@ describe('mergeSheetText', () => {
     )!;
     const result = parseSheet(text);
     expect(result.ok && serializeSheet(result.file)).toBe(text);
+  });
+});
+
+describe('mergeSheetText with formats and charts (6c)', () => {
+  it('merges a format set on one side with a value typed on the other, and conflicts on two formats', () => {
+    const merged = merge(
+      (f) => (budget(f).cells.B2 = { v: 1450, fmt: '$#,##0.00' }),
+      (f) => (budget(f).cells.B2 = { v: 1500 }),
+    )!;
+    expect(budget(merged).cells.B2).toEqual({ v: 1500, fmt: '$#,##0.00' });
+    // The calculation inputs are theirs, so their cached values are exact.
+    expect(merged.engine).toBe(ENGINE);
+    expect(
+      merge(
+        (f) => (budget(f).cells.B2 = { v: 1450, fmt: '$#,##0.00' }),
+        (f) => (budget(f).cells.B2 = { v: 1450, fmt: '0.0' }),
+      ),
+    ).toBeNull();
+    expect(
+      merge(
+        (f) => (budget(f).cells.B2 = { v: 1, fmt: '0.0' }),
+        (f) => (budget(f).cells.B2 = { v: 2 }),
+      ),
+    ).toBeNull();
+  });
+
+  it('merges formats of different cells and keeps the exact cache when only formats changed', () => {
+    const merged = merge(
+      (f) => (budget(f).cells.B2 = { v: 1450, fmt: '$#,##0.00' }),
+      (f) => (budget(f).cells.B10 = { ...budget(f).cells.B10, fmt: '$#,##0' }),
+    )!;
+    expect(budget(merged).cells.B2).toEqual({ v: 1450, fmt: '$#,##0.00' });
+    expect(budget(merged).cells.B10).toEqual({ f: '=SUM(B2:B9)', c: 1750, fmt: '$#,##0' });
+    // Formats are not calculation inputs: the cached values stay exact.
+    expect(merged.engine).toBe(ENGINE);
+  });
+
+  it('merges charts per chart, and conflicts on two different changes of one chart', () => {
+    const withChart = (f: SheetFile) => (budget(f).charts.c1 = { type: 'bar', range: 'A1:B3', headers: true, labels: true });
+    const merged = merge(
+      (f) => {
+        withChart(f);
+      },
+      (f) => (budget(f).charts.c2 = { type: 'pie', range: 'A2:B3', labels: true }),
+    )!;
+    expect(Object.keys(budget(merged).charts)).toEqual(['c1', 'c2']);
+    expect(merged.engine).toBe(ENGINE);
+
+    const text = (edit: (f: SheetFile) => void) => {
+      const file = base();
+      withChart(file);
+      edit(file);
+      return serializeSheet(file);
+    };
+    const chartBase = text(() => {});
+    const retitled = text((f) => (budget(f).charts.c1.title = 'Costs'));
+    const repied = text((f) => (budget(f).charts.c1.type = 'pie'));
+    expect(mergeSheetText(chartBase, retitled, repied)).toBeNull();
+    const removed = text((f) => delete budget(f).charts.c1);
+    expect(mergeSheetText(chartBase, removed, text((f) => (budget(f).cells.A9 = { v: 'x' })))).toContain('"A9"');
   });
 });

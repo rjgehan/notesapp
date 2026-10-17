@@ -4,6 +4,7 @@ import {
   cellText,
   cellValue,
   formulaSheetName,
+  newChartId,
   newSheetFile,
   newSheetId,
   nextSheetName,
@@ -182,7 +183,7 @@ describe('parseSheet', () => {
 
     it('keeps unknown keys at every level', () => {
       const raw = withSheet(
-        { cells: { A1: { v: 1, s: { bg: '#fff' } } }, cols: { A: { w: 90, hidden: true } }, rows: { '1': { bold: true, wrap: 'clip' } }, charts: [{ type: 'bar' }] },
+        { cells: { A1: { v: 1, s: { bg: '#fff' } } }, cols: { A: { w: 90, hidden: true } }, rows: { '1': { bold: true, wrap: 'clip' } }, rules: [{ type: 'colorScale' }] },
         { named: {}, theme: { accent: 'teal' } },
       );
       const { file, repairs } = parse(raw);
@@ -190,7 +191,7 @@ describe('parseSheet', () => {
       const again = parse(serializeSheet(file)).file;
       expect(again).toEqual(file);
       expect(again.extra).toEqual({ theme: { accent: 'teal' } });
-      expect(again.sheets[0].extra).toEqual({ charts: [{ type: 'bar' }] });
+      expect(again.sheets[0].extra).toEqual({ rules: [{ type: 'colorScale' }] });
       expect(again.sheets[0].cells.A1.extra).toEqual({ s: { bg: '#fff' } });
       expect(again.sheets[0].cols.A.extra).toEqual({ hidden: true });
       expect(again.sheets[0].rows['1'].extra).toEqual({ wrap: 'clip' });
@@ -368,5 +369,81 @@ describe('sheet names and ids', () => {
     expect(nextSheetName(file)).toBe('Sheet2');
     file.sheets.push({ ...file.sheets[0], id: 's2', name: 'sheet2' });
     expect(nextSheetName(file)).toBe('Sheet3');
+  });
+});
+
+describe('number formats and charts (6c)', () => {
+  it('reads and writes a cell format after the value, and keeps a cell that only has one', () => {
+    const { file, repairs } = parse(withSheet({ cells: { A1: { v: 0.25, fmt: '0%' }, B2: { fmt: 'yyyy-mm-dd' }, C3: { f: '=A1', c: 0.25, fmt: '0.0%' } } }));
+    expect(repairs).toEqual([]);
+    expect(file.sheets[0].cells).toEqual({ A1: { v: 0.25, fmt: '0%' }, B2: { fmt: 'yyyy-mm-dd' }, C3: { f: '=A1', c: 0.25, fmt: '0.0%' } });
+    const text = serializeSheet(file);
+    expect(text).toContain('"A1": { "v": 0.25, "fmt": "0%" },');
+    expect(text).toContain('"B2": { "fmt": "yyyy-mm-dd" },');
+    expect(text).toContain('"C3": { "f": "=A1", "c": 0.25, "fmt": "0.0%" }');
+    expect(parse(text).file).toEqual(file);
+  });
+
+  it('keeps an unusable cell format aside', () => {
+    const { file, repairs } = parse(withSheet({ cells: { A1: { v: 1, fmt: 7 } } }));
+    expect(file.sheets[0].cells.A1).toEqual({ v: 1, extra: { fmt: 7 } });
+    expect(repairs).toHaveLength(1);
+    expect(serializeSheet(file)).toContain('"A1": { "v": 1, "fmt": 7 }');
+  });
+
+  it('reads charts keyed by id and writes them after the frozen panes, in id order', () => {
+    const { file, repairs } = parse(
+      withSheet({
+        cells: { A1: { v: 'x' } },
+        charts: {
+          c2: { type: 'pie', range: 'A1:B4', title: 'Split', labels: true },
+          c1: { type: 'bar', range: 'A1:C7', headers: true, labels: false, legend: 'top' },
+        },
+      }),
+    );
+    expect(repairs).toEqual([]);
+    expect(file.sheets[0].charts).toEqual({
+      c1: { type: 'bar', range: 'A1:C7', headers: true, labels: false, extra: { legend: 'top' } },
+      c2: { type: 'pie', range: 'A1:B4', title: 'Split', labels: true },
+    });
+    const text = serializeSheet(file);
+    expect(text).toContain(`      "frozen": { "rows": 0, "cols": 0 },
+      "charts": {
+        "c1": { "type": "bar", "range": "A1:C7", "headers": true, "labels": false, "legend": "top" },
+        "c2": { "type": "pie", "range": "A1:B4", "title": "Split", "labels": true }
+      }
+    }`);
+    expect(parse(text).file).toEqual(file);
+  });
+
+  it('writes no charts key for a sheet without charts, as earlier versions did', () => {
+    const text = serializeSheet(parse(withSheet({ charts: {} })).file);
+    expect(text).not.toContain('charts');
+  });
+
+  it('keeps unusable chart values aside and refuses a chart that is not an object', () => {
+    const { file, repairs } = parse(withSheet({ charts: { c1: { type: 'donut', range: 5, title: 'T', headers: 'yes' } } }));
+    expect(file.sheets[0].charts.c1).toEqual({ title: 'T', extra: { type: 'donut', range: 5, headers: 'yes' } });
+    expect(repairs).toHaveLength(3);
+    expect(serializeSheet(file)).toContain('"c1": { "title": "T", "type": "donut", "range": 5, "headers": "yes" }');
+    expect(refusal(withSheet({ charts: { c1: 'bar' } }))).toMatch(/charts c1 is not an object/);
+  });
+
+  it('keeps a charts value that is not an object aside, written back while the sheet has no charts', () => {
+    const { file, repairs } = parse(withSheet({ charts: [{ type: 'bar' }] }));
+    expect(repairs).toHaveLength(1);
+    expect(file.sheets[0].charts).toEqual({});
+    expect(file.sheets[0].extra).toEqual({ charts: [{ type: 'bar' }] });
+    const again = parse(serializeSheet(file));
+    expect(again.file).toEqual(file);
+  });
+
+  it('makes chart ids that sort in the order the charts were made', () => {
+    const sheet = { charts: {} };
+    const first = newChartId(sheet, 1_700_000_000_000);
+    const second = newChartId(sheet, 1_700_000_000_001);
+    const later = newChartId(sheet, 2_000_000_000_000);
+    expect([later, second, first].sort()).toEqual([first, second, later]);
+    expect(first).toMatch(/^c[0-9a-z]{12}$/);
   });
 });

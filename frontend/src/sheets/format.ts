@@ -4,6 +4,7 @@
 // sheets in order and cells in row-major order, one cell per line, so a one-cell edit is a
 // one-line diff. Nothing here loads the engine: embeds, search and merges work from this module.
 import { compareA1, compareColumns, normalizeA1, normalizeColumnKey, normalizeRowKey } from './a1';
+import { numberText, typedInput } from './input';
 
 export const SHEET_TYPE = 'notesapp-sheet';
 export const SHEET_VERSION = 1;
@@ -29,6 +30,8 @@ export interface SheetCell {
   f?: string;
   /** Cached result of the formula, or of an array formula spilling into this cell (a cell with only `c`). */
   c?: CachedValue;
+  /** Number format, such as `0.0%`; before the row's and the column's (DESIGN §6.21.8). */
+  fmt?: string;
   extra?: Extra;
 }
 
@@ -54,6 +57,22 @@ export interface Frozen {
   cols: number;
 }
 
+export const CHART_TYPES = ['bar', 'line', 'pie'] as const;
+export type ChartType = (typeof CHART_TYPES)[number];
+
+/** A chart of a range of its sheet (DESIGN §6.21.9). */
+export interface ChartProps {
+  type?: ChartType;
+  /** A range of the chart's own sheet, such as `A1:C7`. */
+  range?: string;
+  title?: string;
+  /** The range's first row names the series. */
+  headers?: boolean;
+  /** The range's first column labels the categories (the slices of a pie). */
+  labels?: boolean;
+  extra?: Extra;
+}
+
 export interface Sheet {
   /** Stable identity for merges; formulas refer to sheets by name. */
   id: string;
@@ -65,6 +84,8 @@ export interface Sheet {
   /** Keyed by 1-based row numbers. */
   rows: Record<string, RowProps>;
   frozen: Frozen;
+  /** Keyed by chart id; shown in id order. Written only when there are any. */
+  charts: Record<string, ChartProps>;
   extra?: Extra;
 }
 
@@ -82,10 +103,11 @@ export interface SheetFile {
 export type ParseResult = { ok: true; file: SheetFile; repairs: string[] } | { ok: false; error: string };
 
 const FILE_KEYS = ['type', 'version', 'engine', 'sheets', 'named'];
-const SHEET_KEYS = ['id', 'name', 'cells', 'cols', 'rows', 'frozen'];
-const CELL_KEYS = ['v', 'f', 'c'];
+const SHEET_KEYS = ['id', 'name', 'cells', 'cols', 'rows', 'frozen', 'charts'];
+const CELL_KEYS = ['v', 'f', 'c', 'fmt'];
 const COLUMN_KEYS = ['w', 'fmt', 'bold'];
 const ROW_KEYS = ['h', 'fmt', 'bold'];
+const CHART_KEYS = ['type', 'range', 'title', 'headers', 'labels'];
 
 class Refusal extends Error {}
 
@@ -104,7 +126,7 @@ export function newSheetFile(engine = SHEET_ENGINE): SheetFile {
 }
 
 export function emptySheet(id: string, name: string): Sheet {
-  return { id, name, cells: {}, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 } };
+  return { id, name, cells: {}, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 }, charts: {} };
 }
 
 /**
@@ -120,6 +142,19 @@ export function newSheetId(file: Pick<SheetFile, 'sheets'>): string {
   }
 }
 
+/**
+ * An id for a new chart: the time in base 36, so ids sort in the order charts were made (the
+ * order they show in), and a random tail, so charts made on two devices never collide.
+ */
+export function newChartId(sheet: Pick<Sheet, 'charts'>, now = Date.now()): string {
+  const stamp = 'c' + now.toString(36).padStart(9, '0');
+  for (;;) {
+    const bytes = crypto.getRandomValues(new Uint8Array(3));
+    const id = stamp + Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+    if (!(id in sheet.charts)) return id;
+  }
+}
+
 /** Sheet names are unique without regard to case, as in formulas. */
 export const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -132,7 +167,7 @@ export function nextSheetName(file: Pick<SheetFile, 'sheets'>): string {
 }
 
 /** Why `name` cannot name a sheet of `file` (other than the sheet `selfId`), or null. */
-export function sheetNameProblem(name: string, file: Pick<SheetFile, 'sheets'>, selfId?: string): string | null {
+export function sheetNameProblem(name: string, file: { sheets: ReadonlyArray<{ id?: string; name: string }> }, selfId?: string): string | null {
   if (name.trim() === '') return 'A sheet needs a name.';
   if (name !== name.trim()) return 'A sheet name cannot start or end with a space.';
   if (name.length > 100) return 'A sheet name can be at most 100 characters.';
@@ -140,8 +175,23 @@ export function sheetNameProblem(name: string, file: Pick<SheetFile, 'sheets'>, 
   if (/[\u0000-\u001f[\]*?/\\:]/.test(name) || name.startsWith("'") || name.endsWith("'")) {
     return "A sheet name cannot contain [ ] * ? / \\ : or start or end with '.";
   }
-  if (file.sheets.some((s) => s.id !== selfId && sameName(s.name, name))) return `There is already a sheet named "${name}".`;
+  if (file.sheets.some((s) => (selfId === undefined || s.id !== selfId) && sameName(s.name, name))) return `There is already a sheet named "${name}".`;
   return null;
+}
+
+/**
+ * A valid sheet name close to `wanted` (characters a name cannot hold become spaces) that no sheet
+ * of `taken` has: `Data`, else `Data (2)`, `Data (3)`… For imported sheets.
+ */
+export function freeSheetName(wanted: string, taken: ReadonlyArray<{ name: string }>): string {
+  // eslint-disable-next-line no-control-regex
+  let base = wanted.replace(/[\u0000-\u001f[\]*?/\\:]/g, ' ').replace(/^'+|'+$/g, '').trim().slice(0, 90) || 'Sheet';
+  if (sheetNameProblem(base, { sheets: taken }) === null) return base;
+  base = base.replace(/ \(\d+\)$/, '');
+  for (let n = 2; ; n++) {
+    const name = `${base} (${n})`;
+    if (sheetNameProblem(name, { sheets: taken }) === null) return name;
+  }
 }
 
 /** A sheet name as written in a formula: quoted unless it is a plain identifier. */
@@ -151,33 +201,28 @@ export function formulaSheetName(name: string): string {
 
 // ---------- typed input ----------
 
-const NUMBER = /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
-
 /**
- * The content of a cell from what was typed into it: `=…` is a formula, numbers and TRUE/FALSE
- * are values, a leading `'` forces text, and an empty string clears the cell (null).
+ * The content of a cell from what was typed into it (input.ts): `=…` is a formula, numbers,
+ * percentages, amounts, dates and TRUE/FALSE are values, a leading `'` forces text, and an empty
+ * string clears the cell (null). The number format a typed value implies is typedInput()'s.
  */
 export function cellInput(text: string): Pick<SheetCell, 'v' | 'f'> | null {
-  if (text === '') return null;
-  if (text.startsWith('=') && text.length > 1) return { f: text };
-  if (text.startsWith("'")) return { v: text.slice(1) };
-  const trimmed = text.trim();
-  if (NUMBER.test(trimmed)) {
-    const n = Number(trimmed);
-    if (Number.isFinite(n)) return { v: n };
-  }
-  if (/^(true|false)$/i.test(trimmed)) return { v: trimmed.toLowerCase() === 'true' };
-  return { v: text };
+  return typedInput(text).content;
 }
 
-/** What the formula bar shows for a cell: the formula, or the value in a form cellInput() reads back. */
-export function cellText(cell: SheetCell | undefined): string {
+/**
+ * What the formula bar shows for a cell: the formula, or the value in a form cellInput() reads
+ * back. `fmt` is the cell's number format: dates show as dates, percentages as percentages, and
+ * in a plain-text cell (`@`) text shows as it is.
+ */
+export function cellText(cell: SheetCell | undefined, fmt?: string): string {
   if (!cell) return '';
   if (cell.f !== undefined) return cell.f;
   const v = cell.v;
   if (v === undefined) return '';
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
-  if (typeof v === 'number') return String(v);
+  if (typeof v === 'number') return numberText(v, fmt);
+  if (fmt === '@') return v;
   const back = cellInput(v);
   return back !== null && back.v === v ? v : "'" + v;
 }
@@ -191,9 +236,13 @@ export function cellValue(cell: SheetCell | undefined): CachedValue {
 
 export const isCellError = (x: CachedValue | undefined): x is CellError => typeof x === 'object' && x !== null;
 
-/** A cell with neither content nor cached value nor unknown keys, which the file does not keep. */
+/** A cell with neither content nor cached value nor format nor unknown keys, which the file does not keep. */
 export const isEmptyCell = (cell: SheetCell) =>
-  cell.v === undefined && cell.f === undefined && cell.c === undefined && (!cell.extra || Object.keys(cell.extra).length === 0);
+  cell.v === undefined &&
+  cell.f === undefined &&
+  cell.c === undefined &&
+  cell.fmt === undefined &&
+  (!cell.extra || Object.keys(cell.extra).length === 0);
 
 // ---------- parsing ----------
 
@@ -283,6 +332,13 @@ function parseCell(raw: Json, where: string, repairs: string[]): SheetCell | nul
     if (isCachedValue(raw.c)) cell.c = raw.c;
     else repairs.push(`${where}: an unreadable cached value will be recalculated.`);
   }
+  if ('fmt' in raw) {
+    if (typeof raw.fmt === 'string') cell.fmt = raw.fmt;
+    else {
+      addExtra(cell, 'fmt', raw.fmt);
+      repairs.push(`${where}: "fmt" is not a number format; it is kept unchanged but not used.`);
+    }
+  }
   return isEmptyCell(cell) ? null : cell;
 }
 
@@ -332,6 +388,35 @@ function parseLine<T extends ColumnProps | RowProps>(raw: Json, where: string, s
   return props as T;
 }
 
+function parseChart(raw: Json, where: string, repairs: string[]): ChartProps {
+  if (!isObject(raw)) throw new Refusal(`${where} is not an object.`);
+  const chart: ChartProps = {};
+  const extra = extraOf(raw, CHART_KEYS);
+  if (extra) chart.extra = extra;
+  const keep = (key: string, value: Json) => {
+    addExtra(chart, key, value);
+    repairs.push(`${where}: ${quote(key)} has an unusable value; it is kept unchanged.`);
+  };
+  if ('type' in raw) {
+    const type = CHART_TYPES.find((t) => t === raw.type);
+    if (type) chart.type = type;
+    else keep('type', raw.type);
+  }
+  for (const key of ['range', 'title'] as const) {
+    if (!(key in raw)) continue;
+    const value = raw[key];
+    if (typeof value === 'string') chart[key] = value;
+    else keep(key, value);
+  }
+  for (const key of ['headers', 'labels'] as const) {
+    if (!(key in raw)) continue;
+    const value = raw[key];
+    if (typeof value === 'boolean') chart[key] = value;
+    else keep(key, value);
+  }
+  return chart;
+}
+
 function parseFrozen(raw: Json | undefined, where: string, repairs: string[]): Frozen {
   const frozen = { rows: 0, cols: 0 };
   if (raw === undefined) return frozen;
@@ -366,9 +451,15 @@ function parseSheetEntry(raw: Json, index: number, repairs: string[]): Sheet {
     cols: parseKeyed(raw.cols, `${label} columns`, normalizeColumnKey, (v, w) => parseLine<ColumnProps>(v, w, 'w', COLUMN_KEYS, repairs), repairs),
     rows: parseKeyed(raw.rows, `${label} rows`, normalizeRowKey, (v, w) => parseLine<RowProps>(v, w, 'h', ROW_KEYS, repairs), repairs),
     frozen: parseFrozen(raw.frozen, label, repairs),
+    charts: isObject(raw.charts) ? parseKeyed(raw.charts, `${label} charts`, (key) => key, (v, w) => parseChart(v, w, repairs), repairs) : {},
   };
   const extra = extraOf(raw, SHEET_KEYS);
   if (extra) sheet.extra = extra;
+  if (raw.charts !== undefined && !isObject(raw.charts)) {
+    // Charts are not data: an unreadable list is kept aside and written back until a chart is added.
+    addExtra(sheet, 'charts', raw.charts);
+    repairs.push(`${label}: "charts" is not an object; it is kept unchanged but not shown.`);
+  }
   return sheet;
 }
 
@@ -495,9 +586,25 @@ function keyedBlock<T>(entries: Array<[string, T]>, indent: string, line: (value
   return `{\n${entries.map(([k, v]) => `${indent}  ${quote(k)}: ${line(v)}`).join(',\n')}\n${indent}}`;
 }
 
-const cellLine = (c: SheetCell) => inlineEntries(ordered([['v', c.v], ['f', c.f], ['c', c.c]], c.extra));
+const cellLine = (c: SheetCell) => inlineEntries(ordered([['v', c.v], ['f', c.f], ['c', c.c], ['fmt', c.fmt]], c.extra));
 const columnLine = (p: ColumnProps) => inlineEntries(ordered([['w', p.w], ['fmt', p.fmt], ['bold', p.bold]], p.extra));
 const rowLine = (p: RowProps) => inlineEntries(ordered([['h', p.h], ['fmt', p.fmt], ['bold', p.bold]], p.extra));
+const chartLine = (p: ChartProps) =>
+  inlineEntries(
+    ordered(
+      [
+        ['type', p.type],
+        ['range', p.range],
+        ['title', p.title],
+        ['headers', p.headers],
+        ['labels', p.labels],
+      ],
+      p.extra,
+    ),
+  );
+
+/** Plain code-unit order: chart ids, sorted the same way on every device. */
+export const compareIds = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 const caseless = (a: string, b: string) => {
   const x = a.toLowerCase();
@@ -520,6 +627,10 @@ function sheetBlock(sheet: Sheet): string {
     `${i}"rows": ${keyedBlock(rows, i, rowLine)}`,
     `${i}"frozen": ${inline({ rows: sheet.frozen.rows, cols: sheet.frozen.cols })}`,
   ];
+  const charts = Object.entries(sheet.charts).sort(([a], [b]) => compareIds(a, b));
+  // Only when there are any, so files without charts keep the layout of earlier versions.
+  if (charts.length > 0) lines.push(`${i}"charts": ${keyedBlock(charts, i, chartLine)}`);
+  else if (sheet.extra?.charts !== undefined) lines.push(`${i}"charts": ${block(sheet.extra.charts, i)}`);
   for (const [k, v] of Object.entries(sheet.extra ?? {})) if (!SHEET_KEYS.includes(k)) lines.push(`${i}${quote(k)}: ${block(v, i)}`);
   return `    {\n${lines.join(',\n')}\n    }`;
 }

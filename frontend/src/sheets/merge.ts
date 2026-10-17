@@ -1,10 +1,12 @@
 // Cell-level 3-way merge of .sheet files, for the sheet view descriptor's merge() (DESIGN §6.8,
 // §6.21). A conflict reaches the banner only when the same thing changed differently on both
-// sides: a cell's content, a sheet's name or frozen panes, a column, a row or a named range.
+// sides: a cell's content or format, a sheet's name or frozen panes, a column, a row, a chart or a
+// named range.
 // Cached values (`c`) are not content: they are taken from a side whose calculation inputs equal
 // the merged ones, or else the result's `engine` is cleared so the next engine run recalculates.
 import {
   emptySheet,
+  isEmptyCell,
   parseSheet,
   sameName,
   serializeSheet,
@@ -51,7 +53,7 @@ function mergeKeyed<T>(base: Record<string, T>, mine: Record<string, T>, theirs:
 /** A cell's content without its cached value; undefined for a cell that only holds a cache. */
 function content(cell: SheetCell): SheetCell | undefined {
   const { c: _c, ...rest } = cell;
-  return rest.v === undefined && rest.f === undefined && (!rest.extra || Object.keys(rest.extra).length === 0) ? undefined : rest;
+  return isEmptyCell(rest) ? undefined : rest;
 }
 
 function contents(cells: Record<string, SheetCell>): Record<string, SheetCell> {
@@ -64,18 +66,55 @@ function contents(cells: Record<string, SheetCell>): Record<string, SheetCell> {
 }
 
 /** Everything about a sheet that a merge compares (its cached values excluded). */
-const sheetContent = (s: Sheet) => ({ name: s.name, cells: contents(s.cells), cols: s.cols, rows: s.rows, frozen: s.frozen, extra: s.extra ?? {} });
+const sheetContent = (s: Sheet) => ({
+  name: s.name,
+  cells: contents(s.cells),
+  cols: s.cols,
+  rows: s.rows,
+  frozen: s.frozen,
+  charts: s.charts,
+  extra: s.extra ?? {},
+});
+
+/**
+ * Cells merge per part: the content (value or formula), the number format and each unknown key,
+ * so a format set on one device and a value typed on the other are both kept.
+ */
+function mergeCells(base: Record<string, SheetCell>, mine: Record<string, SheetCell>, theirs: Record<string, SheetCell>): Record<string, SheetCell> | Conflict {
+  const out: Record<string, SheetCell> = {};
+  for (const ref of new Set([...Object.keys(base), ...Object.keys(mine), ...Object.keys(theirs)])) {
+    const [b, m, t] = [base[ref], mine[ref], theirs[ref]];
+    const whole = merge3(b, m, t);
+    if (whole !== CONFLICT) {
+      if (whole !== undefined) out[ref] = whole;
+      continue;
+    }
+    const value = (c: SheetCell | undefined) => (c?.v !== undefined ? { v: c.v } : c?.f !== undefined ? { f: c.f } : undefined);
+    const content = merge3(value(b), value(m), value(t));
+    const fmt = merge3(b?.fmt, m?.fmt, t?.fmt);
+    const extra = mergeKeyed(b?.extra ?? {}, m?.extra ?? {}, t?.extra ?? {});
+    if (content === CONFLICT || fmt === CONFLICT || extra === CONFLICT) return CONFLICT;
+    const cell: SheetCell = { ...content };
+    if (fmt !== undefined) cell.fmt = fmt;
+    if (Object.keys(extra).length > 0) cell.extra = extra;
+    if (!isEmptyCell(cell)) out[ref] = cell;
+  }
+  return out;
+}
 
 function mergeSheet(base: Sheet, mine: Sheet, theirs: Sheet): Sheet | Conflict {
   const [b, m, t] = [base, mine, theirs].map(sheetContent);
   const name = merge3(b.name, m.name, t.name);
   const frozen = merge3(b.frozen, m.frozen, t.frozen);
-  const cells = mergeKeyed(b.cells, m.cells, t.cells);
+  const cells = mergeCells(b.cells, m.cells, t.cells);
   const cols = mergeKeyed(b.cols, m.cols, t.cols);
   const rows = mergeKeyed(b.rows, m.rows, t.rows);
+  const charts = mergeKeyed(b.charts, m.charts, t.charts);
   const extra = mergeKeyed(b.extra, m.extra, t.extra);
-  if (name === CONFLICT || frozen === CONFLICT || cells === CONFLICT || cols === CONFLICT || rows === CONFLICT || extra === CONFLICT) return CONFLICT;
-  const sheet: Sheet = { id: mine.id, name: name ?? mine.name, cells, cols, rows, frozen: frozen ?? mine.frozen };
+  if (name === CONFLICT || frozen === CONFLICT || cells === CONFLICT || cols === CONFLICT || rows === CONFLICT || charts === CONFLICT || extra === CONFLICT) {
+    return CONFLICT;
+  }
+  const sheet: Sheet = { id: mine.id, name: name ?? mine.name, cells, cols, rows, frozen: frozen ?? mine.frozen, charts };
   if (Object.keys(extra).length > 0) sheet.extra = extra as Record<string, Json>;
   return sheet;
 }
