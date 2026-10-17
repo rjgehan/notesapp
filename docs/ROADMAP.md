@@ -3,8 +3,9 @@
 | | |
 |---|---|
 | Date | 2026-10-17 |
-| Status | v1 scope approved. On 2026-10-17 you chose the editor direction: Live Preview (item 10), plus formulas (39) and scripts (40) in notes. The backlog, those three included, is waiting for your approval to build. |
-| How to approve | Reply with item numbers, for example "approve 1, 3, 4, 5". Items are scoped to ship independently; dependencies are listed. The order is the recommended build sequence. |
+| Status | **Everything approved, 2026-10-17** ("build all of the features"): items 1–41, built on the `build/roadmap` branch in waves and merged to `main` once verified. |
+| Decisions (2026-10-17) | **Server:** homeserver, as designed. **Formula engine** (items 6 and 39): GPL-3.0 with HyperFormula; the repository becomes GPL-3.0. **Reminder delivery** (item 9): undecided, so every route is built and each one is switched on in Settings. **Public publishing** (item 26): built switched off; nothing is exposed until you enable it. **No iOS app**; the phone uses the web app. **Desktop app** (item 41): Electron, because rgpc has no Rust toolchain. |
+| Build order | Wave 1: 10, 6, 4, 5, then 1, 2, 23 and 38. Wave 2: 3, 39, 40 (with 17), 13, 12, 7, 19, 8, 22. Wave 3: everything else except 37 and 41. Wave 4: 37 and 41, then end-to-end verification. |
 
 **Legend**
 
@@ -88,6 +89,7 @@ DESIGN.md has the details.
 | 36 | Vim mode | L | S | |
 | 37 | Multiple vaults | M | L | |
 | 38 | Ops polish: JDK 25 runtime, faster start, app-error alerts, status page | M | S | |
+| 41 | **Desktop app (Windows and macOS) with live sync** *(new, 2026-10-17)* | M | M | 7 for quick capture; 8 for offline |
 
 ---
 
@@ -581,7 +583,13 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 - **ntfy alternative.** The iOS ntfy app, with no PWA needed; it is the fastest route. The privacy trade-off differs by setup:
   - **Self-hosted ntfy on the tailnet:** on iOS, instant notifications require `upstream-base-url: https://ntfy.sh`, so message ids and timing (not the text) pass through ntfy.sh to reach Apple's push service.
   - **ntfy.sh directly:** the reminder text itself leaves the tailnet. Use an unguessable topic and an access token.
-- **Decision needed before 4c:** reminders need either item 8 (PWA and Web Push) or one of the ntfy setups above. Please pick one.
+- **Decision (2026-10-17): build every route; pick later.** One scheduler fires reminders through a list of delivery channels, each switched on in Settings and all off by default:
+  - **in-app**: a toast plus a browser notification in any open tab, using the Notification API with the tailnet origin;
+  - **desktop**: native notifications from the item 41 app;
+  - **Web Push**: needs the item 8 installed web app on iOS;
+  - **ntfy**: self-hosted or ntfy.sh. The topic, server URL and token come from `/data/secrets/ntfy.json`, never from the vault.
+
+  A reminder is marked delivered once at least one channel accepts it, and missed reminders are delivered when the server starts.
 
 ### 11. Tabs and split panes *(declined for v1)*
 
@@ -749,6 +757,8 @@ Plugs into the view registry. `.canvas` is already a text kind.
 |---|---|---|
 | M | M | 3 helps |
 
+**Decision (2026-10-17): build it switched off.** The publish server only starts when `NOTES_PUBLISH_ENABLED=true`. The shipped `serve.json` has no Funnel entry; DEPLOY.md documents the opt-in `serve.json` change. Nothing is public until you do both.
+
 - **The public site is a separate, minimal server**, not a second connector. In Spring Boot an extra Tomcat connector serves the same servlet context, so every controller, all of `/api/**` and the SPA would answer on it too; built that way, this item would publish unauthenticated read and write access to the whole vault to the internet. Instead:
   - a small, separate HTTP server (a JDK `HttpServer`, or a child Spring context with its own `DispatcherServlet` and only the publish controller) binds `127.0.0.1:8081` and serves only `GET`/`HEAD` on `/p/<slug>` and its static assets, with 404 for everything else;
   - it serves **pre-rendered HTML snapshots** of the notes listed in `.notesapp/publish.json`, written when you publish, never live vault reads;
@@ -866,6 +876,32 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
 | Value | Effort | Depends on |
 |---|---|---|
 | M | S | |
+
+### 41. Desktop app with live sync *(new, 2026-10-17)*
+
+**One line:** a Windows and macOS app for NotesApp, with its own window, a tray icon, a quick-capture hotkey and native notifications. It shows the same live-synced vault as the browser.
+
+| Value | Effort | Depends on |
+|---|---|---|
+| M | M | 7 for quick capture; 8 for offline |
+
+- **Electron**, in a new `desktop/` folder. rgpc has no Rust toolchain, which Tauri would need, while Electron only needs npm.
+- **A thin shell around the server.** It loads the configured server URL (asked on first launch; for example `https://notes.<tailnet>.ts.net`) and bundles no copy of the frontend. Every deploy therefore updates the desktop UI too, and live sync is the same SSE stream the browser uses. After sleep or resume, or when the network changes, it reconnects.
+- **Identity.** Requests come from the computer's tailnet address, so the v1 Tailscale identity and Host allowlists work unchanged. The app stores no tokens.
+- **Security.**
+  - Renderer settings: `contextIsolation` on, `sandbox` on, `nodeIntegration` off.
+  - A preload script exposes only a small `notesDesktop` API: notifications, the capture hotkey and the app version.
+  - Navigation is locked to the server's origin; other links open in the default browser.
+  - Permission requests are denied, except notifications.
+- **Features.**
+  - The window position and size are remembered.
+  - A tray menu: Quick capture, Open today's note, Quit.
+  - A global hotkey (default `Ctrl+Shift+Space`, `Cmd+Shift+Space` on macOS) opens a small capture window that posts to `/api/capture` (item 7).
+  - Native notifications are a reminder delivery route (item 9).
+  - Launch at login (opt-in).
+  - Connection state is shown in the window title.
+  - Offline, it shows the service worker's cached app (item 8), or a "Can't reach the server. Is Tailscale connected?" page with Retry.
+- **Packaging.** electron-builder produces a Windows NSIS installer and an unsigned macOS dmg. A GitHub Actions workflow builds them on `desktop-v*` tags and attaches them to a release in the private repository. There is no auto-updater: the shell rarely changes, because the UI comes from the server.
 
 ---
 
