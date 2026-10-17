@@ -1,0 +1,21 @@
+# Local vault used by the backend's dev profile
+dev-vault/
+
+# Secrets and per-host overrides on homeserver (docs/DEPLOY.md)
+deploy/.env
+deploy/docker-compose.override.yml
+
+# Build output and dependencies
+node_modules/
+frontend/dist/
+frontend/coverage/
+backend/target/
+
+# Editors and OS files
+.idea/
+.vscode/
+*.log
+.DS_Store
+
+# Build worktrees used while building the roadmap
+.wt/

@@ -1,0 +1,108 @@
+import { history } from '@codemirror/commands';
+import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setActiveEditor } from '../../editor/activeEditor';
+import { noteContext, type NoteContext } from '../../editor/context';
+import { useUi } from '../../state/ui';
+import { MobileToolbar } from './MobileToolbar';
+import { registerBuiltins } from '../../extensions/builtins';
+
+let view: EditorView;
+
+function mountEditor(doc: string, markdown = true): EditorView {
+  const openLink = vi.fn();
+  const ctx = { path: () => 'Note.md', openLink, openTag: vi.fn() } as unknown as NoteContext;
+  const v = new EditorView({
+    state: EditorState.create({ doc, selection: { anchor: doc.length }, extensions: [history(), markdown ? noteContext.of(ctx) : []] }),
+    parent: document.body,
+  });
+  setActiveEditor(v);
+  return v;
+}
+
+const toolbar = () => screen.getByRole('toolbar', { hidden: true });
+const button = (name: string) => screen.getByRole('button', { name, hidden: true });
+
+beforeEach(() => {
+  registerBuiltins();
+  useUi.setState({ overlay: null });
+});
+
+afterEach(() => {
+  view?.destroy();
+  setActiveEditor(null);
+  vi.useRealTimers();
+});
+
+describe('MobileToolbar', () => {
+  it('is always mounted and shows while the editor has focus', () => {
+    view = mountEditor('- task');
+    render(<MobileToolbar />);
+    expect(toolbar()).not.toHaveClass('is-visible');
+    act(() => view.focus());
+    expect(toolbar()).toHaveClass('is-visible');
+  });
+
+  it('has buttons that never take the focus away from the editor', () => {
+    view = mountEditor('- task');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    for (const b of screen.getAllByRole('button', { hidden: true })) {
+      expect(b).toHaveAttribute('tabindex', '-1');
+      // A prevented pointerdown keeps the focus (and the iOS keyboard) where it is.
+      expect(fireEvent.pointerDown(b)).toBe(false);
+    }
+    fireEvent.click(button('Toggle checklist'));
+    expect(view.state.doc.toString()).toBe('- [ ] task');
+    expect(document.activeElement).toBe(view.contentDOM);
+    expect(toolbar()).toHaveClass('is-visible');
+  });
+
+  it('dispatches its editing tools to the editor', () => {
+    view = mountEditor('Some text');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    fireEvent.click(button('Insert tag'));
+    expect(view.state.doc.toString()).toBe('Some text #');
+    fireEvent.click(button('Undo'));
+    expect(view.state.doc.toString()).toBe('Some text');
+    fireEvent.click(button('Redo'));
+    expect(view.state.doc.toString()).toBe('Some text #');
+    fireEvent.click(button('Horizontal rule'));
+    expect(view.state.doc.toString()).toBe('Some text #\n\n---\n');
+    fireEvent.click(button('Insert internal link'));
+    expect(view.state.doc.toString()).toBe('Some text #\n\n---\n[[]]');
+    expect(view.state.selection.main.head).toBe(view.state.doc.length - 2);
+  });
+
+  it('opens the command palette and hides the keyboard', () => {
+    view = mountEditor('x');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    fireEvent.click(button('Command palette'));
+    expect(useUi.getState().overlay).toBe('palette');
+    fireEvent.click(button('Hide keyboard'));
+    expect(view.hasFocus).toBe(false);
+  });
+
+  it('hides after the editor has been blurred for a moment', () => {
+    vi.useFakeTimers();
+    view = mountEditor('x');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    act(() => view.contentDOM.blur());
+    expect(toolbar()).toHaveClass('is-visible');
+    act(() => vi.advanceTimersByTime(200));
+    expect(toolbar()).not.toHaveClass('is-visible');
+  });
+
+  it('offers only the generic tools in a plain-text editor', () => {
+    view = mountEditor('{"a": 1}', false);
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    expect(screen.queryByRole('button', { name: 'Insert tag', hidden: true })).toBeNull();
+    expect(button('Indent')).toBeInTheDocument();
+  });
+});

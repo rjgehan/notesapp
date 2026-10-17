@@ -1,0 +1,13 @@
+.git
+.github
+docs
+deploy
+dev-vault
+**/node_modules
+**/.DS_Store
+**/*.log
+**/.idea
+**/.vscode
+backend/target
+frontend/dist
+frontend/coverage

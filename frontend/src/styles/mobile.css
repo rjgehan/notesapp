@@ -1,0 +1,182 @@
+/* Touch and small-screen adjustments (DESIGN §6.16). */
+
+/* Text inputs and the editor are at least 16 px, so iOS never zooms on focus. */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
+@media (pointer: coarse) {
+  :root {
+    --tap-target: 44px;
+  }
+
+  .ribbon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .panel-tab {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Every tap target is at least 44 × 44 px (DESIGN §6.16). */
+  .search-hit-title,
+  .backlink-source,
+  .backlink-section-header,
+  .search-match,
+  .backlink-context,
+  .history-row {
+    min-height: 44px;
+  }
+
+  .toast-action,
+  .toast-close {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .button {
+    min-height: 44px;
+  }
+
+  .outline-item {
+    min-height: 44px;
+    padding-block: 10px;
+  }
+
+  .tree-row {
+    font-size: 15px;
+  }
+
+  .resizer {
+    display: none;
+  }
+
+  .top-bar .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .menu-item {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --content-gutter: 16px;
+  }
+
+  .markdown-view,
+  .text-view,
+  .media-view {
+    padding-inline: max(16px, env(safe-area-inset-left), env(safe-area-inset-right));
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .inline-title {
+    margin-top: 20px;
+    font-size: 1.75em;
+  }
+
+  .file-view-header {
+    flex-wrap: wrap;
+  }
+
+  .properties-list {
+    grid-template-columns: minmax(90px, 35%) 1fr;
+  }
+
+  .toasts {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .keyboard-open .toasts {
+    bottom: 16px;
+  }
+}
+
+/* ---------- editing toolbar (touch devices) ---------- */
+
+.mobile-toolbar {
+  grid-area: toolbar;
+  display: none;
+  min-width: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+@media (pointer: coarse) {
+  .mobile-toolbar.is-visible {
+    display: block;
+  }
+}
+
+/* Toasts clear the toolbar while it is shown. */
+.app-shell:has(.mobile-toolbar.is-visible) .toasts {
+  bottom: calc(60px + env(safe-area-inset-bottom));
+}
+
+.keyboard-open .app-shell:has(.mobile-toolbar.is-visible) .toasts {
+  bottom: 60px;
+}
+
+/* Above the keyboard the home indicator is covered, so its inset is not needed. */
+.keyboard-open .mobile-toolbar {
+  padding-bottom: 0;
+}
+
+.mobile-toolbar-scroll {
+  display: flex;
+  gap: 2px;
+  padding: 2px 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.mobile-toolbar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-toolbar-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-muted);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mobile-toolbar-button:active {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* While the on-screen keyboard is open, the top bar slides away to leave room for the text. */
+.keyboard-open .app-shell.is-phone .top-bar {
+  margin-top: calc(-1 * (var(--header-height) + env(safe-area-inset-top)));
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .top-bar {
+    transition: none;
+  }
+}

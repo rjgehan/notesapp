@@ -1,0 +1,62 @@
+// Applies remote text as a minimal change set (DESIGN §6.6 "Remote updates"): annotated
+// Transaction.remote and kept out of undo history, so the cursor, scroll position and local undo
+// stack survive. While an IME or iOS autocorrect composition is active, the update waits for
+// compositionend (or at most 300 ms).
+import { diff } from '@codemirror/merge';
+import { Annotation, Transaction, type ChangeSpec, type EditorState, type TransactionSpec } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
+
+/**
+ * Marks an edit the session makes itself that must not count as a local change (it stays in the
+ * undo history, unlike remote updates). Used by "Take theirs" so that undo brings mine back.
+ */
+export const sessionEdit = Annotation.define<boolean>();
+
+/** True for a transaction that changes the document on behalf of the user. */
+export function isLocalEdit(tr: Transaction): boolean {
+  return tr.docChanged && !tr.annotation(Transaction.remote) && !tr.annotation(sessionEdit);
+}
+
+export function remoteChanges(current: string, next: string): ChangeSpec[] {
+  return diff(current, next).map((c) => ({ from: c.fromA, to: c.toA, insert: next.slice(c.fromB, c.toB) }));
+}
+
+export function remoteTransaction(state: EditorState, next: string): TransactionSpec | null {
+  const current = state.doc.toString();
+  if (current === next) return null;
+  return {
+    changes: remoteChanges(current, next),
+    annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)],
+  };
+}
+
+/** Applies `next` (already LF-normalized) to a state without a view. */
+export function applyRemoteTextToState(state: EditorState, next: string): EditorState {
+  const spec = remoteTransaction(state, next);
+  return spec ? state.update(spec).state : state;
+}
+
+/**
+ * Resolves once `view` has no active IME or autocorrect composition: at once, or after
+ * compositionend (and CodeMirror's read of the final DOM text), or at most 300 ms.
+ */
+export function waitForComposition(view: EditorView): Promise<void> {
+  return new Promise((done) => {
+    if (!view.composing) {
+      done();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      view.contentDOM.removeEventListener('compositionend', onEnd);
+      clearTimeout(timer);
+      // compositionend fires before CodeMirror reads the final DOM text; let it settle first.
+      setTimeout(done, 0);
+    };
+    const onEnd = () => finish();
+    view.contentDOM.addEventListener('compositionend', onEnd);
+    const timer = setTimeout(finish, 300);
+  });
+}

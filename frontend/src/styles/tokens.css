@@ -1,0 +1,120 @@
+/* Theme tokens (DESIGN §6.17). Variable names mirror Obsidian's so theme snippets port easily.
+   Dark values live on :root itself, so they apply before any script runs. */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --background-primary: #1e1e1e;
+  --background-primary-alt: #242424;
+  --background-secondary: #262626;
+  --background-secondary-alt: #2b2b2b;
+  --background-modifier-border: #363636;
+  --background-modifier-border-hover: #474747;
+  --background-modifier-hover: rgba(255, 255, 255, 0.06);
+  --background-modifier-active-hover: rgba(138, 92, 245, 0.16);
+  --background-modifier-form-field: #2b2b2b;
+  --background-modifier-cover: rgba(10, 10, 10, 0.55);
+  --text-normal: #dadada;
+  --text-muted: #a3a3a3;
+  --text-faint: #6e6e6e;
+  --text-on-accent: #ffffff;
+  --text-selection: rgba(138, 92, 245, 0.33);
+  --text-highlight-bg: rgba(255, 208, 0, 0.32);
+  --interactive-accent: #8a5cf5;
+  --interactive-accent-hover: #9b73f7;
+  --accent: #8a5cf5;
+  --link: #a68af9;
+  --link-unresolved: rgba(166, 138, 249, 0.6);
+  --tag-bg: rgba(138, 92, 245, 0.15);
+  --tag-fg: #b9a2fb;
+  --code-bg: #2a2a2a;
+  --code-fg: #e0a87a;
+  --text-error: #fb464c;
+  --text-warning: #e0ac00;
+  --text-success: #44cf6e;
+  --blockquote-border: #8a5cf5;
+  --checkbox-border: #6e6e6e;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-l: 0 4px 12px rgba(0, 0, 0, 0.35), 0 16px 40px rgba(0, 0, 0, 0.35);
+  --tok-property: #a68af9;
+  --tok-keyword: #fa99cd;
+  --tok-string: #a3d77a;
+  --tok-number: #e0ac00;
+  --tok-comment: #6e6e6e;
+  --tok-function: #6bb5ff;
+  --tok-type: #53dfdd;
+  --tok-variable: #dadada;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --background-primary: #ffffff;
+  --background-primary-alt: #fafafa;
+  --background-secondary: #f6f6f6;
+  --background-secondary-alt: #efefef;
+  --background-modifier-border: #e3e3e3;
+  --background-modifier-border-hover: #d0d0d0;
+  --background-modifier-hover: rgba(0, 0, 0, 0.05);
+  --background-modifier-active-hover: rgba(122, 79, 224, 0.12);
+  --background-modifier-form-field: #ffffff;
+  --background-modifier-cover: rgba(30, 30, 30, 0.35);
+  --text-normal: #222222;
+  --text-muted: #5c5c5c;
+  --text-faint: #9a9a9a;
+  --text-on-accent: #ffffff;
+  --text-selection: rgba(122, 79, 224, 0.22);
+  --text-highlight-bg: rgba(255, 208, 0, 0.4);
+  --interactive-accent: #7a4fe0;
+  --interactive-accent-hover: #6b3fd8;
+  --accent: #7a4fe0;
+  --link: #6b3fd8;
+  --link-unresolved: rgba(107, 63, 216, 0.6);
+  --tag-bg: rgba(122, 79, 224, 0.1);
+  --tag-fg: #6b3fd8;
+  --code-bg: #f2f2f2;
+  --code-fg: #b4543c;
+  --text-error: #e93147;
+  --text-warning: #c48c00;
+  --text-success: #08b94e;
+  --blockquote-border: #7a4fe0;
+  --checkbox-border: #9a9a9a;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-l: 0 4px 12px rgba(0, 0, 0, 0.1), 0 16px 40px rgba(0, 0, 0, 0.12);
+  --tok-property: #6b3fd8;
+  --tok-keyword: #c3277a;
+  --tok-string: #2c8a2c;
+  --tok-number: #b07a00;
+  --tok-comment: #9a9a9a;
+  --tok-function: #1a6fd1;
+  --tok-type: #0f8a87;
+  --tok-variable: #222222;
+}
+
+:root {
+  --font-text: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-interface: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  --font-text-size: 16px;
+  --font-ui-small: 13px;
+  --font-ui-smaller: 12px;
+  --line-height: 1.6;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --ribbon-width: 48px;
+  --header-height: 44px;
+  --status-height: 26px;
+  --readable-width: 46rem;
+  --content-gutter: 32px;
+  --h1-size: 1.802em;
+  --h2-size: 1.602em;
+  --h3-size: 1.424em;
+  --h4-size: 1.266em;
+  --h5-size: 1.125em;
+  --h6-size: 1em;
+  --tap-target: 28px;
+}

@@ -1,0 +1,20 @@
+# LF in the repository and in every checkout, Windows included, so files built
+# into the Linux image and run by CI are byte-identical to what was committed.
+* text=auto eol=lf
+
+# Windows scripts need CRLF to run under cmd.exe.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.jar binary
+
+# Test vault fixtures are byte-exact on purpose (CRLF, BOM and invalid UTF-8 cases);
+# never normalize them.
+backend/src/test/resources/vaults/** -text

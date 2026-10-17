@@ -1,0 +1,392 @@
+/* Styled source mode (DESIGN §6.6 #7). CodeMirror sizes to its content; WorkspaceScroll scrolls. */
+
+.note-editor {
+  padding-bottom: 35vh;
+}
+
+.note-editor .cm-editor {
+  height: auto;
+  background: transparent;
+  color: var(--text-normal);
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+}
+
+.note-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.note-editor .cm-editor .cm-scroller {
+  overflow: visible;
+  font-family: var(--font-text);
+  line-height: var(--line-height);
+}
+
+.note-editor .cm-editor .cm-content {
+  padding: 0 0 16px;
+  caret-color: var(--interactive-accent);
+}
+
+.note-editor .cm-editor .cm-line {
+  padding: 0;
+}
+
+.note-editor .cm-editor .cm-cursor,
+.note-editor .cm-editor .cm-dropCursor {
+  border-left: 2px solid var(--interactive-accent);
+}
+
+.note-editor .cm-editor .cm-selectionBackground,
+.note-editor .cm-editor.cm-focused .cm-selectionBackground,
+.note-editor .cm-editor .cm-content ::selection {
+  background: var(--text-selection) !important;
+}
+
+.note-editor .cm-editor .cm-activeLine {
+  background: transparent;
+}
+
+.note-editor .cm-editor.cm-focused .cm-activeLine {
+  background: color-mix(in srgb, var(--background-modifier-hover) 50%, transparent);
+  border-radius: 2px;
+}
+
+.note-editor .cm-editor .cm-selectionMatch {
+  background: rgba(224, 172, 0, 0.18);
+}
+
+.note-editor .cm-editor .cm-matchingBracket {
+  background: var(--background-modifier-active-hover);
+  color: inherit;
+}
+
+.note-editor .cm-editor .cm-placeholder {
+  color: var(--text-faint);
+}
+
+/* ---------- markdown tokens ---------- */
+
+.cm-h {
+  font-weight: 700;
+  color: var(--text-normal);
+}
+
+.cm-heading-line {
+  line-height: 1.3;
+  padding-top: 0.35em !important;
+  padding-bottom: 0.15em !important;
+}
+
+.cm-heading-line-1 {
+  font-size: var(--h1-size);
+}
+
+.cm-heading-line-2 {
+  font-size: var(--h2-size);
+}
+
+.cm-heading-line-3 {
+  font-size: var(--h3-size);
+}
+
+.cm-heading-line-4 {
+  font-size: var(--h4-size);
+}
+
+.cm-heading-line-5 {
+  font-size: var(--h5-size);
+}
+
+.cm-heading-line-6 {
+  font-size: var(--h6-size);
+  color: var(--text-muted);
+}
+
+.cm-strong {
+  font-weight: 700;
+}
+
+.cm-em {
+  font-style: italic;
+}
+
+.cm-strike {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.cm-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  color: var(--code-fg);
+  background: var(--code-bg);
+  border-radius: 3px;
+  padding: 0.1em 0.2em;
+}
+
+.cm-link,
+.cm-wikilink {
+  color: var(--link);
+}
+
+.cm-url {
+  color: var(--text-faint);
+  text-decoration: underline;
+}
+
+.cm-hashtag {
+  color: var(--tag-fg);
+  background: var(--tag-bg);
+  border-radius: 999px;
+  padding: 0.05em 0.35em;
+}
+
+.cm-highlight {
+  background: var(--text-highlight-bg);
+  border-radius: 2px;
+}
+
+.cm-comment {
+  color: var(--text-faint);
+}
+
+.cm-quote {
+  color: var(--text-muted);
+}
+
+.cm-meta {
+  color: var(--text-faint);
+}
+
+.cm-hr {
+  color: var(--text-faint);
+}
+
+/* Markup characters stay visible but faint, whatever token they belong to. */
+.cm-editor .cm-formatting {
+  color: var(--text-faint);
+  font-weight: normal;
+}
+
+.cm-editor .cm-hashtag {
+  color: var(--tag-fg);
+}
+
+.cm-unresolved,
+.cm-unresolved .cm-link,
+.cm-unresolved .cm-wikilink {
+  color: var(--link-unresolved);
+  text-decoration: underline dashed;
+  text-underline-offset: 3px;
+}
+
+.note-editor .cm-quote-line {
+  border-left: 2px solid var(--blockquote-border);
+  padding-left: 14px !important;
+}
+
+.note-editor .cm-codeblock-line {
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  padding: 0 12px !important;
+}
+
+.note-editor .cm-codeblock-begin {
+  border-top-left-radius: var(--radius-s);
+  border-top-right-radius: var(--radius-s);
+  padding-top: 4px !important;
+}
+
+.note-editor .cm-codeblock-end {
+  border-bottom-left-radius: var(--radius-s);
+  border-bottom-right-radius: var(--radius-s);
+  padding-bottom: 4px !important;
+}
+
+.note-editor .cm-frontmatter-line {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  color: var(--text-muted);
+}
+
+.note-editor .cm-comment-line {
+  color: var(--text-faint);
+}
+
+/* Syntax tokens in fenced code and frontmatter. */
+.cm-tok-property {
+  color: var(--tok-property);
+}
+
+.cm-tok-keyword {
+  color: var(--tok-keyword);
+}
+
+.cm-tok-string {
+  color: var(--tok-string);
+}
+
+.cm-tok-number {
+  color: var(--tok-number);
+}
+
+.cm-tok-comment {
+  color: var(--tok-comment);
+  font-style: italic;
+}
+
+.cm-tok-function {
+  color: var(--tok-function);
+}
+
+.cm-tok-type {
+  color: var(--tok-type);
+}
+
+.cm-tok-variable {
+  color: var(--tok-variable);
+}
+
+.cm-tok-tag {
+  color: var(--tok-keyword);
+}
+
+.cm-tok-attribute {
+  color: var(--tok-property);
+}
+
+.cm-tok-invalid {
+  color: var(--text-error);
+}
+
+/* ---------- tooltips and completion ---------- */
+
+.cm-editor .cm-tooltip {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-l);
+  color: var(--text-normal);
+  overflow: hidden;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul {
+  max-height: min(320px, 50vh);
+  min-width: 240px;
+  max-width: min(480px, 90vw);
+  padding: 4px;
+  font-family: var(--font-interface);
+  font-size: 14px;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: var(--radius-s);
+  line-height: 1.35;
+}
+
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
+
+.cm-editor .cm-completionLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-editor .cm-completionDetail {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text-faint);
+  font-style: normal;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cm-editor .cm-completionMatchedText {
+  text-decoration: none;
+  color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+/* ---------- search panel ---------- */
+
+.cm-editor .cm-panels {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border-radius: var(--radius-m);
+}
+
+.cm-editor .cm-panels.cm-panels-top {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.cm-editor .cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
+
+.cm-editor .cm-search .cm-textfield {
+  min-width: 160px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.cm-editor .cm-search .cm-button {
+  padding: 3px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary-alt);
+  background-image: none;
+  color: var(--text-normal);
+}
+
+.cm-editor .cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.cm-editor .cm-search button[name='close'] {
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+.cm-editor .cm-searchMatch {
+  background: rgba(224, 172, 0, 0.25);
+  outline: 1px solid rgba(224, 172, 0, 0.5);
+}
+
+.cm-editor .cm-searchMatch-selected {
+  background: rgba(224, 172, 0, 0.5);
+}
+
+/* Plain text files use a monospace face. */
+.text-view .note-editor .cm-editor,
+.text-view .note-editor .cm-editor .cm-scroller {
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+/* A pending attachment upload (DESIGN §6.6 #10): a widget, never document text. */
+.cm-upload-placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.9em;
+  padding-inline: 2px;
+}

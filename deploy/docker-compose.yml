@@ -1,0 +1,83 @@
+# NotesApp on homeserver: tailscale + notes + watchtower. Runbook: docs/DEPLOY.md
+# Run every docker compose command from this directory (deploy/), next to .env.
+name: notes
+
+x-logging: &logging                             # size-capped logs; the daemon default (json-file) never rotates
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}               # one-off auth key tagged tag:notes; delete it from .env after the first login
+      TS_EXTRA_ARGS: --advertise-tags=tag:notes
+      TS_HOSTNAME: notes                        # → https://notes.<tailnet>.ts.net
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_AUTH_ONCE: "true"                      # don't re-login on every start
+      TS_USERSPACE: "false"                     # kernel mode: REQUIRED (userspace forwards every tailnet port to 127.0.0.1)
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:9002        # /healthz, loopback only
+    volumes:
+      - tailscale-state:/var/lib/tailscale      # node identity + TLS certs: never delete
+      - ./tailscale:/config:ro                  # a DIRECTORY (serve.json is watched with fsnotify)
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9002/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *logging
+    restart: unless-stopped
+    # deliberately NO watchtower label: update by hand, monthly (docs/DEPLOY.md)
+
+  notes:
+    image: ghcr.io/rjgehan/notesapp:latest      # a rollback pins sha-<…> in docker-compose.override.yml (docs/DEPLOY.md)
+    network_mode: service:tailscale             # shares tailscale's netns; no ports/hostname/networks allowed
+    depends_on:
+      tailscale:
+        condition: service_healthy
+        restart: true
+    environment:
+      TZ: ${TZ:-UTC}
+      NOTES_ALLOWED_HOSTS: ${NOTES_ALLOWED_HOSTS:?set NOTES_ALLOWED_HOSTS in deploy/.env}
+      NOTES_IDENTITY_ALLOWED_LOGINS: ${NOTES_IDENTITY_ALLOWED_LOGINS:?set NOTES_IDENTITY_ALLOWED_LOGINS in deploy/.env}
+      NOTES_TAILSCALE_WATCHDOG_ENABLED: "true"  # exit (→ restart) if orphaned from tailscale's netns
+    volumes:
+      - notes-data:/data
+    mem_limit: 1g
+    stop_grace_period: 45s
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    logging: *logging
+    restart: unless-stopped
+
+  watchtower:
+    image: nickfedor/watchtower:1.23.1@sha256:3175c006eb20112f3a70f7002f82dbf4a4078c97e7033735a4d153668fc3dfb1   # maintained fork; pinned by digest (it holds docker.sock)
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"           # only touches the 'notes' container
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "300"
+      WATCHTOWER_TIMEOUT: 45s                   # matches notes.stop_grace_period
+      WATCHTOWER_NOTIFICATIONS_HOSTNAME: homeserver
+      WATCHTOWER_NOTIFICATION_URL: ${WATCHTOWER_NOTIFICATION_URL:-}   # optional; empty = no notifications (ntfy recommended)
+      WATCHTOWER_NOTIFICATION_REPORT: "true"    # report every update session (updated, failed, skipped)
+      DOCKER_CONFIG: /config                    # GHCR credentials (package is private)
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/watchtower:/config:ro              # DIRECTORY containing config.json from `docker --config /etc/watchtower login ghcr.io`
+    logging: *logging
+    restart: unless-stopped
+
+volumes:
+  tailscale-state:
+    external: true                              # created once (docs/DEPLOY.md); `docker compose down -v` cannot delete it
+  notes-data:
+    external: true
