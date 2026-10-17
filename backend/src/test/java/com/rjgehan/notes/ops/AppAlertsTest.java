@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import com.rjgehan.notes.api.dto.AlertTestResult;
 import com.rjgehan.notes.api.dto.AlertsState;
 import com.rjgehan.notes.api.dto.AlertsStatus;
 import com.rjgehan.notes.notify.NtfyClient;
@@ -193,6 +194,27 @@ class AppAlertsTest {
 		assertThat(this.sent).singleElement()
 			.satisfies((s) -> assertThat(s.message().title()).isEqualTo("NotesApp: Restarted to rejoin the Tailscale network"));
 		assertThat(alerts.status().recent().get(0).lastAt()).isEqualTo(start.minusSeconds(20));
+	}
+
+	@Test
+	void aTestAlertIsSentNowWithinTheHourlyLimit() {
+		AppAlerts alerts = alerts(Map.of("notes.alerts.max-per-hour", "2", "notes.allowed-hosts", "notes.example.ts.net"));
+		assertThat(alerts.sendTest()).isEqualTo(new AlertTestResult(true, null));
+		assertThat(this.sent).singleElement().satisfies((s) -> {
+			assertThat(s.topic()).isEqualTo("ops");
+			assertThat(s.message().title()).isEqualTo("NotesApp: test alert");
+			assertThat(s.message().click()).isEqualTo(URI.create("https://notes.example.ts.net/x/status"));
+		});
+		this.failuresToCome = 1;
+		assertThat(alerts.sendTest()).isEqualTo(new AlertTestResult(false, "IOException: ntfy answered HTTP 502"));
+		assertThat(alerts.status().lastError()).isEqualTo("IOException: ntfy answered HTTP 502");
+		assertThat(alerts.sendTest().error()).startsWith("At most 2 alerts are sent in an hour");
+		this.clock.advance(Duration.ofMinutes(61));
+		assertThat(alerts.sendTest().sent()).isTrue();
+		assertThat(alerts.status().sent()).isEqualTo(2);
+
+		this.loaded = new NtfyConfigFile.Loaded(null, null);
+		assertThat(alerts.sendTest()).isEqualTo(new AlertTestResult(false, "App alerts are off"));
 	}
 
 	@Test

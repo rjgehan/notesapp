@@ -6,6 +6,7 @@ import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, newPathError,
 import { splitWikiBody } from '../../features/syntax';
 import { DEFAULT_SETTINGS } from '../../features/settings';
 import type {
+  AlertTestResult,
   AttachmentResult,
   BacklinkGroup,
   BacklinksResponse,
@@ -392,6 +393,11 @@ export class MockVault {
       backup: { state: 'unknown', reason: 'The mock has no backups', lastRun: null, lastSuccess: null, snapshot: null, offsite: null, failures: null },
       alerts: { state: 'off', reason: 'not configured', server: null, sent: 0, dropped: 0, lastSentAt: null, lastError: null, lastErrorAt: null, recent: [] },
     };
+  }
+
+  /** The mock has no ntfy.json, like a server without alerts (API.md §6.6). */
+  sendTestAlert(): AlertTestResult {
+    return fail('bad-request', 'App alerts are off: not configured');
   }
 
   /** The mock has no mirror: it reports what an unconfigured server does. */

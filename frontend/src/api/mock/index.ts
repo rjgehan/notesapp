@@ -52,6 +52,7 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     getMe: () => call(() => ({ login: 'owner@notes', name: 'Owner', profilePicUrl: null, source: 'default' as const })),
     getStatus: () => call(() => vault.getStatus()),
     getStatusDetails: () => call(() => vault.getStatusDetails()),
+    sendTestAlert: () => call(() => vault.sendTestAlert()),
     getSettings: () => call(() => vault.getSettings()),
     putSettings: (req) => call(() => vault.putSettings(req, clientId)),
     getTree: () => call(() => vault.getTree()),

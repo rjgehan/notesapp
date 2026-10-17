@@ -2,6 +2,7 @@
 // dev-only in-memory mock replaced it at startup (VITE_MOCK_API=1).
 import { apiFetch, query } from './client';
 import type {
+  AlertTestResult,
   AttachmentResult,
   BacklinksResponse,
   CommitResult,
@@ -67,6 +68,7 @@ export interface Endpoints {
   getMe(): Promise<MeResponse>;
   getStatus(): Promise<StatusResponse>;
   getStatusDetails(): Promise<StatusDetails>;
+  sendTestAlert(): Promise<AlertTestResult>;
   getSettings(): Promise<SettingsResponse>;
   putSettings(req: SettingsUpdateRequest): Promise<SettingsResponse>;
   getTree(): Promise<TreeResponse>;
@@ -107,6 +109,7 @@ export const httpEndpoints: Endpoints = {
   getMe: () => apiFetch('/api/me'),
   getStatus: () => apiFetch('/api/status'),
   getStatusDetails: () => apiFetch('/api/status/details'),
+  sendTestAlert: () => apiFetch('/api/alerts/test', { method: 'POST' }),
   getSettings: () => apiFetch('/api/settings'),
   putSettings: (req) => apiFetch('/api/settings', { method: 'PUT', json: req }),
   getTree: () => apiFetch('/api/tree'),

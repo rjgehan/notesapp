@@ -2,20 +2,23 @@
 // at a glance, from /api/status (live through status.changed) and /api/status/details (refreshed
 // every 30 s while the page is open). Problems are listed first; each card then says what is
 // running and how it is doing.
-import { CircleAlert, CircleCheck, CloudUpload, GitCommitHorizontal, RefreshCw, TriangleAlert } from 'lucide-react';
+import { CircleAlert, CircleCheck, CloudUpload, GitCommitHorizontal, RefreshCw, Send, TriangleAlert } from 'lucide-react';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { errorMessage } from '../../api/client';
+import { api } from '../../api/endpoints';
 import { useStatus, useStatusDetails } from '../../api/hooks';
 import { queryClient } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
 import type { StatusDetails, StatusResponse } from '../../api/types';
 import { runCommand } from '../../features/commands';
+import { toastError } from '../../features/errors';
 import { formatBytes, formatDateTime, formatRelative, formatSince } from '../../features/format';
 import { formatLimit } from '../../features/largeFiles';
 import { mirrorConfigured, mirrorSummary, pushMirrorNow } from '../../features/mirror';
 import { openPath } from '../../features/navigation';
 import { aotCacheLabel, alertsSummary, backupSummary, formatUptime, LOW_FREE_BYTES, statusProblems, type Problem } from '../../features/opsStatus';
 import { pageBuild } from '../../state/buildCheck';
+import { toast } from '../../state/toasts';
 import { useUi } from '../../state/ui';
 import { usePageTitle } from './usePageTitle';
 
@@ -302,10 +305,37 @@ function BackupCard({ details, now }: { details: StatusDetails; now: number }) {
   );
 }
 
+/** POST /api/alerts/test, with the outcome as a toast. */
+async function sendTestAlert(): Promise<void> {
+  try {
+    const result = await api.sendTestAlert();
+    if (result.sent) toast('Test alert sent to ntfy', { kind: 'success' });
+    else toast(`The test alert was not sent: ${result.error ?? 'unknown error'}`, { kind: 'error' });
+  } catch (e) {
+    toastError(e, 'Test alert');
+  } finally {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.statusDetails() });
+  }
+}
+
 function AlertsCard({ details, now }: { details: StatusDetails; now: number }) {
   const alerts = details.alerts;
+  const [testing, setTesting] = useState(false);
+  const test = () => {
+    setTesting(true);
+    void sendTestAlert().finally(() => setTesting(false));
+  };
   return (
-    <Card title="App alerts">
+    <Card
+      title="App alerts"
+      actions={
+        alerts.state === 'on' ? (
+          <button type="button" className="button" disabled={testing} onClick={test}>
+            <Send size={14} aria-hidden /> Send a test alert
+          </button>
+        ) : undefined
+      }
+    >
       <Row label="ntfy">
         <span className={alerts.state === 'error' ? 'status-error' : undefined}>{alertsSummary(alerts)}</span>
       </Row>

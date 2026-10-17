@@ -130,6 +130,8 @@ export interface AlertsStatus {
   recent: Array<{ marker: string; count: number; lastAt: IsoInstant }>;   // logged since the server started
 }
 
+export interface AlertTestResult { sent: boolean; error: string | null }   // POST /api/alerts/test (§6.6)
+
 // ---------- settings (§5) ----------
 export interface FilesSettings {
   newNoteLocation: 'root' | 'current' | 'folder';

@@ -144,6 +144,29 @@ class StatusDetailsIntegrationTest {
 	}
 
 	@Test
+	void aTestAlertIsSentAtOnceAndRefusedWhileAlertsAreOff() throws IOException {
+		JsonNode result = this.api.postEmpty("/api/alerts/test").ok(200);
+		assertThat(result.get("sent").asBoolean()).isTrue();
+		assertThat(result.get("error").isNull()).isTrue();
+		assertThat(received).anySatisfy((alert) -> {
+			assertThat(alert.get("title").asString()).isEqualTo("NotesApp: test alert");
+			assertThat(alert.get("topic").asString()).isEqualTo("notes-ops");
+		});
+
+		Path file = data.resolve("secrets").resolve("ntfy.json");
+		Path aside = data.resolve("ntfy.json.aside");
+		Files.move(file, aside);
+		try {
+			assertThat(this.api.postEmpty("/api/alerts/test").problem(400)).isEqualTo("bad-request");
+			assertThat(this.api.get("/api/status/details").ok(200).get("alerts").get("state").asString())
+				.isEqualTo("off");
+		}
+		finally {
+			Files.move(aside, file);
+		}
+	}
+
+	@Test
 	void aLoggedMarkerReachesNtfyAndIsCounted() {
 		LoggerFactory.getLogger(StatusDetailsIntegrationTest.class)
 			.error("STORAGE_LOW only {} bytes are free (a test)", 12345);

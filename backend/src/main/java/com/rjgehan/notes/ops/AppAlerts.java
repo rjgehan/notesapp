@@ -23,6 +23,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
+import com.rjgehan.notes.api.dto.AlertTestResult;
 import com.rjgehan.notes.api.dto.AlertsState;
 import com.rjgehan.notes.api.dto.AlertsStatus;
 import com.rjgehan.notes.config.NotesProperties;
@@ -367,6 +368,54 @@ public class AppAlerts implements DisposableBean {
 				? ex.getClass().getSimpleName() + ": " + ex.getMessage() : ex.getClass().getSimpleName();
 		text = text.replaceAll("\\s+", " ");
 		return (text.length() > MAX_ERROR_LENGTH) ? text.substring(0, MAX_ERROR_LENGTH) + "…" : text;
+	}
+
+	// ---------------------------------------------------------------- test
+
+	/**
+	 * {@code POST /api/alerts/test}: sends a test alert now, on the caller's thread, within the hourly limit, so the
+	 * status page can say at once whether ntfy is reachable. The caller checks that alerts are on.
+	 */
+	public AlertTestResult sendTest() {
+		NtfyConfig current = this.config.get().config();
+		if (current == null || !current.alerts().enabled()) {
+			return new AlertTestResult(false, "App alerts are off");
+		}
+		Instant now = this.clock.instant();
+		synchronized (this.state) {
+			while (!this.recentSends.isEmpty() && !this.recentSends.peekFirst().isAfter(now.minus(HOUR))) {
+				this.recentSends.removeFirst();
+			}
+			if (this.recentSends.size() >= this.maxPerHour) {
+				return new AlertTestResult(false,
+						"At most " + this.maxPerHour + " alerts are sent in an hour; try again later");
+			}
+			this.recentSends.addLast(now);
+		}
+		NtfyClient.Message message = new NtfyClient.Message("NotesApp: test alert",
+				"App alerts from NotesApp reach this topic. When something goes wrong, the alert arrives here the "
+						+ "same way.",
+				3, List.of("white_check_mark"), this.statusPage);
+		try {
+			this.publisher.publish(current, current.alerts().topic(), message);
+			synchronized (this.state) {
+				this.sent++;
+				this.lastSentAt = this.clock.instant();
+			}
+			return new AlertTestResult(true, null);
+		}
+		catch (IOException | RuntimeException ex) {
+			String error = describe(ex);
+			synchronized (this.state) {
+				this.lastError = error;
+				this.lastErrorAt = now;
+			}
+			return new AlertTestResult(false, error);
+		}
+		catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			return new AlertTestResult(false, "Interrupted");
+		}
 	}
 
 	// ---------------------------------------------------------------- status

@@ -421,6 +421,20 @@ What the status page (`/x/status`, ROADMAP item 38) shows beyond §6.2. Some of 
 
 No `status.changed` event is sent for these fields: the page refreshes them every 30 seconds, and whenever it refreshes `/api/status`.
 
+### 6.6 `POST /api/alerts/test`
+
+No body. Sends a test alert to the alerts topic now, so the status page can show at once whether ntfy accepts it (DESIGN §5.18.1). It counts toward the hourly limit of alerts. `200 AlertTestResult`:
+
+```json
+{ "sent": false, "error": "IOException: ntfy answered HTTP 403" }
+```
+
+`error` is a short text, `null` when `sent` is true; it never contains the topic or the token. `alerts.lastSentAt` or `alerts.lastError` in §6.5 change accordingly.
+
+| Errors |
+|---|
+| `400 bad-request` when app alerts are off (`detail` says why: no `ntfy.json`, switched off in it, or what is wrong with it) |
+
 ---
 
 ## 7. Tree (also the note list for the quick switcher and autocomplete)
@@ -1643,6 +1657,8 @@ export interface AlertsStatus {
   recent: Array<{ marker: string; count: number; lastAt: IsoInstant }>;   // logged since the server started
 }
 
+export interface AlertTestResult { sent: boolean; error: string | null }   // POST /api/alerts/test (§6.6)
+
 // ---------- settings (§5) ----------
 export interface FilesSettings {
   newNoteLocation: 'root' | 'current' | 'folder';
@@ -1900,6 +1916,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | GET | `/api/me` | | 200 `MeResponse` | 6.1 |
 | GET | `/api/status` | | 200 `StatusResponse` | 6.2 |
 | GET | `/api/status/details` | | 200 `StatusDetails` | 6.5 |
+| POST | `/api/alerts/test` | | 200 `AlertTestResult` | 6.6 |
 | POST | `/api/mirror/push` | | 202 `MirrorStatus` | 6.4 |
 | GET | `/api/settings` | | 200 `SettingsResponse` | 5 |
 | PUT | `/api/settings` | `SettingsUpdateRequest` | 200 `SettingsResponse` | 5 |
@@ -1948,7 +1965,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `MeResponse` | `MeResponse` | |
 | `StatusResponse`, `SkippedEntry` | `StatusResponse` with nested `VaultStats`, `IndexStats`, `GitStatus` (with nested `LargeFilesStats`), `WatcherStatus`, `DiskStatus`, `SettingsStatus`; `SkippedEntry(String name, SkipReason reason)` | Enums `GitState` and `SkipReason` serialize as their lower-case strings |
 | `MirrorStatus` | Same | Enum `MirrorState` serializes as its lower-case string |
-| `StatusDetails`, `BackupStatus`, `AlertsStatus` | `StatusDetails` with nested `RuntimeStatus`, `EventsStatus`, `GitDetails` (with nested `LargeFile`), `DiskDetails`; `BackupStatus`; `AlertsStatus` with nested `MarkerCount` | Enums `AotCacheState` (`in-use`, `not-used`, `off`, `unknown`), `BackupState` and `AlertsState` serialize as their lower-case strings |
+| `StatusDetails`, `BackupStatus`, `AlertsStatus`, `AlertTestResult` | `StatusDetails` with nested `RuntimeStatus`, `EventsStatus`, `GitDetails` (with nested `LargeFile`), `DiskDetails`; `BackupStatus`; `AlertsStatus` with nested `MarkerCount`; `AlertTestResult` | Enums `AotCacheState` (`in-use`, `not-used`, `off`, `unknown`), `BackupState` and `AlertsState` serialize as their lower-case strings |
 | `Settings`, `FilesSettings`, `DailyNotesSettings`, `TemplatesSettings`, `EditorSettings` | Same names in `com.rjgehan.notes.settings` | Enums: `NewNoteLocation`, `LinkFormat`, `AttachmentLocation`, `EditorMode` |
 | `SettingsResponse`, `SettingsUpdateRequest` | Same | |
 | `FileEntry`, `FolderEntry`, `TreeResponse` | Same | |

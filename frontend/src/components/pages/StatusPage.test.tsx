@@ -9,6 +9,7 @@ import type { StatusDetails, StatusResponse } from '../../api/types';
 import { registerBuiltins } from '../../extensions/builtins';
 import { registeredPages } from '../../extensions';
 import { openPath } from '../../features/navigation';
+import { useToasts } from '../../state/toasts';
 import StatusPage from './StatusPage';
 
 vi.mock('../../features/navigation', async (importOriginal) => ({
@@ -125,6 +126,19 @@ describe('StatusPage (ROADMAP item 38)', () => {
     await waitFor(() => expect(push).toHaveBeenCalledTimes(1));
     fireEvent.click(within(history).getByRole('button', { name: 'Commit now' }));
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+  });
+
+  it('sends a test alert and says how it went', async () => {
+    const { status, details } = data();
+    const send = vi.spyOn(api, 'sendTestAlert').mockResolvedValueOnce({ sent: true, error: null }).mockResolvedValueOnce({ sent: false, error: 'IOException: ntfy answered HTTP 403' });
+    renderPage(status, details);
+    const alerts = await screen.findByRole('region', { name: 'App alerts' });
+    fireEvent.click(within(alerts).getByRole('button', { name: 'Send a test alert' }));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain('Test alert sent to ntfy'));
+    await waitFor(() => expect(within(alerts).getByRole('button', { name: 'Send a test alert' })).toBeEnabled());
+    fireEvent.click(within(alerts).getByRole('button', { name: 'Send a test alert' }));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain('The test alert was not sent: IOException: ntfy answered HTTP 403'));
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it('explains unknown backups and alerts that are off', async () => {
