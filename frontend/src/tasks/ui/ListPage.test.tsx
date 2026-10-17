@@ -1,0 +1,142 @@
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryClient } from '../../api/queryClient';
+import type { Task, TaskList, TaskWriteResult } from '../../api/types';
+import { taskApi } from '../api';
+import { taskStore } from '../store';
+import { makeList, makeSection, makeTask } from '../testing';
+import ListPage from './ListPage';
+import { renderWithApp } from './renderWithApp';
+import { useTaskUi } from './state';
+
+const list = makeList({ sections: [makeSection('S1', 'Errands', 'a0')] });
+const tasks = [
+  makeTask({ id: 'A', title: 'Plan the move', order: 'a0' }),
+  makeTask({ id: 'A1', title: 'Book the van', parentId: 'A', order: 'a0' }),
+  makeTask({ id: 'B', title: 'Pay rent', order: 'a1', priority: 3, tags: ['bills'] }),
+  makeTask({ id: 'D', title: 'Old chore', order: 'a2', status: 'done', completedAt: '2026-10-01T00:00:00.000Z' }),
+  makeTask({ id: 'E', title: 'Buy milk', sectionId: 'S1', order: 'a0' }),
+];
+
+function serve(l: TaskList = list, t: Task[] = tasks) {
+  return vi.spyOn(taskApi, 'query').mockResolvedValue({ view: 'list', lists: [l], tasks: t, total: t.length, problems: [] });
+}
+
+function result(task: Task | null, changed: Task[] = []): TaskWriteResult {
+  return { task, changed, deleted: [], rolledForward: false, files: [], createdFolders: [] };
+}
+
+const titles = () => [...document.querySelectorAll('.task-tree .task-row')].map((r) => `${(r as HTMLElement).style.getPropertyValue('--task-depth')}:${r.querySelector('.task-title')?.textContent ?? '(editing)'}`);
+
+beforeEach(() => {
+  taskStore.reset();
+  useTaskUi.setState({ quickAdd: null, detailId: null });
+});
+
+afterEach(() => queryClient.clear());
+
+const renderList = () => renderWithApp(<ListPage />, { path: '/x/tasks/list/L1', route: '/x/tasks/list/:id' });
+
+describe('List page (ROADMAP item 4)', () => {
+  it('shows sections and subtasks, and completed tasks on request', async () => {
+    const query = serve();
+    renderList();
+    await screen.findByText('Plan the move');
+    expect(query).toHaveBeenCalledWith({ view: 'list', list: 'L1', status: 'all' });
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Home');
+    expect(titles()).toEqual(['0:Plan the move', '1:Book the van', '0:Pay rent', '0:Buy milk']);
+    expect(screen.getByRole('button', { name: /^Errands/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'List actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Show completed tasks \(1\)/ }));
+    expect(titles()).toContain('0:Old chore');
+  });
+
+  it('hides and shows subtasks', async () => {
+    serve();
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide subtasks of “Plan the move”' }));
+    expect(titles()).toEqual(['0:Plan the move', '0:Pay rent', '0:Buy milk']);
+    fireEvent.click(screen.getByRole('button', { name: /^Errands/ }));
+    expect(titles()).toEqual(['0:Plan the move', '0:Pay rent']);
+  });
+
+  it('edits a title inline and sends it with the title it started from', async () => {
+    serve();
+    const update = vi.spyOn(taskApi, 'update').mockImplementation(async (_id, req) => result({ ...tasks[2], ...req.changes } as Task));
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit “Pay rent”' }));
+    const title = screen.getByRole('textbox', { name: 'Title' });
+    fireEvent.focus(title);
+    fireEvent.change(title, { target: { value: 'Pay the rent' } });
+    fireEvent.keyDown(title, { key: 'Enter' });
+    fireEvent.blur(title);
+    await waitFor(() => expect(update).toHaveBeenCalledWith('B', { changes: { title: 'Pay the rent' }, base: { title: 'Pay rent' } }, expect.any(String)));
+    // Priority and the due date are inline too.
+    fireEvent.click(screen.getByRole('radio', { name: /Low/ }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith('B', { changes: { priority: 1 }, base: { priority: 3 } }, expect.any(String)));
+    fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-11-01' } });
+    await waitFor(() => expect(update).toHaveBeenCalledWith('B', { changes: { due: '2026-11-01' }, base: { due: null } }, expect.any(String)));
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('textbox', { name: 'Title' })).not.toBeInTheDocument();
+  });
+
+  it('adds tags inline, refusing invalid ones', async () => {
+    serve();
+    const update = vi.spyOn(taskApi, 'update').mockImplementation(async (_id, req) => result({ ...tasks[2], ...req.changes } as Task));
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit “Pay rent”' }));
+    const input = screen.getByRole('textbox', { name: 'Add tags' });
+    fireEvent.change(input, { target: { value: '#home, 123' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByRole('alert')).toHaveTextContent('“123” is not a valid tag');
+    fireEvent.change(input, { target: { value: '#home' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(update).toHaveBeenCalledWith('B', { changes: { tags: ['bills', 'home'] }, base: { tags: ['bills'] } }, expect.any(String)));
+  });
+
+  it('moves a task with Alt+arrows: down among siblings and into the task above', async () => {
+    serve();
+    const reorder = vi.spyOn(taskApi, 'reorder').mockImplementation(async (req) => result(null, [{ ...tasks[2], parentId: req.parentId }]));
+    renderList();
+    const row = await screen.findByRole('button', { name: 'Edit “Plan the move”' });
+    fireEvent.keyDown(row, { key: 'ArrowDown', altKey: true });
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith({ listId: 'L1', sectionId: null, parentId: null, ids: ['A'], after: 'B' }, expect.any(String)));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Edit “Pay rent”' }), { key: 'ArrowRight', altKey: true });
+    await waitFor(() => expect(reorder).toHaveBeenLastCalledWith(expect.objectContaining({ ids: ['B'], parentId: 'A' }), expect.any(String)));
+  });
+
+  it('moves a task into a section from its menu', async () => {
+    serve();
+    const reorder = vi.spyOn(taskApi, 'reorder').mockImplementation(async () => result(null, [{ ...tasks[2], sectionId: 'S1', order: 'Zz' }]));
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'More for “Pay rent”' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to section “Errands”' }));
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith({ listId: 'L1', sectionId: 'S1', parentId: null, ids: ['B'], after: null }, expect.any(String)));
+    await waitFor(() => expect(titles()).toEqual(['0:Plan the move', '1:Book the van', '0:Pay rent', '0:Buy milk']));
+    const errands = screen.getByRole('button', { name: /^Errands/ }).closest('li')!;
+    expect(within(errands).getByText('2')).toBeInTheDocument();
+  });
+
+  it('opens quick add for the list and for a section', async () => {
+    serve();
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add task to Errands' }));
+    expect(useTaskUi.getState().quickAdd).toEqual({ listId: 'L1', sectionId: 'S1' });
+    fireEvent.click(screen.getAllByRole('button', { name: /Add task/ })[0]);
+    expect(useTaskUi.getState().quickAdd).toEqual({ listId: 'L1' });
+  });
+
+  it('shows a list written by a newer version read-only', async () => {
+    serve({ ...list, writable: false });
+    renderList();
+    expect(await screen.findByText(/cannot be changed/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Add task/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Complete “Pay rent”' })).toBeDisabled();
+  });
+
+  it('says so when the list no longer exists', async () => {
+    vi.spyOn(taskApi, 'query').mockResolvedValue({ view: 'list', lists: [], tasks: [], total: 0, problems: [] });
+    renderList();
+    expect(await screen.findByText('This list no longer exists')).toBeInTheDocument();
+  });
+});
