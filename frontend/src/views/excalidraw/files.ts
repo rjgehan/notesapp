@@ -147,25 +147,3 @@ export async function displayDataUrl(blob: Blob): Promise<{ dataURL: string; mim
     return original();
   }
 }
-
-function escapeXml(s: string): string {
-  return s.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]!);
-}
-
-/**
- * A static stand-in for an image the app cannot show: an Obsidian Excalidraw extra (an embedded
- * note, a LaTeX formula), a web image (never fetched), or a missing attachment. It exists in
- * memory only; the file keeps its reference.
- */
-export function placeholderDataUrl(label: string, detail: string): string {
-  const line = (s: string) => escapeXml(s.length > 60 ? s.slice(0, 59) + '…' : s);
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120">` +
-    `<rect x="1" y="1" width="318" height="118" rx="8" fill="#f4f4f5" stroke="#a1a1aa" stroke-dasharray="6 4"/>` +
-    `<text x="160" y="52" font-family="sans-serif" font-size="15" fill="#3f3f46" text-anchor="middle">${line(label)}</text>` +
-    `<text x="160" y="80" font-family="sans-serif" font-size="12" fill="#71717a" text-anchor="middle">${line(detail)}</text>` +
-    `</svg>`;
-  let binary = '';
-  for (const b of new TextEncoder().encode(svg)) binary += String.fromCharCode(b);
-  return 'data:image/svg+xml;base64,' + btoa(binary);
-}

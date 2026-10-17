@@ -15,6 +15,9 @@ export interface EmbedProps {
   entry: FileEntry;
   subpath?: string;
   display?: string;
+  /** The embed's size in CSS pixels, from `![[file|W]]` or `![[file|WxH]]`. */
+  width?: number;
+  height?: number;
   sourcePath: string;
   depth: number;
 }

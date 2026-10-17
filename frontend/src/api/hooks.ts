@@ -144,3 +144,8 @@ export function useTextFile(path: string | null) {
     enabled: path !== null,
   });
 }
+
+/** `useTextFile` outside React, from the same cache (a note embedded in a drawing). */
+export function fetchTextFile(path: string) {
+  return queryClient.fetchQuery({ queryKey: queryKeys.file(path), queryFn: () => api.readFile(path), staleTime: STALE.file });
+}

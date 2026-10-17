@@ -405,6 +405,28 @@ describe('images', () => {
     expect(Object.values(files).map((f) => f.path)).toHaveLength(5);
   });
 
+  it('shows the plugin’s extras as static images sized like their element, and keeps their entries', async () => {
+    const path = 'Map.excalidraw.md';
+    const content = markdownDrawing({
+      embedded: [
+        ['n1', '[[Plan#Goals]]'],
+        ['t1', '$$e=mc^2$$'],
+      ],
+      scene: scene([el('note', { type: 'image', fileId: 'n1', width: 300, height: 200 }), el('tex', { type: 'image', fileId: 't1', width: 240, height: 60 })]),
+    });
+    const embeddedFile = vi.fn(async () => ({ dataURL: 'data:image/svg+xml;base64,PHN2Zy8+', mimeType: 'image/svg+xml' }));
+    const { canvas, vault } = await setup(path, content, { resolveLink: vi.fn((t: string) => (t === 'Plan' ? 'Notes/Plan.md' : null)), embeddedFile });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(embeddedFile).toHaveBeenCalledWith('Notes/Plan.md', 'Goals', path, { width: 300, height: 200 });
+    expect(canvas.files.n1.dataURL).toBe('data:image/svg+xml;base64,PHN2Zy8+');
+    expect(atob(canvas.files.t1.dataURL!.split(',')[1])).toContain('e=mc^2');
+    // Showing them is not an edit, and a save keeps their entries.
+    expect(vault.readFile(path).content).toBe(content);
+    canvas.change('note', { x: 9 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(markdownParts(vault.readFile(path).content).embedded.map((e) => e.value)).toEqual(['[[Plan#Goals]]', '$$e=mc^2$$']);
+  });
+
   it('lists an image added to an Obsidian drawing under Embedded Files, not in the JSON', async () => {
     const path = 'Map.excalidraw.md';
     const { canvas, controller, vault } = await setup(path, markdownDrawing({ scene: scene([]) }));

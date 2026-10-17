@@ -23,6 +23,7 @@ import { drawingEnv } from './env';
 import type { LiveFile } from './files';
 import { keepFontsSameOrigin } from './fonts';
 import { drawingFormat, type DrawingFormat, type SceneElement } from './format';
+import { useAppTheme } from './theme';
 import './excalidraw.css';
 
 keepFontsSameOrigin();
@@ -36,22 +37,6 @@ const lib: SceneLib = {
   hashElementsVersion: (elements) => hashElementsVersion(elements as never),
   captureNever: CaptureUpdateAction.NEVER,
 };
-
-// ---------- the app theme (data-theme on <html>, which also follows the OS in "system") ----------
-
-function subscribeTheme(fn: () => void): () => void {
-  const observer = new MutationObserver(fn);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-  return () => observer.disconnect();
-}
-
-function currentTheme(): 'light' | 'dark' {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-}
-
-function useAppTheme(): 'light' | 'dark' {
-  return useSyncExternalStore(subscribeTheme, currentTheme);
-}
 
 // ---------- links inside drawings ----------
 

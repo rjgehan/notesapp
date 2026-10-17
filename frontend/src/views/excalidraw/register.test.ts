@@ -32,6 +32,9 @@ describe('drawing views', () => {
     expect(getCommand('file.new.excalidraw')?.name).toBe('Create new drawing');
     // New drawings are .excalidraw only (DESIGN §6.8.1).
     expect(viewFor(entry('Map.excalidraw.md', 'note')).create).toBeUndefined();
+    // ![[drawing]] embeds through the view (a lazy chunk).
+    expect(d.loadEmbed).toBeTypeOf('function');
+    expect(viewFor(entry('Map.excalidraw.md', 'note')).loadEmbed).toBeTypeOf('function');
   });
 
   it('point Excalidraw at the self-hosted fonts', () => {

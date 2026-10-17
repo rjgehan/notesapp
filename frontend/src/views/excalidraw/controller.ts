@@ -12,7 +12,8 @@
 //   ids in the file (the Obsidian plugin's block ids); the scene keeps Excalidraw's own ids, and
 //   the controller maps between them, so undo history and selection never see a rename.
 import type { DocumentSession } from '../../sync/DocumentSession';
-import { dataUrlToBlob, EMBED_LIMIT, fileIdFor, filesToStore, placeholderDataUrl, referencedFileIds, type LiveFile } from './files';
+import { dataUrlToBlob, EMBED_LIMIT, fileIdFor, filesToStore, referencedFileIds, type LiveFile } from './files';
+import { imageBoxes, imageFor, type ImageEnv } from './images';
 import {
   EXPORTED_APP_STATE,
   isLiveText,
@@ -58,11 +59,8 @@ export interface SceneLib {
   captureNever: unknown;
 }
 
-/** The app around the view. */
-export interface DrawingEnv {
-  /** An attachment for display, or null when it is not in the vault. */
-  loadAttachment(path: string, source: string): Promise<{ dataURL: string; mimeType: string; path: string } | null>;
-  resolveLink(target: string, source: string): string | null;
+/** The app around the view: images (images.ts), uploads, link texts and error toasts. */
+export interface DrawingEnv extends ImageEnv {
   /** POST /api/attachments with `source` = the drawing. */
   upload(file: Blob, name: string | null, source: string): Promise<{ path: string }>;
   /** Wiki link text for an attachment, as `## Embedded Files` lists it. */
@@ -352,51 +350,18 @@ export class DrawingController {
         const api = this.api;
         if (!api) return;
         const live = api.getFiles();
-        for (const id of referencedFileIds(api.getSceneElementsIncludingDeleted())) {
+        const elements = api.getSceneElementsIncludingDeleted();
+        const boxes = imageBoxes(elements);
+        for (const id of referencedFileIds(elements)) {
           if (this.requested.has(id) || live[id]?.dataURL) continue;
           this.requested.add(id);
-          const file = await this.fileFor(id);
+          const file = await imageFor(id, { stored: this.stored, section: this.sectionRefs, vault: this.vault }, this.env, this.session.path, boxes.get(id));
           if (file && this.api === api) api.addFiles([file]);
         }
       } while (this.loadAgain);
     } finally {
       this.loading = false;
     }
-  }
-
-  private placeholder(id: string, label: string, detail: string): LiveFile {
-    return { id, mimeType: 'image/svg+xml', dataURL: placeholderDataUrl(label, detail), created: Date.now() };
-  }
-
-  private async fileFor(id: string): Promise<LiveFile | null> {
-    const stored = this.stored.get(id);
-    if (stored?.dataURL) return { id, mimeType: stored.mimeType, dataURL: stored.dataURL, created: stored.created };
-    const path = stored?.path ?? this.vault.get(id)?.path;
-    if (path) return this.attachment(id, path);
-    const ref = this.sectionRefs.get(id);
-    if (!ref) return null;
-    switch (ref.kind) {
-      case 'link': {
-        const resolved = this.env.resolveLink(ref.target, this.session.path);
-        return resolved ? this.attachment(id, resolved) : this.placeholder(id, 'Missing image', ref.target);
-      }
-      case 'latex':
-        return this.placeholder(id, 'LaTeX formula (shown in Obsidian)', ref.latex);
-      case 'url':
-        return this.placeholder(id, 'Web image (not loaded here)', ref.url);
-      default:
-        return this.placeholder(id, 'Embedded file (shown in Obsidian)', id);
-    }
-  }
-
-  private async attachment(id: string, path: string): Promise<LiveFile> {
-    try {
-      const loaded = await this.env.loadAttachment(path, this.session.path);
-      if (loaded) return { id, mimeType: loaded.mimeType, dataURL: loaded.dataURL, created: Date.now(), path: loaded.path };
-    } catch {
-      // Shown as missing; the file keeps its reference.
-    }
-    return this.placeholder(id, 'Missing image', path);
   }
 
   /**

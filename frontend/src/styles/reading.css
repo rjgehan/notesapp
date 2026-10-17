@@ -361,6 +361,52 @@
   margin-bottom: 0;
 }
 
+/* Drawing embeds (views/excalidraw/DrawingEmbed.tsx): the SVG export, a click opens the editor */
+.markdown-rendered .drawing-embed {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  border-radius: var(--radius-m);
+  line-height: 0;
+  text-decoration: none !important;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+}
+
+.drawing-embed img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-m);
+}
+
+.drawing-embed img.is-fixed {
+  object-fit: contain;
+}
+
+.drawing-embed:hover img,
+.drawing-embed:focus-visible img {
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.drawing-embed-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: min(240px, 100%);
+  min-height: 120px;
+  padding: 12px 16px;
+  border: 1px dashed var(--background-modifier-border-hover);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+}
+
 .markdown-embed-empty,
 .embed-loading {
   color: var(--text-faint);

@@ -11,6 +11,7 @@ import type { FileEntry } from '../api/types';
 import { splitFrontmatter } from '../features/frontmatter';
 import { noteRoute } from '../features/paths';
 import { isInternalDestination, isWhitespace, matchWikiLinkAt, parseMarkdownDestination, splitWikiBody, tagBodyLength } from '../features/syntax';
+import { isMarkdownViewPath } from '../views/registry';
 
 export interface RenderContext {
   sourcePath: string;
@@ -293,6 +294,8 @@ function embedHtml(ctx: RenderContext, target: string, subpath: string | null, d
     case 'pdf':
       return `<span class="internal-embed ${entry.kind}-embed" data-embed-kind="${entry.kind}"${attrs}></span>`;
     case 'note':
+      // A note another view shows (an .excalidraw.md drawing) embeds through that view, at any depth.
+      if (!isMarkdownViewPath(entry.path)) return `<span class="internal-embed file-embed" data-embed-kind="file"${attrs}></span>`;
       if (ctx.depth > 0 || subpath?.startsWith('^') || entry.path === ctx.sourcePath) {
         return internalLink(ctx, target, subpath, display ?? defaultLinkText(target, subpath));
       }

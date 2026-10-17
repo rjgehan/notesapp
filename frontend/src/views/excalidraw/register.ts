@@ -2,7 +2,7 @@
 // built-in view: `.excalidraw` (score 11) with "New drawing", and Obsidian Excalidraw's
 // `.excalidraw.md` (14, which beats `.md`). Both are textual, so autosave, drafts, conflicts,
 // history and live sync come from the DocumentSession; `merge` reconciles elements. The editor
-// is a lazy chunk; this module stays small.
+// and the `![[drawing]]` embed (exportToSvg) are lazy chunks; this module stays small.
 import { Shapes } from 'lucide-react';
 import { registerView } from '../registry';
 import { newDrawingContent } from './format';
@@ -24,6 +24,7 @@ export function registerDrawingViews(): void {
     textual: true,
     modes: ['edit'],
     load: () => import('./ExcalidrawView'),
+    loadEmbed: () => import('./DrawingEmbed'),
     create: { label: 'drawing', extension: 'excalidraw', initialContent: newDrawingContent },
     merge: (base, mine, theirs) => mergeDrawingTexts('excalidraw', base, mine, theirs),
   });
@@ -34,6 +35,7 @@ export function registerDrawingViews(): void {
     textual: true,
     modes: ['edit'],
     load: () => import('./ExcalidrawView'),
+    loadEmbed: () => import('./DrawingEmbed'),
     merge: (base, mine, theirs) => mergeDrawingTexts('markdown', base, mine, theirs),
   });
 }

@@ -114,6 +114,12 @@ export function drawingFormat(path: string): DrawingFormat {
   return path.toLowerCase().endsWith('.md') ? 'markdown' : 'excalidraw';
 }
 
+/** The names the drawing view claims (register.ts): `.excalidraw` and `.excalidraw.md`. */
+export function isDrawingPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.md');
+}
+
 /** The content of a new `.excalidraw` file. */
 export function newDrawingContent(): string {
   const scene: Scene = {

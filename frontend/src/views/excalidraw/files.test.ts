@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { el } from '../../test/drawings';
-import { blobToDataUrl, dataUrlToBlob, filesToStore, isPastedName, placeholderDataUrl, referencedFileIds, type FileSources } from './files';
+import { blobToDataUrl, dataUrlToBlob, filesToStore, isPastedName, referencedFileIds, type FileSources } from './files';
 import { sameOriginFontSources } from './fonts';
 
 const none: FileSources = { stored: new Map(), section: new Set(), vault: new Map() };
@@ -52,14 +52,6 @@ describe('image helpers', () => {
     expect(blob.size).toBe(8);
     expect(await blobToDataUrl(blob)).toBe('data:image/png;base64,iVBORw0KGgo=');
     expect(await dataUrlToBlob('data:text/plain,a%20b').text()).toBe('a b');
-  });
-
-  it('draws placeholders as SVG data URLs, with the text escaped', () => {
-    const url = placeholderDataUrl('Missing image', '<script>&"x"</script>');
-    expect(url.startsWith('data:image/svg+xml;base64,')).toBe(true);
-    const svg = new TextDecoder().decode(Uint8Array.from(atob(url.split(',')[1]), (c) => c.charCodeAt(0)));
-    expect(svg).toContain('&lt;script&gt;&amp;&quot;x&quot;&lt;/script&gt;');
-    expect(svg).not.toContain('<script>');
   });
 });
 
