@@ -400,6 +400,10 @@ export class Workbook {
     if (expression !== null && existing === undefined && !valid(name, expression)) {
       throw new Error(`"${name}" cannot name a range: use letters, digits and _, and not a cell reference.`);
     }
+    // A typed range or value must at least parse (the named-ranges dialog); files are not checked here.
+    if (expression !== null && !this.engine.validateFormula('=' + expression)) {
+      throw new Error(`"${expression}" is not a range, a value or a formula.`);
+    }
     const key = existing ?? name;
     const after = expression ?? undefined;
     if (this.model.named[key] !== after) this.record([{ kind: 'named', name: key, before: this.model.named[key], after }]);

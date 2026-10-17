@@ -253,6 +253,8 @@ describe('edits', () => {
     expect(() => wb.setNamed('B2', 'Budget!A1')).toThrow(/cannot name a range/);
     expect(() => wb.setNamed('true', '1')).toThrow(/cannot name a range/);
     expect(() => wb.setNamed('__proto__', '1')).toThrow(/cannot name a range/);
+    expect(() => wb.setNamed('Broken', 'SUM(')).toThrow(/not a range/);
+    expect(() => wb.setNamed('Total', 'Budget!$B$2 +')).toThrow(/not a range/);
     expect(wb.canUndo()).toBe(false);
   });
 
