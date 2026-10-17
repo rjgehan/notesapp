@@ -56,6 +56,7 @@ function context(settings: Settings = DEFAULT_SETTINGS, path = 'Welcome.md'): No
     toggleMode: () => {},
     insertFiles: () => {},
     linkTo: (path) => `[[${path}]]`,
+    showMenu: () => {},
   };
 }
 

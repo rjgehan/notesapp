@@ -4,6 +4,7 @@ import { StateEffect, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { currentSettings, currentTree, fetchNoteMeta, fetchTags, useTree } from '../api/hooks';
+import { openContextMenu } from '../components/overlays/openContextMenu';
 import { insertAttachments } from '../features/attachments';
 import { linkTo } from '../features/fileOps';
 import { wantsNoteFocus } from '../features/focus';
@@ -58,6 +59,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       toggleMode: () => callbacks.current.onToggleMode(),
       insertFiles: (files, range, pasted) => void insertAttachments(session, files, range, pasted),
       linkTo: (path) => linkTo(path, session.path),
+      showMenu: openContextMenu,
     };
     const hooks: EditorHooks = {
       onLocalChange: () => session.markDirty(),

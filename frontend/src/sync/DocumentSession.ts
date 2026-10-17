@@ -10,7 +10,7 @@ import { errorMessage, isProblem, isStorageProblem, isTransient, isVersionConfli
 import type { Endpoints } from '../api/endpoints';
 import type { FileEntry, TextFile, Version, WriteResult } from '../api/types';
 import { markdownNoteLanguage } from '../editor/language';
-import { remoteChanges, remoteTransaction, sessionEdit, waitForComposition } from '../editor/remote';
+import { isComposing, remoteChanges, remoteTransaction, sessionEdit, waitForComposition } from '../editor/remote';
 import { addUpload, endUpload, pendingUploads, uploadsField } from '../editor/uploads';
 import { detectEol, fromLf, toLf, type Eol } from '../features/eol';
 import { isNotePath } from '../features/paths';
@@ -412,7 +412,7 @@ export class DocumentSession {
    */
   private async replaceRemote(text: string, seq: number): Promise<'applied' | 'edited' | 'superseded'> {
     const view = this.view;
-    if (view && view.composing) {
+    if (view && isComposing(view)) {
       const before = this.changes;
       await waitForComposition(view);
       if (this.disposed || seq !== this.reconcileSeq) return 'superseded';

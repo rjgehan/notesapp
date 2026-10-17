@@ -35,6 +35,7 @@ function context(overrides: Partial<NoteContext> = {}): NoteContext {
     toggleMode: () => {},
     insertFiles: () => {},
     linkTo: (p) => `[[${p}]]`,
+    showMenu: () => {},
     ...overrides,
   };
 }

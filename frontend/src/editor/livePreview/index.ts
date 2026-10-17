@@ -14,6 +14,7 @@ import { followLink } from '../editorCommands';
 import { linkAt } from '../linkAt';
 import { buildLivePreview, revealOptions, type LivePreview, type LivePreviewConfig } from './decorations';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
+import { tables } from './table';
 
 export type { LivePreviewConfig } from './decorations';
 
@@ -298,10 +299,10 @@ const linkClicks = EditorView.domEventHandlers({
 });
 
 /**
- * The Live Preview extension (DESIGN §6.6.1). `locked` renders the same way read-only: the note
- * gets keyboard focus for reading, and links follow on a plain click.
+ * Live Preview of inline content and lines, without tables: the note's editor uses it, and so does
+ * the editor of a table cell, which holds one line of inline Markdown.
  */
-export function livePreview(config: LivePreviewConfig): Extension {
+export function livePreviewInline(config: LivePreviewConfig): Extension {
   return [
     livePreviewConfig.of(config),
     livePlugin,
@@ -310,4 +311,13 @@ export function livePreview(config: LivePreviewConfig): Extension {
     Prec.high(linkClicks),
     config.locked ? EditorView.contentAttributes.of({ tabindex: '0' }) : [settleSelection, removeEmptyFormatting, liveKeymap],
   ];
+}
+
+/**
+ * The Live Preview extension (DESIGN §6.6.1). `locked` renders the same way read-only: the note
+ * gets keyboard focus for reading, and links follow on a plain click. Tables come first, so their
+ * keys (arrows and deletion next to a table) run before the inline ones.
+ */
+export function livePreview(config: LivePreviewConfig): Extension {
+  return [tables({ locked: config.locked }), livePreviewInline(config)];
 }

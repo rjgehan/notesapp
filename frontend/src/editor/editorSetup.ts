@@ -13,7 +13,8 @@ import { followLink, followLinkAtCursor, insertMarkdownLink, saveNow, toggleBold
 import { lineClassPlugin, obsidianHighlight } from './highlight';
 import { linkAt } from './linkAt';
 import { markdownNoteLanguage } from './language';
-import { livePreview, type LivePreviewConfig } from './livePreview';
+import { livePreview, livePreviewInline, type LivePreviewConfig } from './livePreview';
+import { cellLanguage, tableCellSetup } from './livePreview/table';
 import { pasteAndDrop } from './pasteAndDrop';
 import { isLocalEdit } from './remote';
 import { searchHighlight } from './searchHighlight';
@@ -120,16 +121,57 @@ const clickNavigation: Extension = [
   }),
 ];
 
+const noteKeymap = [
+  { key: 'Mod-s', run: saveNow, preventDefault: true },
+  { key: 'Mod-Enter', run: followLinkAtCursor },
+  { key: 'Mod-l', run: toggleCheckbox, preventDefault: true },
+  { key: 'Mod-b', run: toggleBold, preventDefault: true },
+  { key: 'Mod-i', run: toggleItalic, preventDefault: true },
+  { key: 'Mod-k', run: insertMarkdownLink, preventDefault: true },
+  { key: 'Mod-e', run: toggleMode, preventDefault: true },
+];
+
+/**
+ * The editor of a table cell being edited in Live Preview (DESIGN §6.6.1): one line of inline
+ * Markdown with the note's rendering, completion and formatting keys. Its undo history is the
+ * note's, and the grid adds the keys that move between cells.
+ */
+function tableCellExtensions(ctx: NoteContext, hooks: EditorHooks, config: LivePreviewConfig): Extension[] {
+  return [
+    noteContext.of(ctx),
+    isIOS ? [] : drawSelection(),
+    cellLanguage,
+    syntaxHighlighting(obsidianHighlight),
+    livePreviewInline({ ...config, locked: false }),
+    EditorView.lineWrapping,
+    EditorView.contentAttributes.of({
+      spellcheck: String(hooks.spellcheck),
+      autocorrect: hooks.autocorrect ? 'on' : 'off',
+      autocapitalize: 'sentences',
+      enterkeyhint: 'next',
+    }),
+    closeBrackets(),
+    autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
+    clickNavigation,
+    unresolvedLinks,
+    smartPunctuationGuard,
+    keymap.of(noteKeymap.filter((k) => k.key !== 'Mod-l')),
+    keymap.of([...closeBracketsKeymap, ...defaultKeymap]),
+  ];
+}
+
 /** The Markdown note editor (DESIGN §6.6 #1–16), in Live Preview or styled source mode (§6.6.1). */
 export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[] {
+  const preview = hooks.livePreview;
   return [
     noteContext.of(ctx),
     common(hooks),
-    hooks.livePreview?.locked ? [] : placeholder('Start writing…'),
+    preview?.locked ? [] : placeholder('Start writing…'),
     markdownNoteLanguage(),
     syntaxHighlighting(obsidianHighlight),
     lineClassPlugin,
-    hooks.livePreview ? livePreview(hooks.livePreview) : [],
+    preview ? livePreview(preview) : [],
+    preview && !preview.locked ? tableCellSetup.of(() => tableCellExtensions(ctx, hooks, preview)) : [],
     autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
     clickNavigation,
     unresolvedLinks,
@@ -137,15 +179,7 @@ export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[
     searchHighlight,
     pasteAndDrop,
     baseKeymaps(),
-    keymap.of([
-      { key: 'Mod-s', run: saveNow, preventDefault: true },
-      { key: 'Mod-Enter', run: followLinkAtCursor },
-      { key: 'Mod-l', run: toggleCheckbox, preventDefault: true },
-      { key: 'Mod-b', run: toggleBold, preventDefault: true },
-      { key: 'Mod-i', run: toggleItalic, preventDefault: true },
-      { key: 'Mod-k', run: insertMarkdownLink, preventDefault: true },
-      { key: 'Mod-e', run: toggleMode, preventDefault: true },
-    ]),
+    keymap.of(noteKeymap),
     keymap.of([...closeBracketsKeymap, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
   ];
 }

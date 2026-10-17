@@ -1012,6 +1012,9 @@ mark.match {
   right: auto;
   z-index: 90;
   max-width: calc(100vw - 16px);
+  /* A long menu (a table cell's) scrolls rather than leaving the screen. */
+  max-height: calc(var(--vvh, 100dvh) - 16px);
+  overflow-y: auto;
 }
 
 .menu-separator {

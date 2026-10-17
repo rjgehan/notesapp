@@ -37,12 +37,42 @@ export function applyRemoteTextToState(state: EditorState, next: string): Editor
 }
 
 /**
- * Resolves once `view` has no active IME or autocorrect composition: at once, or after
- * compositionend (and CodeMirror's read of the final DOM text), or at most 300 ms.
+ * Editors nested in a note's editor that write into its document (a table cell being edited,
+ * DESIGN §6.6.1). Their compositions count as the note's.
+ */
+const nested = new WeakMap<EditorView, Set<EditorView>>();
+
+export function addNestedEditor(host: EditorView, inner: EditorView): void {
+  let set = nested.get(host);
+  if (!set) nested.set(host, (set = new Set()));
+  set.add(inner);
+}
+
+export function removeNestedEditor(host: EditorView, inner: EditorView): void {
+  nested.get(host)?.delete(inner);
+}
+
+/** The editor composing text for `view`: the view itself or an editor nested in it, or null. */
+function composingEditor(view: EditorView): EditorView | null {
+  if (view.composing) return view;
+  for (const inner of nested.get(view) ?? []) if (inner.composing) return inner;
+  return null;
+}
+
+/** Whether an IME or autocorrect composition is active in `view` or an editor nested in it. */
+export function isComposing(view: EditorView): boolean {
+  return composingEditor(view) !== null;
+}
+
+/**
+ * Resolves once `view` (and the editors nested in it) has no active IME or autocorrect
+ * composition: at once, or after compositionend (and CodeMirror's read of the final DOM text), or
+ * at most 300 ms.
  */
 export function waitForComposition(view: EditorView): Promise<void> {
   return new Promise((done) => {
-    if (!view.composing) {
+    const editor = composingEditor(view);
+    if (!editor) {
       done();
       return;
     }
@@ -50,13 +80,13 @@ export function waitForComposition(view: EditorView): Promise<void> {
     const finish = () => {
       if (settled) return;
       settled = true;
-      view.contentDOM.removeEventListener('compositionend', onEnd);
+      editor.contentDOM.removeEventListener('compositionend', onEnd);
       clearTimeout(timer);
       // compositionend fires before CodeMirror reads the final DOM text; let it settle first.
       setTimeout(done, 0);
     };
     const onEnd = () => finish();
-    view.contentDOM.addEventListener('compositionend', onEnd);
+    editor.contentDOM.addEventListener('compositionend', onEnd);
     const timer = setTimeout(finish, 300);
   });
 }

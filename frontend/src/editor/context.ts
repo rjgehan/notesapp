@@ -25,7 +25,11 @@ export interface NoteContext {
   insertFiles(files: File[], range: { from: number; to: number }, pasted: boolean): void;
   /** A link to a vault path as this note would write it (internal explorer drags). */
   linkTo(path: string): string;
+  /** Shows a context menu at a point of the screen (a table's row, column and cell menus). */
+  showMenu(at: { x: number; y: number }, label: string, items: EditorMenuEntry[]): void;
 }
+
+export type EditorMenuEntry = { id: string; label: string; danger?: boolean; disabled?: boolean; run(): void } | 'separator';
 
 export const noteContext = Facet.define<NoteContext, NoteContext | null>({
   combine: (values) => values[0] ?? null,

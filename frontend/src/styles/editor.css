@@ -492,3 +492,177 @@
 .note-editor .cm-editor.cm-lp-locked .cm-activeLine {
   background: transparent;
 }
+
+/* ---------- tables as grids (DESIGN §6.6.1) ---------- */
+
+/* The reading view's table look. The scroller scrolls a wide table sideways, and leaves room on
+   the table's top and left edges for the row and column grips. */
+.cm-lp-table {
+  position: relative;
+  /* As wide as the note, never wider: a wide table scrolls inside, rather than widening every line. */
+  width: 0;
+  min-width: 100%;
+  margin: 0.4em 0;
+  white-space: normal;
+  /* Words stay whole (the editor breaks long ones anywhere); a cell grows to its longest word instead. */
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.cm-lp-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 10px 0 2px 10px;
+  margin: -10px 0 -2px -10px;
+}
+
+.cm-lp-table table {
+  border-collapse: collapse;
+}
+
+.cm-lp-cell {
+  position: relative;
+  min-width: 3em;
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  vertical-align: top;
+  text-align: left;
+}
+
+th.cm-lp-cell {
+  background: var(--background-secondary);
+  font-weight: 600;
+}
+
+/* An empty cell keeps the height of a line. */
+.cm-lp-cell-content:empty::before {
+  content: '\200b';
+}
+
+.cm-lp-table.is-editable .cm-lp-cell {
+  cursor: text;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.cm-lp-cell.is-editing:focus-within {
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+.cm-lp-embed-source {
+  color: var(--text-muted);
+}
+
+/* The editor of a cell being edited blends into the cell. */
+.note-editor .cm-lp-cell .cm-editor {
+  background: transparent;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+.note-editor .cm-lp-cell .cm-editor .cm-scroller {
+  line-height: inherit;
+}
+
+.note-editor .cm-lp-cell .cm-editor .cm-content,
+.note-editor .cm-lp-cell .cm-editor .cm-line {
+  padding: 0;
+}
+
+/* Row and column grips: drag to reorder, click for the row's or column's menu. They show for the
+   row and column under the mouse, and for the cell being edited. */
+.cm-lp-grip {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary-alt);
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity 120ms ease;
+}
+
+.cm-lp-grip::before {
+  content: '';
+  width: 6px;
+  height: 10px;
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.3px);
+  background-size: 3px 3.33px;
+}
+
+.cm-lp-grip-row {
+  top: 50%;
+  left: 0;
+  width: 14px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+}
+
+.cm-lp-grip-column {
+  top: 0;
+  left: 50%;
+  width: 22px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+}
+
+.cm-lp-grip-column::before {
+  width: 10px;
+  height: 6px;
+  background-size: 3.33px 3px;
+}
+
+.cm-lp-table.is-editable tr:hover > .cm-lp-cell > .cm-lp-grip-row,
+.cm-lp-table.is-editable tr:has(> .cm-lp-cell.is-editing) > .cm-lp-cell > .cm-lp-grip-row,
+.cm-lp-table.is-editable th.is-column-hover > .cm-lp-grip-column,
+.cm-lp-table.is-editable th.is-column-active > .cm-lp-grip-column {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cm-lp-grip:hover {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.cm-lp-table.is-dragging,
+.cm-lp-table.is-dragging * {
+  cursor: grabbing;
+}
+
+/* Where a dragged row or column goes. */
+.cm-lp-table-drop {
+  position: absolute;
+  z-index: 3;
+  border-radius: 1px;
+  background: var(--interactive-accent);
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .cm-lp-grip-row {
+    width: 18px;
+    height: 30px;
+  }
+
+  .cm-lp-grip-column {
+    width: 30px;
+    height: 18px;
+  }
+
+  /* A 44 px target around the grip. */
+  .cm-lp-grip::after {
+    content: '';
+    position: absolute;
+    inset: -13px;
+  }
+}
