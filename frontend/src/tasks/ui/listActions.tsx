@@ -2,10 +2,10 @@
 import { Archive, ArchiveRestore, ArrowDown, ArrowUp, FileText, Pencil, Trash2 } from 'lucide-react';
 import type { TaskList } from '../../api/types';
 import type { MenuEntry } from '../../components/overlays/ContextMenu';
-import { navigateTo, openPath } from '../../features/navigation';
+import { navigateTo } from '../../features/navigation';
 import { promptText } from '../../state/dialogs';
 import { createList, deleteList, moveList, updateList } from '../mutations';
-import { listRoute } from './state';
+import { listRoute, openListSource } from './state';
 
 const validName = (v: string) => (v.trim().length > 200 ? 'At most 200 characters' : /[\r\n]/.test(v) ? 'One line only' : null);
 
@@ -38,7 +38,7 @@ export function listMenu(list: TaskList, neighbours?: { before: TaskList | null;
     list.archived
       ? { id: 'unarchive', label: 'Unarchive', icon: <ArchiveRestore size={16} />, disabled: !writable, run: () => void updateList(list, { archived: false }) }
       : { id: 'archive', label: 'Archive', icon: <Archive size={16} />, disabled: !writable, run: () => void updateList(list, { archived: true }) },
-    { id: 'file', label: 'Open list file', icon: <FileText size={16} />, run: () => openPath(list.path) },
+    { id: 'file', label: 'Open list file (JSON)', icon: <FileText size={16} />, run: () => openListSource(list.path) },
     'separator',
     { id: 'delete', label: 'Delete list…', icon: <Trash2 size={16} />, danger: true, run: () => void deleteList(list) },
   );

@@ -120,9 +120,10 @@ export function TaskMeta({ task, today, list, subtasks, parentTitle }: MetaProps
     task.due && <DueLabel key="due" value={task.due} today={today} />,
     !task.due && task.start && <DueLabel key="start" value={task.start} today={today} kind="start" />,
     task.recurrence && (
-      <span key="rec" className="task-meta-item" title={recurrenceText(task.recurrence.rrule)}>
+      <span key="rec" className="task-meta-item task-meta-rule" title={`Repeats ${recurrenceText(task.recurrence.rrule)}`}>
         <Repeat size={13} aria-hidden />
-        <span className="visually-hidden">Repeats {recurrenceText(task.recurrence.rrule)}</span>
+        <span className="visually-hidden">Repeats </span>
+        <span className="task-meta-rule-text">{recurrenceText(task.recurrence.rrule)}</span>
       </span>
     ),
     task.priority > 0 && <PriorityFlag key="prio" priority={task.priority} />,

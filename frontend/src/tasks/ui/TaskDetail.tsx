@@ -21,12 +21,12 @@ import { taskApi } from '../api';
 import { datePart, useToday } from '../dates';
 import { childrenByParent, depthOf, isClosed, MAX_DEPTH } from '../model';
 import { createTask, deleteTask, isPending, updateTask } from '../mutations';
-import { recurrencePresets, recurrenceText, ruleFromText } from '../recurrence';
 import { taskStore, useTaskStore } from '../store';
 import { DateTimeField, PriorityField, TagsField } from './fields';
+import { RepeatField } from './RepeatField';
 import { useTextField } from './textField';
 import { ListDot, TaskCheck, TaskTitle } from './parts';
-import { listRoute, openTaskDetail, useTaskUi } from './state';
+import { listRoute, openListSource, openTaskDetail, useTaskUi } from './state';
 
 function close(): void {
   useTaskUi.getState().closeDetail();
@@ -39,81 +39,6 @@ function Field({ label, children, id }: { label: string; children: React.ReactNo
         {label}
       </span>
       <div className="task-field-control">{children}</div>
-    </div>
-  );
-}
-
-function RepeatField({ task, disabled }: { task: Task; disabled?: boolean }) {
-  const [custom, setCustom] = useState<string | null>(null);
-  const presets = recurrencePresets(task.due ?? task.start);
-  const rrule = task.recurrence?.rrule ?? null;
-  const preset = rrule === null ? 'none' : (presets.find((p) => p.rrule === rrule)?.id ?? 'custom');
-  const set = (next: Task['recurrence']) => void updateTask(task, { recurrence: next }, { recurrence: task.recurrence });
-  const parsed = custom !== null ? ruleFromText(custom.trim().toLowerCase().startsWith('every') ? custom : `every ${custom}`) : null;
-  return (
-    <div className="task-repeat-field">
-      <select
-        className="select"
-        aria-label="Repeat"
-        value={custom !== null ? 'custom' : preset}
-        disabled={disabled}
-        onChange={(e) => {
-          const id = e.target.value;
-          if (id === 'custom') {
-            setCustom('');
-            return;
-          }
-          setCustom(null);
-          if (id === 'none') set(null);
-          else set({ rrule: presets.find((p) => p.id === id)!.rrule, from: task.recurrence?.from ?? 'due' });
-        }}
-      >
-        <option value="none">Does not repeat</option>
-        {presets.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.label}
-          </option>
-        ))}
-        <option value="custom">{preset === 'custom' && custom === null ? recurrenceText(rrule!) : 'Custom…'}</option>
-      </select>
-      {custom !== null && (
-        <form
-          className="task-repeat-custom"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!parsed) return;
-            set({ rrule: parsed, from: task.recurrence?.from ?? 'due' });
-            setCustom(null);
-          }}
-        >
-          <input
-            className="text-input"
-            aria-label="Custom repeat"
-            placeholder="every 2 weeks on monday"
-            value={custom}
-            onChange={(e) => setCustom(e.target.value)}
-            autoCapitalize="off"
-            enterKeyHint="done"
-          />
-          <button type="submit" className="button button-small" disabled={!parsed}>
-            Set
-          </button>
-          <span className={parsed ? 'muted' : 'field-error'}>{custom.trim() === '' ? '' : parsed ? recurrenceText(parsed) : 'Not a supported rule'}</span>
-        </form>
-      )}
-      {task.recurrence && (
-        <select
-          className="select"
-          aria-label="Repeat from"
-          value={task.recurrence.from}
-          disabled={disabled}
-          onChange={(e) => set({ rrule: task.recurrence!.rrule, from: e.target.value as 'due' | 'completion' })}
-        >
-          <option value="due">from the due date</option>
-          <option value="completion">from completion</option>
-        </select>
-      )}
-      {task.recurrence && !task.due && !task.start && <p className="field-warning">A repeating task counts from its due date: set one.</p>}
     </div>
   );
 }
@@ -530,11 +455,11 @@ export default function TaskDetail({ id }: { id: string }) {
             <button
               type="button"
               className="icon-button"
-              aria-label="Open the list file"
+              aria-label="Open the list file (JSON)"
               title={`Open ${list.path}`}
               onClick={() => {
                 close();
-                openPath(list.path);
+                openListSource(list.path);
               }}
             >
               <ExternalLink size={16} />

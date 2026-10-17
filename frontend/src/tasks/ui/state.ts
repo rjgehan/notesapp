@@ -1,6 +1,8 @@
 // UI state of the tasks feature: the quick-add dialog and the task detail sheet, which open from
 // pages, the note panel, the palette and the hotkey, and render in the shell's overlay host.
 import { create } from 'zustand';
+import { navigateTo } from '../../features/navigation';
+import { noteRoute } from '../../features/paths';
 import type { TaskDate } from '../../api/types';
 
 /** Where a task added by quick add goes, and what it starts with. */
@@ -49,4 +51,9 @@ export function openTaskDetail(id: string): void {
 /** The route of a list's page. */
 export function listRoute(listId: string): string {
   return `/x/tasks/list/${encodeURIComponent(listId)}`;
+}
+
+/** Opens a list's file as its source (the JSON), rather than as the list. */
+export function openListSource(path: string): void {
+  navigateTo(noteRoute(path) + '?view=source');
 }

@@ -151,17 +151,45 @@ describe('completing, creating, deleting and moving', () => {
     expect(uncomplete).toHaveBeenCalledWith('P', expect.any(String));
   });
 
-  it('rolls a recurring task forward and says when it is next due', async () => {
-    const t = makeTask({ id: 'R', due: '2026-10-17', recurrence: { rrule: 'FREQ=WEEKLY', from: 'due' } });
-    const sub = makeTask({ id: 'S', parentId: 'R' });
-    store.upsert([t, sub]);
-    vi.spyOn(taskApi, 'complete').mockResolvedValue(result({ ...t, due: '2026-10-24' }, { rolledForward: true }));
-    const done = completeTask(t, store);
-    // Subtasks of a recurring task are not closed: they reopen for the next round anyway.
-    expect(store.task('S')?.status).toBe('open');
-    await done;
-    expect(store.task('R')).toMatchObject({ status: 'open', due: '2026-10-24' });
-    expect(toasts().at(-1)).toContain('next due');
+  it('rolls a recurring task forward at once, as the server will, and says when it is next due', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 9, 17, 10, 0));
+    try {
+      const t = makeTask({ id: 'R', due: '2026-10-17', recurrence: { rrule: 'FREQ=WEEKLY', from: 'due' } });
+      const open = makeTask({ id: 'S', parentId: 'R' });
+      const closed = makeTask({ id: 'C', parentId: 'R', status: 'done', completedAt: '2026-10-16T10:00:00.000Z' });
+      store.upsert([t, open, closed]);
+      const held = deferred<TaskWriteResult>();
+      const complete = vi.spyOn(taskApi, 'complete').mockReturnValue(held.promise);
+      const done = completeTask(t, store);
+      await vi.waitFor(() => expect(store.task('R')).toMatchObject({ status: 'open', due: '2026-10-24' }));
+      // Subtasks of a recurring task are not closed: the closed ones reopen for the next round.
+      expect(store.task('S')?.status).toBe('open');
+      expect(store.task('C')?.status).toBe('open');
+      // A second tap meanwhile does not complete the next occurrence too.
+      expect(await completeTask(store.task('R')!, store)).toBeNull();
+      held.resolve(result({ ...t, due: '2026-10-24' }, { rolledForward: true, changed: [{ ...closed, status: 'open', completedAt: null }] }));
+      await done;
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(store.task('R')).toMatchObject({ status: 'open', due: '2026-10-24' });
+      expect(toasts().at(-1)).toContain('next due');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes a recurring task on its last occurrence, and waits for the server when the rule is unknown here', async () => {
+    const last = makeTask({ id: 'L', due: '2026-10-17', recurrence: { rrule: 'FREQ=DAILY;COUNT=1', from: 'due' } });
+    const odd = makeTask({ id: 'O', due: '2026-10-17', recurrence: { rrule: 'FREQ=HOURLY', from: 'due' } });
+    store.upsert([last, odd]);
+    const held = deferred<TaskWriteResult>();
+    vi.spyOn(taskApi, 'complete').mockReturnValue(held.promise);
+    void completeTask(last, store);
+    void completeTask(odd, store);
+    await vi.waitFor(() => expect(store.task('L')?.status).toBe('done'));
+    expect(store.hasPending('O')).toBe(true);
+    expect(store.task('O')).toMatchObject({ status: 'open', due: '2026-10-17' });
+    held.resolve(result(null));
   });
 
   it('shows a new task in its list at once, then swaps in the created one', async () => {

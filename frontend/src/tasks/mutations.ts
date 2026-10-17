@@ -15,6 +15,7 @@ import type {
   TaskList,
   TaskListFields,
   TaskListWriteResult,
+  TaskStatus,
   TaskWriteResult,
 } from '../api/types';
 import { toastError } from '../features/errors';
@@ -30,6 +31,7 @@ import { addFolders, invalidateContentQueries, refreshFileQuery, upsertFiles } f
 import { taskApi } from './api';
 import { formatTaskDate, localToday } from './dates';
 import { compareKeys, isValidKey, keyBetween } from './fractionalIndex';
+import { loadRecurrence } from './loadRecurrence';
 import { childrenByParent, compareOrder, descendants } from './model';
 import { invalidateTaskViews } from './queries';
 import { taskStore, type TaskPatch, type TaskStore } from './store';
@@ -290,26 +292,45 @@ export async function updateTask(task: Task, changes: TaskFields, base?: TaskFie
   return result?.task ?? null;
 }
 
+/** Tasks whose completion is being sent: a second tap must not complete the next occurrence too. */
+const completing = new Set<string>();
+
+/**
+ * The optimistic outcome of completing a task on `day`: closed with its open subtasks, or, for a
+ * recurring task, rolled forward to its next date (computed here as the server will, with its
+ * closed subtasks reopened), or left as it is when the rule cannot be evaluated here.
+ */
+function completionPatches(task: Task, roll: Partial<Task> | null | undefined, store: TaskStore): Map<string, TaskPatch> {
+  const now = new Date().toISOString();
+  const below = descendants(task.id, childrenByParent(store.tasks().values()));
+  if (roll === undefined) return new Map([[task.id, {}]]);
+  if (roll) return new Map<string, TaskPatch>([[task.id, roll], ...below.filter((d) => d.status !== 'open').map((d): [string, TaskPatch] => [d.id, { status: 'open', completedAt: null }])]);
+  return new Map<string, TaskPatch>([[task.id, { status: 'done', completedAt: now }], ...below.filter((d) => d.status === 'open').map((d): [string, TaskPatch] => [d.id, { status: 'done', completedAt: now }])]);
+}
+
 /** POST /api/tasks/{id}/complete, with Undo. A recurring task rolls forward to its next date. */
 export async function completeTask(task: Task, store: TaskStore = taskStore): Promise<TaskWriteResult | null> {
-  if (isPending(task) || task.status !== 'open') return null;
-  const now = new Date().toISOString();
-  const patches = new Map<string, TaskPatch>([[task.id, { status: 'done', completedAt: now }]]);
-  if (!task.recurrence) {
-    for (const d of descendants(task.id, childrenByParent(store.tasks().values()))) {
-      if (d.status === 'open') patches.set(d.id, { status: 'done', completedAt: now });
-    }
+  if (isPending(task) || task.status !== 'open' || completing.has(task.id)) return null;
+  completing.add(task.id);
+  const day = localToday();
+  let result: TaskWriteResult | null;
+  try {
+    // Only a recurring task waits (for the rrule chunk), so a plain one is checked off at once.
+    const roll = task.recurrence ? await loadRecurrence().then((m) => m.rollForward(task, day), () => undefined) : null;
+    const patches = completionPatches(task, roll, store);
+    result = await runWrite(
+      {
+        keys: [task.id],
+        patches,
+        send: (key) => taskApi.complete(task.id, { date: day, base: { due: task.due, start: task.start } }, key),
+        apply: (r) => applyTaskWriteResult(r, store),
+        subject: task.title,
+      },
+      store,
+    );
+  } finally {
+    completing.delete(task.id);
   }
-  const result = await runWrite(
-    {
-      keys: [task.id],
-      patches,
-      send: (key) => taskApi.complete(task.id, { date: localToday(), base: { due: task.due, start: task.start } }, key),
-      apply: (r) => applyTaskWriteResult(r, store),
-      subject: task.title,
-    },
-    store,
-  );
   if (!result) return null;
   const after = result.task;
   if (result.rolledForward && after) {
@@ -342,6 +363,14 @@ export async function uncompleteTask(task: Task, store: TaskStore = taskStore): 
 export function toggleTask(task: Task, store: TaskStore = taskStore): void {
   if (task.status === 'open') void completeTask(task, store);
   else void uncompleteTask(task, store);
+}
+
+/** Sets a task's status (a board move): done goes through complete (recurrence, subtasks, Undo), open through uncomplete. */
+export function setTaskStatus(task: Task, status: TaskStatus, store: TaskStore = taskStore): void {
+  if (status === task.status) return;
+  if (status === 'done' && task.status === 'open') void completeTask(task, store);
+  else if (status === 'open') void uncompleteTask(task, store);
+  else void updateTask(task, { status }, { status: task.status }, store);
 }
 
 /** DELETE /api/tasks/{id}, after a confirmation that names the subtasks going with it. */

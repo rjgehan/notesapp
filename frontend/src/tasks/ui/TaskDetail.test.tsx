@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/client';
 import { queryClient } from '../../api/queryClient';
@@ -46,15 +46,56 @@ describe('task detail sheet', () => {
     await waitFor(() => expect(patch).toHaveBeenLastCalledWith('A', { changes: { listId: 'L2' }, base: { listId: 'L1' } }, expect.any(String)));
   });
 
-  it('reads a custom rule as an RRULE', async () => {
+  it('builds a custom rule from choices, read back as text', async () => {
+    // Monday 19 October 2026.
     taskStore.upsert([makeTask({ id: 'A', title: 'Water plants', due: '2026-10-19' })]);
     const patch = update();
     renderWithApp(<TaskDetail id="A" />);
     fireEvent.change(screen.getByRole('combobox', { name: 'Repeat' }), { target: { value: 'custom' } });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Custom repeat' }), { target: { value: 'every 2 weeks on monday' } });
-    expect(screen.getByText('every 2 weeks on Monday')).toBeInTheDocument();
+    const editor = screen.getByRole('form', { name: 'Custom repeat' });
+    expect(within(editor).getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(within(editor).getByRole('spinbutton', { name: 'Interval' }), { target: { value: '2' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Thursday' }));
+    fireEvent.change(within(editor).getByRole('spinbutton', { name: 'Times' }), { target: { value: '5' } });
+    expect(within(editor).getByText('Every 2 weeks on Monday, Thursday, 5 more times')).toBeInTheDocument();
+    fireEvent.click(within(editor).getByRole('button', { name: 'Set' }));
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith('A', { changes: { recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH;COUNT=5', from: 'due' } }, base: { recurrence: null } }, expect.any(String)),
+    );
+    expect(screen.queryByRole('form', { name: 'Custom repeat' })).not.toBeInTheDocument();
+  });
+
+  it('reads a rule typed in words, or a raw RRULE checked against the server’s subset', async () => {
+    taskStore.upsert([makeTask({ id: 'A', title: 'Water plants', due: '2026-10-19' })]);
+    const patch = update();
+    renderWithApp(<TaskDetail id="A" />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Repeat' }), { target: { value: 'custom' } });
+    const editor = screen.getByRole('form', { name: 'Custom repeat' });
+    fireEvent.click(screen.getByRole('radio', { name: 'In words' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Repeat, in words' }), { target: { value: 'every 2 weeks on monday' } });
+    expect(within(editor).getByText('Every 2 weeks on Monday')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'RRULE' }));
+    const raw = screen.getByRole('textbox', { name: 'RRULE' });
+    expect(raw).toHaveValue('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO');
+    fireEvent.change(raw, { target: { value: 'FREQ=HOURLY' } });
+    expect(screen.getByText(/FREQ must be/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set' })).toBeDisabled();
+    fireEvent.change(raw, { target: { value: 'freq=monthly;byday=-1fr' } });
+    expect(within(editor).getByText('Every month on the last Friday')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Set' }));
-    await waitFor(() => expect(patch).toHaveBeenCalledWith('A', { changes: { recurrence: { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO', from: 'due' } }, base: { recurrence: null } }, expect.any(String)));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('A', { changes: { recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=-1FR', from: 'due' } }, base: { recurrence: null } }, expect.any(String)));
+  });
+
+  it('shows a rule it cannot offer as a choice by its text, with the next dates', () => {
+    taskStore.upsert([makeTask({ id: 'A', title: 'Report', due: '2026-10-19', recurrence: { rrule: 'FREQ=MONTHLY;BYDAY=1MO', from: 'completion' } })]);
+    renderWithApp(<TaskDetail id="A" />);
+    const repeat = screen.getByRole('combobox', { name: 'Repeat' });
+    expect(repeat).toHaveDisplayValue('Every month on the 1st Monday');
+    expect(screen.getByRole('combobox', { name: 'Repeat from' })).toHaveValue('completion');
+    expect(screen.getByText(/^Then /)).toHaveTextContent(/Nov 2/);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit the rule' }));
+    expect(screen.getByRole('radio', { name: 'Choose' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: /^on the/ })).toBeChecked();
   });
 
   it('renders notes as sanitized Markdown and saves edits made in them', async () => {
