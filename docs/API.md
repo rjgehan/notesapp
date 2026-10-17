@@ -2044,7 +2044,7 @@ The types are in §17 (`Task`, `TaskList`, ...). Field rules:
 | `tz` | The client's IANA time zone, such as `Europe/Paris`, used for "today" when `date` is absent. `today` and `upcoming` need `date` or `tz`. |
 | `days` | How many days `upcoming` covers, today included: 1 to 366, default 14 |
 | `limit` | At most this many tasks for `completed` and `search`: 1 to 1000, default 200 |
-| `before` | `completed` only: tasks completed before this instant (for paging, pass the last `completedAt` received) |
+| `before` | `completed` only: tasks completed before this instant (for paging, pass the last `completedAt` received; subtasks completed with their parent share its instant, so a page can end among them: the web client passes one millisecond after the last time and merges the tasks it sees twice) |
 
 | View | Tasks | Order |
 |---|---|---|
@@ -2177,3 +2177,8 @@ Every night (`notes.tasks.archive-cron`, 03:20), tasks closed more than 90 days 
 - `GET /api/search` can return a list file; its `matches` are lines of task text.
 - A list file is not a note: `GET /api/notes/meta` answers `409 type-mismatch`, it never appears in unlinked mentions, and it does not count in `/api/status` `vault.notes`.
 - Renaming or moving a note does not rewrite links in task files; such a file is reported in `MoveResult.failed` with `not-rewritable`, and the link can be fixed by editing the task.
+
+**Tasks in notes** (conventions of the clients; the server treats these as ordinary links and embeds):
+
+- **A link to one task** is a link to its list's file with the task's id as an Obsidian block reference: `[[Inbox.tasks#^01JC4M3A0QY1T9X2W4E6R8T0U2|Pay rent]]` (or `[Pay rent](Tasks/Inbox.tasks#%5E01JC4M3A0QY1T9X2W4E6R8T0U2)`). It makes the note a backlink source of the list file, follows the file when the list is renamed (§10.3), and stays a link to the file in Obsidian. The web client opens the task by its id (§20.3), so the link keeps working after the task moved to another list. **Convert checkbox to task** writes such a link in place of the `- [ ]` line it turned into a task: it creates the task with `POST /api/tasks` without a list (so in the Inbox, created when needed) and edits the note only afterwards, through §8 like any edit.
+- **An embedded list** is `![[Home.tasks]]`: the web client shows the list there, live, and checking a task completes it through §20.4. `![[Home.tasks#Errands]]` shows one section (by name, case-insensitive) and `![[Home.tasks#^<task id>]]` one task with its subtasks.
