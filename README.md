@@ -13,6 +13,8 @@ A self-hosted, single-user notes web app modelled closely on Obsidian. The vault
 - **Phone-first.** A responsive layout tuned for iPhone Safari (keyboard-aware editor, toolbar, drawer, 44 px targets), dark and light themes.
 - **Zero-touch deploys.** A push to `main` is tested, built for amd64 and arm64, and running on the server within about five minutes.
 - **Nightly backups.** Optional, encrypted restic snapshots of the vault, its history and the Tailscale identity to a second disk and to Backblaze B2 or Amazon S3 (7 daily, 4 weekly, 12 monthly), consistent because the app is stopped for the seconds the snapshot takes, with ntfy alerts and a documented restore drill.
+- **History mirror on GitHub.** Optionally, the vault's git history is pushed to a private GitHub repository about 10 minutes after you stop editing, with a token from a compose secret; fast-forward only, so a mirror that has diverged is reported, never overwritten. Failures show in the status bar and are retried with backoff.
+- **Small history, large files kept.** Files over 25 MB (configurable) stay in the vault and in backups but out of git history; the History panel says why, and replacing such a file keeps the old one in the trash.
 
 ## Architecture
 
@@ -22,7 +24,7 @@ A Spring Boot 4 backend (Java 21) serves the REST and SSE API ([docs/API.md](doc
 |---|---|
 | `backend/` | Spring Boot app (`com.rjgehan.notes`), Maven wrapper |
 | `frontend/` | React + TypeScript + Vite SPA |
-| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, Tailscale serve config, `.env.example` |
+| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, the empty mirror-token placeholder in `mirror/`, Tailscale serve config, `.env.example` |
 | `.github/` | CI, image publishing, Dependabot |
 | `Dockerfile` | Three stages: frontend build, backend build, JRE runtime |
 | `docs/` | Design, API contract, deployment runbook, roadmap |

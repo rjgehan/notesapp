@@ -141,6 +141,8 @@ sequenceDiagram
 
 There is no app-level login. Tailscale identity admits requests (the allowlist), and is used for display and for the git author. "Inside the boundary" therefore means: a user-owned device of an allowed login, reaching `notes:443` through the policy.
 
+**Outbound.** The app makes one internet connection, and only when it is configured: the optional mirror push (ROADMAP item 2, §5.8 *Mirror*) to the `https://` URL in `NOTES_MIRROR_URL`, authenticated with a token from a compose secret. It goes out through the host's normal network, which the tailnet policy does not restrict. With the mirror on, the vault's history (every note and every attachment under the large-file threshold) leaves the tailnet for that repository.
+
 ---
 
 ## 3. Repository layout
@@ -168,7 +170,8 @@ NotesApp/                              (monorepo; branch main)
 ├── deploy/                            WP-Infra
 │   ├── docker-compose.yml             tailscale + notes + watchtower; optional backup + backup-scheduler (§7.10)
 │   ├── backup/                        restic-job.sh, nightly.sh, scheduler.sh and their tests (§7.10)
-│   ├── secrets/                       gitignored: compose secrets files (restic password, off-site keys)
+│   ├── mirror/no-token                empty placeholder for the mirror_token secret until the mirror is set up (§7.2)
+│   ├── secrets/                       gitignored: compose secrets files (restic password, off-site keys, mirror token)
 │   ├── tailscale/serve.json           mounted as a directory (fsnotify-safe)
 │   └── .env.example                   copied to deploy/.env on homeserver (gitignored)
 ├── docs/
@@ -191,6 +194,7 @@ NotesApp/                              (monorepo; branch main)
 |---|---|---|---|
 | `**/*.md` | Notes | yes | committed |
 | any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes are content-indexed | committed |
+| any visible file larger than `notes.git.large-file-threshold` (25 MiB) | Large attachments: videos, scans, archives | in tree like any file | **excluded** through the managed section of `info/exclude` (§4.6, §5.8 *Large files*); kept in backups |
 | `.notesapp/settings.json` | App settings (§5.12) | hidden | committed, so settings have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
@@ -200,7 +204,7 @@ NotesApp/                              (monorepo; branch main)
 | `.obsidian/` | Obsidian desktop config, if the user ever opens the vault there. Never touched. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
-**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and may later be mirrored (ROADMAP item 2). App-generated secrets or tokens (future push keys, API keys) live in `/data/secrets/`, outside `/data/vault`; operator secrets come from compose `secrets:` files read through `*_FILE` properties.
+**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). App-generated secrets or tokens (future push keys, API keys) live in `/data/secrets/`, outside `/data/vault`; operator secrets come from compose `secrets:` files read through `*_FILE` properties.
 
 ### 4.2 File kinds
 
@@ -299,7 +303,7 @@ These vectors are listed in `NameRulesTest` and copied into the frontend mock.
 
 ### 4.6 `.git/info/exclude`
 
-The app rewrites this file at every startup. It uses `info/exclude` rather than a `.gitignore` so the app's ignores never appear as a vault file.
+The app owns this file: it rewrites it at every startup, and it keeps its last section current. It uses `info/exclude` rather than a `.gitignore` so the app's ignores never appear as a vault file. Ignores of your own belong in the vault's `.gitignore`.
 
 ```
 # managed by NotesApp: rewritten at startup
@@ -313,7 +317,12 @@ The app rewrites this file at every startup. It uses `info/exclude` rather than 
 Thumbs.db
 *.swp
 *~
+# kept out of history, larger than 25 MB (ROADMAP item 23); kept current by NotesApp
+/Attachments/Holiday 2026.mp4
+/Scans/Contract \[signed].pdf
 ```
+
+The last section is the large-file policy (§5.8 *Large files*): one line per file over `notes.git.large-file-threshold`, rebuilt from the index at startup and before every commit. Each line is anchored with a leading `/` and escapes `\`, `*`, `?`, `[` and trailing spaces, so it matches exactly one on-disk path (`Scan [1].pdf` never excludes `Scan 1.pdf`). With the threshold set to 0 the section is absent.
 
 ### 4.7 `.notesapp/trash.json`
 
@@ -423,6 +432,8 @@ Thumbs.db
 | | `GitBootstrap` | Runs the initial, import or "changed while stopped" commit asynchronously after readiness (§5.17). |
 | | `HistoryService` | API operations: list, content, raw, restore, commit now. |
 | | `GitHousekeeping` | `@Scheduled(cron = "${notes.git.gc-cron}")` runs `autoGC` under `gitLock`. |
+| | `LargeFiles` | The large-file policy (ROADMAP item 23): the files over `notes.git.large-file-threshold`, from the index; the exclude pattern of a path (§4.6). |
+| | `GitMirror` | `SmartLifecycle` with its own thread. Pushes `HEAD` to `notes.mirror.url` after the delay, fast-forward only, with backoff on failures (ROADMAP item 2). |
 | `watch` | `VaultWatcher` | `SmartLifecycle`. Recursive inotify through `WatchService`, per-path debounce (§5.9). |
 | | `VaultReconciler` | `reconcile(path)` (takes the locks), `reconcileLocked(path)` (for callers that already hold them), `reconcileSubtree(dir)`, `fullRescan()`. Compares disk with the index by hash (text) or by size and mtime (binary). |
 | | `RescanScheduler` | `@Scheduled(fixedDelayString = "${notes.watcher.rescan-interval}")`. |
@@ -434,7 +445,7 @@ Thumbs.db
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
 | | `TailscaleInterfaceCheck` | Refuses to start outside the dev profile when no kernel Tailscale interface is visible (§5.13). |
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `MirrorController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -892,6 +903,32 @@ This is `MoveService.move(from, to, updateLinks, dryRun, identity, origin)`. `up
 
 **Container environment.** `XDG_CONFIG_HOME=/data/.config` (JGit writes `jgit/config` there, and it persists) and `GIT_CONFIG_NOSYSTEM=1` (no `git` binary probing). `Git.shutdown()` is called on exit.
 
+**Large files** (ROADMAP item 23). Files larger than `notes.git.large-file-threshold` (25 MiB; `0` turns the policy off) stay in the vault, the tree, the trash and the backups (§7.10), but no version of them above the threshold ever becomes a git object, so the repository stays small and under GitHub's 100 MB file limit for the mirror below.
+
+- **The set comes from the index.** `LargeFiles` lists the indexed files over the threshold (`VaultIndex.filesLargerThan`, a read-locked pass over the file map). Nothing else is persisted: the startup sequence writes the managed section of `info/exclude` (§4.6) right after the index is built (§5.17 step 6), and every commit brings it up to date again.
+- **Every commit applies it, under `gitLock`, before anything is staged** (`GitStore.commit` and `commitAll`):
+  1. Recompute the set from the index. A file the commit names explicitly is also checked **on disk** (`stat`), because an external copy that is still growing may not be reindexed yet; a file over the threshold there counts as large for this commit.
+  2. Rewrite `info/exclude` atomically (temp file and rename in `.git/info/`) when its content changed.
+  3. A large file that git still **tracks** and that this commit touches (named, or under a named folder; `commitAll` touches everything) is removed from git's index with `rm --cached`. This must come before `git add`: `add` keeps updating a tracked file even when it is ignored, which would write the large blob.
+  4. Then `add` and `rm` as before. `add` skips an untracked ignored file, so a new large file never enters the index, also when its folder is added after a move or a trash restore.
+- **Messages.** The caller's message function receives only the ordinary changes. A commit that only stops tracking files is `Stop versioning Attachments/scan.pdf (larger than 25 MB)` (or `Stop versioning 3 files (larger than 25 MB): a, b, c`); when it also has ordinary changes, the caller's subject is kept and the body gets one `Stopped versioning <path> (larger than 25 MB)` line per file. A batch whose only change is a large file makes no commit and no `history.committed`.
+- **History of such a file.** Its earlier versions (from before it grew past the threshold) stay in history; the commit that stopped tracking it appears as a `deleted` entry. `GET /api/history` adds `excluded: {reason: "large-file", size, limitBytes}` and reports `pending: false` (none of its changes will be committed); the History panel explains it (§6.11).
+- **Startup.** An imported repository, or a lowered threshold, may leave a large file tracked. The git bootstrap (§5.17 step 8) commits when the tree is dirty **or** `GitStore.tracksLargeFiles()`; `commitAll` then stops tracking them, so the history stops growing with them at once rather than at their next edit.
+- **Replacing a large file keeps it.** Git cannot bring back a version it never stored, so before a raw overwrite (`PUT /api/files/raw?onConflict=overwrite`) or a history restore replaces a file over the threshold, `FileService.keepReplacedVersion` puts a copy of it in the trash (`TrashStore.keepCopy`: a hard link under `.trash/`, or a copy where the filesystem has none; safe because every app write replaces a file by renaming a new one over it, which breaks the link). The trash entry has the file's original path and the requester as `deletedBy`; `trash.changed` follows the content event. A small file being replaced is in history already and is not copied.
+- **Not covered:** an external process that rewrites a large file in place (for example `cp` over SSH) replaces it without any copy, as it would any file the app has not seen; the nightly backups have it. A changed threshold applies at the next start: the bootstrap commit stops tracking the files now over it and adds the files now under it (no longer ignored, they make the tree dirty).
+- `/api/status` shows `git.largeFiles` (`limitBytes`, the number of files and their total size) next to `disk.repoBytes`, the size of `.git`.
+
+**Mirror** (ROADMAP item 2). `GitMirror` pushes the vault's history to one remote, normally a private GitHub repository, so it can be browsed on github.com and survives the loss of `homeserver`. It is **off** unless `notes.mirror.url` (`NOTES_MIRROR_URL`) is set; the notes then leave the tailnet, which is why it is opt-in.
+
+- **Configuration.** `url` must be a plain `https://` URL: no user info, query or fragment (a URL with credentials is refused, and only the redacted form is ever shown). `token-file` (`NOTES_MIRROR_TOKEN_FILE`, a compose secret at `/run/secrets/mirror_token`) holds a fine-grained personal access token with *Contents: read and write* on that one repository; it is required for `https://`. `username` defaults to `x-access-token` (GitHub accepts any user name with a token). `file:` URLs are accepted too, without a token: the tests use a local bare repository, and the same works for a mirror on another disk. The token is never in the vault (§4.1) and never in an environment variable.
+- **When.** A single platform thread (`git-mirror`) ticks every 15 s and reads `HEAD`. A new `HEAD` is pushed once it has been stable for `delay` (10 min) and at most `max-delay` (1 h) after the first unpushed commit was seen, so a long writing session (a commit every 5 minutes) is still mirrored hourly. Commits are already batched (30 s quiet, 5 min maximum), so this is about one push per editing session. Nothing is pushed at shutdown; the next boot pushes about 10 minutes after it starts.
+- **How.** `GitStore.push(url, branch, commitId, credentials, timeout)`: JGit `PushCommand` with the ref spec `<commitId>:refs/heads/<branch>` (no `+`) and `setForce(false)`, a read timeout of `timeout` (60 s), and `UsernamePasswordCredentialsProvider` built right before the push from the token file, which is read fresh each time and kept only in that push's credentials. The id is resolved first, so commits made during a slow push are simply pushed next time. A push only reads the repository: it runs **outside `gitLock`**, so saves and commits never wait for the network. It holds `maintenanceLock` instead, which nightly gc also takes, so a push never reads packs that gc is replacing. Hooks never run (`core.hooksPath`, above), including `pre-push`.
+- **Fast-forward only.** `REJECTED_NONFASTFORWARD` (the mirror has commits the vault lacks, or a different history) and `REJECTED_REMOTE_CHANGED` make the state `diverged`: logged once, `status.changed` published, and no further pushes until `POST /api/mirror/push` (API.md §6.4) asks again, which the user does after fixing the mirror (DEPLOY.md). The vault's history is never rewritten to match, and the mirror is never overwritten.
+- **Failures** (network, authentication, a missing repository, a missing or empty token file, a push refused by a hook or by GitHub's file-size limit) are handled like commit failures: state `failing`, `lastError` and `failingSince`, `status.changed` on the first failure, one ERROR line per streak with the marker `GIT_MIRROR_FAILED`, then retries after 1, 5 and 15 minutes and every 30 minutes. The first success clears the streak, logs `The git mirror is working again` and publishes `status.changed`. Errors are scrubbed before they are stored or logged: the token is replaced by `***`, user info is removed from URLs, and the text is capped at 300 characters.
+- **Requested push.** `POST /api/mirror/push` sets a flag and runs a tick on the mirror's thread at once; it bypasses the delay, the backoff and the divergence stop, and answers `202` with the status (`pushing: true`). A `status.changed` follows when that push ends, whatever its outcome.
+- **Status.** `/api/status` `mirror` (API.md §6.2): `state` (`disabled`, `ready`, `failing`, `diverged`), the reason it is disabled, the redacted remote, the branch, `pushing`, the last pushed commit and time (this run), the next push, and the error. The status bar warns while it is `failing` or `diverged` (§6.18).
+- **Alternatives considered.** A second remote configured in `.git/config` with the token in the URL (the token would sit in the vault's repository, which backups copy). SSH deploy keys (a key file to manage, and `ssh` client support in the image). Pushing from the backup sidecar (it mounts the vault read-only and runs only at night). git-lfs for large files (history would still reference them, GitHub's LFS quota is small, and JGit's LFS support is partial; §5.8 above disables history for LFS repositories).
+
 ### 5.9 External change detection
 
 **Model.** The index stores `(version, size, mtime)` for every file. The watcher and the rescan never trust timing; they compare *content* for text files (by hash) and `(size, mtime)` for binary files and over-size text files, whose `version` is null.
@@ -1130,6 +1167,7 @@ public record NotesProperties(
     @DefaultValue Git git, @DefaultValue Watcher watcher, @DefaultValue Sse sse,
     @DefaultValue Limits limits, @DefaultValue Identity identity, @DefaultValue Security security,
     @DefaultValue TailscaleWatchdog tailscaleWatchdog,
+    @DefaultValue Mirror mirror /* ROADMAP item 2, §5.8 "Mirror" */,
     @DefaultValue({"md","markdown","txt","json","canvas","excalidraw","sheet","tasks","csv","tsv","yaml","yml"}) List<String> textExtensions,
     @DefaultValue("true") boolean welcomeNote,
     @DefaultValue("dev") String buildSha /* NOTES_BUILD_SHA, set by the image; shown in /api/status, hello and X-Notes-Build */) {
@@ -1138,7 +1176,13 @@ public record NotesProperties(
                     @DefaultValue("5m") Duration commitMaxDelay,
                     @DefaultValue("NotesApp") String committerName,
                     @DefaultValue("notesapp@notes") String committerEmail,
-                    @DefaultValue("0 30 3 * * *") String gcCron) {}
+                    @DefaultValue("0 30 3 * * *") String gcCron,
+                    @DefaultValue("25MB") DataSize largeFileThreshold /* NOTES_GIT_LARGE_FILE_THRESHOLD; 0 = version everything (§5.8) */) {}
+  public record Mirror(@DefaultValue("") String url /* NOTES_MIRROR_URL; empty = off */,
+                       @DefaultValue("") String tokenFile /* NOTES_MIRROR_TOKEN_FILE, a compose secret */,
+                       @DefaultValue("x-access-token") String username,
+                       @DefaultValue("10m") Duration delay, @DefaultValue("1h") Duration maxDelay,
+                       @DefaultValue("60s") Duration timeout) {}
   public record Watcher(@DefaultValue("true") boolean enabled,
                         @DefaultValue("400ms") Duration debounce,
                         @DefaultValue("5m") Duration rescanInterval) {}
@@ -1218,16 +1262,17 @@ For phone testing against dev (§9.1 step 4), `NOTES_ALLOWED_HOSTS` overrides th
 3. `SettingsService.load()`, creating defaults if needed (§5.12).
 4. `GitStore.openOrInit()`: remove stale lock files, apply the config (including `core.hooksPath`), write `info/exclude`, log the branch and remotes (§5.8).
 5. **Welcome note.** Only when the repository was **created in this boot** (or has no commits), the vault has no visible files, and `notes.welcome-note=true`: write `Welcome.md` from the classpath. A user who later deletes everything does not get it back.
-6. `IndexBuilder.build()`: walk the vault, parse notes in parallel, and build the links, tags and search index. Text files above their size limit are listed but not content-indexed. Log the counts and the duration.
+6. `IndexBuilder.build()`: walk the vault, parse notes in parallel, and build the links, tags and search index. Text files above their size limit are listed but not content-indexed. Log the counts and the duration. Then `GitStore.syncLargeFiles()` writes the large-file section of `info/exclude` from the index (§4.6, §5.8 *Large files*), before anything can commit.
 7. `SmartLifecycle` beans then start in phase order:
    1. `CommitBatcher` (`DEFAULT_PHASE - 4096`).
    2. `VaultWatcher` (`DEFAULT_PHASE - 3072`). After registering its watches, it runs one `fullRescan()` to cover the gap since step 6.
    3. Tomcat (`DEFAULT_PHASE - 2048`).
+   4. `GitMirror` (`DEFAULT_PHASE`), only when a mirror is configured (§5.8 *Mirror*); it stops first, without a final push.
 
    After `ApplicationReadyEvent`, readiness reports UP. Shutdown stops them in reverse order.
 8. **Git bootstrap, asynchronously after readiness** (`GitBootstrap`). While it runs, `git.state` is `importing`, history endpoints answer `503 history-unavailable` with `reason: "importing"`, and the batcher holds its commits.
    - If the repository has no commits: stage everything (`add .`, `setAll(true)`, `setRenormalize(false)`) and commit `Initial commit` (fresh vault) or `Import existing vault (N files)` (an existing folder of notes copied into the volume), with author NotesApp.
-   - Otherwise, if the working tree is dirty against `HEAD` (edited while the app was down): stage everything and commit `Changes made while NotesApp was stopped` as `External`.
+   - Otherwise, if the working tree is dirty against `HEAD` (edited while the app was down), or git still tracks a file over the large-file threshold: stage everything and commit `Changes made while NotesApp was stopped` as `External` (a commit that only stops tracking large files is titled `Stop versioning …`, §5.8).
    - Then `git.state` becomes `ready` and `status.changed` is published.
 
    Importing a vault with gigabytes of attachments can take minutes. Running it after readiness means it never delays the health check, never makes Watchtower see a hung start, and never keeps the iPhone on a 502.
@@ -1246,7 +1291,8 @@ For phone testing against dev (§9.1 step 4), `NOTES_ALLOWED_HOSTS` overrides th
 - One INFO line per **structural** mutating call (create, upload, delete, move, restore, settings), for example: `MOVE Projects/Plan.md → Projects/Roadmap.md links=2 client=c1a2b3c4 user=rjgehan 41ms`. Autosave `PUT`s, which arrive every few seconds while typing, are logged at DEBUG.
 - `X-Client-Id` (first 8 characters) and a short request id are put in the MDC.
 - Commits are logged at INFO with the short id and subject. Watcher mode changes and overflows are logged at WARN.
-- **Stable ERROR markers** for alerting and log searches: `GIT_COMMIT_FAILED`, `WATCHER_DEGRADED`, `TAILSCALE_WATCHDOG_EXIT`, `STORAGE_LOW`, `SETTINGS_READ_ONLY`.
+- **Stable ERROR markers** for alerting and log searches: `GIT_COMMIT_FAILED`, `GIT_MIRROR_FAILED`, `WATCHER_DEGRADED`, `TAILSCALE_WATCHDOG_EXIT`, `STORAGE_LOW`, `SETTINGS_READ_ONLY`.
+- **The mirror token is never logged** (§5.8 *Mirror*): it is read right before a push, and error texts are scrubbed of it.
 - **Note content, frontmatter values and search queries are never logged.** Paths are logged; they are the user's own data on their own server.
 
 ### 5.19 Performance targets
@@ -1366,6 +1412,7 @@ frontend/src/
 │   ├── hotkeys.ts            global key handler (Mod = Cmd on Apple, Ctrl elsewhere)
 │   ├── fuzzy.ts              fuzzysort wrappers
 │   ├── recent.ts             MRU list (localStorage)
+│   ├── mirror.ts, largeFiles.ts  the mirror's warning, summary and "push now"; the large-file threshold (§6.11, §6.18)
 │   └── paths.ts              join, folderOf, basename, extension, encodeRoutePath, decodeRoutePath
 ├── components/
 │   ├── layout/               AppShell (hosts the app-level file input), TopBar, Ribbon, LeftSidebar, RightSidebar, StatusBar,
@@ -1729,6 +1776,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
   - **Full text tab:** the old version in a read-only editor.
   - Images show old and new side by side through `GET /api/history/raw`.
 - **Restore.** **Restore this version** asks for confirmation, flushes the session, and calls `POST /api/history/restore {path: currentPath, commit, sourcePath: entry.path, baseVersion: session.version}`. A 409 leads to the conflict flow. **Copy text** copies the old version to the clipboard.
+- **Large files** (ROADMAP item 23, §5.8). When the response has `excluded`, a note at the top says the file is larger than the history limit (for example "This file is 80.0 MB, larger than the 25 MB limit for history"), that its versions are not kept in git, that the file stays in the vault and in backups, and that replacing it moves the old one to the trash. It replaces "No history for this file yet."; versions from before the file grew past the limit are listed below it, the last one being the `deleted` entry "Stop versioning …". There is no pending row. The restore confirmation for a file over the limit says that the current version goes to the trash instead of staying in history, and so does the Replace choice when OS files are dropped on a folder (`features/largeFiles.ts` reads the limit from the cached `/api/status`).
 
 ### 6.12 Daily notes and templates UX
 
@@ -1928,6 +1976,8 @@ On recovery, any `resync` is processed, the replay countdown reaches `caughtUp` 
 
 **History warning.** When `/api/status` reports `git.state: "failing"`, the status bar (desktop) and the ⋯ menu (phone) show "History is not being saved" with the time since `failingSince`. `status.changed` events keep this current.
 
+**Mirror warning** (ROADMAP item 2, §5.8 *Mirror*). The same places show "Mirror is not being updated (for 2 hours)" while `mirror.state` is `failing`, and "Mirror stopped: it has commits this vault does not" while it is `diverged`. On the desktop the warning is a button: its tooltip is `lastError` (plus, when diverged, that NotesApp never force-pushes), and clicking it calls `POST /api/mirror/push`; the phone's ⋯ menu adds **Push to mirror now**. The palette has **Push history to the mirror now** whenever a mirror is configured. The outcome arrives as `status.changed`. Settings › About lists the history size (`disk.repoBytes`), the files kept out of history, and the mirror (remote, last push, next push, or the error).
+
 **New build after a deploy.** Every deploy replaces the bundle, but an open tab, especially an iPhone Safari tab that stays open for weeks, keeps running the old one. Its lazy chunks are gone from the new image, and it speaks the old API contract.
 
 - The page knows the build it loaded (`import.meta.env.VITE_BUILD_SHA`). `state/buildCheck.ts` compares it with `hello.buildSha` and with the `X-Notes-Build` response header.
@@ -2093,6 +2143,10 @@ services:
       NOTES_ALLOWED_HOSTS: ${NOTES_ALLOWED_HOSTS:?set NOTES_ALLOWED_HOSTS in deploy/.env}
       NOTES_IDENTITY_ALLOWED_LOGINS: ${NOTES_IDENTITY_ALLOWED_LOGINS:?set NOTES_IDENTITY_ALLOWED_LOGINS in deploy/.env}
       NOTES_TAILSCALE_WATCHDOG_ENABLED: "true"  # exit (→ restart) if orphaned from tailscale's netns
+      NOTES_GIT_LARGE_FILE_THRESHOLD: ${NOTES_GIT_LARGE_FILE_THRESHOLD:-25MB}   # larger files stay out of git history (0 = version everything)
+      NOTES_MIRROR_URL: ${NOTES_MIRROR_URL:-}   # https://github.com/<you>/<repo>.git; empty = no mirror
+      NOTES_MIRROR_TOKEN_FILE: /run/secrets/mirror_token
+    secrets: [mirror_token]
     volumes:
       - notes-data:/data
     mem_limit: 1g
@@ -2137,6 +2191,7 @@ volumes:
 - **Required variables.** `${VAR:?…}` makes `docker compose up` fail with a clear message when `NOTES_ALLOWED_HOSTS`, `NOTES_IDENTITY_ALLOWED_LOGINS` or `WATCHTOWER_NOTIFICATION_URL` is missing.
 - **Digest pin.** WP-Infra fills in the digest of `nickfedor/watchtower:1.23.1` (`docker buildx imagetools inspect`); Dependabot keeps it current (§7.5).
 - **Backups.** The real file continues with the optional `backup` and `backup-scheduler` services (Compose profiles, off by default), the `backup-cache` and `backup-state` volumes and a top-level `secrets:` block (§7.10).
+- **Mirror token** (ROADMAP item 2, §5.8 *Mirror*). The top-level `secrets:` block also declares `mirror_token` with `file: ${NOTES_MIRROR_TOKEN_SECRET:-./mirror/no-token}`. `deploy/mirror/no-token` is an empty file in git, so the always-enabled `notes` service can mount the secret on deploys that have no mirror (Compose fails to create a container whose secret file is missing); `NOTES_MIRROR_URL` empty keeps the mirror off. Setting it up points `NOTES_MIRROR_TOKEN_SECRET` at `./secrets/mirror-token` (gitignored, readable by uid 1000) and sets `NOTES_MIRROR_URL` (DEPLOY.md *Mirror to GitHub*).
 
 ### 7.3 `deploy/tailscale/serve.json`
 
@@ -2179,7 +2234,7 @@ TZ=America/New_York
 ```
 
 - A one-off tagged auth key is used instead of an OAuth client. For a single node it is one fewer moving part, and with `TS_AUTH_ONCE=true` and a persistent state volume it is only ever used once. Deleting it from `.env` afterwards means it no longer sits in the container's environment (visible in `docker inspect`) for the life of the node.
-- **Future secrets** (ROADMAP items 2, 18) use compose `secrets:` files, read by the app through `*_FILE` properties, never plain variables in `.env` and never files in the vault (§4.1). The files live in `deploy/secrets/` (gitignored, mode 600); the backups of item 1 were the first to use it (§7.10). Non-secret settings such as `COMPOSE_PROFILES` and the backup repository locations stay in `.env`.
+- **Future secrets** (ROADMAP items 2, 18) use compose `secrets:` files, read by the app through `*_FILE` properties, never plain variables in `.env` and never files in the vault (§4.1). The files live in `deploy/secrets/` (gitignored, mode 600); the backups of item 1 were the first to use it (§7.10), and the mirror token of item 2 the second (`secrets/mirror-token`, §7.2). Non-secret settings such as `COMPOSE_PROFILES`, the backup repository locations, `NOTES_GIT_LARGE_FILE_THRESHOLD`, `NOTES_MIRROR_URL` and `NOTES_MIRROR_TOKEN_SECRET` (the token file's path, not the token) stay in `.env`; the real `.env.example` has their blocks after the backup block.
 
 ### 7.5 GitHub Actions
 
@@ -2381,7 +2436,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 - **Update tailscale and Watchtower monthly:** `docker compose pull tailscale watchtower && docker compose up -d` (or merge the Dependabot PR that bumps their digests). Compose cascades the tailscale recreate to `notes`.
 - **Logs:** `docker compose logs -f notes`. Logs are rotated (§7.2).
 - **Monitoring.** Watchtower reports every update session. A cron job on `beach` runs `curl -fsS https://notes.<tailnet>.ts.net/readyz` every 5 minutes and posts to the same ntfy topic on failure; `/readyz` is exempt from the identity allowlist, so this works even if `beach` is a tagged node (it then needs a policy grant to `tag:notes:443`). The app's stable ERROR markers (§5.18) are the third signal.
-- **Manual backup, no downtime** (git history only, which includes every committed note and attachment; run "Commit pending changes now" first): `docker run --rm -v notes-data:/data:ro -v /mnt/backup:/b alpine/git -c safe.directory='*' -C /data/vault bundle create /b/notes-$(date +%F).bundle --all` (pin a current `alpine/git` tag).
+- **Manual backup, no downtime** (git history only, which includes every committed note and every attachment up to the large-file threshold, §5.8; run "Commit pending changes now" first): `docker run --rm -v notes-data:/data:ro -v /mnt/backup:/b alpine/git -c safe.directory='*' -C /data/vault bundle create /b/notes-$(date +%F).bundle --all` (pin a current `alpine/git` tag).
 - **Manual backup, full** (working tree, `.git`, trash and settings): `docker compose stop notes`, then `sudo tar czf /mnt/backup/notes-$(date +%F).tgz -C /srv/notes/data vault`, then `docker compose start notes`. Recommended before releases that touch `MoveService`, the trash or `GitStore`.
 - **Restore drill** (documented and tried once in DEPLOY.md): stop `notes`; create a fresh volume (or directory) owned by 1000:1000; untar the backup into it, or `git clone` the bundle into `vault/`; point `notes-data` at it; start `notes`; check `/api/status` (counts, `git.head`) and the git log.
 - **Automated backups** (ROADMAP item 1) are §7.10: nightly restic snapshots, switched on with `COMPOSE_PROFILES=backup`. The manual backups above remain for a one-off copy before a risky release.
@@ -2455,6 +2510,8 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 | `TrashServiceTest` | Delete and restore a file and a folder; the **flat** layout (`Projects/Plan.md` lands at `.trash/Plan.md`); deleting `A/B.md` after folder `A` was trashed gives a separate top-level entry; two concurrent deletes of `X/Plan.md` and `Y/Plan.md` give `Plan.md` and `Plan 1.md` and both `trash.json` entries; restore conflict and the rename option; restore to an original name with `#` works; purge and empty never follow a symlink placed in `.trash`; a `trash.json` entry whose `trashPath` is `../x` or `a/b` is ignored; externally added `.trash` items listed 1:1. |
 | `CommitBatcherTest` (controlled `Clock`) | Quiet period; max delay; `prepareWrite` with a different author flushes **before** the write (the previous author's bytes are committed under their name); no empty commits and no `history.committed` for them; an immediate commit flushes the batch first; flush on `stop()`; an `IOException` during commit keeps the paths pending, retries with backoff, and reports `failing` then recovers; a file with an NFD on-disk name is staged and committed after a save. |
 | `GitStoreTest` | A stale `index.lock` and `refs/heads/main.lock` are removed at startup and commits work; `core.hooksPath` is set; LFS filters disable history. |
+| `LargeFilesTest`, `LargeFilePolicyTest` (1 KB threshold) | Each exclude pattern matches exactly its own path in JGit (`Scan [1].pdf`, `a*b?.bin`, a trailing space, `#` and `!` names, Unicode); a new large file stays on disk and **never becomes a git object** (checked in the object database); a batch of only a large file makes no commit; a tracked file that grows past the threshold is untracked with `Stop versioning …`, keeps its earlier versions, and `history.list` reports `excluded` and `pending: false`; an ordinary change and a stopped file share a commit that says both; a file that shrinks is versioned again; replacing a large file (raw overwrite, history restore) keeps the old bytes in the trash with `file.changed` then `trash.changed`, and later writes leave that copy alone; a folder move moves the exclusion; a file still growing on disk is kept out before the index catches up; the bootstrap untracks large files an older repository has and leaves them out of an import; threshold 0 versions everything; the default is 25 MB. |
+| `GitMirrorTest` (a local bare repository, controlled `Clock`) | Off until configured, and while history is disabled; only plain `https://` URLs with a token file (or `file:`) are accepted, and a URL with credentials is refused and never shown; the push comes 10 minutes after the last commit, and within the 1-hour maximum during continuous commits; **never force-pushes**: a diverged mirror keeps its commits, the state is `diverged` with one `status.changed`, nothing is pushed until a push is requested, and a requested push after the mirror is fixed resumes; failures back off 1, 5, 15, then 30 minutes with one event per streak and recover; a missing or empty token file is a failure; the token never appears in `lastError` or the logs (a push to `https://127.0.0.1:1`); error texts are scrubbed. |
 | `HistoryServiceTest` | `--follow` across a rename gives the per-commit paths; change types; `parentCommitId`; `readAt`; restore creates an immediate commit; **edit, then restore within the quiet period: `git log` contains both the edit and the restore**; restored bytes are verbatim (BOM, CRLF and invalid UTF-8 preserved); history of an NFD-named file; detached `HEAD` gives `history-unavailable`. |
 | `VaultReconcilerTest` | External create, modify and delete give events with `origin=null` and an External commit; the app's own write gives no event; a binary file is compared by size and mtime; an external folder delete gives one `folder.deleted`; an external move gives a delete plus a create; more than 50 changes give `resync`; a rescan applies changes under per-path locks only (a save during a rescan is not blocked). |
 | `VaultWatcherTest` (`@EnabledOnOs(LINUX)`) | Files in a new subdirectory caught; a moved directory's keys dropped and re-registered. |
@@ -2479,6 +2536,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 13. A JSON body with `Content-Length` above `max-json-body` gets `413` before it is read.
 14. Importing a vault whose `.git` has a `post-commit` hook that writes a marker file: after several commits, the marker does not exist.
 15. A save is not delayed by more than a few ms while a slow upload (a body trickled over 5 s) is in progress.
+16. `/api/status` reports `git.largeFiles` and `mirror` (off by default, `POST /api/mirror/push` then gives `400`); a large upload is counted and its history says `excluded`; with a local bare repository as the mirror, `POST /api/mirror/push` answers `202` and the mirror receives `HEAD`; the push needs `X-Client-Id` like every mutation.
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
@@ -2493,6 +2551,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - `drafts.ts` (with `fake-indexeddb`): write, restore, re-key, ownership by live tabs over a mocked `BroadcastChannel`, the quota-failure warning.
 - `applyEvents`: each event's cache patch, including `removeQueries(['file', …])` and the own-mutation invalidations. `events.ts`: `lastEventId` tracking; **an idle stream that receives only pings for 2 minutes stays Live and never reconnects**; `onerror` with `readyState` `CLOSED` recreates the stream with backoff; the `replayed` countdown sets `caughtUp`; resync buffering drops buffered events with `seq` at or below the tree's `eventId`; a `buildSha` mismatch reloads when all sessions are clean and shows the banner when one is dirty.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
+- Mirror and large files (ROADMAP items 2 and 23): `features/mirror.ts` (the warning texts for `failing` and `diverged`, none while `ready` or `disabled`, the About summary, the push command shown only with a configured mirror, its toasts); `features/largeFiles.ts` (the threshold format, strictly-larger rule, policy off); `HistoryPanel` (the note replaces "No history" for an excluded file and older versions are still listed); `StatusBar` (the warning button with the error as its tooltip, and a click that calls `POST /api/mirror/push`).
 
 ### 8.3 Browser smoke checklist
 
@@ -2522,6 +2581,8 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 22. iPhone: type frontmatter (`---`, `tags: ["a"]`, `"[[Link]]"`) and a code span with quotes; nothing is turned into an em dash or curly quotes.
 23. Deploy a new build while a tab is open on each device: the indicator shows Reconnecting and then Live within about a minute, a clean tab reloads itself to the new build, and a dirty tab shows the reload banner and saves after reconnecting.
 24. Open the app from a tagged device or a non-allowed login: it gets 403. `docker compose config` shows both volumes as `external: true`.
+25. Mirror (ROADMAP item 2), when configured: 10 minutes after an edit, the commit is on github.com; with the token file emptied (then `docker compose up -d --force-recreate notes`), the status bar shows "Mirror is not being updated" and clicking it reports the error again; a commit pushed to the GitHub repository from elsewhere makes the next push stop with "Mirror stopped", and the GitHub repository keeps that commit. `docker compose logs notes | grep -c <first characters of the token>` prints 0.
+26. Large files (ROADMAP item 23): drop a file over 25 MB onto a folder: it opens and downloads, its History panel shows the note, Settings › About counts it, `git -C /srv/notes/data/vault check-ignore -v <path>` names the `info/exclude` line, and replacing it with another upload puts the old one in the trash.
 
 ---
 

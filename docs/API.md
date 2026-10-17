@@ -92,6 +92,7 @@ version = lowercase_hex( SHA1( "blob " + decimal(byteLength) + "\0" + bytes ) )
 | Text file content (UTF-8 bytes) | 5 MiB (5,242,880) by default; the server can raise it per extension (`notes.limits.text-size-overrides`). Beyond it `413 too-large`, with `limit` set to the limit that applied. |
 | JSON request body | 16 MiB (`Content-Length` checked before reading); beyond it `413 too-large` |
 | Upload body | 100 MiB (104,857,600); beyond it `413 too-large` |
+| Versioned file size | 25 MiB (26,214,400) by default (`notes.git.large-file-threshold`); a larger file is stored but kept out of git history (§6.2 `git.largeFiles`, §14.1 `excluded`) |
 | Free disk space after an upload | at least 1 GiB; otherwise `507 insufficient-storage` |
 | Path length | 1024 UTF-16 characters; each existing segment 255 UTF-8 bytes; each **new** segment 240 UTF-8 bytes |
 | `POST /api/links/resolve` targets | 1 to 500 |
@@ -333,10 +334,15 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
   "index": { "builtInMs": 1830, "lastRescanAt": "2026-10-16T14:03:01.552Z" },
   "git": { "enabled": true, "state": "ready", "reason": null, "head": "9c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d",
            "pendingPaths": 2, "nextCommitAt": "2026-10-16T14:05:30.000Z",
-           "lastCommitAt": "2026-10-16T14:01:12.000Z", "lastError": null, "failingSince": null },
+           "lastCommitAt": "2026-10-16T14:01:12.000Z", "lastError": null, "failingSince": null,
+           "largeFiles": { "limitBytes": 26214400, "files": 3, "bytes": 412090368 } },
   "watcher": { "mode": "inotify" },
   "disk": { "freeBytes": 182736451584, "repoBytes": 91234567 },
-  "settings": { "readOnly": false, "reason": null }
+  "settings": { "readOnly": false, "reason": null },
+  "mirror": { "state": "ready", "reason": null, "remote": "https://github.com/rjgehan/notes-vault.git",
+              "branch": "main", "pushing": false, "pushedCommit": "8b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c",
+              "lastPushAt": "2026-10-16T13:52:40.118Z", "nextPushAt": "2026-10-16T14:11:12.000Z",
+              "lastError": null, "failingSince": null }
 }
 ```
 
@@ -349,11 +355,18 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `watcher.mode` | `inotify`, `polling` (watcher failed; rescans only) or `disabled` |
 | `git.state` | `ready`; `importing` (the startup commit is running after readiness); `failing` (commits fail and are being retried; `lastError` and `failingSince` are set); `disabled` (`enabled` is false) |
 | `git.reason` | Non-null when `enabled` is false, for example `"disabled by configuration"`, `"HEAD is detached"` or `"git-lfs is not supported"` |
-| `disk.repoBytes` | Size of `.git`, measured by the last rescan; `null` before the first one |
+| `git.largeFiles` | The large-file policy (DESIGN §5.8): files larger than `limitBytes` (`notes.git.large-file-threshold`, 25 MiB by default) stay in the vault but out of git history. `files` and `bytes` count them now. `limitBytes` is `null` when the policy is off (threshold 0). |
+| `disk.repoBytes` | Size of `.git` (the history), measured by the last rescan; `null` before the first one |
 | `settings` | `readOnly` and its `reason` (§5) |
+| `mirror` | The push mirror of the history (§6.4, DESIGN §5.8), a `MirrorStatus` |
+| `mirror.state` | `disabled` (`reason` says why: `"not configured"`, `"history is disabled"`, or a configuration error such as a URL that is not `https://`); `ready` (new commits are pushed about 10 minutes after the last one); `failing` (pushes fail and are retried with backoff; `lastError` and `failingSince` are set); `diverged` (the mirror has commits the vault's history lacks; nothing is pushed until §6.4 is called again, and NotesApp never force-pushes) |
+| `mirror.remote` | The mirror's URL. It never contains credentials: a URL with any is refused (`disabled`). |
+| `mirror.pushedCommit`, `mirror.lastPushAt` | The last commit the mirror is known to have and when it was pushed, during this server run; `null` until the first push |
+| `mirror.nextPushAt` | When the next push is due (after a failure: the next retry); `null` when the mirror is up to date, disabled or diverged |
+| `mirror.lastError` | A short error text; never contains the token |
 | `buildSha` | `"dev"` outside the Docker image |
 
-A `status.changed` event (§16.4) is sent whenever `git.state`, `watcher.mode` or `settings.readOnly` changes, or free space on the vault's filesystem crosses 1 GiB.
+A `status.changed` event (§16.4) is sent whenever `git.state`, `watcher.mode`, `settings.readOnly` or `mirror.state` changes, when free space on the vault's filesystem crosses 1 GiB, and when a push requested with §6.4 ends.
 
 ### 6.3 Health
 
@@ -366,6 +379,14 @@ These endpoints need no `X-Client-Id`, and they are exempt from the Host and ide
 | `GET /readyz` | Readiness: `200 {"status":"UP"}`, or `503 {"status":"OUT_OF_SERVICE"}` during shutdown |
 
 **During startup the port is closed**: the app indexes the vault before Tomcat listens, so a request through `tailscale serve` gets serve's own `502` with an empty body, not a `503`. The same happens for the 10–30 s of every deploy. Clients treat it as transient (§3).
+
+### 6.4 `POST /api/mirror/push`
+
+No body. Pushes the history to the mirror now instead of waiting for the delay, also while backing off after failures and after the mirror has diverged (once it has been fixed). The push runs in the background: the response is `202 MirrorStatus` (§6.2) with `pushing: true`, and a `status.changed` event (reason `mirror`) follows when it ends; `GET /api/status` then shows the outcome.
+
+| Errors |
+|---|
+| `400 bad-request` when the mirror is off (`detail` says why) |
 
 ---
 
@@ -572,7 +593,7 @@ This uploads bytes to an exact path. It is used when dropping OS files onto an e
 - `onConflict` (default `fail`):
   - `fail`: an existing file (or a case variant) returns `409 already-exists` / `case-collision`.
   - `rename`: the server inserts ` 1`, ` 2`, ... before the extension and returns the final path in `file.path`.
-  - `overwrite`: an existing **non-text** file is replaced, after its current content is committed to git (`503 history-unavailable` and no write if that commit fails); a case variant still returns 409. Overwriting a `note` or `text` file is refused with `400 bad-request`; use `PUT /api/files`, which has the conflict protocol.
+  - `overwrite`: an existing **non-text** file is replaced, after its current content is committed to git (`503 history-unavailable` and no write if that commit fails); a case variant still returns 409. Overwriting a `note` or `text` file is refused with `400 bad-request`; use `PUT /api/files`, which has the conflict protocol. A file over the large-file threshold (§6.2 `git.largeFiles`) is not in history, so a copy of the replaced file goes to the trash instead (events: `file.changed`, then `trash.changed`).
 - A new path is a **new** name (§1.3). Creation never replaces an existing file, even under a concurrent create.
 - A text-kind path is indexed like a save.
 - Send an `Idempotency-Key` (§2).
@@ -1019,7 +1040,8 @@ This is the history of one path, following renames (the equivalent of `git log -
       "path": "Projects/Plan.md", "time": "2026-10-16T14:05:31.000Z",
       "authorName": "R. J. Gehan", "authorLogin": "rjgehan@github",
       "message": "Update Projects/Plan.md", "change": "modified", "renamedFrom": null }
-  ]
+  ],
+  "excluded": null
 }
 ```
 
@@ -1028,10 +1050,16 @@ This is the history of one path, following renames (the equivalent of `git log -
 | `entries[].path` | The file's path **as of that commit**. Pass it as `path` to §14.2 and as `sourcePath` to §14.4. |
 | `parentCommitId` | The commit's first parent, or `null` for a root commit. A `deleted` entry has no content at its own commit: read the last version with `commit=<parentCommitId>`. |
 | `change` | `added`, `modified`, `renamed` or `deleted` |
-| `pending` | `true` when the path has uncommitted changes in the batch |
+| `pending` | `true` when the path has uncommitted changes in the batch; always `false` for an excluded file |
 | `message` | The commit subject only |
+| `excluded` | `HistoryExclusion` when new versions of the file are not kept in history, else `null`. The only reason is `large-file`: the file (`size` bytes) is larger than the large-file threshold (`limitBytes`, §6.2). Its earlier versions, from before it grew past the threshold, are still listed; the commit that stopped tracking it is a `deleted` entry with the subject `Stop versioning <path> (larger than 25 MB)`. |
 
 A path with no history returns `entries: []`.
+
+```json
+{ "path": "Attachments/Holiday.mp4", "pending": false, "hasMore": false, "entries": [],
+  "excluded": { "reason": "large-file", "size": 83886080, "limitBytes": 26214400 } }
+```
 
 ### 14.2 `GET /api/history/content?path={pathAtCommit}&commit={commitId}`
 
@@ -1070,7 +1098,7 @@ Request `HistoryRestoreRequest`:
 | `sourcePath` | The path at `commit`; defaults to `path` |
 | `baseVersion` | **Text kinds:** the client's current version of `path`, or `null` when the file does not exist now (it is then recreated). A mismatch is `409 version-conflict`; `null` while the file exists is `409 already-exists`. **Non-text kinds:** must be `null`; an existing file is overwritten, and `already-exists` never applies. |
 
-**What the server does.** Before writing anything, it commits the current content of `path` and any pending history (so the edits made just before the restore are kept in history, not overwritten unseen). If that commit fails, the response is `503 history-unavailable` (`reason: "commit-failed"`) and nothing is written. It then writes the historical bytes **verbatim** (BOM, line endings and invalid UTF-8 included; they are never decoded and re-encoded) and commits the restore.
+**What the server does.** Before writing anything, it commits the current content of `path` and any pending history (so the edits made just before the restore are kept in history, not overwritten unseen). If that commit fails, the response is `503 history-unavailable` (`reason: "commit-failed"`) and nothing is written. A current file over the large-file threshold (§6.2) is not in history, so a copy of it goes to the trash instead. It then writes the historical bytes **verbatim** (BOM, line endings and invalid UTF-8 included; they are never decoded and re-encoded) and commits the restore.
 
 `200 HistoryRestoreResult`:
 
@@ -1090,7 +1118,7 @@ The server commits immediately: `Restore <path> to version <shortId>`. `commitId
 | `409 version-conflict` (text kinds) / `already-exists` (text kinds, `baseVersion: null` but the file exists) |
 | `503 history-unavailable` |
 
-Events: `file.changed` or `file.created` (with `folder.created` first for any re-created parents), then `history.committed`.
+Events: `file.changed` or `file.created` (with `folder.created` first for any re-created parents), then `trash.changed` when a large file was kept in the trash, then `history.committed`.
 
 ### 14.5 `POST /api/history/commit`
 
@@ -1411,7 +1439,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `trash.changed` | `TrashChangedEvent` (`{}`) | yes | The trash list changed |
 | `history.committed` | `HistoryCommittedEvent` | yes | A commit was made. `paths` has at most 100 entries, and `truncated` is true when there were more. Not sent when an operation had nothing to commit. |
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
-| `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, or free space crossing 1 GiB); refetch it |
+| `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 
 Examples of `data` payloads:
@@ -1525,10 +1553,25 @@ export interface StatusResponse {
   index: { builtInMs: number; lastRescanAt: IsoInstant | null };
   git: { enabled: boolean; state: 'ready' | 'importing' | 'failing' | 'disabled'; reason: string | null;
          head: string | null; pendingPaths: number; nextCommitAt: IsoInstant | null;
-         lastCommitAt: IsoInstant | null; lastError: string | null; failingSince: IsoInstant | null };
+         lastCommitAt: IsoInstant | null; lastError: string | null; failingSince: IsoInstant | null;
+         largeFiles: { limitBytes: number | null; files: number; bytes: number } };   // kept out of history (§14.1)
   watcher: { mode: 'inotify' | 'polling' | 'disabled' };
   disk: { freeBytes: number; repoBytes: number | null };
   settings: { readOnly: boolean; reason: string | null };
+  mirror: MirrorStatus;
+}
+
+export interface MirrorStatus {
+  state: 'disabled' | 'ready' | 'failing' | 'diverged';
+  reason: string | null;          // why it is disabled: "not configured", "history is disabled" or a configuration error
+  remote: string | null;          // the mirror's URL; never contains credentials
+  branch: string | null;          // the branch pushed, e.g. "main"
+  pushing: boolean;
+  pushedCommit: string | null;    // the last commit the mirror is known to have (this server run)
+  lastPushAt: IsoInstant | null;  // the last successful push (this server run)
+  nextPushAt: IsoInstant | null;  // null when up to date, disabled or diverged
+  lastError: string | null;
+  failingSince: IsoInstant | null;
 }
 
 // ---------- settings (§5) ----------
@@ -1703,7 +1746,14 @@ export interface HistoryEntry {
   change: ChangeType;
   renamedFrom: VaultPath | null;
 }
-export interface HistoryResponse { path: VaultPath; pending: boolean; hasMore: boolean; entries: HistoryEntry[] }
+export interface HistoryResponse {
+  path: VaultPath;
+  pending: boolean;
+  hasMore: boolean;
+  entries: HistoryEntry[];
+  excluded: HistoryExclusion | null;  // set when new versions of the file are not kept in history
+}
+export interface HistoryExclusion { reason: 'large-file'; size: number; limitBytes: number }
 export interface HistoryContent {
   commitId: string;
   path: VaultPath;
@@ -1746,7 +1796,7 @@ export interface HistoryCommittedEvent {
   truncated: boolean;
 }
 export interface SettingsChangedEvent { version: Version; origin: string | null }
-export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' }
+export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' | 'mirror' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
 
 export interface VaultEventMap {
@@ -1780,6 +1830,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 |---|---|---|---|---|
 | GET | `/api/me` | | 200 `MeResponse` | 6.1 |
 | GET | `/api/status` | | 200 `StatusResponse` | 6.2 |
+| POST | `/api/mirror/push` | | 202 `MirrorStatus` | 6.4 |
 | GET | `/api/settings` | | 200 `SettingsResponse` | 5 |
 | PUT | `/api/settings` | `SettingsUpdateRequest` | 200 `SettingsResponse` | 5 |
 | GET | `/api/tree` | | 200 `TreeResponse` | 7 |
@@ -1825,7 +1876,8 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `TextRange` | `TextRange(int from, int to)` | |
 | `FieldError` | `FieldError(String field, String message)` | Placed in `api.error` |
 | `MeResponse` | `MeResponse` | |
-| `StatusResponse`, `SkippedEntry` | `StatusResponse` with nested `VaultStats`, `IndexStats`, `GitStatus`, `WatcherStatus`, `DiskStatus`, `SettingsStatus`; `SkippedEntry(String name, SkipReason reason)` | Enums `GitState` and `SkipReason` serialize as their lower-case strings |
+| `StatusResponse`, `SkippedEntry` | `StatusResponse` with nested `VaultStats`, `IndexStats`, `GitStatus` (with nested `LargeFilesStats`), `WatcherStatus`, `DiskStatus`, `SettingsStatus`; `SkippedEntry(String name, SkipReason reason)` | Enums `GitState` and `SkipReason` serialize as their lower-case strings |
+| `MirrorStatus` | Same | Enum `MirrorState` serializes as its lower-case string |
 | `Settings`, `FilesSettings`, `DailyNotesSettings`, `TemplatesSettings`, `EditorSettings` | Same names in `com.rjgehan.notes.settings` | Enums: `NewNoteLocation`, `LinkFormat`, `AttachmentLocation`, `EditorMode` |
 | `SettingsResponse`, `SettingsUpdateRequest` | Same | |
 | `FileEntry`, `FolderEntry`, `TreeResponse` | Same | |
@@ -1834,7 +1886,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `HeadingInfo`, `OutgoingLink`, `NoteMeta`, `Mention`, `BacklinkGroup`, `BacklinksResponse`, `ResolveRequest`, `ResolvedLink`, `ResolveResponse` | Same | `NoteMeta.frontmatter` is `@Nullable Map<String, Object>` |
 | `SearchMatch`, `SearchHit`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | |
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
-| `HistoryEntry`, `HistoryResponse`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | |
+| `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |

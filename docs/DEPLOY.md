@@ -202,6 +202,8 @@ nano .env
 | `WATCHTOWER_NOTIFICATION_URL` | Optional, recommended: an ntfy URL (below). Empty means no notifications. |
 | `TZ` | Your IANA time zone, for logs and git commit times, e.g. `Europe/Berlin`. |
 
+The blocks after these are optional and can wait: backups (*Backups*, recommended), `NOTES_GIT_LARGE_FILE_THRESHOLD` (*Large files*; the default of 25 MB suits most vaults) and the GitHub mirror (*Mirror to GitHub*).
+
 **ntfy (recommended).** With it, Watchtower reports every update session (updated, failed, skipped), which is how you find out that deploys have stopped, for example after the pull token was revoked. Without it, a broken pipeline is silent.
 
 ```sh
@@ -291,7 +293,7 @@ Then from your devices:
 | What | Where |
 |---|---|
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
-| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password and off-site keys, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
+| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys and the mirror token, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
 | Tailscale identity and certificates | volume `tailscale-state` |
 | Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
@@ -367,7 +369,7 @@ docker compose logs -f notes                                # follow
 docker compose logs --since 24h notes | grep -E ' (ERROR|WARN) '
 ```
 
-Stable ERROR markers to search for (DESIGN §5.18): `GIT_COMMIT_FAILED`, `WATCHER_DEGRADED`, `TAILSCALE_WATCHDOG_EXIT`, `STORAGE_LOW`, `SETTINGS_READ_ONLY`. Logs are rotated at 5 × 10 MB per container. Note content and search queries are never logged; paths are.
+Stable ERROR markers to search for (DESIGN §5.18): `GIT_COMMIT_FAILED`, `GIT_MIRROR_FAILED`, `WATCHER_DEGRADED`, `TAILSCALE_WATCHDOG_EXIT`, `STORAGE_LOW`, `SETTINGS_READ_ONLY`. Logs are rotated at 5 × 10 MB per container. Note content and search queries are never logged; paths are.
 
 ### Monitoring
 
@@ -385,7 +387,9 @@ crontab -e
 
 `/readyz` is exempt from the identity allowlist, so the probe also works from a tagged machine; with the step 6 policy, that machine's tag then needs `{ "src": ["tag:<its tag>"], "dst": ["tag:notes"], "ip": ["tcp:443"] }`.
 
-**Disk:** `/api/status` shows `disk.freeBytes` and the size of the git repository (`disk.repoBytes`). Uploads are refused below 1 GiB free.
+**Disk:** `/api/status` shows `disk.freeBytes`, the size of the git repository (`disk.repoBytes`) and the files kept out of it (`git.largeFiles`, *Large files*); **Settings › About** shows the same. Uploads are refused below 1 GiB free.
+
+**Mirror:** when the GitHub mirror is set up, `mirror` in `/api/status` and the status bar show whether it is current; failures are logged as `GIT_MIRROR_FAILED` (*Mirror to GitHub*).
 
 ### Backups
 
@@ -516,7 +520,7 @@ The `@reboot` line starts NotesApp again if the server rebooted during a snapsho
 
 A one-off copy, for example before a release that changes moving and renaming, the trash or the git integration (`MoveService`, `TrashService`, `GitStore`). Copy it to **another** disk or machine; `/mnt/backup` stands for that. With the nightly backups running, `docker compose exec backup-scheduler sh /backup/nightly.sh` is the simplest one.
 
-**Git history only, no downtime.** Contains every committed note and attachment and the settings, but not the trash or the last few minutes of uncommitted edits. Run **Commit pending changes now** from the command palette first, then:
+**Git history only, no downtime.** Contains every committed note, every attachment up to the large-file threshold (25 MB, *Large files* below) and the settings, but not larger files, the trash or the last few minutes of uncommitted edits. Run **Commit pending changes now** from the command palette first, then:
 
 ```sh
 docker run --rm -v notes-data:/data:ro -v /mnt/backup:/b alpine/git:2.54.0 \
@@ -647,6 +651,60 @@ sudo rm -rf "$D" "$O"
 
 If `readyz` never answers, `docker logs notes-drill` shows why. The drill container has no identity allowlist configured, so the made-up login header is accepted; it is reachable only through `docker exec`. To drill a **manual** backup instead, untar it into `$D` (`sudo tar xzf /mnt/backup/notes-YYYY-MM-DD.tgz -C "$D"`) or clone the bundle as in *From a manual backup* with `-v "$D":/r`, then continue from the git checks.
 
+### Mirror to GitHub
+
+Optionally, NotesApp pushes the vault's git history to a **private** GitHub repository (ROADMAP item 2, DESIGN §5.8 *Mirror*): about 10 minutes after you stop editing, and at least hourly while you keep editing. You can then browse every note and its history on github.com, and the history survives the loss of homeserver. **Your notes then also live on GitHub**, outside the tailnet; files over the large-file threshold (*Large files* below) are not in the history, so they are never pushed. It is off until you set it up.
+
+NotesApp **never force-pushes**. If the GitHub repository gets commits from elsewhere, the mirror stops and says so instead of overwriting them.
+
+**1. An empty private repository.** On GitHub: *New repository*, **Private**, and **no** README, licence or `.gitignore` (any initial commit would make the first push stop as diverged). Note its HTTPS URL, `https://github.com/<you>/<repo>.git`.
+
+**2. A fine-grained token for that repository only.** GitHub → *Settings* → *Developer settings* → *Personal access tokens* → *Fine-grained tokens* → *Generate new token*:
+
+- *Repository access*: **Only select repositories**, the new repository.
+- *Permissions* → *Repository permissions* → **Contents: Read and write** (GitHub adds *Metadata: Read-only* by itself). Nothing else.
+- An expiry date you will remember; put a reminder in your calendar a week before it.
+
+**3. The token file**, readable by uid 1000 (the app's user), never in `.env`:
+
+```sh
+cd ~/notesapp/deploy
+install -d -m 700 secrets
+install -m 600 /dev/null secrets/mirror-token
+nano secrets/mirror-token                      # paste the token (github_pat_...) and save
+[ "$(id -u)" = 1000 ] || sudo chown 1000 secrets/mirror-token
+```
+
+**4. `.env`.** If your `.env` was made before the mirror existed, append the new blocks from `.env.example` (`grep -q '^NOTES_MIRROR_URL=' .env || sed -n '/^# ---- Git history/,$p' .env.example >> .env`), then set:
+
+| Variable | Value |
+|---|---|
+| `NOTES_MIRROR_URL` | `https://github.com/<you>/<repo>.git`. Without a user name or token in it: a URL with credentials is refused. |
+| `NOTES_MIRROR_TOKEN_SECRET` | `./secrets/mirror-token` |
+
+**5. Start and check:**
+
+```sh
+docker compose up -d                            # recreates notes with the secret
+docker compose logs notes | grep -i mirror      # "Git mirror: pushing to https://github.com/... about 10 min after each commit"
+```
+
+Run **Push history to the mirror now** from the command palette, then look at **Settings › About › Mirror** (or `mirror` in `/api/status`): it shows *last push just now*, and the repository on github.com has your history. From then on the status bar warns if pushes fail (*Mirror is not being updated*) or the mirror has diverged (*Mirror stopped*); failures are retried after 1, 5 and 15 minutes and then every 30 minutes, and logged once as `GIT_MIRROR_FAILED`.
+
+**Rotate the token** before it expires: generate a new one as in step 2, replace the content of `secrets/mirror-token`, run `docker compose up -d --force-recreate notes` (the secret is mounted when the container is created), check **Push history to the mirror now** works, then delete the old token on GitHub.
+
+**Turn it off:** set `NOTES_MIRROR_URL=` in `.env` and run `docker compose up -d`. Delete the token on GitHub and `secrets/mirror-token`; the GitHub repository keeps what was pushed until you delete it.
+
+### Large files
+
+Files larger than **25 MB** stay in the vault, the trash and the nightly backups, but out of git history (ROADMAP item 23, DESIGN §5.8 *Large files*), so `.git` stays small and the mirror stays under GitHub's 100 MB file limit. For such a file:
+
+- its History panel says why it has no new versions; the versions from before it grew past 25 MB are kept;
+- replacing it (an upload over it, or restoring an older version) first puts the current file in the **trash**, since history cannot bring it back;
+- `.git/info/exclude` lists it in the section NotesApp manages (`git -C /srv/notes/data/vault check-ignore -v '<path>'` shows the line).
+
+**Settings › About** shows the history size and how many files are kept out of it. To change the threshold, set `NOTES_GIT_LARGE_FILE_THRESHOLD` in `.env` (for example `50MB`; `0` versions every file) and run `docker compose up -d`. At the next start, files now over the threshold stop being versioned (`Stop versioning …` commits) and files now under it are committed. Lowering it does not shrink the history: versions already committed stay. Keep it below 100 MB while the mirror is on.
+
 ### Import an existing Obsidian vault later
 
 Before the first start, use step 4. Into a running installation: stop the app, copy the vault into a subfolder, remove the copy's own `.git` and `.obsidian` (a nested repository would hide the folder from the vault's history), fix the owner, and start again. The app commits the new files as `Changes made while NotesApp was stopped`.
@@ -757,6 +815,28 @@ Files or folders were created as root. `/api/status` lists them under `vault.unw
 The next retry after the fix succeeds and the warning clears.
 
 `git.state: disabled` with a `reason` instead means the repository is in a state the app will not touch: `HEAD is detached`, a merge or rebase in progress, or git-lfs. Saves keep working. Repair the repository as uid 1000 (for example `sudo -u '#1000' git -C /srv/notes/data/vault switch main`), then `docker compose restart notes`.
+
+### "Mirror is not being updated" (`GIT_MIRROR_FAILED`)
+
+Pushes to the GitHub mirror fail. The tooltip of the status-bar warning, **Settings › About** and `mirror.lastError` in `/api/status` give the reason. Nothing is lost: the vault and its history are unaffected, and the next successful push sends every commit made meanwhile. Retries come after 1, 5 and 15 minutes, then every 30 minutes; clicking the warning (or **Push history to the mirror now**) retries at once.
+
+- **`not authorized`, `Authentication is required`, `git-receive-pack not permitted`:** the token expired, was revoked, or lacks *Contents: Read and write* on that repository. Rotate it (*Mirror to GitHub*).
+- **`cannot read the token file` (`AccessDeniedException`):** `secrets/mirror-token` is not readable by uid 1000. Run `sudo chown 1000 ~/notesapp/deploy/secrets/mirror-token`, then `docker compose up -d --force-recreate notes`.
+- **`the token file ... is empty`:** `NOTES_MIRROR_TOKEN_SECRET` is not set in `.env`, so the empty placeholder `deploy/mirror/no-token` is mounted.
+- **`not found`, `repository not found`:** the URL is wrong, or the token was made for another repository.
+- **`connection failed`, timeouts:** homeserver cannot reach github.com (`curl -sI https://github.com` on homeserver). It recovers on its own.
+- **`GH001: Large files detected`, or another refusal by GitHub:** a file over 100 MB is in the history from before the large-file threshold applied, or the threshold is above 100 MB. Lower `NOTES_GIT_LARGE_FILE_THRESHOLD`. Versions already committed stay in the history, so the push keeps failing until that history is rewritten by hand, which NotesApp never does; make a full backup before attempting it.
+
+`mirror.state: disabled` with a `reason` other than *not configured* means the configuration is refused, for example a URL that is not `https://` or that contains credentials. Fix `NOTES_MIRROR_URL` and run `docker compose up -d`.
+
+### "Mirror stopped: it has commits this vault does not"
+
+The GitHub repository got commits that are not in the vault's history: it was created with a README, someone pushed to it, or it is the mirror of another vault. NotesApp only fast-forwards, so it stopped instead of overwriting them; the vault is unaffected. Look at the repository's commits on github.com, then either:
+
+- **keep the vault's history** (the usual case): delete the repository on GitHub and create it again, empty (*Mirror to GitHub*, step 1; give the token access to the new repository); or
+- **use another repository**: change `NOTES_MIRROR_URL` and run `docker compose up -d`.
+
+Then run **Push history to the mirror now**; the warning clears when the push succeeds.
 
 ### Low disk space (`STORAGE_LOW`)
 

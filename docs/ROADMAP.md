@@ -527,6 +527,13 @@ Clicking an embed opens the full editor.
 
 ### 2. Mirror the vault's git history to a private GitHub repo
 
+**Status:** built (wave 1). `GitMirror` pushes `HEAD` with JGit over HTTPS, fast-forward only, with the token from the `mirror_token` compose secret (`NOTES_MIRROR_TOKEN_FILE`); off until `NOTES_MIRROR_URL` is set. Design in DESIGN §5.8 *Mirror*, setup and troubleshooting in DEPLOY.md *Mirror to GitHub*, contract in API.md §6.2 and §6.4. Deviations and additions:
+
+- **Delay with a ceiling.** A push comes 10 minutes after the last commit, and at most 1 hour after the first unpushed one, so a long writing session (a commit every 5 minutes) is still mirrored.
+- **Diverged means stop, then a manual retry.** When the mirror has commits the vault lacks, pushing stops (`mirror.state: diverged`, a status-bar warning) until **Push history to the mirror now** (`POST /api/mirror/push`, a new endpoint) is used after fixing the repository. Failures back off 1, 5 and 15 minutes, then every 30 minutes, and log `GIT_MIRROR_FAILED` once per streak.
+- **The secret is always mounted.** Compose cannot create a container whose secret file is missing, so `mirror_token` defaults to an empty file in git (`deploy/mirror/no-token`) and `NOTES_MIRROR_TOKEN_SECRET` points it at `deploy/secrets/mirror-token` when the mirror is set up; existing deploys need no change.
+- **Additions:** `file:` URLs work too (the tests push to a local bare repository); URLs with credentials are refused; the mirror's state is in Settings › About; nothing is pushed at shutdown.
+
 **One line:** push the vault repo to a private GitHub repository, debounced to about 10 minutes after commits, for off-site history you can browse on github.com.
 
 | Value | Effort | Depends on |
@@ -726,6 +733,12 @@ Results update through SSE.
 - Text from PDFs (Apache PDFBox), `.sheet` and `.excalidraw` files.
 
 ### 23. Large-attachment policy for git history
+
+**Status:** built (wave 1). Files over `notes.git.large-file-threshold` (`NOTES_GIT_LARGE_FILE_THRESHOLD`, 25 MB by default, 0 turns it off) are listed in a managed section of `.git/info/exclude`, rebuilt from the index at startup and before every commit; a tracked file that crosses the threshold is untracked (`Stop versioning …`) before anything is staged, so no large version ever becomes a git object. `/api/status` reports `git.largeFiles` (threshold, count, bytes) next to the repository size (`disk.repoBytes`), and the History panel explains why such a file has no new versions. Design in DESIGN §4.6 and §5.8 *Large files*, operations in DEPLOY.md *Large files*. Deviations and additions:
+
+- **The replaced version goes to the trash.** Git cannot bring back a version it never stored, so a raw overwrite or a history restore of a large file first keeps the current file in the trash (a hard link where the filesystem has them, so nothing is copied). Restore it from the Trash page like any deleted file.
+- **Existing repositories are brought in line at startup.** The bootstrap commit stops tracking large files an imported or older repository still tracks; versions already committed stay (history is never rewritten).
+- **Repository size** was already in `/api/status` as `disk.repoBytes` (measured by the rescan); it is now also in Settings › About.
 
 **One line:** keep files above a configurable size (for example 25 MB) out of git history so the repo stays small. They stay in the vault and in backups (item 1).
 

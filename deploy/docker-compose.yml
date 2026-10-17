@@ -49,6 +49,11 @@ services:
       NOTES_ALLOWED_HOSTS: ${NOTES_ALLOWED_HOSTS:?set NOTES_ALLOWED_HOSTS in deploy/.env}
       NOTES_IDENTITY_ALLOWED_LOGINS: ${NOTES_IDENTITY_ALLOWED_LOGINS:?set NOTES_IDENTITY_ALLOWED_LOGINS in deploy/.env}
       NOTES_TAILSCALE_WATCHDOG_ENABLED: "true"  # exit (→ restart) if orphaned from tailscale's netns
+      NOTES_GIT_LARGE_FILE_THRESHOLD: ${NOTES_GIT_LARGE_FILE_THRESHOLD:-25MB}   # larger files stay out of git history (0 = version everything)
+      # ---- Mirror of the vault's history to a private GitHub repository (ROADMAP item 2, DEPLOY.md "Mirror"):
+      NOTES_MIRROR_URL: ${NOTES_MIRROR_URL:-}   # https://github.com/<you>/<repo>.git; empty = no mirror
+      NOTES_MIRROR_TOKEN_FILE: /run/secrets/mirror_token
+    secrets: [mirror_token]
     volumes:
       - notes-data:/data
     mem_limit: 1g
@@ -139,8 +144,10 @@ volumes:
   backup-cache: {}                              # restic's cache; disposable
   backup-state: {}
 
-secrets:                                        # files under deploy/secrets/ (gitignored, mode 600); DEPLOY.md "Backups"
+secrets:                                        # files under deploy/secrets/ (gitignored, mode 600); DEPLOY.md "Backups", "Mirror"
   restic_password:
     file: ./secrets/restic-password
   backup_offsite_credentials:
     file: ./secrets/backup-offsite-credentials
+  mirror_token:                                 # the mirror's GitHub token, readable by uid 1000 (the app's user)
+    file: ${NOTES_MIRROR_TOKEN_SECRET:-./mirror/no-token}   # an empty file in git until the mirror is set up
