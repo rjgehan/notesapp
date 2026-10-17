@@ -1,8 +1,10 @@
-// Editing commands bound in the editor keymap and exposed to the palette and mobile toolbar.
+// Editing commands bound in the editor keymap and exposed to the palette and mobile toolbar. The
+// formatting toggles (bold, italic, links, headings, lists) are in formatting.ts.
 import { startCompletion } from '@codemirror/autocomplete';
-import { EditorSelection, type ChangeSpec } from '@codemirror/state';
+import type { ChangeSpec } from '@codemirror/state';
 import type { Command, EditorView } from '@codemirror/view';
 import { noteContext } from './context';
+import { toggleInlineCode } from './formatting';
 import { linkAt, type LinkHit } from './linkAt';
 
 const TASK = /^(\s*(?:>\s?)*\s*(?:[-+*]|\d+[.)])\s+\[)([ xX])(\])/;
@@ -40,47 +42,6 @@ export const toggleCheckbox: Command = (view) => {
   return true;
 };
 
-function toggleWrap(marker: string): Command {
-  return (view) => {
-    const { state } = view;
-    if (state.readOnly) return false;
-    const len = marker.length;
-    const tr = state.changeByRange((range) => {
-      const before = state.sliceDoc(range.from - len, range.from);
-      const after = state.sliceDoc(range.to, range.to + len);
-      if (before === marker && after === marker) {
-        return {
-          changes: [
-            { from: range.from - len, to: range.from },
-            { from: range.to, to: range.to + len },
-          ],
-          range: EditorSelection.range(range.anchor - len, range.head - len),
-        };
-      }
-      const text = state.sliceDoc(range.from, range.to);
-      if (text.length >= 2 * len && text.startsWith(marker) && text.endsWith(marker)) {
-        return {
-          changes: { from: range.from, to: range.to, insert: text.slice(len, -len) },
-          range: EditorSelection.range(range.from, range.to - 2 * len),
-        };
-      }
-      return {
-        changes: [
-          { from: range.from, insert: marker },
-          { from: range.to, insert: marker },
-        ],
-        range: EditorSelection.range(range.anchor + len, range.head + len),
-      };
-    });
-    view.dispatch(state.update(tr, { userEvent: 'input', scrollIntoView: true }));
-    return true;
-  };
-}
-
-export const toggleBold: Command = toggleWrap('**');
-export const toggleItalic: Command = toggleWrap('*');
-export const toggleInlineCode: Command = toggleWrap('`');
-
 /** Types `#` (with a separating space when needed, since a tag must follow whitespace) and opens tag completion. */
 export const insertTagSign: Command = (view) => {
   if (view.state.readOnly) return false;
@@ -105,20 +66,6 @@ export const insertHorizontalRule: Command = (view) => {
   const from = blank ? line.from : line.to;
   const insert = blank ? (previousBlank ? '' : '\n') + '---\n' : '\n\n---\n';
   view.dispatch({ changes: { from, to: line.to, insert }, selection: { anchor: from + insert.length }, userEvent: 'input', scrollIntoView: true });
-  return true;
-};
-
-/** Mod-K: wraps the selection as `[text]()` with the cursor in the destination. */
-export const insertMarkdownLink: Command = (view) => {
-  const { state } = view;
-  if (state.readOnly) return false;
-  const tr = state.changeByRange((range) => {
-    const text = state.sliceDoc(range.from, range.to);
-    const insert = `[${text}]()`;
-    const cursor = text ? range.from + insert.length - 1 : range.from + 1;
-    return { changes: { from: range.from, to: range.to, insert }, range: EditorSelection.cursor(cursor) };
-  });
-  view.dispatch(state.update(tr, { userEvent: 'input', scrollIntoView: true }));
   return true;
 };
 
@@ -157,3 +104,9 @@ export const toggleMode: Command = (view) => {
   view.state.facet(noteContext)?.toggleMode();
   return true;
 };
+
+/**
+ * Mod-E in a note's text (DESIGN §6.6.1): inline code while you edit; in a locked note, which is
+ * read-only, it unlocks, as Mod-E does everywhere outside the text.
+ */
+export const inlineCodeOrUnlock: Command = (view) => (view.state.readOnly ? toggleMode(view) : toggleInlineCode(view));

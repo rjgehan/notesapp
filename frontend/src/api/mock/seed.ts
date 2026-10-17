@@ -30,11 +30,12 @@ are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is
 
 - [x] Open the welcome note
 - [ ] Toggle a checkbox in reading view
-- [ ] Switch modes with Mod-E
+- [ ] Lock editing with the lock button
 
 | Feature | Shortcut |
 | --- | --- |
-| Toggle reading view | \`Mod-E\` |
+| Bold | \`Mod-B\` |
+| Inline code | \`Mod-E\` |
 | Save now | \`Mod-S\` |
 | Follow link | \`Mod-Enter\` |
 

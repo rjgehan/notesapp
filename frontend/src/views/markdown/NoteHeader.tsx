@@ -22,8 +22,9 @@ interface Props {
 }
 
 /**
- * Mod-E (DESIGN §6.6.1): a note locks and unlocks editing (Live Preview, read-only); the reading view
- * goes back to editing. Views with `edit` and `read` switch between the two.
+ * Lock editing (DESIGN §6.6.1): a note locks and unlocks editing (Live Preview, read-only); the
+ * reading view goes back to editing. Views with `edit` and `read` switch between the two. Mod-E does
+ * the same, except in a note's text, where it toggles inline code; so only unlocking names it.
  */
 export function ModeToggle({ mode }: { mode: ViewMode }) {
   const shortcut = keyLabel('Mod-e');
@@ -43,7 +44,7 @@ export function ModeToggle({ mode }: { mode: ViewMode }) {
       onClick={toggleNoteMode}
       aria-label="Lock editing"
       aria-pressed={locked}
-      title={`${locked ? 'Unlock editing' : 'Lock editing'} (${shortcut})`}
+      title={locked ? `Unlock editing (${shortcut})` : 'Lock editing'}
     >
       {locked ? <Lock size={17} /> : <LockOpen size={17} />}
     </button>

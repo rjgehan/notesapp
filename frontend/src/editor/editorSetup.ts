@@ -9,7 +9,8 @@ import { drawSelection, EditorView, highlightActiveLine, keymap, placeholder } f
 import { isIOS, modKey } from '../features/platform';
 import { headingSource, tagSource, wikilinkSource } from './completion';
 import { noteContext, type NoteContext } from './context';
-import { followLink, followLinkAtCursor, insertMarkdownLink, saveNow, toggleBold, toggleCheckbox, toggleItalic, toggleMode } from './editorCommands';
+import { followLink, followLinkAtCursor, inlineCodeOrUnlock, saveNow, toggleCheckbox } from './editorCommands';
+import { formatting, toggleBold, toggleHighlight, toggleItalic, toggleLink, toggleStrikethrough } from './formatting';
 import { lineClassPlugin, obsidianHighlight } from './highlight';
 import { linkAt } from './linkAt';
 import { markdownNoteLanguage } from './language';
@@ -125,10 +126,13 @@ const noteKeymap = [
   { key: 'Mod-s', run: saveNow, preventDefault: true },
   { key: 'Mod-Enter', run: followLinkAtCursor },
   { key: 'Mod-l', run: toggleCheckbox, preventDefault: true },
+  // Formatting (DESIGN §6.6.1): toggles on the selection or at the cursor.
   { key: 'Mod-b', run: toggleBold, preventDefault: true },
   { key: 'Mod-i', run: toggleItalic, preventDefault: true },
-  { key: 'Mod-k', run: insertMarkdownLink, preventDefault: true },
-  { key: 'Mod-e', run: toggleMode, preventDefault: true },
+  { key: 'Mod-k', run: toggleLink, preventDefault: true },
+  { key: 'Mod-Shift-x', run: toggleStrikethrough, preventDefault: true },
+  { key: 'Mod-Shift-h', run: toggleHighlight, preventDefault: true },
+  { key: 'Mod-e', run: inlineCodeOrUnlock, preventDefault: true },
 ];
 
 /**
@@ -151,6 +155,7 @@ function tableCellExtensions(ctx: NoteContext, hooks: EditorHooks, config: LiveP
       enterkeyhint: 'next',
     }),
     closeBrackets(),
+    formatting(),
     autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
     clickNavigation,
     unresolvedLinks,
@@ -172,6 +177,7 @@ export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[
     lineClassPlugin,
     preview ? livePreview(preview) : [],
     preview && !preview.locked ? tableCellSetup.of(() => tableCellExtensions(ctx, hooks, preview)) : [],
+    formatting(),
     autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
     clickNavigation,
     unresolvedLinks,

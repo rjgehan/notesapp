@@ -6,7 +6,9 @@ import type { FileEntry, MoveResult, SettingsResponse, WriteResult } from '../ap
 import { usePendingNote } from '../state/pendingNote';
 import { useUi } from '../state/ui';
 import { applyMoveResult } from '../sync/applyEvents';
+import { registerBuiltins } from '../extensions/builtins';
 import { syncTarget } from '../sync/liveSync';
+import { getCommand, runCommand } from './commands';
 import { createNote } from './fileOps';
 import { wantsNoteFocus } from './focus';
 import { currentNoteMode, isEditingMode, setNoteMode, toggleNoteMode, toggleReadingView, toggleSourceMode, viewModeFor } from './noteMode';
@@ -67,6 +69,18 @@ describe('note modes (ROADMAP 10a)', () => {
     expect(currentNoteMode()).toBe('locked');
     setNoteMode('read');
     toggleNoteMode();
+    expect(currentNoteMode()).toBe('live');
+  });
+
+  it('the palette has Toggle source mode and Toggle lock editing', () => {
+    registerBuiltins();
+    expect(getCommand('editor.toggleSource')?.name).toBe('Toggle source mode');
+    expect(getCommand('editor.toggleMode')?.name).toBe('Toggle lock editing');
+    runCommand('editor.toggleSource', { activePath: 'Welcome.md' });
+    expect(currentNoteMode()).toBe('source');
+    runCommand('editor.toggleMode', { activePath: 'Welcome.md' });
+    expect(currentNoteMode()).toBe('locked');
+    runCommand('editor.toggleMode', { activePath: 'Welcome.md' });
     expect(currentNoteMode()).toBe('live');
   });
 

@@ -29,7 +29,8 @@ import SearchPanel from '../components/panels/SearchPanel';
 import { confirmDelete, promptNewFolder } from '../components/explorer/rowActions';
 import { activeEditor } from '../editor/activeEditor';
 import { insertWikilink } from '../editor/completion';
-import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, toggleItalic } from '../editor/editorCommands';
+import { followLinkAtCursor, toggleCheckbox } from '../editor/editorCommands';
+import { setHeading, toggleBold, toggleBulletList, toggleHeading, toggleHighlight, toggleInlineCode, toggleItalic, toggleLink, toggleNumberedList, toggleQuote, toggleStrikethrough } from '../editor/formatting';
 import { historyEditor, insertTable } from '../editor/livePreview/table';
 import { pickAndInsertAttachments } from '../features/attachments';
 import { getCommand, setViewCommandSource } from '../features/commands';
@@ -218,8 +219,9 @@ export function registerBuiltins(): void {
 
   // ---------- editor ----------
   const onNote = (c: { activePath: string | null }) => c.activePath !== null && isNotePath(c.activePath);
-  registerCommand({ id: 'editor.toggleMode', name: 'Lock or unlock editing', hotkey: 'Mod-e', run: toggleNoteMode, when: onNote });
-  registerCommand({ id: 'editor.toggleSource', name: 'Toggle Live Preview/source mode', run: toggleSourceMode, when: onNote });
+  // Mod-E outside the note's text; in the text it is inline code, and in a locked note it unlocks (DESIGN §6.6.1).
+  registerCommand({ id: 'editor.toggleMode', name: 'Toggle lock editing', hotkey: 'Mod-e', run: toggleNoteMode, when: onNote });
+  registerCommand({ id: 'editor.toggleSource', name: 'Toggle source mode', run: toggleSourceMode, when: onNote });
   registerCommand({ id: 'editor.toggleReading', name: 'Toggle reading view', run: toggleReadingView, when: onNote });
   registerCommand({
     id: 'editor.save',
@@ -235,7 +237,15 @@ export function registerBuiltins(): void {
   editorCommand('editor.toggleCheckbox', 'Toggle checklist status', toggleCheckbox, 'Mod-l');
   editorCommand('editor.bold', 'Toggle bold', toggleBold, 'Mod-b');
   editorCommand('editor.italic', 'Toggle italic', toggleItalic, 'Mod-i');
-  editorCommand('editor.insertLink', 'Insert Markdown link', insertMarkdownLink, 'Mod-k');
+  editorCommand('editor.strikethrough', 'Toggle strikethrough', toggleStrikethrough, 'Mod-Shift-x');
+  editorCommand('editor.highlight', 'Toggle highlight', toggleHighlight, 'Mod-Shift-h');
+  editorCommand('editor.inlineCode', 'Toggle inline code', toggleInlineCode, 'Mod-e');
+  editorCommand('editor.insertLink', 'Insert or remove link', toggleLink, 'Mod-k');
+  for (let level = 1; level <= 6; level++) editorCommand(`editor.heading${level}`, `Toggle heading ${level}`, toggleHeading(level));
+  editorCommand('editor.headingNone', 'Remove heading', (v) => setHeading(v, 0));
+  editorCommand('editor.bulletList', 'Toggle bulleted list', toggleBulletList);
+  editorCommand('editor.numberedList', 'Toggle numbered list', toggleNumberedList);
+  editorCommand('editor.quote', 'Toggle quote', toggleQuote);
   editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
   editorCommand('editor.insertTable', 'Insert table', insertTable);
   // In a table cell, find searches the note.

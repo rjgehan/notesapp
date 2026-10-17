@@ -3,19 +3,25 @@
 // "editor focused or toolbar in use" state: unmounting it on blur would remove a button before
 // its click arrives. Buttons never take focus (tabIndex -1, pointerdown default prevented), so
 // the editor keeps the focus and the keyboard stays open while they dispatch to the EditorView.
-// In a table cell being edited (DESIGN §6.6.1) it offers Previous and Next cell instead of the
-// tools that insert whole lines.
+// It has the formatting tools of Live Preview (DESIGN §6.6.1): bold, italic, heading, list,
+// checkbox, link and table. In a table cell being edited it offers Previous and Next cell instead
+// of the tools that change whole lines.
 import { indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import type { EditorView } from '@codemirror/view';
 import {
   ArrowLeftToLine,
   ArrowRightToLine,
+  Bold,
   Brackets,
   Code,
   Command as CommandIcon,
   Hash,
+  Heading,
   ImagePlus,
+  Italic,
   KeyboardOff,
+  Link,
+  List,
   ListIndentDecrease,
   ListIndentIncrease,
   Minus,
@@ -30,7 +36,8 @@ import { useEffect, useRef, useState } from 'react';
 import { activeEditor } from '../../editor/activeEditor';
 import { insertWikilink } from '../../editor/completion';
 import { noteContext } from '../../editor/context';
-import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox, toggleInlineCode } from '../../editor/editorCommands';
+import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox } from '../../editor/editorCommands';
+import { cycleHeading, toggleBold, toggleBulletList, toggleInlineCode, toggleItalic, toggleLink } from '../../editor/formatting';
 import { historyEditor, insertTable, isTableCell, moveToCell } from '../../editor/livePreview/table';
 import { revealCaret } from '../../editor/mobileViewport';
 import { pickAndInsertAttachments } from '../../features/attachments';
@@ -47,7 +54,7 @@ interface Tool {
   icon: LucideIcon;
   /** Only for Markdown notes (the plain-text editor gets the generic tools). */
   markdown?: boolean;
-  /** Inserts whole lines: not in a table cell. */
+  /** Changes whole lines: not in a table cell. */
   lines?: boolean;
   /** Only in a table cell. */
   cell?: boolean;
@@ -59,10 +66,16 @@ const TOOLS: Tool[] = [
   { id: 'tag', label: 'Insert tag', icon: Hash, markdown: true, run: (v) => insertTagSign(v) },
   { id: 'cell-previous', label: 'Previous cell', icon: ArrowLeftToLine, cell: true, run: (v) => moveToCell(v, -1) },
   { id: 'cell-next', label: 'Next cell', icon: ArrowRightToLine, cell: true, run: (v) => moveToCell(v, 1) },
+  { id: 'bold', label: 'Bold', icon: Bold, markdown: true, run: (v) => toggleBold(v) },
+  { id: 'italic', label: 'Italic', icon: Italic, markdown: true, run: (v) => toggleItalic(v) },
+  // Each tap goes one step: text, heading 1, 2, 3, text.
+  { id: 'heading', label: 'Heading', icon: Heading, markdown: true, lines: true, run: (v) => cycleHeading(v) },
+  { id: 'list', label: 'Bulleted list', icon: List, markdown: true, lines: true, run: (v) => toggleBulletList(v) },
   { id: 'checkbox', label: 'Toggle checklist', icon: SquareCheck, markdown: true, lines: true, run: (v) => toggleCheckbox(v) },
+  { id: 'link', label: 'Link', icon: Link, markdown: true, run: (v) => toggleLink(v) },
+  { id: 'table', label: 'Insert table', icon: Table, markdown: true, lines: true, run: (v) => insertTable(v) },
   { id: 'code', label: 'Inline code', icon: Code, markdown: true, run: (v) => toggleInlineCode(v) },
   { id: 'rule', label: 'Horizontal rule', icon: Minus, markdown: true, lines: true, run: (v) => insertHorizontalRule(v) },
-  { id: 'table', label: 'Insert table', icon: Table, markdown: true, lines: true, run: (v) => insertTable(v) },
   { id: 'outdent', label: 'Outdent', icon: ListIndentDecrease, lines: true, run: (v) => indentLess(v) },
   { id: 'indent', label: 'Indent', icon: ListIndentIncrease, lines: true, run: (v) => indentMore(v) },
   // A cell's undo history is its note's.

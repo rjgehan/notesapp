@@ -78,6 +78,40 @@ describe('MobileToolbar', () => {
     expect(view.state.selection.main.head).toBe(view.state.doc.length - 2);
   });
 
+  it('has the formatting tools: bold, italic, heading, list, checkbox, link and table, with 44 px targets', () => {
+    view = mountEditor('Some text');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    view.dispatch({ selection: { anchor: 0, head: 4 } });
+    fireEvent.click(button('Bold'));
+    expect(view.state.doc.toString()).toBe('**Some** text');
+    fireEvent.click(button('Italic'));
+    expect(view.state.doc.toString()).toBe('***Some*** text');
+    fireEvent.click(button('Heading'));
+    expect(view.state.doc.toString()).toBe('# ***Some*** text');
+    fireEvent.click(button('Heading'));
+    expect(view.state.doc.toString()).toBe('## ***Some*** text');
+    fireEvent.click(button('Bulleted list'));
+    expect(view.state.doc.toString()).toBe('- ***Some*** text');
+    view.dispatch({ selection: { anchor: view.state.doc.length - 4, head: view.state.doc.length } });
+    fireEvent.click(button('Link'));
+    expect(view.state.doc.toString()).toBe('- ***Some*** [text]()');
+    for (const name of ['Toggle checklist', 'Insert table']) expect(button(name)).toBeInTheDocument();
+    for (const b of screen.getAllByRole('button', { hidden: true })) expect(b).toHaveClass('mobile-toolbar-button');
+  });
+
+  it('keeps the inline formatting tools in a table cell, without the line tools', () => {
+    const note = mountEditor('note');
+    const ctx = { path: () => 'Note.md' } as unknown as NoteContext;
+    view = new EditorView({ state: EditorState.create({ doc: 'cell', extensions: [noteContext.of(ctx), tableCellHost.of(note)] }), parent: document.body });
+    setActiveEditor(view);
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    for (const name of ['Bold', 'Italic', 'Link', 'Inline code']) expect(button(name)).toBeInTheDocument();
+    for (const name of ['Heading', 'Bulleted list']) expect(screen.queryByRole('button', { name, hidden: true })).toBeNull();
+    note.destroy();
+  });
+
   it('opens the command palette and hides the keyboard', () => {
     view = mountEditor('x');
     render(<MobileToolbar />);
