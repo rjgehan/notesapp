@@ -10,6 +10,7 @@ A self-hosted, single-user notes web app modelled closely on Obsidian. The vault
 - **Editor and reading view.** CodeMirror 6 in styled source mode with autocomplete for links, headings and tags; a reading view with embeds, image sizes, clickable checkboxes, footnotes, `==highlights==` and `%%comments%%`.
 - **Find things.** Quick switcher, command palette, full-text search (phrases, `tag:`, `path:`, negation), backlinks and unlinked mentions, outline and tags panels.
 - **Organise.** Rename and move with automatic link updates (and undo), trash with restore, attachments by paste, drop or upload, daily notes and templates.
+- **Drawings.** Excalidraw drawings as vault files: new `.excalidraw` drawings, and Obsidian Excalidraw `.excalidraw.md` files edited in place. Touch and Apple Pencil on iPhone and iPad, images stored as vault attachments, edits from two devices merged automatically, and changes from another device shown live.
 - **Phone-first.** A responsive layout tuned for iPhone Safari (keyboard-aware editor, toolbar, drawer, 44 px targets), dark and light themes.
 - **Zero-touch deploys.** A push to `main` is tested, built for amd64 and arm64, and running on the server within about five minutes.
 
