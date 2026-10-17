@@ -11,6 +11,7 @@ import type { Endpoints } from '../api/endpoints';
 import type { FileEntry, TextFile, Version, WriteResult } from '../api/types';
 import { markdownNoteLanguage } from '../editor/language';
 import { remoteChanges, remoteTransaction, sessionEdit, waitForComposition } from '../editor/remote';
+import { trackedRange, trackedRangesField, trackRange, untrackRange } from '../editor/tracked';
 import { addUpload, endUpload, pendingUploads, uploadsField } from '../editor/uploads';
 import { detectEol, fromLf, toLf, type Eol } from '../features/eol';
 import { isNotePath } from '../features/paths';
@@ -114,6 +115,7 @@ const UNSAVED: ReadonlySet<SessionStatus> = new Set(['dirty', 'saving', 'offline
 type DeferredEvent = { kind: 'changed'; version: Version | null } | { kind: 'deleted'; trashId: string | null };
 
 let uploadSeq = 0;
+let trackSeq = 0;
 
 export class DocumentSession {
   path: string;
@@ -173,9 +175,9 @@ export class DocumentSession {
     return this.loadPromise;
   }
 
-  /** Undo history, pending uploads, and the note language so headings and links are readable without an editor. */
+  /** Undo history, pending uploads, tracked ranges, and the note language so headings and links are readable without an editor. */
   private baseExtensions(): Extension[] {
-    return isNotePath(this.path) ? [history(), uploadsField, markdownNoteLanguage()] : [history(), uploadsField];
+    return isNotePath(this.path) ? [history(), uploadsField, trackedRangesField, markdownNoteLanguage()] : [history(), uploadsField, trackedRangesField];
   }
 
   // ---------- observation ----------
@@ -1021,6 +1023,27 @@ export class DocumentSession {
   cancelUpload(id: number): void {
     this.uploads = Math.max(0, this.uploads - 1);
     if (pendingUploads(this.editorState).some((u) => u.id === id)) this.dispatchEffects([endUpload.of({ id })]);
+  }
+
+  // ---------- tracked ranges (editor/tracked.ts) ----------
+
+  /**
+   * Follows `from`..`to` through every change, local or remote, for work outside the editor that
+   * comes back to it later. Returns the range's id, or null when the document cannot be edited.
+   */
+  trackRange(from: number, to: number): number | null {
+    if (!this.isEditable()) return null;
+    const id = ++trackSeq;
+    this.dispatchEffects([trackRange.of({ id, from, to })]);
+    return id;
+  }
+
+  /** Where a tracked range is now, and stops following it; null when it was lost (a reload). */
+  takeRange(id: number): { from: number; to: number } | null {
+    const range = trackedRange(this.editorState, id);
+    if (!range) return null;
+    this.dispatchEffects([untrackRange.of(id)]);
+    return { from: range.from, to: range.to };
   }
 
   // ---------- drafts ----------
