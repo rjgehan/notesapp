@@ -61,7 +61,7 @@ public class NoteService {
 	public NoteMeta meta(String apiPath) {
 		ApiPath path = this.paths.resolve(apiPath, Mode.EXISTING);
 		VaultIndex.NoteView view = this.index.noteView(path.nfc());
-		if (view == null) {
+		if (view == null || this.kinds.kindOf(path.nfc()) != FileKind.NOTE) {
 			FileRecord file = this.index.file(path.nfc());
 			if (file == null && !this.index.isFolder(path.nfc())) {
 				throw NotesException.notFound(path.nfc());
@@ -126,7 +126,9 @@ public class NoteService {
 		List<BacklinkGroup> groups = new ArrayList<>();
 		for (VaultIndex.Candidate candidate : this.index.mentionCandidates(usable)) {
 			NoteRecord source = candidate.note();
-			if (source.path().equals(target.path()) || files.isExcluded(source.path())) {
+			// Documents (DocumentIndexer) are indexed from a search text, whose offsets are not the file's.
+			if (source.path().equals(target.path()) || files.isExcluded(source.path())
+					|| this.kinds.kindOf(source.path()) != FileKind.NOTE) {
 				continue;
 			}
 			List<Mention> mentions = new ArrayList<>();
