@@ -140,3 +140,48 @@ describe('List page (ROADMAP item 4)', () => {
     expect(await screen.findByText('This list no longer exists')).toBeInTheDocument();
   });
 });
+
+describe('the Kanban view of a list (ROADMAP item 4)', () => {
+  const columnTitles = () => [...document.querySelectorAll('[data-board-column]')].map((c) => `${c.querySelector('.board-column-name')?.textContent}: ${[...c.querySelectorAll('.board-card .task-title')].map((t) => t.textContent).join(', ')}`);
+
+  beforeEach(() => localStorage.clear());
+
+  it('shows the sections as columns of top-level cards, and is remembered for the list', async () => {
+    serve();
+    const first = renderList();
+    fireEvent.click(await screen.findByRole('radio', { name: /Board/ }));
+    expect(columnTitles()).toEqual(['No section: Plan the move, Pay rent', 'Errands: Buy milk']);
+    expect(screen.getByText('0/1')).toBeInTheDocument();
+    first.unmount();
+    renderList();
+    expect(await screen.findByRole('region', { name: 'Home board' })).toBeInTheDocument();
+  });
+
+  it('moves a card to the next column with Alt+→, at the same height, as a reorder into that section', async () => {
+    serve();
+    const reorder = vi.spyOn(taskApi, 'reorder').mockImplementation(async () => result(null, [{ ...tasks[0], sectionId: 'S1', order: 'Zz' }]));
+    renderList();
+    fireEvent.click(await screen.findByRole('radio', { name: /Board/ }));
+    const card = screen.getByText('Plan the move').closest('[data-board-card]') as HTMLElement;
+    fireEvent.keyDown(card, { key: 'ArrowRight', altKey: true });
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith({ listId: 'L1', sectionId: 'S1', parentId: null, ids: ['A'], after: null }, expect.any(String)));
+    await waitFor(() => expect(columnTitles()).toEqual(['No section: Pay rent', 'Errands: Plan the move, Buy milk']));
+  });
+
+  it('by status: a card moved to Done completes the task, and one moved back reopens it', async () => {
+    serve();
+    const complete = vi.spyOn(taskApi, 'complete').mockResolvedValue(result({ ...tasks[2], status: 'done', completedAt: '2026-10-17T10:00:00.000Z' }));
+    const uncomplete = vi.spyOn(taskApi, 'uncomplete').mockResolvedValue(result({ ...tasks[3], status: 'open', completedAt: null }));
+    renderList();
+    fireEvent.click(await screen.findByRole('radio', { name: /Board/ }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Columns' }), { target: { value: 'board-status' } });
+    expect(columnTitles()).toEqual(['To do: Plan the move, Pay rent, Buy milk', 'Done: Old chore']);
+    fireEvent.click(screen.getByRole('button', { name: 'More for “Pay rent”' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mark as done' }));
+    await waitFor(() => expect(complete).toHaveBeenCalledWith('B', expect.objectContaining({ base: { due: null, start: null } }), expect.any(String)));
+    await waitFor(() => expect(columnTitles()).toEqual(['To do: Plan the move, Buy milk', 'Done: Pay rent, Old chore']));
+    const old = screen.getByText('Old chore').closest('[data-board-card]') as HTMLElement;
+    fireEvent.keyDown(old, { key: 'ArrowLeft', altKey: true });
+    await waitFor(() => expect(uncomplete).toHaveBeenCalledWith('D', expect.any(String)));
+  });
+});
