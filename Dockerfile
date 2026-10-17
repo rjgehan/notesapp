@@ -10,7 +10,7 @@ ARG GIT_SHA=dev
 ENV VITE_BUILD_SHA=${GIT_SHA}
 RUN npm run build
 
-# ---------- 2) backend: runs natively on the build host; the jar is arch-independent ----------
+# ---------- 2) backend: runs natively on the build host; the jar is arch-independent (bytecode for Java 21) ----------
 FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk-noble AS backend
 WORKDIR /src/backend
 COPY backend/.mvn/ .mvn/
@@ -23,9 +23,15 @@ RUN sh ./mvnw -B -ntp -DskipTests package \
  && java -Djarmode=tools -jar /tmp/application.jar extract --layers --destination /extracted \
  && mkdir -p /out/data/vault /out/data/.config
 
-# ---------- 3) runtime: one per target arch; NO RUN steps, so arm64 needs no emulation ----------
-FROM eclipse-temurin:21-jre-noble
+# ---------- 3) runtime: one per target arch, on JDK 25. Its two RUN steps run under QEMU for arm64 (DESIGN §7.1) ----------
+FROM eclipse-temurin:25-jre-noble
 ARG GIT_SHA=dev
+ARG TARGETARCH
+ARG BUILDARCH
+# The JDK 25 images ship without curl, which the HEALTHCHECK below and DEPLOY.md's restore drill use.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend /extracted/dependencies/ ./
 COPY --from=backend /extracted/spring-boot-loader/ ./
@@ -38,9 +44,30 @@ ENV NOTES_VAULT_DIR=/data/vault \
     GIT_CONFIG_NOSYSTEM=1 \
     SERVER_ADDRESS=127.0.0.1 \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
+# AOT cache (JEP 483/514): a training run starts the app on a scratch vault and stops once the Spring context is
+# refreshed, before anything listens; the JVM then writes the classes it loaded and linked, with their profiles, to
+# notesapp.aot, which the ENTRYPOINT uses. It runs here because the cache only fits this JVM build, this architecture
+# and these exact jars. Natively a failed training run fails the build; under emulation the image ships without the
+# cache (the JVM then starts normally, and the status page shows "AOT cache: not used").
+RUN set -eu; \
+    t=/tmp/aot-training; mkdir -p "$t"; \
+    if XDG_CONFIG_HOME="$t/config" timeout 900 java -XX:AOTCacheOutput=/app/notesapp.aot \
+         -Dspring.context.exit=onRefresh -Djava.io.tmpdir="$t" -jar application.jar \
+         --notes.vault-dir="$t/vault" --notes.allowed-hosts=localhost \
+         --notes.security.require-tailscale-interface=false \
+       && [ -s /app/notesapp.aot ]; then \
+      ls -l /app/notesapp.aot; \
+    elif [ "$TARGETARCH" = "$BUILDARCH" ]; then \
+      echo "ERROR: the AOT cache training run failed" >&2; exit 1; \
+    else \
+      echo "WARNING: the AOT cache training run failed under emulation ($TARGETARCH on $BUILDARCH);" \
+           "this image starts without the cache" >&2; \
+      rm -f /app/notesapp.aot; \
+    fi; \
+    rm -rf "$t" /app/notesapp.aot.config /tmp/hsperfdata_*
 # uid/gid 1000 = the 'ubuntu' user that ships in the noble base image (no useradd needed); see DESIGN §7.7 for why 1000
 USER 1000:1000
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8080/readyz || exit 1
-ENTRYPOINT ["java", "-jar", "application.jar"]
+ENTRYPOINT ["java", "-XX:AOTCache=/app/notesapp.aot", "-jar", "application.jar"]

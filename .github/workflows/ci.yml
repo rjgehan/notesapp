@@ -29,6 +29,22 @@ jobs:
           cache-dependency-path: backend/pom.xml
       - run: sh ./mvnw -B -ntp verify
 
+  backend-jdk25:                             # the jar is built for Java 21 but runs on JDK 25 in the image (DESIGN §7.1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - run: sh ./mvnw -B -ntp verify
+
   frontend:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -88,7 +104,7 @@ jobs:
           cache-from: type=gha
 
   publish:
-    needs: [backend, frontend]
+    needs: [backend, backend-jdk25, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'   # push, weekly schedule, manual
     uses: ./.github/workflows/publish.yml
     permissions:
