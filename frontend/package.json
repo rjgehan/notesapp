@@ -32,6 +32,7 @@
     "dayjs": "^1.11.23",
     "dompurify": "^3.4.17",
     "fuzzysort": "^4.0.2",
+    "hyperformula": "3.4.0",
     "lucide-react": "^1.58.0",
     "markdown-it": "^15.0.3",
     "react": "^19.3.1",

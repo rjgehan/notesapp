@@ -76,12 +76,14 @@ Vitest, ESLint and so on) are not shipped.
 | @tanstack/query-core | MIT | <https://tanstack.com/query> |
 | @tanstack/react-query | MIT | <https://tanstack.com/query> |
 | argparse | PSF-2.0 | <https://github.com/nodeca/argparse> |
+| chevrotain | Apache-2.0 | <https://sap.github.io/chevrotain/docs/> |
 | cookie-es | MIT | <https://github.com/unjs/cookie-es> |
 | crelt | MIT | <https://code.haverbeke.berlin/marijn/crelt> |
 | dayjs | MIT | <https://day.js.org> |
 | dompurify | (MPL-2.0 OR Apache-2.0) | <https://github.com/cure53/DOMPurify> |
 | entities | BSD-2-Clause | <https://github.com/fb55/entities> |
 | fuzzysort | MIT | <https://github.com/farzher/fuzzysort> |
+| hyperformula | GPL-3.0-only | <https://hyperformula.handsontable.com/> |
 | linkify-it | MIT | <https://github.com/markdown-it/linkify-it> |
 | lucide-react | ISC | <https://lucide.dev> |
 | markdown-it | MIT | <https://github.com/markdown-it/markdown-it> |
@@ -90,8 +92,10 @@ Vitest, ESLint and so on) are not shipped.
 | react | MIT | <https://react.dev/> |
 | react-dom | MIT | <https://react.dev/> |
 | react-router | MIT | <https://github.com/remix-run/react-router> |
+| regexp-to-ast | MIT | <https://github.com/bd82/regexp-to-ast> |
 | scheduler | MIT | <https://react.dev/> |
 | style-mod | MIT | <https://code.haverbeke.berlin/marijn/style-mod> |
+| tiny-emitter | MIT | <https://github.com/scottcorgan/tiny-emitter> |
 | uc.micro | MIT | <https://github.com/markdown-it/uc.micro> |
 | w3c-keyname | MIT | <https://github.com/marijnh/w3c-keyname> |
 | yaml | ISC | <https://eemeli.org/yaml/> |
