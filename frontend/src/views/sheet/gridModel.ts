@@ -10,8 +10,9 @@ import { usedExtent } from '../../sheets/edits';
 import { cellText, cellValue, isCellError, type Sheet } from '../../sheets/format';
 import type { CellRange } from '../../sheets/refs';
 
-/** Height of the column letters above the frozen rows. */
+/** Height of the column letters above the frozen rows (taller on touch devices). */
 export const HEADER_BAND = 26;
+export const TOUCH_HEADER_BAND = 32;
 export const DEFAULT_COLUMN_WIDTH = 100;
 export const MIN_COLUMN_WIDTH = 32;
 export const MAX_COLUMN_WIDTH = 800;
@@ -33,6 +34,8 @@ export interface SheetSelection {
 }
 
 export interface GridLayout {
+  /** Height of the column letters; frozen rows are drawn below them. */
+  headerBand: number;
   /** Rows and columns the grid shows, frozen ones included (sheet coordinates). */
   rows: number;
   cols: number;
@@ -46,6 +49,7 @@ export interface GridLayout {
 
 export interface LayoutOptions {
   rowHeight: number;
+  headerBand?: number;
   /** Rows and columns the user scrolled or moved into beyond the default size. */
   minRows: number;
   minCols: number;
@@ -70,7 +74,7 @@ export function gridLayout(sheet: Sheet, opts: LayoutOptions): GridLayout {
     frozenHeight = next;
     frozenRows++;
   }
-  return { rows, cols, frozenRows, frozenCols: Math.min(sheet.frozen.cols, cols - 1), frozenHeight, rowHeight, columnWidth };
+  return { headerBand: opts.headerBand ?? HEADER_BAND, rows, cols, frozenRows, frozenCols: Math.min(sheet.frozen.cols, cols - 1), frozenHeight, rowHeight, columnWidth };
 }
 
 /** The frozen row at `y` pixels below the column letters, or null below the frozen rows. */

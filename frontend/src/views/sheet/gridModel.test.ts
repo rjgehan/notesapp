@@ -29,6 +29,8 @@ describe('grid layout', () => {
     expect(big.rows).toBe(2000 + 100);
     expect(big.cols).toBe(30 + 4);
     expect(gridLayout(sheet(), { ...opts, minRows: 5000, minCols: 40 })).toMatchObject({ rows: 5000, cols: 40 });
+    expect(gridLayout(sheet(), opts).headerBand).toBe(26);
+    expect(gridLayout(sheet(), { ...opts, headerBand: 32 }).headerBand).toBe(32);
   });
 
   it('takes widths and heights from the file, within limits', () => {

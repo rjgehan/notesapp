@@ -26,7 +26,6 @@ import {
   fromGridSelection,
   gridCell,
   gridColumns,
-  HEADER_BAND,
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
   toGridSelection,
@@ -127,7 +126,8 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
   const [sizing, setSizing] = useState<ReadonlyMap<number, number>>(new Map());
   const f = layout.frozenRows;
   const frozenActive = selection.active.row < f;
-  const headerHeight = HEADER_BAND + layout.frozenHeight;
+  const band = layout.headerBand;
+  const headerHeight = band + layout.frozenHeight;
   const fontFamily = theme.grid.fontFamily ?? 'system-ui, sans-serif';
 
   // The model is mutable: `version` changes with every change, and the callbacks below with it, so
@@ -150,7 +150,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
       const g = theme.grid;
       ctx.save();
       ctx.textBaseline = 'middle';
-      const bandTop = rect.y + HEADER_BAND;
+      const bandTop = rect.y + band;
       if (col < 0) {
         // The corner, and the frozen rows' numbers.
         ctx.font = `${g.markerFontStyle ?? '12px'} ${fontFamily}`;
@@ -171,12 +171,12 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
       // Column letters, centred as in Google Sheets.
       if (frozenActive && selection.active.col === col && !isSelected) {
         ctx.fillStyle = g.bgHeaderHasFocus ?? '#363636';
-        ctx.fillRect(rect.x, rect.y, rect.width, HEADER_BAND);
+        ctx.fillRect(rect.x, rect.y, rect.width, band);
       }
       ctx.font = `${g.headerFontStyle ?? '500 12px'} ${fontFamily}`;
       ctx.textAlign = 'center';
       ctx.fillStyle = isSelected ? (g.textHeaderSelected ?? '#fff') : (g.textHeader ?? '#a3a3a3');
-      ctx.fillText(columnLetters(col), rect.x + rect.width / 2, rect.y + HEADER_BAND / 2);
+      ctx.fillText(columnLetters(col), rect.x + rect.width / 2, rect.y + band / 2);
       const { sheet } = model;
       const columnBold = sheet.cols[columnLetters(col)]?.bold === true;
       for (let r = 0; r < f; r++) {
@@ -218,7 +218,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
       }
       ctx.restore();
     },
-    [theme, fontFamily, f, layout, selection, frozenActive, model],
+    [theme, fontFamily, f, layout, selection, frozenActive, model, band],
   );
 
   // ---------- selection ----------
@@ -237,8 +237,8 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
 
   const onHeaderClicked = useCallback(
     (col: number, e: HeaderClickedEventArgs) => {
-      if (col < 0 || e.localEventY < HEADER_BAND) return;
-      const row = frozenRowAt(layout, e.localEventY - HEADER_BAND);
+      if (col < 0 || e.localEventY < band) return;
+      const row = frozenRowAt(layout, e.localEventY - band);
       if (row === null) return;
       e.preventDefault();
       const last = lastFrozenClick.current;
@@ -248,7 +248,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
       handlers.onSelect({ active: { col, row }, range: { col, row, width: 1, height: 1 } });
       if ((again || e.isDoubleClick === true || (e.isTouch && selection.active.col === col && selection.active.row === row)) && editable) requestEdit({ col, row });
     },
-    [layout, handlers, selection, editable, requestEdit],
+    [layout, handlers, selection, editable, requestEdit, band],
   );
 
   const onCellActivated = useCallback(
@@ -381,7 +381,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
       onPointerDownCapture={(e) => {
         const box = wrapper.current?.getBoundingClientRect();
         const y = box ? e.clientY - box.top : -1;
-        frozenPress.current = f > 0 && y >= HEADER_BAND && y < headerHeight;
+        frozenPress.current = f > 0 && y >= band && y < headerHeight;
         lastPointer.current = e.pointerType;
         userInput.current = y >= headerHeight ? Date.now() : 0;
       }}

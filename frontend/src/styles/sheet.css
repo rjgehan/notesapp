@@ -307,7 +307,7 @@
   /* 16 px keeps iOS from zooming into the field. */
   .sheet-name-box,
   .sheet-formula-input {
-    min-height: 40px;
+    min-height: 44px;
     font-size: 16px;
   }
 

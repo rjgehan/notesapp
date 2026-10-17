@@ -20,7 +20,7 @@ import { toast } from '../../state/toasts';
 import type { SessionSnapshot } from '../../sync/DocumentSession';
 import { InlineTitle } from '../markdown/InlineTitle';
 import { FormulaBar, type EditTarget, type FormulaBarHandle, type Move } from './FormulaBar';
-import { cellSelection, clampSelection, gridLayout, type CellAt, type SheetSelection } from './gridModel';
+import { cellSelection, clampSelection, gridLayout, HEADER_BAND, TOUCH_HEADER_BAND, type CellAt, type SheetSelection } from './gridModel';
 import { ColumnWidthDialog, NamedRangesDialog } from './SheetDialogs';
 import { SheetGrid, type SheetGridHandlers } from './SheetGrid';
 import { SheetTabs } from './SheetTabs';
@@ -110,6 +110,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     () =>
       gridLayout(sheetById(model.file, sheetId) ?? model.file.sheets[0], {
         rowHeight: touch ? 32 : 24,
+        headerBand: touch ? TOUCH_HEADER_BAND : HEADER_BAND,
         minRows: grown?.rows ?? 0,
         minCols: grown?.cols ?? 0,
         // Frozen rows take at most half the grid (a phone in landscape).
