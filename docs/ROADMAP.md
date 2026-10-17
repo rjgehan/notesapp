@@ -890,6 +890,14 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
 
 ### 38. Ops polish
 
+**Status:** built (wave 1). The image runs on `eclipse-temurin:25-jre-noble` with an AOT cache from a training run at build time (DESIGN §7.1). The app pushes its stable ERROR markers to ntfy itself (`ops/AppAlerts`, DESIGN §5.18.1), configured in `/data/secrets/ntfy.json`, the file item 9 will share. The status page is `/x/status`, registered with `registerPage` (DESIGN §6.18.1), backed by `GET /api/status/details` and `POST /api/alerts/test` (API.md §6.5 and §6.6). Setup and troubleshooting are in DEPLOY.md *App alerts*. Deviations and additions:
+
+- **Compiled for Java 21, run on 25.** The source level stays at `--release 21` because the development machine has only JDK 21; a new `backend-jdk25` CI job runs every backend test on JDK 25, and `publish` waits for it.
+- **The AOT training run stops at context refresh** (`-Dspring.context.exit=onRefresh`), so it covers the startup path, not request handling. It must run on the target architecture: natively a failure fails the build, while under QEMU (arm64) the image ships without the cache rather than blocking the weekly security rebuild. JGit's classes are not cached because its jar is signed. Not measured on JDK 25 here (Docker is not installed on the development machine); a JDK 21 CDS proxy of the same run halved the context's start.
+- **curl is installed** in the runtime image: the JDK 25 Temurin images no longer ship it, and the `HEALTHCHECK` (which the nightly backup waits on) and the restore drill need it.
+- **Alerts carry fixed texts, never the log message,** so no path, error text or note content leaves the server. A marker is sent at most once an hour (repeats are summed up in one follow-up) and at most 10 alerts an hour in all.
+- **Additions:** *Send a test alert* on the status page; an alert after a Tailscale watchdog restart, sent by the restarted app because the exiting one has no network; the backup state mounted read-only into the app (`NOTES_BACKUP_STATE` for host cron) so the status page shows the last backup; the markers logged since start, counted even without ntfy; and `registerPage`'s command now closes the phone drawer, which the first registered page showed staying open.
+
 **One line:** a JDK 25 runtime image (no virtual-thread pinning, AOT cache for faster start), ntfy alerts for app errors (the v1 ERROR markers pushed directly, not only through logs), and an in-app status page. Watchtower notifications, the `/readyz` probe and Dependabot are already in v1.
 
 | Value | Effort | Depends on |

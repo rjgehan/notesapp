@@ -293,16 +293,17 @@ Then from your devices:
 | What | Where |
 |---|---|
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
-| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys and the mirror token, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
+| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys and the mirror token, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts, uid 1000, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
 | Tailscale identity and certificates | volume `tailscale-state` |
 | Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
+| Status page | `https://notes.<tailnet>.ts.net/x/status` (*Status* in the ribbon or the phone drawer) |
 | Containers | `notes-tailscale-1`, `notes-notes-1`, `notes-watchtower-1`; with backups `notes-backup-1` and `notes-backup-scheduler-1` |
 
 ### Updates
 
 - **The app updates itself.** Watchtower checks GHCR every 5 minutes, so a green push to `main` is live a few minutes after its publish job finishes; the weekly scheduled rebuild arrives the same way. Each update session is reported to ntfy if configured. During the 10–30 s restart the app answers `502`; open tabs show *Reconnecting* and recover on their own.
-- **Which build is running:** `buildSha` in `https://notes.<tailnet>.ts.net/api/status`, or
+- **Which build is running:** the status page (*Server*), `buildSha` in `https://notes.<tailnet>.ts.net/api/status`, or
   `docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' notes-notes-1`.
 - **Update now** instead of waiting: `docker compose pull notes && docker compose up -d notes`.
 
@@ -369,11 +370,11 @@ docker compose logs -f notes                                # follow
 docker compose logs --since 24h notes | grep -E ' (ERROR|WARN) '
 ```
 
-Stable ERROR markers to search for (DESIGN §5.18): `GIT_COMMIT_FAILED`, `GIT_MIRROR_FAILED`, `WATCHER_DEGRADED`, `TAILSCALE_WATCHDOG_EXIT`, `STORAGE_LOW`, `SETTINGS_READ_ONLY`. Logs are rotated at 5 × 10 MB per container. Note content and search queries are never logged; paths are.
+Stable ERROR markers to search for (DESIGN §5.18): `GIT_COMMIT_FAILED`, `GIT_MIRROR_FAILED`, `WATCHER_DEGRADED`, `TAILSCALE_WATCHDOG_EXIT`, `STORAGE_LOW`, `SETTINGS_READ_ONLY`. Logs are rotated at 5 × 10 MB per container. Note content and search queries are never logged; paths are. With *App alerts* set up, the app also pushes each marker to your phone, and the status page counts them under *App alerts*.
 
 ### Monitoring
 
-Three signals: Watchtower's ntfy reports, an external `/readyz` probe, and the ERROR markers above.
+Four signals: Watchtower's ntfy reports, an external `/readyz` probe, the ERROR markers above (pushed by the app itself once *App alerts* is set up), and the **status page** at `https://notes.<tailnet>.ts.net/x/status`, which lists every problem first and then shows the server, history, disk, backups, alerts and live sync at a glance.
 
 **Probe from `beach`** (any always-on tailnet machine with cron), every 5 minutes, posting to the same ntfy topic on failure. The retries ride out the restart of a normal deploy:
 
@@ -390,6 +391,32 @@ crontab -e
 **Disk:** `/api/status` shows `disk.freeBytes`, the size of the git repository (`disk.repoBytes`) and the files kept out of it (`git.largeFiles`, *Large files*); **Settings › About** shows the same. Uploads are refused below 1 GiB free.
 
 **Mirror:** when the GitHub mirror is set up, `mirror` in `/api/status` and the status bar show whether it is current; failures are logged as `GIT_MIRROR_FAILED` (*Mirror to GitHub*).
+
+### App alerts
+
+NotesApp pushes its own problems to ntfy (ROADMAP item 38, DESIGN §5.18.1): history not being saved, the mirror failing, the disk filling up, the file watcher failing, read-only settings, and a restart after losing the Tailscale network (the ERROR markers in *Logs*). Each alert is a fixed text with a link to the status page; paths, error texts and note content never leave the server. While a problem lasts it is sent at most once an hour, with a "still happening" count, and at most 10 alerts go out in any hour. Nothing is sent until you create the file below.
+
+**1. A topic.** Reuse the Watchtower topic from step 7 (`notes-<hex>`), or make one for app problems with `openssl rand -hex 16`. Subscribe to it in the ntfy app on the iPhone.
+
+**2. `ntfy.json`,** in the data volume next to the vault, never inside it, so it never reaches git, the trash or the mirror:
+
+```sh
+sudo install -d -o 1000 -g 1000 -m 700 /srv/notes/data/secrets
+sudo -u '#1000' sh -c 'umask 077 && cat > /srv/notes/data/secrets/ntfy.json' <<'EOF'
+{ "server": "https://ntfy.sh", "topic": "notes-<hex>" }
+EOF
+```
+
+- **With an access token** (a reserved topic on ntfy.sh, or a self-hosted server with access control), add `"token": "tk_…"`. A token is only sent over `https://`, or over `http://` to a tailnet host.
+- **A self-hosted ntfy on the tailnet:** `"server": "https://ntfy.<tailnet>.ts.net"`.
+- **A separate topic for app problems,** for example once the reminders of ROADMAP item 9 use the main one: `"alerts": { "topic": "notes-ops-<hex>" }`. `"alerts": false` switches the alerts off and keeps the file.
+- **With a plain (not bind-backed) volume:** `docker compose exec -T notes sh -c 'umask 077 && mkdir -p /data/secrets && cat > /data/secrets/ntfy.json' < ntfy.json`.
+
+No restart is needed: the app reads the file again whenever it changes.
+
+**3. Test it.** On the status page, *App alerts* says "sent to ntfy at https://ntfy.sh", or what is wrong with the file. Press **Send a test alert**: the phone shows *NotesApp: test alert*.
+
+The backups (`NOTES_BACKUP_NTFY_URL`) and Watchtower (`WATCHTOWER_NOTIFICATION_URL`) keep their own settings in `.env`; all three can post to the same topic.
 
 ### Backups
 
@@ -486,7 +513,7 @@ The first off-site upload can take hours on a slow uplink. NotesApp is already r
 
 - **ntfy.** A failed run posts *NotesApp backup failed* (high priority) with the steps that failed and the last lines of restic's output. *NotesApp is down after the backup* (urgent) means the app could not be started again: run `docker compose up -d` at once. On Sundays, when the weekly repository check passes, a low-priority *NotesApp backups OK* arrives. **If that Sunday message stops coming, the backups have stopped**, for example because `backup-scheduler` is not running.
 - **Heartbeat (recommended).** It catches what ntfy cannot: homeserver being off, or the scheduler being gone. Create a check at [healthchecks.io](https://healthchecks.io) (or an Uptime Kuma push monitor) with a period of 1 day and a grace time of 2 hours. Set `NOTES_BACKUP_HEARTBEAT_URL` to its ping URL (`https://hc-ping.com/<uuid>`), run `docker compose up -d`, and let the check notify you, for example through the same ntfy topic. Every successful run pings it.
-- **Status:** `docker compose exec backup-scheduler cat /state/status.json` shows the last run's time and result, the snapshot, the off-site result, the last success and the failures.
+- **Status:** the status page's *Backups* card shows the last run's time and result, the snapshot, the off-site result, the last success and the failures, and lists a failed run, or no success for 36 hours, among the problems at the top. The same file from the command line: `docker compose exec backup-scheduler cat /state/status.json`.
 - **Logs:** `docker compose logs --since 48h backup-scheduler` (each run, with restic's output) and `docker compose logs backup`.
 
 #### Run, pause or change the backups
@@ -514,7 +541,7 @@ crontab -e
 @reboot sleep 120; /bin/sh $HOME/notesapp/deploy/backup/nightly.sh --recover >> $HOME/notesapp-backup.log 2>&1
 ```
 
-The `@reboot` line starts NotesApp again if the server rebooted during a snapshot. Add `NOTES_BACKUP_HEARTBEAT_URL=<url>` before `/bin/sh` in the first line for a heartbeat. The state (`status.json`) is in `~/.local/state/notesapp-backup`, and the log grows by about a kilobyte a night. Monitoring is the same as above.
+The `@reboot` line starts NotesApp again if the server rebooted during a snapshot. Add `NOTES_BACKUP_HEARTBEAT_URL=<url>` before `/bin/sh` in the first line for a heartbeat. The state (`status.json`) is in `~/.local/state/notesapp-backup`, and the log grows by about a kilobyte a night. Monitoring is the same as above. For the status page to see it, mount that directory into the app instead of the scheduler's volume: `echo "NOTES_BACKUP_STATE=$HOME/.local/state/notesapp-backup" >> .env && docker compose up -d` (an absolute path; Compose does not expand `~`).
 
 #### Manual backups
 
@@ -865,3 +892,21 @@ The ntfy message names the steps that failed; `docker compose logs --since 24h b
 - **`repository check`:** read restic's message in the log. If the local repository is damaged, move its directory aside, run `init` again (it takes the chunker parameters from the off-site repository) and let the next run fill it; the off-site copy keeps the history.
 - **`NotesApp backup skipped`:** the previous run was still going, typically the first off-site upload. If no run is going (`docker compose exec backup-scheduler cat /state/run.lock/pid`), `docker compose restart backup-scheduler` clears the lock.
 - **`NotesApp backup interrupted`:** homeserver rebooted or the scheduler was restarted during a snapshot. NotesApp was started again and that snapshot was cancelled; the next night takes a new one.
+
+### App alerts do not arrive
+
+Open the status page; its *App alerts* card says what the app sees:
+
+- **"off: no ntfy.json":** there is no `/srv/notes/data/secrets/ntfy.json` (*App alerts*, step 2).
+- **`ntfy.json …` in red** (not valid JSON, no topic, a token over plain `http://`, or `cannot be read (AccessDeniedException)`): fix the file; for the last one, `sudo chown -R 1000:1000 /srv/notes/data/secrets`. The card updates within 30 seconds, without a restart.
+- **"Last error: IOException: ntfy answered HTTP 403"** (or 401): the token, or the topic's access rules. **HTTP 429:** ntfy.sh's rate limit for your IP address. A connection error: homeserver cannot reach the server (`curl -sI https://ntfy.sh`).
+- **Sent, but nothing on the phone:** the phone subscribes to another topic (check `alerts.topic`), or a self-hosted server lacks `upstream-base-url` for iOS.
+- **"held back by the rate limit":** more than 10 alerts in an hour; the next alert says how many were skipped, and the status page lists every problem logged since the start.
+
+### The status page says "AOT cache: not used"
+
+The JVM could not use the AOT cache built into the image (DESIGN §7.1), usually because the arm64 image's training run failed under emulation; the publish job's log says so. NotesApp works normally and only starts a little slower. The next image build tries again.
+
+### The status page says "No backup has reported here yet"
+
+The app sees no `status.json`. With `backup-scheduler`, no run has finished yet (run one: *Run, pause or change the backups*). With host cron, set `NOTES_BACKUP_STATE` (*Host cron instead of backup-scheduler*). "No backup for 2 days" instead means the runs have stopped: `docker compose ps backup-scheduler` and its logs.
