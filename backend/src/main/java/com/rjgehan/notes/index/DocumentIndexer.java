@@ -16,6 +16,11 @@ import org.jspecify.annotations.Nullable;
  * {@code #tags} become the file's backlinks and tags exactly as they would in a note. Those links point into the
  * search text, not the file, so a rename never rewrites them (the move reports the file as {@code not-rewritable}),
  * and the file is never offered for unlinked mentions.
+ * <p>
+ * An indexer may also support notes, such as an Obsidian Excalidraw {@code .excalidraw.md} drawing. Such a note is
+ * scanned as a note, with its own rewritable links, and the blocks are a supplement for what its Markdown does not
+ * show: they are appended to its search text with the same rules, and add no headings or block ids
+ * ({@link DocumentParse#supplement}).
  */
 public interface DocumentIndexer {
 

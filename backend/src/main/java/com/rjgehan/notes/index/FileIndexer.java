@@ -22,7 +22,8 @@ import org.springframework.stereotype.Component;
 /**
  * Builds {@link IndexedFile}s: text kinds within their size limit are hashed (their version), notes are decoded and
  * parsed; binary and over-size files are described by size and mtime only (DESIGN §4.2, §5.4). A text file that a
- * {@link DocumentIndexer} supports is decoded and handed to it, and what it returns is indexed like a note's body.
+ * {@link DocumentIndexer} supports is decoded and handed to it, and what it returns is indexed like a note's body; a
+ * note it supports is parsed as a note, and what it returns is a supplement to that.
  */
 @Component
 public class FileIndexer {
@@ -113,7 +114,30 @@ public class FileIndexer {
 		TextCodec.Decoded decoded = TextCodec.decode(bytes);
 		NoteParse parse = MarkdownScanner.scan(decoded.text(), decoded.hadBom(), decoded.lossy());
 		FileRecord record = new FileRecord(path, kind, bytes.length, mtime, version, parse.aliases());
-		return new IndexedFile(record, disk, decoded.text(), parse);
+		DocumentParse.Parsed supplemented = supplement(path, decoded, parse);
+		return (supplemented != null) ? new IndexedFile(record, disk, supplemented.text(), supplemented.parse())
+				: new IndexedFile(record, disk, decoded.text(), parse);
+	}
+
+	/**
+	 * A note that a {@link DocumentIndexer} supports too (an {@code .excalidraw.md} drawing) is scanned as a note, and
+	 * the indexer's blocks are added after its text: what the note's Markdown does not show (DocumentParse#supplement).
+	 */
+	private DocumentParse.@Nullable Parsed supplement(String path, TextCodec.Decoded decoded, NoteParse parse) {
+		DocumentIndexer indexer = documentIndexer(path);
+		if (indexer == null || decoded.lossy()) {
+			return null;
+		}
+		try {
+			DocumentIndexer.Document document = indexer.index(path, decoded.text());
+			return (document != null && !document.blocks().isEmpty())
+					? DocumentParse.supplement(decoded.text(), parse, document) : null;
+		}
+		catch (RuntimeException ex) {
+			// The note itself is indexed in any case.
+			logger.warn("Cannot index {} as a document: {}", path, ex.toString());
+			return null;
+		}
 	}
 
 	private DocumentParse.@Nullable Parsed document(String path, byte[] bytes) {
