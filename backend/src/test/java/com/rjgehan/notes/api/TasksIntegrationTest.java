@@ -80,7 +80,7 @@ class TasksIntegrationTest {
 		JsonNode result = reply.ok(201);
 		assertThat(reply.header("Cache-Control")).isEqualTo("no-store");
 		assertThat(result.propertyNames()).containsExactlyInAnyOrder("task", "changed", "deleted", "rolledForward",
-				"files", "createdFolders");
+				"files", "createdFolders", "lists");
 		JsonNode task = result.get("task");
 		assertThat(task.propertyNames()).containsExactlyInAnyOrderElementsOf(TASK_FIELDS);
 		assertThat(task.get("sectionId").isNull()).isTrue();

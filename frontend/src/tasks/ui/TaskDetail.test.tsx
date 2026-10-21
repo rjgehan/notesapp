@@ -11,7 +11,7 @@ import { useTaskUi } from './state';
 import TaskDetail from './TaskDetail';
 
 function result(task: Task): TaskWriteResult {
-  return { task, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [] };
+  return { task, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] };
 }
 
 const list = makeList();

@@ -16,7 +16,7 @@ const bills = makeList({ id: 'B1', name: 'Bills', path: 'Tasks/Bills.tasks' });
 const inbox = makeList({ id: 'IN', name: 'Inbox', order: 'Zz', path: 'Tasks/Inbox.tasks' });
 
 function result(task: Task): TaskWriteResult {
-  return { task, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [] };
+  return { task, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] };
 }
 
 beforeEach(() => {

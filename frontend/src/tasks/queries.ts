@@ -8,7 +8,7 @@ import { queryClient } from '../api/queryClient';
 import type { LocalDate, Task, TaskFileProblem, TaskList, TasksResponse } from '../api/types';
 import { taskApi, type TaskQueryParams } from './api';
 import { inListView, inToday, inUpcoming, matchesFilter, statusesOf } from './model';
-import { taskStore } from './store';
+import { taskStore, type TaskStore } from './store';
 
 export interface ViewMeta {
   total: number;
@@ -76,10 +76,10 @@ export async function loadView(params: TaskQueryParams): Promise<ViewMeta> {
   return { total: response.total, problems: response.problems };
 }
 
-export async function loadLists(): Promise<ViewMeta> {
-  const since = taskStore.generation();
+export async function loadLists(store: TaskStore = taskStore): Promise<ViewMeta> {
+  const since = store.generation();
   const response = await taskApi.lists();
-  taskStore.setLists(response.lists, response.problems, since);
+  store.setLists(response.lists, response.problems, since);
   return { total: response.lists.length, problems: response.problems };
 }
 
@@ -105,7 +105,7 @@ export function useTaskViews(all: readonly TaskQueryParams[]) {
 }
 
 export function useTaskLists() {
-  return useQuery({ queryKey: taskKeys.lists(), queryFn: loadLists, staleTime: Infinity });
+  return useQuery({ queryKey: taskKeys.lists(), queryFn: () => loadLists(), staleTime: Infinity });
 }
 
 export const COMPLETED_PAGE = 50;
@@ -138,7 +138,7 @@ export function useCompletedTasks(filter: Omit<TaskQueryParams, 'view' | 'before
 
 /** Makes sure the lists are known (quick add resolves `@List` against them). */
 export function ensureLists(): Promise<unknown> {
-  return queryClient.fetchQuery({ queryKey: taskKeys.lists(), queryFn: loadLists, staleTime: Infinity });
+  return queryClient.fetchQuery({ queryKey: taskKeys.lists(), queryFn: () => loadLists(), staleTime: Infinity });
 }
 
 /** Refetches every task view that is shown (and marks the others stale). */

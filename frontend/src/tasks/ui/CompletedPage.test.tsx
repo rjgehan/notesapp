@@ -72,7 +72,7 @@ describe('Completed page (ROADMAP item 4)', () => {
   it('reopens a task, which leaves the log', async () => {
     const done = makeTask({ id: 'B', title: 'Pay rent', status: 'done', completedAt: '2026-10-15T18:00:00.000Z' });
     vi.spyOn(taskApi, 'query').mockResolvedValue(page([done]));
-    const reopen = vi.spyOn(taskApi, 'uncomplete').mockResolvedValue({ task: { ...done, status: 'open', completedAt: null }, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [] } satisfies TaskWriteResult);
+    const reopen = vi.spyOn(taskApi, 'uncomplete').mockResolvedValue({ task: { ...done, status: 'open', completedAt: null }, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] } satisfies TaskWriteResult);
     renderWithApp(<CompletedPage />);
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Reopen “Pay rent”' }));
     await waitFor(() => expect(reopen).toHaveBeenCalledWith('B', expect.any(String)));

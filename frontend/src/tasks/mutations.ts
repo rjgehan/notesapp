@@ -33,7 +33,7 @@ import { formatTaskDate, localToday } from './dates';
 import { compareKeys, isValidKey, keyBetween } from './fractionalIndex';
 import { loadRecurrence } from './loadRecurrence';
 import { childrenByParent, compareOrder, descendants } from './model';
-import { invalidateTaskViews } from './queries';
+import { invalidateTaskViews, loadLists } from './queries';
 import { taskStore, type TaskPatch, type TaskStore } from './store';
 import { acknowledgeFiles } from './sync';
 
@@ -55,8 +55,13 @@ function applyFiles(files: readonly FileEntry[], createdFolders: readonly string
 
 export function applyTaskWriteResult(result: TaskWriteResult, store: TaskStore = taskStore): void {
   applyFiles(result.files, result.createdFolders);
-  store.upsert(result.task ? [result.task, ...result.changed] : result.changed);
+  // A list the write created (the Inbox, on first use): its list.changed is not echoed to this tab.
+  store.upsertLists(result.lists);
+  const tasks = result.task ? [result.task, ...result.changed] : result.changed;
+  store.upsert(tasks);
   store.remove(result.deleted);
+  // Every view needs a task's list; one this page does not know yet is fetched.
+  if (tasks.some((t) => !t.archived && store.list(t.listId) === undefined)) void loadLists(store).catch(() => undefined);
 }
 
 export function applyTaskListWriteResult(result: TaskListWriteResult, store: TaskStore = taskStore): void {

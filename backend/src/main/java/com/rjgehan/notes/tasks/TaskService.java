@@ -17,6 +17,7 @@ import com.rjgehan.notes.api.dto.CompleteTaskRequest;
 import com.rjgehan.notes.api.dto.ReorderTasksRequest;
 import com.rjgehan.notes.api.dto.Task;
 import com.rjgehan.notes.api.dto.TaskList;
+import com.rjgehan.notes.api.dto.TaskListWriteResult;
 import com.rjgehan.notes.api.dto.TaskRecurrence;
 import com.rjgehan.notes.api.dto.TaskStatus;
 import com.rjgehan.notes.api.dto.TaskWriteResult;
@@ -116,10 +117,17 @@ public class TaskService {
 		String after = optionalId(body.get("after"), "after", errors);
 		requireValid(errors);
 		Author author = Author.of(identity);
+		// The Inbox, when this request creates it: the caller gets no echo of its list.changed or folder.created.
+		List<TaskList> createdLists = new ArrayList<>();
+		Set<String> createdFolders = new LinkedHashSet<>();
 		return attempt((catalog) -> {
 			String listId = listFor(fields, catalog);
 			if (listId == null) {
-				this.lists.ensureInbox(identity, origin);
+				TaskListWriteResult inbox = this.lists.ensureInbox(identity, origin);
+				if (inbox != null) {
+					createdLists.addAll(inbox.lists());
+					createdFolders.addAll(inbox.createdFolders());
+				}
 				return null;
 			}
 			TaskList list = catalog.requireList(listId);
@@ -160,8 +168,12 @@ public class TaskService {
 				List<Task> changed = publishChanged(session, renumbered, file, path);
 				TaskWrites.Committed committed = session.commit();
 				logger.debug("TASK create {} in {} client={}", id, path.nfc(), origin);
+				createdFolders.addAll(committed.createdFolders());
+				List<TaskList> lists = createdLists.stream()
+					.map((created) -> created.id().equals(listId) ? list : created)
+					.toList();
 				return new TaskWriteResult(task, changed, List.of(), false, committed.files(),
-						committed.createdFolders());
+						List.copyOf(createdFolders), lists);
 			}
 		});
 	}
@@ -279,7 +291,7 @@ public class TaskService {
 				TaskWrites.Committed committed = session.commit();
 				logger.debug("TASK update {} {} client={}", id, effective.keySet(), origin);
 				return new TaskWriteResult(task, changed, List.of(), false, committed.files(),
-						committed.createdFolders());
+						committed.createdFolders(), List.of());
 			}
 		});
 	}
@@ -410,7 +422,7 @@ public class TaskService {
 				TaskWrites.Committed committed = session.commit();
 				logger.debug("TASK complete {} rolled={} client={}", id, next != null, origin);
 				return new TaskWriteResult(task, changed, List.of(), next != null, committed.files(),
-						committed.createdFolders());
+						committed.createdFolders(), List.of());
 			}
 		});
 	}
@@ -547,7 +559,7 @@ public class TaskService {
 				TaskWrites.Committed committed = session.commit();
 				logger.debug("TASK uncomplete {} client={}", id, origin);
 				return new TaskWriteResult(task, changed, List.of(), false, committed.files(),
-						committed.createdFolders());
+						committed.createdFolders(), List.of());
 			}
 		});
 	}
@@ -646,7 +658,7 @@ public class TaskService {
 				if (alreadyPlaced(tree, siblings, moving, parentId, sectionId, request.after())) {
 					// A retry, or a drop where the tasks already were.
 					return new TaskWriteResult(null, viewAll(moving, file, path), List.of(), false, List.of(),
-							List.of());
+							List.of(), List.of());
 				}
 				for (ObjectNode node : moving) {
 					if (parentId != null) {
@@ -671,7 +683,7 @@ public class TaskService {
 				TaskWrites.Committed committed = session.commit();
 				logger.debug("TASK reorder {} in {} client={}", ids, path.nfc(), origin);
 				return new TaskWriteResult(null, changed, List.of(), false, committed.files(),
-						committed.createdFolders());
+						committed.createdFolders(), List.of());
 			}
 		});
 	}
@@ -723,7 +735,7 @@ public class TaskService {
 				TaskWrites.Committed committed = session.commit();
 				logger.debug("TASK delete {} (+{} subtasks) client={}", id, deleted.size() - 1, origin);
 				return new TaskWriteResult(null, List.of(), List.copyOf(deleted), false, committed.files(),
-						committed.createdFolders());
+						committed.createdFolders(), List.of());
 			}
 		});
 	}
@@ -781,7 +793,7 @@ public class TaskService {
 	}
 
 	private static TaskWriteResult unchanged(Task task) {
-		return new TaskWriteResult(task, List.of(), List.of(), false, List.of(), List.of());
+		return new TaskWriteResult(task, List.of(), List.of(), false, List.of(), List.of(), List.of());
 	}
 
 	/**

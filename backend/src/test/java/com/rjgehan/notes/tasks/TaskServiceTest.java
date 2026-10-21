@@ -66,8 +66,15 @@ class TaskServiceTest {
 		assertThat(inbox.path()).isEqualTo("Tasks/Inbox.tasks");
 		assertThat(task.listId()).isEqualTo(inbox.id());
 		assertThat(result.files()).extracting((f) -> f.path()).containsExactly("Tasks/Inbox.tasks");
+		// The caller is not sent its own list.changed and folder.created: the result carries them.
+		assertThat(result.lists()).containsExactly(inbox);
+		assertThat(result.createdFolders()).containsExactly("Tasks");
 		assertThat(this.fx.eventsSince(mark)).containsExactly("folder.created", "file.created", "list.changed",
 				"file.changed", "task.created");
+		TaskWriteResult second = this.fx.tasks.create(TaskFixture.json("{\"title\": \"Eggs\"}"), TestVault.ALICE,
+				TaskFixture.CLIENT);
+		assertThat(second.lists()).isEmpty();
+		assertThat(second.createdFolders()).isEmpty();
 		String file = this.fx.read("Tasks/Inbox.tasks");
 		assertThat(file).startsWith("{\n  \"type\": \"notesapp-tasks\",\n  \"version\": 1,\n").endsWith("}\n")
 			.contains("\"title\": \"Buy milk\"");

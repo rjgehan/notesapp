@@ -1877,6 +1877,7 @@ export interface TaskWriteResult {
   rolledForward: boolean;         // complete: a recurring task moved to its next occurrence
   files: FileEntry[];             // list files written; apply them like file.changed / file.created
   createdFolders: VaultPath[];
+  lists: TaskList[];              // lists the change created (the Inbox, on first use); apply them like list.changed
 }
 
 export interface TaskListFields { name?: string; color?: string | null; icon?: string | null; archived?: boolean }
@@ -2084,7 +2085,7 @@ The types are in §17 (`Task`, `TaskList`, ...). Field rules:
 
 ### 20.4 Changing tasks
 
-Every change answers `TaskWriteResult`: the task after the change (`task`), other tasks it touched (`changed`: subtasks completed or moved with it, siblings renumbered), removed ids (`deleted`), and the list files written (`files`, with `createdFolders`). The calling client applies `files` to its tree as it would `file.changed`, because its own events are not echoed. A request that changes nothing (repeating a change already made) answers the current task with `files: []` and publishes nothing.
+Every change answers `TaskWriteResult`: the task after the change (`task`), other tasks it touched (`changed`: subtasks completed or moved with it, siblings renumbered), removed ids (`deleted`), the list files written (`files`, with `createdFolders`), and the lists the change created (`lists`: the Inbox, the first time a task goes there). The calling client applies `files` to its tree as it would `file.changed`, and `lists` as it would `list.changed`, because its own events are not echoed. A request that changes nothing (repeating a change already made) answers the current task with `files: []` and publishes nothing.
 
 **`POST /api/tasks`** creates a task. The body is a `CreateTaskRequest`: the `TaskFields` to set (`title` is required) and `after`. Without `listId`, the task goes to its parent's list, or to the Inbox, `Tasks/Inbox.tasks`, which is created (first in the list order) the first time it is needed. Without `after` the task goes last among its siblings (same parent and, for a top-level task, same section); with `after: null` first; otherwise right after that sibling. `201 TaskWriteResult`.
 

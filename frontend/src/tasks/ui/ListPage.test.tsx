@@ -23,7 +23,7 @@ function serve(l: TaskList = list, t: Task[] = tasks) {
 }
 
 function result(task: Task | null, changed: Task[] = []): TaskWriteResult {
-  return { task, changed, deleted: [], rolledForward: false, files: [], createdFolders: [] };
+  return { task, changed, deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] };
 }
 
 const titles = () => [...document.querySelectorAll('.task-tree .task-row')].map((r) => `${(r as HTMLElement).style.getPropertyValue('--task-depth')}:${r.querySelector('.task-title')?.textContent ?? '(editing)'}`);

@@ -417,6 +417,7 @@ export interface TaskWriteResult {
   rolledForward: boolean;         // complete: a recurring task moved to its next occurrence
   files: FileEntry[];             // list files written; apply them like file.changed / file.created
   createdFolders: VaultPath[];
+  lists: TaskList[];              // lists the change created (the Inbox, on first use); apply them like list.changed
 }
 
 export interface TaskListFields { name?: string; color?: string | null; icon?: string | null; archived?: boolean }

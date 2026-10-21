@@ -60,7 +60,7 @@ describe('![[List.tasks]] embeds (ROADMAP item 4)', () => {
   });
 
   it('complete a task when it is checked, and open its details from its title', async () => {
-    const complete = vi.spyOn(taskApi, 'complete').mockResolvedValue({ task: { ...tasks[2], status: 'done', completedAt: '2026-10-17T10:00:00.000Z' }, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [] } satisfies TaskWriteResult);
+    const complete = vi.spyOn(taskApi, 'complete').mockResolvedValue({ task: { ...tasks[2], status: 'done', completedAt: '2026-10-17T10:00:00.000Z' }, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] } satisfies TaskWriteResult);
     const box = within(embed());
     fireEvent.click(await box.findByRole('checkbox', { name: 'Complete “Buy milk”' }));
     await waitFor(() => expect(complete).toHaveBeenCalledWith('B', expect.objectContaining({ base: { due: null, start: null } }), expect.any(String)));
@@ -70,7 +70,7 @@ describe('![[List.tasks]] embeds (ROADMAP item 4)', () => {
   });
 
   it('add a task to the list, or to the section shown', async () => {
-    const create = vi.spyOn(taskApi, 'create').mockResolvedValue({ task: makeTask({ id: 'N', title: 'Eggs', sectionId: 'S1' }), changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [] });
+    const create = vi.spyOn(taskApi, 'create').mockResolvedValue({ task: makeTask({ id: 'N', title: 'Eggs', sectionId: 'S1' }), changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] });
     const box = within(embed('Errands'));
     expect(await box.findByText('Buy milk')).toBeInTheDocument();
     expect(box.queryByText('Plan the move')).not.toBeInTheDocument();

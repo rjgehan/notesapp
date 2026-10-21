@@ -5,11 +5,12 @@ import type { FileEntry, Problem, Task, TaskWriteResult, TreeResponse } from '..
 import { useToasts } from '../state/toasts';
 import { taskApi } from './api';
 import { completeTask, createTask, deleteTask, isPending, moveTask, updateTask } from './mutations';
+import { inToday } from './model';
 import { TaskStore } from './store';
 import { makeList, makeTask } from './testing';
 
 function result(task: Task | null, extra: Partial<TaskWriteResult> = {}): TaskWriteResult {
-  return { task, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], ...extra };
+  return { task, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [], ...extra };
 }
 
 function problem(status: number, code: Problem['code'], extra: Record<string, unknown> = {}): ApiError {
@@ -204,6 +205,28 @@ describe('completing, creating, deleting and moving', () => {
     expect(create).toHaveBeenCalledWith({ title: ' Buy milk ', tags: ['shop'] }, expect.any(String));
     expect([...store.tasks().values()].some(isPending)).toBe(false);
     expect(store.task('NEW')).toBeDefined();
+  });
+
+  it('shows a task created into an Inbox that the server made for it (no list.changed echo)', async () => {
+    const fresh = new TaskStore();
+    fresh.setLists([makeList()], [], fresh.generation());
+    const inbox = makeList({ id: 'INBOX', name: 'Inbox', order: 'Zz', path: 'Tasks/Inbox.tasks' });
+    const created = makeTask({ id: 'NEW', listId: 'INBOX', title: 'Buy milk', due: '2026-10-17' });
+    vi.spyOn(taskApi, 'create').mockResolvedValue(result(created, { lists: [inbox], createdFolders: ['Tasks'] }));
+    expect(await createTask({ title: 'Buy milk', due: '2026-10-17' }, fresh)).toEqual(created);
+    expect(fresh.list('INBOX')).toEqual(inbox);
+    expect(inToday(fresh.task('NEW')!, '2026-10-17', fresh.listMapView())).toBe(true);
+  });
+
+  it('fetches the lists when a result names a list this page does not know', async () => {
+    const fresh = new TaskStore();
+    fresh.setLists([makeList()], [], fresh.generation());
+    const inbox = makeList({ id: 'INBOX', name: 'Inbox', order: 'Zz', path: 'Tasks/Inbox.tasks' });
+    vi.spyOn(taskApi, 'create').mockResolvedValue(result(makeTask({ id: 'NEW', listId: 'INBOX' })));
+    const lists = vi.spyOn(taskApi, 'lists').mockResolvedValue({ lists: [makeList(), inbox], problems: [] });
+    await createTask({ title: 'n' }, fresh);
+    await vi.waitFor(() => expect(fresh.list('INBOX')).toEqual(inbox));
+    expect(lists).toHaveBeenCalledTimes(1);
   });
 
   it('removes the placeholder and reports a failed create', async () => {

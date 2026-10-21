@@ -121,24 +121,26 @@ public class TaskListService {
 
 	/**
 	 * Makes sure the Inbox ({@code Tasks/Inbox.tasks}, first in the list order) exists, for a task created without a
-	 * list. Two devices creating it at once is fine: the second create finds the file there.
+	 * list. Two devices creating it at once is fine: the second create finds the file there. Returns the result of
+	 * creating it, or null when it was already there.
 	 */
-	void ensureInbox(Identity identity, @Nullable String origin) throws IOException {
+	@Nullable TaskListWriteResult ensureInbox(Identity identity, @Nullable String origin) throws IOException {
 		TaskCatalog catalog = this.store.catalog();
 		if (catalog.listAt(TaskService.INBOX) != null) {
-			return;
+			return null;
 		}
 		List<String> orders = catalog.lists().stream().map(TaskList::order).toList();
 		String first = orders.stream().filter(FractionalIndex::isValid).sorted().findFirst().orElse(null);
 		List<String> keys = TaskOrder.keysBetween(null, first, 1);
 		String order = (keys != null) ? keys.get(0) : TaskOrder.after(orders);
 		try {
-			createFile("Inbox", order, Map.of(), false, identity, origin);
+			return createFile("Inbox", order, Map.of(), false, identity, origin);
 		}
 		catch (NotesException ex) {
 			if (ex.code() != ErrorCode.ALREADY_EXISTS && ex.code() != ErrorCode.CASE_COLLISION) {
 				throw ex;
 			}
+			return null;
 		}
 	}
 

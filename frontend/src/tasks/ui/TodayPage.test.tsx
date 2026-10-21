@@ -49,7 +49,7 @@ describe('Today page (ROADMAP item 4)', () => {
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Complete “Call the plumber”' }));
     expect(screen.queryByText('Call the plumber')).not.toBeInTheDocument();
     await waitFor(() => expect(complete).toHaveBeenCalledWith('T', expect.objectContaining({ base: { due: today, start: null } }), expect.any(String)));
-    finish({ task: makeTask({ id: 'T', title: 'Call the plumber', due: today, status: 'done' }), changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [] });
+    finish({ task: makeTask({ id: 'T', title: 'Call the plumber', due: today, status: 'done' }), changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] });
     await waitFor(() => expect(screen.getByText('Nothing for today')).toBeInTheDocument());
   });
 
