@@ -852,3 +852,41 @@ th.cm-lp-cell {
   height: 0;
   overflow: hidden;
 }
+
+/* Widgets are not text: a long press on the phone never selects inside them (ROADMAP 10c). */
+.cm-lp-footnote,
+.cm-lp-footnote-label,
+.cm-lp-fence,
+.cm-lp-bullet,
+.cm-lp-task-box,
+.cm-lp-remote-image {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@media (pointer: coarse) {
+  /* A footnote's number is small; its tap target is not. */
+  .cm-lp-footnote {
+    position: relative;
+    padding: 0 3px;
+  }
+
+  .cm-lp-footnote::after {
+    content: '';
+    position: absolute;
+    inset: -14px -8px;
+  }
+
+  .cm-lp-remote-image {
+    min-height: 44px;
+  }
+
+  .cm-lp-properties .properties-heading {
+    min-height: 44px;
+  }
+
+  .cm-lp-properties .properties-edit {
+    width: 44px;
+    height: 44px;
+  }
+}

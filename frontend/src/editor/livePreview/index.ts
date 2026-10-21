@@ -115,6 +115,19 @@ export function settleCursor(state: EditorState, pos: number, pointer: boolean):
   return preferredInRun(run);
 }
 
+/**
+ * An end of a selection a pointer made (a drag, or the phone's selection handles) that lands inside
+ * hidden markup goes to its edge away from the selection's other end (`other`), so the selection
+ * takes the markup in and the markup stays hidden (DESIGN §6.6.1, ROADMAP 10c): a revealed marker
+ * would move the text under the finger.
+ */
+export function settleSelectionEnd(state: EditorState, pos: number, other: number): number {
+  const layout = lineLayout(state, pos);
+  const hit = [...layout.zones, ...layout.runs, ...layout.blocks].find((r) => pos > r.from && pos < r.to);
+  if (!hit) return pos;
+  return other < pos ? hit.to : hit.from;
+}
+
 const settleSelection = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
   const config = tr.startState.facet(livePreviewConfig);
@@ -123,7 +136,14 @@ const settleSelection = EditorState.transactionFilter.of((tr) => {
   const state = tr.state;
   let changed = false;
   const ranges = tr.selection.ranges.map((r): SelectionRange => {
-    if (!r.empty) return r;
+    if (!r.empty) {
+      if (!pointer) return r;
+      const anchor = settleSelectionEnd(state, r.anchor, r.head);
+      const head = settleSelectionEnd(state, r.head, r.anchor);
+      if (anchor === r.anchor && head === r.head) return r;
+      changed = true;
+      return EditorSelection.range(anchor, head);
+    }
     const pos = settleCursor(state, r.head, pointer);
     if (pos === r.head) return r;
     changed = true;
