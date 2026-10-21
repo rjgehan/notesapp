@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import com.rjgehan.notes.bookmarks.BookmarkService;
 import com.rjgehan.notes.config.JsonConfig;
 import com.rjgehan.notes.config.NotesProperties;
 import com.rjgehan.notes.events.EventHub;
@@ -100,6 +101,8 @@ public final class TestVault implements AutoCloseable {
 
 	public final SettingsService settings;
 
+	public final BookmarkService bookmarks;
+
 	public final TrashStore trashStore;
 
 	public final TrashService trash;
@@ -132,11 +135,12 @@ public final class TestVault implements AutoCloseable {
 		this.builder = new IndexBuilder(this.fs, this.indexer, this.index);
 		this.nameRules = new NameRules(this.kinds);
 		this.settings = new SettingsService(this.fs, this.batcher, this.hub, this.clock, JSON);
+		this.bookmarks = new BookmarkService(this.fs, this.index, this.batcher, this.hub, this.clock, JSON);
 		this.trashStore = new TrashStore(this.fs, JSON, this.clock);
 		this.trash = new TrashService(this.paths, this.fs, this.locks, this.index, this.files, this.trashStore,
-				this.reconciler, this.batcher, this.hub);
+				this.reconciler, this.batcher, this.hub, this.bookmarks);
 		this.moves = new MoveService(this.paths, this.fs, this.locks, this.index, this.files, this.indexer,
-				this.reconciler, this.batcher, this.hub, this.moveLog, this.settings);
+				this.reconciler, this.batcher, this.hub, this.moveLog, this.settings, this.bookmarks);
 		this.attachments = new AttachmentService(this.paths, this.nameRules, this.files, this.index, this.settings);
 	}
 
