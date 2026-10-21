@@ -101,12 +101,13 @@ function titleCommitted(id: number): Promise<PendingNote | null> {
  * `POST /api/files {Untitled.md, onConflict: rename}` runs in the background. A title committed
  * before the POST returns becomes a rename; otherwise the typed title is handed to the note.
  * Content from a template (`TitledContent`) renders its `{{title}}` with the note's final name.
+ * Another view's file (`extension`, called `label` in the pending view) is created the same way.
  */
-export function createNote(folder: string, initialContent: string | Promise<string | TitledContent> = '', extension = 'md'): void {
+export function createNote(folder: string, initialContent: string | Promise<string | TitledContent> = '', extension = 'md', label = 'note'): void {
   const id = ++pendingSeq;
   const key = newIdempotencyKey();
   const initialTitle = 'Untitled';
-  startPendingNote(id, folder, initialTitle);
+  startPendingNote(id, folder, initialTitle, { extension, label });
   useUi.getState().setDrawerOpen(false);
   void (async () => {
     let created: FileEntry;

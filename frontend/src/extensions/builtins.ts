@@ -89,7 +89,7 @@ function registerCreateCommands(): void {
       id: `file.new.${d.id}`,
       name: `Create new ${create.label}`,
       icon: d.icon,
-      run: (c) => createNote(newNoteFolder(c.activePath), create.initialContent(), create.extension),
+      run: (c) => createNote(newNoteFolder(c.activePath), create.initialContent(), create.extension, create.label),
     });
   }
 }

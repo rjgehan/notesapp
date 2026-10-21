@@ -55,7 +55,7 @@ export function rowMenuItems(row: RowTarget, startRename: () => void): MenuEntry
       id: `create:${d.id}`,
       label: `New ${d.create!.label} here`,
       icon: <FilePlus size={16} />,
-      run: () => createNote(folder, d.create!.initialContent(), d.create!.extension),
+      run: () => createNote(folder, d.create!.initialContent(), d.create!.extension, d.create!.label),
     }));
   const items: MenuEntry[] = [
     ...creates,

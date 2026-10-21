@@ -5,6 +5,9 @@ import { create } from 'zustand';
 export interface PendingNote {
   id: number;
   folder: string;
+  /** The extension of the file being created (`md` for a note) and what it is called ("note", "drawing"). */
+  extension: string;
+  label: string;
   /** The title as typed so far (without the extension). */
   title: string;
   /** The user committed a title (Enter or blur) before the note existed: it becomes a rename. */
@@ -29,10 +32,10 @@ interface PendingState {
 
 export const usePendingNote = create<PendingState>()(() => ({ pending: null, handoff: null }));
 
-/** A new pending note whose whole title is selected, so typing replaces it. */
-export function startPendingNote(id: number, folder: string, title: string): void {
+/** A new pending note (or other file) whose whole title is selected, so typing replaces it. */
+export function startPendingNote(id: number, folder: string, title: string, file: { extension: string; label: string } = { extension: 'md', label: 'note' }): void {
   usePendingNote.setState({
-    pending: { id, folder, title, committed: false, selectionStart: 0, selectionEnd: title.length },
+    pending: { id, folder, ...file, title, committed: false, selectionStart: 0, selectionEnd: title.length },
     handoff: null,
   });
 }

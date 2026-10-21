@@ -105,7 +105,7 @@ export function TopBar() {
   const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen]);
   const descriptor = entry && !pending ? viewFor(entry) : null;
   const phone = useBreakpoint() === 'phone';
-  const title = pending ? pending.title || 'New note' : path ? displayName(path) : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
+  const title = pending ? pending.title || `New ${pending.label}` : path ? displayName(path) : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
 
   return (
     <header className="top-bar">
