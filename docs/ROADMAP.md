@@ -875,6 +875,14 @@ Needs `Permissions-Policy: microphone=(self)`.
 
 ### 34. Flashcards and spaced repetition
 
+**Status:** built (wave 3). Cards are read from notes in the Spaced Repetition plugin's syntax (`Q::A`, `Q:::A`, `?` and `??` paragraphs, `==cloze==` deletions with `^[hints]` and numbered groups; decks from `#flashcards` tags, deck lines and question-specific tags, or from folders) and scheduled with FSRS (`ts-fsrs` 5.4.2, MIT). `/x/flashcards` has the decks with today's counts, a phone-first review session with keyboard shortcuts, statistics and settings (DESIGN §5.34, §6.34; API.md §34). Deviations and additions:
+
+- **Nothing is written into notes.** A card is identified by a hash of its question, and its answers live in `.notesapp/srs.json` as the ROADMAP said: a set of answers per card (the truth) and the FSRS state computed from them (a cache, kept only while it covers every answer). Two devices reviewing at once both keep their answers, and a retry is stored once. An edited question keeps its history when the new text is close to the old one in the same note; the records of deleted cards can be pruned from the statistics page.
+- **The plugin's `<!--SR:…-->` schedules are ignored**, not imported: they are SM-2 numbers. Cards they follow start as new.
+- **Settings** (tags, folder decks, daily limits, desired retention, maximum interval, learning steps, fuzz, the hour a day starts) live in the same file and change field by field.
+- **Offline answers** wait in an outbox in `localStorage` and are sent when the server is back.
+- **Left for later:** cramming (studying cards that are not due), sibling burying across days, Anki-style `{{c1::…}}` clozes, `**bold**` clozes, and optimizing the FSRS weights from the review history.
+
 **One line:** review cards written in notes (Obsidian Spaced Repetition plugin syntax: `Q::A`, `?` blocks, `#flashcards`) with FSRS scheduling.
 
 | Value | Effort | Depends on |

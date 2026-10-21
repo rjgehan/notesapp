@@ -197,6 +197,7 @@ NotesApp/                              (monorepo; branch main)
 | any file larger than `notes.git.large-file-threshold` (25 MiB), hidden or not, outside the folders ignored below | Large attachments: videos, scans, archives; a large plugin cache under `.obsidian/`; a partial download (`*.part`) | in tree like any file when visible | **excluded** through the managed section of `info/exclude` (§4.6, §5.8 *Large files*); kept in backups |
 | `.notesapp/settings.json` | App settings (§5.12) | hidden | committed, so settings have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
+| `.notesapp/srs.json` | Flashcard answers, their cached FSRS state and the flashcard settings (§5.34) | hidden | committed |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
 | `.notesapp/cache/` | Reserved for derived caches (unused in v1) | hidden | excluded |
 | `.trash/` | Deleted items, stored **flat**: each trashed file or folder is one top-level entry, `.trash/<name>`, with ` 1`, ` 2`, ... on collisions. The original path is kept only in `trash.json`. | hidden; shown only in the Trash view | excluded |
@@ -1367,6 +1368,38 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
 
+### 5.34 Flashcard review records (ROADMAP item 34)
+
+Sections 5.34 and 6.34 (and 5.35 and 6.35) are numbered after their ROADMAP items, so branches built in parallel do not collide.
+
+Cards are written in notes and parsed by the client (§6.34); nothing is ever written into a note. What the notes do not hold, each card's answers and the flashcard settings, lives in **`.notesapp/srs.json`**, owned by `flashcards.FlashcardService` (API.md §34). It is a vault file like `settings.json`: committed with the vault's history (batched like autosaves, author from the identity), hidden from the tree, and never served by the file API.
+
+```json
+{
+  "schemaVersion": 1,
+  "config": {
+    "newPerDay": 15
+  },
+  "cards": {
+    "c1k1sjm8rzcy": {
+      "note": "Cards/Biology.md",
+      "front": "The [...] is the powerhouse of the cell.",
+      "state": {"due":"2026-10-21T16:58:20.316Z","stability":0.212,"difficulty":6.4133,"scheduledDays":0,"learningSteps":0,"reps":1,"lapses":0,"phase":"learning","lastReview":"2026-10-21T16:57:20.316Z","n":1},
+      "reviews": [
+        "2026-10-21T16:57:20.316Z again 3082"
+      ]
+    }
+  }
+}
+```
+
+- **The answers are the truth; the state is a cache.** A card's answers are a set keyed by their instant, so merging two devices' answers is a union: it commutes, and a retried request changes nothing. The FSRS state is what the answering client computed; the server keeps it only while it covers every answer (`n` and `lastReview`), and otherwise stores `null` for clients to recompute by replaying the answers (§6.34). Replaying every card on every load would cost about 30 µs per answer on a desktop (a second for 2,000 cards of 20 answers), so the cache matters on the phone.
+- **Server-owned operations, not file saves.** Every change (an answer, an undo, a prune, a settings change) is applied under one lock to the file as it is on disk, so two devices reviewing at once never meet a version conflict, and a client sends a few hundred bytes per answer instead of the whole file. The settings change field by field for the same reason. A write that changes nothing (a duplicate) is not written, committed or announced.
+- **Layout.** Written by hand for stable bytes: cards sorted by id, one answer per line, a card's state on one line, the settings sorted by key with only the fields that were set. An answer adds one line and changes one, so git diffs stay readable. Fields this build does not know are kept at every level; an entry that cannot be read is skipped with a WARN.
+- **Reads.** The parsed file is cached with its blob id and read again when the bytes on disk differ (a hand edit, a history restore). `flashcards.changed` (API.md §34.7) carries the changed records, so an open page on another device updates without a refetch.
+- **Source notes.** `GET /api/flashcards/notes` takes the notes from the index: by tag (`TagIndex.notesWithTag`, nested tags included), or, with folder decks, every note with a card marker. Only the client parses them: it alone schedules, and one parser keeps the syntax in one language.
+- **Why not in the notes.** The Spaced Repetition plugin writes `<!--SR:!2026-10-25,3,250-->` after each card. Writing into notes from a review on the phone would put an open copy of the note on another device into conflict while the user types there, and those numbers are SM-2's, not FSRS's. Such comments in an imported vault are ignored (and hidden from the cards); their schedule is not imported.
+
 ---
 
 ## 6. Frontend design
@@ -1386,6 +1419,7 @@ These versions were verified on 2026-10-16. The lockfile pins them.
 | Editor | CodeMirror 6: state 6.7.6, view 6.43.14, commands, language, lang-markdown 6.5.2, language-data, lang-yaml, autocomplete, search, merge 6.12.2; `@lezer/markdown` 1.8.0, `@lezer/highlight`, `@lezer/common` |
 | Reading view | markdown-it 15.0.3 (bundled types), `@mdit/plugin-tasklist` 1.1.3, `@mdit/plugin-footnote` 1.1.2, `@mdit/plugin-mark` (same @mdit release line; exact version pinned at scaffold), dompurify 3.4.17 |
 | Utilities | dayjs 1.11.23 (+ plugins), fuzzysort 4.0.2 (always `threshold: 0`), `yaml` 2.9.1 for client-side frontmatter merge |
+| Flashcards (ROADMAP item 34) | `ts-fsrs` 5.4.2 (MIT, no dependencies), pinned exactly, in the flashcards page's lazy chunk (§6.34) |
 | Drawings (ROADMAP item 5) | `@excalidraw/excalidraw` 0.18.1 (MIT; peer React 17–19; a lazy chunk with self-hosted fonts, §6.8.1), `lz-string` 1.5.0 (MIT) for Obsidian Excalidraw's compressed-json blocks. Both pinned exactly. |
 | Tests | Vitest 5.0.5, jsdom 30.1.3, Testing Library (react 16.3.3, dom 10.4.2, user-event 14.6.8, jest-dom 7.0.1), `fake-indexeddb` (dev only; version pinned at scaffold) for the drafts store |
 | Lint | ESLint 10.13 flat config generated by `npm create vite@latest frontend -- --template react-ts --eslint` (typescript-eslint 8.71.2, react-hooks 7.1.1, react-refresh 0.5.7) |
@@ -1437,6 +1471,8 @@ frontend/src/
 │   └── clientId.ts           per-page-load id (crypto.randomUUID, getRandomValues fallback)
 ├── extensions/               EXTENSION POINTS (§6.8): registerView, registerPage, registerPanel, registerCommand,
 │   │                         registerEventHandler; builtins.ts registers every v1 view, panel and command through them
+├── flashcards/               ROADMAP item 34 (§6.34): parse.ts, ids.ts, reviews.ts, schedule.ts (ts-fsrs), deck.ts,
+│                             session.ts, stats.ts, store.ts (records, outbox), register.ts, ui/ (the /x/flashcards page)
 ├── views/                    FILE-TYPE → VIEW REGISTRY (§6.8)
 │   ├── registry.ts
 │   ├── excalidraw/           drawings (§6.8.1): register.ts (descriptors, eager), format.ts and merge.ts (pure, eager),
@@ -2190,6 +2226,39 @@ On recovery, any `resync` is processed, the replay countdown reaches `caughtUp` 
 - `settings-read-only`: "Settings were written by a newer version of NotesApp and are read-only here."
 
 Any other error shows the problem's `detail`. 5xx problem errors show a toast with the `incidentId` for log lookup. Transient failures (§6.9) never show an error toast; they show the Offline state. An unexpected render error is caught by an `ErrorBoundary` per view, which offers **Reload view**.
+
+### 6.34 Flashcards (ROADMAP item 34)
+
+The code is in `frontend/src/flashcards/`. The pure parts are `parse.ts` (cards in notes), `ids.ts` (identity), `reviews.ts` and `schedule.ts` (answers and FSRS), `deck.ts` (decks and counts), `session.ts` (a review session), `stats.ts` and `store.ts` (records and the outbox); `ui/` has the page. `register.ts` registers the page, the commands and the event handlers (§6.8). ts-fsrs 5.4.2 (MIT) loads with the page's lazy chunk, never in the main bundle.
+
+**Syntax** (the Obsidian Spaced Repetition plugin's, so a vault works in both apps):
+
+| Written | Cards |
+|---|---|
+| `Question::Answer` | One; a leading list marker or checkbox is dropped |
+| `Question:::Answer` | Two, one each way (siblings) |
+| Lines, a line `?`, lines | One. The question and the answer form a paragraph: it ends at a blank line (fenced code in the answer may hold blank lines). |
+| Lines, a line `??`, lines | Two, one each way |
+| `==deletion==` in a paragraph | One per deletion, with the others shown. `==x==^[hint]` shows the hint in the blank; `==x==[^1]` asks every deletion with the same number together (the plugin's classic clozes). Paragraphs with `::` cards are not read for clozes. |
+
+- **Decks** are flashcard tags (`config.tags`, default `#flashcards`, matched case-insensitively, nested tags included): the note's frontmatter tags first, then each line of tags sets the deck for the cards after it, and tags at the start of a card's first line apply to that card only (the plugin's question-specific tags). Cards before any such line take the note's first flashcard tag. With `foldersAsDecks` the deck is the note's folder (`''` shows as "Vault root"). A deck's counts include its sub-decks.
+- **Ignored:** fenced code, `$$` math, `%%` comments, HTML comments (the plugin's way to suspend a card), `::` and `==` inside inline code or a wikilink, and the plugin's `<!--SR:…-->` comments. The headings above a card are kept as its context ("Trivia › Capitals").
+- **Identity.** A card's id is `c` plus a 53-bit hash (cyrb53) of its kind and its normalized question (white space collapsed, SR comments dropped). A forward card has the same id written on one line or on several; a reverse card hashes its own question; a cloze hashes the paragraph's plain text with the deletion's text and occurrence (or its group number), so adding a deletion keeps the other deletions' ids. Nothing is written into the note, moving or renaming the note keeps every id, and the same card written in two notes is one card.
+- **Edited questions.** Editing a question makes a new id. Adoption keeps the history: a card without a record takes the record of a card that is gone from the same note when its `front` hint is at least 75 % similar (Levenshtein), and the card's next answer carries `from`, so the server moves the record (API.md §34.4). The records of cards in no note can be pruned from the statistics page.
+
+**Scheduling.** FSRS through ts-fsrs with the vault's settings (desired retention, maximum interval, learning and relearning steps, fuzz; short-term steps on). A card's FSRS card is its stored state when that covers its answers, else the replay of its answers in order (cached per record); a `reset` answer starts the card over as new. ts-fsrs seeds its fuzz with the review time and the card, so a replay on another device gives the same due date. The study day starts at `dayStartsAt` local time (Anki's 4 a.m.): a review card is due when it falls due before the next study day starts, a learning card when it is due within 20 minutes (learning ahead). New cards count against `newPerDay` and reviews against `reviewsPerDay`, across every device, from the day's answers.
+
+**Records on the device** (`store.ts`). The server's records are the `['flashcards', 'state']` query, and this device's answers not yet confirmed are laid over them, so the page never waits for the network. Answers and undos go through an **outbox** kept in `localStorage` (a few hundred bytes each). It sends them in order, consecutive answers in one request, and retries with backoff (2, 4, 8, 16, 30 s) after transient and storage failures, and at once when the event stream has caught up or the browser is back online; an operation the server refuses is dropped with a toast. Undoing an answer still in the outbox removes it there; one already sent is undone on the server. `flashcards.changed` patches the query. Note events (`file.*`, `entry.moved`, `folder.deleted`) refetch the source notes a second later, only while the page is open; parsed notes are cached by version.
+
+**The page** (`/x/flashcards`, one ribbon and drawer entry; `?view=review|stats|settings`, `&deck=`, `&note=`):
+
+- **Decks.** Today's count and **Study now** on top, then the deck tree with new, learning and due counts (blue, orange and green, as in Anki), capped by what today's limits leave. A row studies its deck. Without cards, the page shows the syntax.
+- **Review.** Built for the iPhone. The card fills the workspace below a 48 px bar (back, the deck, the remaining counts, undo, and a ⋯ menu with Edit in note, Skip for now and Reset progress) and a progress line. A tap on the card shows the answer; **Show answer**, then the four answer buttons (each with the interval it would schedule), sit at the bottom, 56 px tall, clear of the home indicator. A basic card shows the answer under the question; a cloze replaces its blank with the highlighted deletion. Cards render through the reading-view pipeline (§6.7), so links, tags, images and embeds work, and a link opens its note.
+- **The queue** has learning cards due now first, then reviews (most overdue first) with new cards (in note order) spread evenly among them; siblings are never shown back to back. A card answered *again* comes back in the session when due; when only such a card is left, the session waits for it, or shows it on request. Answers on other devices and edited notes reach the queue when the next card is picked; the card on screen never changes under the thumb.
+- **Keys:** Space or Enter show the answer, then answer Good; 1 to 4 answer Again, Hard, Good, Easy; U or Mod-Z undo; E edits; S skips; Escape ends the session.
+- **Statistics.** Today (answers, time, share of *again*), the day streak, retention over 30 days (review answers that were not *again*, young and mature apart at Anki's 21 days), the cards by stage, and two single-series bar charts: answers per day for 30 days, and cards due in the next 30 days.
+- **Settings.** The fields of API.md §34.3; only the changed fields are sent.
+- **Commands:** Open Flashcards, Review flashcards, Review flashcards in this note (all its due and new cards, without daily limits), Show flashcard statistics.
 
 ---
 

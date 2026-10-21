@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; flashcards (item 34) in §16.4, §17, §18, §19 and §34. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -1488,6 +1488,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `history.committed` | `HistoryCommittedEvent` | yes | A commit was made. `paths` has at most 100 entries, and `truncated` is true when there were more. Not sent when an operation had nothing to commit. |
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
+| `flashcards.changed` | `FlashcardsChangedEvent` | no | Flashcard review records or settings changed (§34.7). Not in `VAULT_EVENT_NAMES`: the flashcards feature registers it with `registerEventHandler`. |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 
 Examples of `data` payloads:
@@ -1906,6 +1907,64 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
+
+// ---------- Flashcards (API.md §34, ROADMAP item 34) ----------
+export type FlashcardRating = 'again' | 'hard' | 'good' | 'easy' | 'reset';
+export type FlashcardPhase = 'new' | 'learning' | 'review' | 'relearning';
+export interface FlashcardConfig {
+  tags: string[];               // without '#'; nested tags count too
+  foldersAsDecks: boolean;      // decks are folders, and every note with cards counts
+  newPerDay: number;
+  reviewsPerDay: number;
+  retention: number;            // FSRS desired retention, 0.7 to 0.99
+  maximumInterval: number;      // days
+  learningSteps: string[];      // '1m', '10m', '1d'
+  relearningSteps: string[];
+  fuzz: boolean;
+  dayStartsAt: number;          // local hour when a new study day starts
+}
+export interface FlashcardCardState {
+  due: IsoInstant;
+  stability: number;
+  difficulty: number;
+  scheduledDays: number;
+  learningSteps: number;
+  reps: number;
+  lapses: number;
+  phase: FlashcardPhase;
+  lastReview: IsoInstant | null;
+  n: number;                    // the number of reviews this state was computed from
+}
+export interface FlashcardCard {
+  note: VaultPath | null;
+  front: string | null;
+  state: FlashcardCardState | null;
+  reviews: string[];            // "<instant> <rating>[ <ms>]", oldest first
+}
+export interface FlashcardsResponse { config: FlashcardConfig; cards: Record<string, FlashcardCard>; version: Version | null }
+export interface FlashcardReview {
+  card: string;
+  at: IsoInstant;
+  rating: FlashcardRating;
+  ms?: number;
+  note?: VaultPath;
+  front?: string;
+  state?: FlashcardCardState;
+  from?: string;                // the card's previous id, when its text was edited
+}
+export interface FlashcardReviewRequest { reviews: FlashcardReview[] }
+export interface FlashcardUndoRequest { card: string; at: IsoInstant; state?: FlashcardCardState }
+export interface FlashcardPruneRequest { cards: string[] }
+export interface FlashcardConfigUpdateRequest { config: Partial<{ [K in keyof FlashcardConfig]: FlashcardConfig[K] | null }> }
+export interface FlashcardWriteResult { cards: Record<string, FlashcardCard | null>; version: Version }
+export interface FlashcardNote { path: VaultPath; version: Version; content: string }
+export interface FlashcardNotesResponse { config: FlashcardConfig; notes: FlashcardNote[] }
+export interface FlashcardsChangedEvent {
+  cards: Record<string, FlashcardCard | null> | null;   // null: too many changed, refetch
+  config: FlashcardConfig | null;
+  version: Version;
+  origin: string | null;
+}
 ```
 
 ---
@@ -1948,6 +2007,12 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | POST | `/api/history/restore` | `HistoryRestoreRequest` | 200 `HistoryRestoreResult` | 14.4 |
 | POST | `/api/history/commit` | | 200 `CommitResult` | 14.5 |
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
+| GET | `/api/flashcards` | | 200 `FlashcardsResponse` | 34.3 |
+| GET | `/api/flashcards/notes` | | 200 `FlashcardNotesResponse` | 34.2 |
+| POST | `/api/flashcards/reviews` | `FlashcardReviewRequest` | 200 `FlashcardWriteResult` | 34.4 |
+| POST | `/api/flashcards/undo` | `FlashcardUndoRequest` | 200 `FlashcardWriteResult` | 34.5 |
+| POST | `/api/flashcards/prune` | `FlashcardPruneRequest` | 200 `FlashcardWriteResult` | 34.5 |
+| PUT | `/api/flashcards/config` | `FlashcardConfigUpdateRequest` | 200 `FlashcardConfig` | 34.6 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -1978,8 +2043,81 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
+| `FlashcardConfig`, `FlashcardCardState`, `FlashcardCard`, `FlashcardsResponse`, `FlashcardReview`, `FlashcardReviewRequest`, `FlashcardUndoRequest`, `FlashcardPruneRequest`, `FlashcardConfigUpdateRequest`, `FlashcardWriteResult`, `FlashcardNote`, `FlashcardNotesResponse` | Same (§34) | `FlashcardCardState.phase` is the enum `FlashcardPhase`; `FlashcardConfigUpdateRequest.config` is a `JsonNode`, validated field by field; `FlashcardReview` and `FlashcardUndoRequest` take `at` as a string, parsed as an ISO-8601 instant |
+| `FlashcardsChangedEvent` | Same name in `com.rjgehan.notes.events` | An extension event (§34.7): it echoes `origin` like a content event, and `cards` maps removed records to `null` |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
 **Nullability.** Every TypeScript `T | null` is a `@Nullable` component that is always serialized, including when null. An optional request field (`?`) is a `@Nullable` component; the server applies the documented default.
+
+---
+
+## 34. Flashcards (ROADMAP item 34)
+
+Sections 34 and 35 are numbered after their ROADMAP items, so branches built in parallel do not collide. Cards live in notes, in the Obsidian Spaced Repetition plugin's syntax, and are parsed and scheduled (FSRS) by the client (DESIGN §6.34). The server stores what notes do not hold: each card's answers and a cached FSRS state, plus the flashcard settings, in `.notesapp/srs.json` (DESIGN §5.34).
+
+### 34.1 Review records
+
+A card is identified by a string of 1 to 64 characters from `[A-Za-z0-9_-]` that the client derives from the card's question (DESIGN §6.34). Its record (`FlashcardCard`):
+
+| Field | Meaning |
+|---|---|
+| `reviews` | The answers, oldest first, as `"<instant> <rating>[ <ms>]"`: the time in §1.5 form, `again`, `hard`, `good`, `easy` or `reset`, and optionally how long the answer took in milliseconds (0 to 86,400,000). **The answers are a set keyed by their instant**: an answer with an instant already present is a duplicate and is ignored. |
+| `state` | The FSRS state after the first `n` answers, as the answering client computed it (`FlashcardCardState`). It is a cache: the server keeps it only while `n` equals the number of answers and `lastReview` is the instant of the last one, and otherwise stores `null`. Clients use a current state as is and replay the answers otherwise. |
+| `note`, `front` | Hints from the last answer: the note the card was in, and the start of its question on one line (at most 200 characters). Clients use them to keep the record of a card whose question was edited (§34.4 `from`). |
+
+### 34.2 `GET /api/flashcards/notes`
+
+The notes that may hold cards, with their text: `{config, notes: [{path, version, content}]}`, sorted by path.
+
+- With tags (the default), every note with one of `config.tags` or a tag nested under one (`#flashcards/spanish`), inline or in the frontmatter.
+- With `config.foldersAsDecks`, every note whose text contains `::`, `==`, or a line that is only `?` or `??`.
+- Drawings (`.excalidraw.md`) are left out. `content` is the indexed text, which is `TextFile.content` (§8.1).
+
+### 34.3 `GET /api/flashcards`
+
+`FlashcardsResponse`: the effective settings (every field, with defaults filled in), every record by card id, and `version`, the blob id of `srs.json` (`null` before the first write).
+
+| Setting | Default | Range |
+|---|---|---|
+| `tags` | `["flashcards"]` | 1 to 20 tags without spaces; a leading `#` is dropped |
+| `foldersAsDecks` | `false` | |
+| `newPerDay` | 20 | 0 to 9,999 |
+| `reviewsPerDay` | 200 | 0 to 99,999 |
+| `retention` | 0.9 | 0.7 to 0.99 |
+| `maximumInterval` | 36,500 days | 1 to 36,500 |
+| `learningSteps` | `["1m", "10m"]` | at most 10 of `<number><m\|h\|d>` |
+| `relearningSteps` | `["10m"]` | as above |
+| `fuzz` | `true` | |
+| `dayStartsAt` | 4 | local hour, 0 to 23 |
+
+### 34.4 `POST /api/flashcards/reviews`
+
+`{reviews: FlashcardReview[]}` with 1 to 1,000 answers, applied in order under one lock. Answers in the same request may be for different cards. For each answer:
+
+1. With `from` (the card's previous id) naming another record, that record's answers are united with this card's record and the old record is removed (it appears as `null` in the result).
+2. The answer is added unless its instant is already there (a retried request changes nothing).
+3. `note` and `front` replace the hints when given (`front` is collapsed to one line and cut to 200 characters).
+4. `state` is stored when it covers every answer of the record after step 2; otherwise the state already stored is kept if it still does, else the record's state becomes `null`. Two devices answering the same card at once therefore both keep their answer, and the card's state is recomputed by the next client that reads it.
+
+Answer: `FlashcardWriteResult`, the records this request changed and the file's new `version`. Errors: `400 bad-request` with `errors[]` naming every invalid field (`reviews[i].card`, `.at`, `.rating`, `.ms`, `.note`, `.from`, `.state`); an `at` more than 24 hours ahead of the server's clock is refused.
+
+### 34.5 `POST /api/flashcards/undo` and `POST /api/flashcards/prune`
+
+- **Undo** `{card, at, state?}` removes the answer at `at` (a missing answer is not an error). `state` is the card's state before that answer and is stored when it covers the remaining answers. A record left without answers is removed (`null` in the result).
+- **Prune** `{cards: string[]}` (1 to 10,000 ids) removes those records; ids without a record are ignored. Clients prune the records of cards that are in no note (DESIGN §6.34); the removed history stays in the vault's git history.
+
+### 34.6 `PUT /api/flashcards/config`
+
+`{config: {...}}` with the settings to change. Fields that are absent keep their value, so two devices changing different settings never overwrite each other; `null` resets a field to its default; unknown fields are ignored. Answer: the effective `FlashcardConfig`. Errors: `400 bad-request` with `errors[]` (`config.<field>`).
+
+### 34.7 `flashcards.changed`
+
+Published after every write that changed the file, before the lock is released, and not delivered to the connection whose client made the change (like a content event, §16.4):
+
+```json
+{"cards":{"c3k9…":{"note":"Spanish.md","front":"hola","state":null,"reviews":["2026-10-21T16:57:47.431Z easy"]}},"config":null,"version":"f8f79e…","origin":"c-9a8b7c6d5e4f"}
+```
+
+`cards` lists the changed records (`null` for a removed one); with more than 20 it is `null` and clients refetch §34.3. `config` is set when the settings changed.
