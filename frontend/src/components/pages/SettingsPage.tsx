@@ -389,6 +389,11 @@ function NumberSetting({ value, onChange, disabled, label, step, min }: { value:
   );
 }
 
+const AI_PROVIDERS: Array<['claude-code' | 'api', string]> = [
+  ['claude-code', 'Claude Code (your Claude subscription)'],
+  ['api', 'Anthropic API (API key, billed per token)'],
+];
+
 const AI_MODELS: Array<[string, string]> = [
   ['claude-sonnet-5-5', 'Claude Sonnet 5.5 (recommended)'],
   ['claude-opus-5-5', 'Claude Opus 5.5 (best answers, twice the price)'],
@@ -409,11 +414,14 @@ function AiSection({ settings: s, set, disabled, errors }: VaultSectionProps) {
       <div className="banner banner-info ai-privacy" role="note">
         <Info size={14} aria-hidden />
         <span>
-          Ask your vault, summaries and suggestions are written by Claude, Anthropic’s AI. When you use them, your question and the text of the notes it needs <strong>leave your tailnet</strong> for Anthropic’s API. Nothing is sent until you ask, and notes in the excluded folders below never are. Conversations stay on the device that had them.
+          Ask your vault, summaries and suggestions are written by Claude, Anthropic’s AI. When you use them, your question and the text of the notes it needs <strong>leave your tailnet</strong> for Anthropic, through Claude Code with your Claude subscription (the default; it counts against your plan’s usage limits) or through the Anthropic API (billed per token). Nothing is sent until you ask, and notes in the excluded folders below never are. Conversations stay on the device that had them.
         </span>
       </div>
-      <Row label="Use Claude" description="Off by default. The server also needs an Anthropic API key in its secrets folder (DEPLOY.md, “Ask your vault”).">
+      <Row label="Use Claude" description="Off by default. The server also needs the provider’s credential: a Claude Code token or an Anthropic API key (CASAOS.md or DEPLOY.md, “Ask your vault”).">
         <Toggle label="Use Claude for Ask and summaries" checked={a.enabled} disabled={disabled} onChange={(v) => ai({ enabled: v })} />
+      </Row>
+      <Row label="Provider" description="Claude Code runs on the server with your Claude Pro or Max subscription, for your personal use. The API needs a key and is billed per token.">
+        <Select label="Provider" value={a.provider ?? 'claude-code'} disabled={disabled} options={AI_PROVIDERS} onChange={(v) => ai({ provider: v })} />
       </Row>
       <Row label="Model" description="Sonnet answers well for everyday questions. Opus is slower and costs twice as much.">
         <Select label="Model" value={a.model} disabled={disabled} options={AI_MODELS} onChange={(v) => ai({ model: v })} />
@@ -441,7 +449,7 @@ function AiSection({ settings: s, set, disabled, errors }: VaultSectionProps) {
       <Row label="Context per request" description="The most characters of note text one request carries, earlier turns included (about 4 characters per token)." error={errors.aiMaxContext}>
         <NumberSetting label="Context per request in characters" value={a.maxContextChars} step={1000} min={4000} disabled={disabled} onChange={(v) => ai({ maxContextChars: v }, false)} />
       </Row>
-      <Row label="Monthly budget (USD)" description="Requests stop once this month’s estimated spend reaches it." error={errors.aiBudget}>
+      <Row label="Monthly budget (USD)" description="Requests stop once this month’s estimated spend reaches it: what the API bills, or with Claude Code the API value of your usage (it counts against your plan, not your card)." error={errors.aiBudget}>
         <NumberSetting label="Monthly budget in US dollars" value={a.monthlyBudgetUsd} step={1} min={0.5} disabled={disabled} onChange={(v) => ai({ monthlyBudgetUsd: v }, false)} />
       </Row>
       <dl className="about-list">
@@ -452,8 +460,8 @@ function AiSection({ settings: s, set, disabled, errors }: VaultSectionProps) {
         {st && (
           <>
             <div className="about-row">
-              <dt>API key</dt>
-              <dd>{st.keyPresent ? `Found in ${st.keyFile}` : st.fake ? 'Not needed: this development server gives fake answers' : `Missing: put one in the server’s ${st.keyFile} file (CASAOS.md or DEPLOY.md, “Ask your vault”)`}</dd>
+              <dt>{st.provider === 'api' ? 'API key' : 'Claude Code'}</dt>
+              <dd>{st.fake ? 'Not needed: this development server gives fake answers' : st.provider !== 'api' && !st.cliInstalled ? 'The Claude Code CLI is not installed on the server' : st.keyPresent ? `${st.provider === 'api' ? 'Key' : 'Token'} found in ${st.keyFile}` : `Missing: put one in the server’s ${st.keyFile} file (CASAOS.md or DEPLOY.md, “Ask your vault”)`}</dd>
             </div>
             <div className="about-row">
               <dt>This month ({st.month})</dt>

@@ -29,7 +29,9 @@ function status(patch: Partial<AiStatus> = {}): AiStatus {
     reason: null,
     model: 'claude-sonnet-5-5',
     models: [{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', inputUsdPerMTok: 2, outputUsdPerMTok: 10 }],
-    keyFile: 'anthropic-key',
+    provider: 'claude-code',
+    keyFile: 'claude-token',
+    cliInstalled: true,
     keyPresent: true,
     month: '2026-10',
     monthCostUsd: 0.25,
@@ -104,9 +106,9 @@ describe('AiChat (ROADMAP item 18)', () => {
   });
 
   it('explains a missing key without showing one', async () => {
-    setup(status({ state: 'not-configured', reason: 'no API key: anthropic-key does not exist', keyPresent: false }));
-    expect(await screen.findByText(/The server has no Anthropic API key/)).toBeInTheDocument();
-    expect(screen.getByText('anthropic-key', { selector: 'code' })).toBeInTheDocument();
+    setup(status({ state: 'not-configured', reason: 'no Claude Code token: claude-token does not exist', keyPresent: false }));
+    expect(await screen.findByText(/The server cannot use Claude Code/)).toBeInTheDocument();
+    expect(screen.getByText('claude-token', { selector: 'code' })).toBeInTheDocument();
   });
 
   it('warns once that notes are sent to Anthropic', async () => {

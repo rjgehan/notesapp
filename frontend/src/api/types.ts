@@ -152,6 +152,7 @@ export interface EditorSettings { defaultMode: 'edit' | 'read'; readableLineLeng
 /** Ask your vault and summaries (§20). Optional in a request: a body without it keeps the current values. */
 export interface AiSettings {
   enabled: boolean;               // off by default: nothing is sent to Anthropic until this is on
+  provider: AiProvider;           // 'claude-code' (default): the CLI with your Claude subscription; 'api': billed per token
   model: AiModelId;               // 'claude-sonnet-5-5' (default), 'claude-opus-5-5' or 'claude-haiku-5-5'
   excludedPaths: VaultPath[];     // never sent; files.excludedPaths are never sent either. Default ['Private']
   maxContextChars: number;        // note text one request may carry, 4,000 to 400,000; default 60,000
@@ -342,6 +343,7 @@ export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry
 
 // ---------- Ask your vault and summaries (§20) ----------
 export type AiModelId = string;
+export type AiProvider = 'claude-code' | 'api';
 export type AiAction = 'ask' | 'summarize' | 'suggest';
 export type AiScope = 'note' | 'folder' | 'notes' | 'selection';
 /** What a turn asked: a question, or the fields of a summary request. */
@@ -374,10 +376,12 @@ export interface AiModelInfo { id: AiModelId; label: string; inputUsdPerMTok: nu
 export interface AiStatus {
   state: 'off' | 'not-configured' | 'over-budget' | 'ready';
   reason: string | null;
+  provider: AiProvider;
   model: AiModelId;
   models: AiModelInfo[];
-  keyFile: string;                // the key file's name, never its content
+  keyFile: string;                // the provider's credential file (claude-token or anthropic-key), never its content
   keyPresent: boolean;
+  cliInstalled: boolean;          // the Claude Code CLI is on the server
   month: string;                  // "2026-10", in the server's time zone
   monthCostUsd: number;           // estimated
   monthRequests: number;

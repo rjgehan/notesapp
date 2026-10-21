@@ -63,7 +63,7 @@ function Unavailable({ status }: { status: AiStatus }) {
     return (
       <div className="ai-unavailable">
         <p>
-          <strong>The server has no Anthropic API key.</strong> {status.reason}. Put a key in the server’s key file, <code>{status.keyFile}</code> (CASAOS.md or DEPLOY.md, “Ask your vault”).
+          <strong>{status.provider === 'api' ? 'The server cannot use the Anthropic API.' : 'The server cannot use Claude Code.'}</strong> {status.reason}. {status.provider === 'api' ? 'Put an API key in' : 'Put a Claude Code token (made with claude setup-token) in'} the server’s <code>{status.keyFile}</code> file (CASAOS.md or DEPLOY.md, “Ask your vault”).
         </p>
       </div>
     );
@@ -386,7 +386,7 @@ export function AiChat({ activePath, variant, onOpen }: Props) {
           </div>
           {status.data && (
             <p className="ai-footnote">
-              {status.data.fake ? 'Fake answers (development server)' : 'Sent to Anthropic when you ask'} · {status.data.models.find((m) => m.id === status.data.model)?.label ?? status.data.model} · {money(status.data.monthCostUsd)} of {money(status.data.monthlyBudgetUsd)} this month
+              {status.data.fake ? 'Fake answers (development server)' : status.data.provider === 'api' ? 'Sent to the Anthropic API when you ask' : 'Sent to Claude with your subscription when you ask'} · {status.data.models.find((m) => m.id === status.data.model)?.label ?? status.data.model} · {money(status.data.monthCostUsd)} of {money(status.data.monthlyBudgetUsd)} this month
             </p>
           )}
         </form>
