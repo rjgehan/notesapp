@@ -24,6 +24,8 @@ public enum ErrorCode {
 	TYPE_MISMATCH("type-mismatch", HttpStatus.CONFLICT, "Wrong entry type"),
 	VERSION_CONFLICT("version-conflict", HttpStatus.CONFLICT, "Version conflict"),
 	SETTINGS_READ_ONLY("settings-read-only", HttpStatus.CONFLICT, "Settings are read-only"),
+	TASK_CONFLICT("task-conflict", HttpStatus.CONFLICT, "Task changed on the server"),
+	MALFORMED_FILE("malformed-file", HttpStatus.CONFLICT, "File cannot be read"),
 	TOO_LARGE("too-large", HttpStatus.CONTENT_TOO_LARGE, "Too large"),
 	NOT_TEXT("not-text", HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Not a text file"),
 	UNSUPPORTED_MEDIA_TYPE("unsupported-media-type", HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),

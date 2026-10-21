@@ -434,6 +434,34 @@ public class FileService {
 		}
 	}
 
+	/** A file {@link #createLocked} made, and the folders it created for it (outermost first). */
+	public record NewFile(FileEntry entry, List<String> createdFolders) {
+	}
+
+	/**
+	 * Creates a new file for a caller that holds the vault read lock and the locks of {@code path} and its ancestors
+	 * ({@link #lockPaths}), and that writes other files in the same operation (the task API). Like {@code POST
+	 * /api/files} it never replaces anything: {@code already-exists} or {@code case-collision} when the name is
+	 * taken, even by a file created outside the app a moment ago. The file is indexed and queued for git; the caller
+	 * publishes {@code folder.created} and {@code file.created} before releasing its locks.
+	 */
+	public NewFile createLocked(ApiPath path, byte[] bytes, Author author) throws IOException {
+		requireWithinTextLimit(path, bytes.length);
+		checkFree(path);
+		List<String> folders = ensureParentFolders(path);
+		this.batcher.prepareWrite(author);
+		try {
+			this.fs.createExclusive(path.disk(), bytes);
+		}
+		catch (FileAlreadyExistsException ex) {
+			this.reconciler.reconcileLocked(path);
+			throw NotesException.alreadyExists(path.nfc(), path.nfc());
+		}
+		FileEntry entry = indexWritten(path, bytes);
+		this.batcher.markDirty(path, author);
+		return new NewFile(entry, folders);
+	}
+
 	/**
 	 * Creates the missing parent folders of {@code path} on disk and in the index. Returns the folders that are new to
 	 * the index, outermost first; the caller publishes {@code folder.created} for them before its file event.

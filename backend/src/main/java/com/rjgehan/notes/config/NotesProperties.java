@@ -32,6 +32,7 @@ public record NotesProperties(
 		@DefaultValue Alerts alerts,
 		@DefaultValue Backup backup,
 		@DefaultValue("/data/secrets") Path secretsDir,
+		@DefaultValue Tasks tasks,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
 				"yml" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
@@ -114,6 +115,12 @@ public record NotesProperties(
 	public record Security(
 			@DefaultValue("true") boolean requireTailscaleInterface,
 			@DefaultValue("false") boolean allowUserspaceTailscale) {
+	}
+
+	/** Structured tasks (ROADMAP item 4): when completed tasks roll into the archive files. */
+	public record Tasks(
+			@DefaultValue("90d") Duration archiveAfter,
+			@DefaultValue("0 20 3 * * *") String archiveCron) {
 	}
 
 	public record TailscaleWatchdog(

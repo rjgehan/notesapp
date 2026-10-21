@@ -275,6 +275,19 @@ Errors show in the block as the message and line number, with the code visible.
 
 ### 4. Structured to-do tracking, not Markdown *(big three c)*
 
+**Status:** built (wave 1): phases 4a and 4b, as below; phase 4c (reminder delivery) comes with item 9, as planned. Reminders are already stored, edited and moved with repeating tasks, so item 9 only adds delivery. Deviations from this spec, and why:
+
+- **Embeds in Live Preview.** `![[Home.tasks]]` is interactive in the reading view, through the view registry's `loadEmbed`. Live Preview (item 10) renders no embeds until its phase 10b, which mounts them through that same hook, so task embeds need no change then. Embeds also take `#Section` or `#^<task id>` to show part of a list.
+- **Convert checkbox to task** leaves `- [[Inbox.tasks#^<task id>|Title]]`: a link to the list's file with the task's id as an Obsidian block reference, because a task has no note of its own. NotesApp opens the task from it, even after the task moved to another list, and Obsidian keeps it as a link to the file. The line keeps its list marker. The Obsidian Tasks plugin's emoji dates, priorities and 🔁 rules become task fields, which this spec did not ask for, so a vault that used that plugin keeps its dates.
+- **Kanban.** Cards are the top-level tasks; subtasks are counted on their card and open in the details. In the status columns, Done and Cancelled are ordered by completion time, so cards are reordered within To do only. A list's layout (list or board) is remembered per device.
+- **A `.tasks` file opens as its list**, with its JSON one click away (Source), rather than as JSON. Link and embed targets then show something useful.
+- **Pages.** Completed and Filter are reached from tabs on every task page and from the palette, not the ribbon, which keeps three task icons (Today, Upcoming, lists). Upcoming leaves out overdue tasks (Today has them). A filter is saved as its page address (bookmarkable), not as a named saved filter.
+- **Recurrence** is the RRULE subset of API.md §20.6 (`DAILY` to `YEARLY`). `COUNT` is stored as the occurrences left, and completed occurrences are not logged as separate tasks, so the Completed log shows a repeating task only once it is done for good. The rule editor offers common choices, a rule in words and a raw RRULE.
+- **Conflicts are per field.** A `PATCH` carries the `base` values the client saw rather than a version of the task or list: two devices editing different tasks, or different fields of one task, never conflict, and a retry changes nothing. `complete` takes the `due` and `start` it saw, so a repeating task never rolls forward twice. Additions to the API: `GET /api/tasks/{id}`, `Task.archived`, `TaskList.path` and `writable`, and the `task-conflict` and `malformed-file` errors (API.md §20).
+- **Changes made outside the task API** (hand edits, saves of the file as text, restores, moves) send only the usual file events. Clients refetch their task views when a `.tasks` file changes.
+- **Search and backlinks.** `DocumentIndexer` hands the index the searchable content as Markdown blocks, scanned with the note rules, instead of its own model of links and tags. When a note is renamed or moved, the move rewrites the links to it in task files too (titles, notes and `links` paths), through the indexer, since the indexed links point into search text rather than the file.
+- **Versions.** chrono-node is 2.10.2, not 2.10.3: 2.10.3 was less than two weeks old when it was pinned. rrule is 2.8.1 and lib-recur 0.17.1.
+
 **One line:** a real task manager (lists, due dates, priorities, recurrence, subtasks, reminders, Today and Upcoming views) whose data lives in the vault as JSON, not as `- [ ]` lines.
 
 | Value | Effort | Depends on |

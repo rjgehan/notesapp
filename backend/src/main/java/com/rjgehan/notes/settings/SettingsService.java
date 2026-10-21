@@ -21,6 +21,7 @@ import com.rjgehan.notes.api.error.ErrorCode;
 import com.rjgehan.notes.api.error.FieldError;
 import com.rjgehan.notes.api.error.NotesException;
 import com.rjgehan.notes.api.error.VersionConflictException;
+import com.rjgehan.notes.config.JsonConfig;
 import com.rjgehan.notes.events.EventHub;
 import com.rjgehan.notes.events.SettingsChangedEvent;
 import com.rjgehan.notes.history.Author;
@@ -34,9 +35,6 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.util.DefaultIndenter;
-import tools.jackson.core.util.DefaultPrettyPrinter;
-import tools.jackson.core.util.Separators;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.json.JsonMapper;
@@ -92,12 +90,7 @@ public class SettingsService {
 		this.hub = hub;
 		this.clock = clock;
 		this.mapper = mapper;
-		DefaultIndenter indenter = new DefaultIndenter("  ", "\n");
-		DefaultPrettyPrinter printer = new DefaultPrettyPrinter(Separators.createDefaultInstance()
-			.withObjectNameValueSpacing(Separators.Spacing.AFTER)
-			.withObjectEmptySeparator("")
-			.withArrayEmptySeparator("")).withObjectIndenter(indenter).withArrayIndenter(indenter);
-		this.writer = mapper.writer().with(printer);
+		this.writer = JsonConfig.vaultFileWriter(mapper);
 		ObjectNode raw = SettingsCodec.merge(JsonNodeFactory.instance.objectNode(), Settings.defaults());
 		this.state = new State(Settings.defaults(), raw, Hashing.blobId(serialize(raw)), false, null);
 	}

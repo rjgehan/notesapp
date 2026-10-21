@@ -23,7 +23,8 @@ import org.springframework.stereotype.Component;
  * Builds {@link IndexedFile}s: text kinds within their size limit are hashed (their version), notes are decoded and
  * parsed; binary and over-size files are described by size and mtime only (DESIGN §4.2, §5.4). A text file that a
  * {@link DocumentIndexer} supports is decoded and handed to it, and what it returns is indexed like a note's body; a
- * note it supports is parsed as a note, and what it returns is a supplement to that.
+ * note it supports is parsed as a note, and what it returns is a supplement to that. After a move, a document (not a
+ * note) is rewritten as a whole by its indexer ({@link #rewriteDocument}).
  */
 @Component
 public class FileIndexer {
@@ -156,6 +157,26 @@ public class FileIndexer {
 		catch (RuntimeException ex) {
 			// A defect in one document type must never stop the vault from being indexed.
 			logger.warn("Cannot index {} as a document: {}", path, ex.toString());
+			return null;
+		}
+	}
+
+	/**
+	 * A document's text with its links rewritten by its {@link DocumentIndexer} after a move, or null when the file is
+	 * a note (its own links are spliced; a supplement's are not rewritable), no indexer handles both names, or it
+	 * cannot rewrite this text.
+	 */
+	public DocumentIndexer.@Nullable Rewritten rewriteDocument(String path, String newPath, String text,
+			DocumentIndexer.LinkRewriter links) {
+		DocumentIndexer indexer = documentIndexer(path);
+		if (indexer == null || indexer != documentIndexer(newPath) || this.kinds.kindOf(path) == FileKind.NOTE) {
+			return null;
+		}
+		try {
+			return indexer.rewriteLinks(path, text, links);
+		}
+		catch (RuntimeException ex) {
+			logger.warn("Cannot rewrite the links of {}: {}", path, ex.toString());
 			return null;
 		}
 	}

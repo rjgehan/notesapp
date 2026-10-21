@@ -5,7 +5,7 @@ import { isProblem } from '../api/client';
 import { api } from '../api/endpoints';
 import { currentSettings, currentTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
-import type { FileEntry, MoveResult, Settings } from '../api/types';
+import type { FailedUpdate, FileEntry, MoveResult, Settings } from '../api/types';
 import { newIdempotencyKey } from '../state/clientId';
 import { clearPendingNote, startPendingNote, usePendingNote, type PendingNote } from '../state/pendingNote';
 import { toast } from '../state/toasts';
@@ -193,14 +193,37 @@ export async function createNamedNote(name: string, fromPath: string | null, via
 
 // ---------- rename and move ----------
 
+/** '1 note', '3 notes', or 'files' when task lists (or other indexed files) are among them. */
+export function updatedFilesText(updates: ReadonlyArray<{ path: string }>): string {
+  const n = updates.length;
+  const notes = updates.every((u) => extensionOf(u.path) === 'md');
+  return `${n} ${notes ? (n === 1 ? 'note' : 'notes') : n === 1 ? 'file' : 'files'}`;
+}
+
 function linkSummary(r: MoveResult): string {
-  const n = r.linkUpdates.length;
-  return n === 0 ? '' : ` · updated links in ${n} ${n === 1 ? 'note' : 'notes'}`;
+  return r.linkUpdates.length === 0 ? '' : ` · updated links in ${updatedFilesText(r.linkUpdates)}`;
+}
+
+const FAILED_REASON: Record<string, string> = {
+  'not-utf8': 'not valid UTF-8',
+  'not-rewritable': 'a property link that cannot be rewritten',
+  'span-mismatch': 'changed meanwhile',
+  'io-error': 'storage error',
+};
+
+/** Why a move did not update the links in a file (MoveResult.failed), in words. */
+export function failedReason(f: FailedUpdate): string {
+  // A task list the server will not rewrite: not valid, or written by a newer version (API.md §20.9).
+  if (f.reason === 'not-rewritable' && extensionOf(f.path) === 'tasks') return 'a task list that cannot be changed here; edit the links in its tasks';
+  // A drawing's links kept only in its scene JSON (DESIGN §6.8.1): Excalidraw shows and edits them.
+  const lower = f.path.toLowerCase();
+  if (f.reason === 'not-rewritable' && (lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.md'))) return 'a link in the drawing that cannot be rewritten; edit it in the drawing';
+  return FAILED_REASON[f.reason] ?? f.reason;
 }
 
 function reportFailures(r: MoveResult): void {
   if (r.failed.length === 0) return;
-  const names = r.failed.map((f) => displayName(f.path)).join(', ');
+  const names = r.failed.map((f) => `${displayName(f.path)} (${failedReason(f)})`).join(', ');
   toast(`Links could not be updated in ${names}`, { kind: 'error', timeout: 8000 });
 }
 

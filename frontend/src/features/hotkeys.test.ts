@@ -53,6 +53,43 @@ describe('global hotkeys', () => {
     expect(local).not.toHaveBeenCalled();
   });
 
+  it('runs a command that asks for it (globalHotkey) inside text fields and the editor too', () => {
+    const add = vi.fn();
+    registerCommand({ id: 'test.quickAdd', name: 'Add task', hotkey: 'Mod-Alt-t', globalHotkey: true, run: add });
+    const editor = document.createElement('div');
+    editor.className = 'cm-editor';
+    const content = document.createElement('div');
+    editor.appendChild(content);
+    const input = document.createElement('input');
+    document.body.append(editor, input);
+    press(content, { key: 't', code: 'KeyT', altKey: true, ...mod });
+    press(input, { key: 't', code: 'KeyT', altKey: true, ...mod });
+    expect(add).toHaveBeenCalledTimes(2);
+  });
+
+  it.skipIf(isApple)('lets AltGr (Ctrl+Alt) type its character in text fields instead of running a hotkey', () => {
+    const add = vi.fn();
+    registerCommand({ id: 'test.quickAdd', name: 'Add task', hotkey: 'Mod-Alt-t', globalHotkey: true, run: add });
+    const editor = document.createElement('div');
+    editor.className = 'cm-editor';
+    const content = document.createElement('div');
+    content.contentEditable = 'true';
+    editor.appendChild(content);
+    const input = document.createElement('input');
+    document.body.append(editor, input);
+    // Romanian (Programmers): AltGr+T types ț; Turkish Q: ₺.
+    const typed = press(content, { key: 'ț', code: 'KeyT', ctrlKey: true, altKey: true });
+    const lira = press(input, { key: '₺', code: 'KeyT', ctrlKey: true, altKey: true });
+    expect(add).not.toHaveBeenCalled();
+    expect(typed.defaultPrevented).toBe(false);
+    expect(lira.defaultPrevented).toBe(false);
+    // Ctrl+Alt+T on a layout without an AltGr character there is still the hotkey, and so is any
+    // Ctrl+Alt+T outside text fields.
+    press(content, { key: 't', code: 'KeyT', ctrlKey: true, altKey: true });
+    press(document.body, { key: 'ț', code: 'KeyT', ctrlKey: true, altKey: true });
+    expect(add).toHaveBeenCalledTimes(2);
+  });
+
   it('runs F2 without modifiers and ignores plain keys', () => {
     const rename = vi.fn();
     registerCommand({ id: 'file.rename', name: 'Rename', hotkey: 'F2', run: rename });

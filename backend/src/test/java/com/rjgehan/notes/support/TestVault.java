@@ -17,8 +17,8 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import com.rjgehan.notes.config.JsonConfig;
-import com.rjgehan.notes.drawings.ExcalidrawDocumentIndexer;
 import com.rjgehan.notes.config.NotesProperties;
+import com.rjgehan.notes.drawings.ExcalidrawDocumentIndexer;
 import com.rjgehan.notes.events.EventHub;
 import com.rjgehan.notes.events.VaultEvent;
 import com.rjgehan.notes.history.Author;
@@ -31,6 +31,7 @@ import com.rjgehan.notes.index.FileIndexer;
 import com.rjgehan.notes.index.IndexBuilder;
 import com.rjgehan.notes.index.VaultIndex;
 import com.rjgehan.notes.settings.SettingsService;
+import com.rjgehan.notes.tasks.TaskDocumentIndexer;
 import com.rjgehan.notes.vault.ApiPath;
 import com.rjgehan.notes.vault.AttachmentService;
 import com.rjgehan.notes.vault.FileKinds;
@@ -122,7 +123,8 @@ public final class TestVault implements AutoCloseable {
 		this.fs = fsFactory.apply(this.properties);
 		this.kinds = new FileKinds(this.properties);
 		this.paths = new VaultPaths(this.index, this.fs);
-		this.indexer = new FileIndexer(this.fs, this.kinds, List.of(new ExcalidrawDocumentIndexer(JSON)));
+		this.indexer = new FileIndexer(this.fs, this.kinds,
+				List.of(new ExcalidrawDocumentIndexer(JSON), new TaskDocumentIndexer(JSON, this.clock)));
 		this.hub = new RecordingEventHub(this.properties, this.clock);
 		this.largeFiles = new LargeFiles(this.index, this.properties);
 		this.git = new FailingGitStore(this.fs, this.properties, this.clock, this.largeFiles);

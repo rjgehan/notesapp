@@ -18,6 +18,7 @@ import { isLocalEdit } from './remote';
 import { searchHighlight } from './searchHighlight';
 import { smartPunctuationGuard } from './smartPunctuation';
 import { unresolvedLinks } from './unresolved';
+import { trackedRangesField } from './tracked';
 import { uploadsField } from './uploads';
 
 export interface EditorHooks {
@@ -55,8 +56,10 @@ function coveredMargins(view: EditorView): { top: number } {
 function common(hooks: EditorHooks): Extension[] {
   return [
     history(),
-    // The session's pending attachment uploads (the same field instance, so they survive mounts).
+    // The session's pending attachment uploads and tracked ranges (the same field instances, so
+    // they survive mounts).
     uploadsField,
+    trackedRangesField,
     isIOS ? [] : drawSelection(),
     highlightActiveLine(),
     indentOnInput(),

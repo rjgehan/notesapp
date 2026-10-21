@@ -1,6 +1,6 @@
 // Global key handler for command hotkeys (DESIGN §6.13, §6.14). Mod = Cmd on Apple, Ctrl elsewhere.
-// Inside the editor and text fields only the always-global hotkeys fire; the editor keymap binds
-// its own (Mod-B/I/K/L/E/S/Enter).
+// Inside the editor and text fields only the always-global hotkeys fire (and commands that ask for
+// it with `globalHotkey`); the editor keymap binds its own (Mod-B/I/K/L/E/S/Enter).
 import { availableCommands, runCommand } from './commands';
 import { activePath } from './navigation';
 import { isApple } from './platform';
@@ -31,6 +31,15 @@ export function eventSpec(e: KeyboardEvent): string | null {
   return [...parts, key.length === 1 ? key.toLowerCase() : key].join('-');
 }
 
+/**
+ * AltGr typing a character: Windows and Linux report AltGr as Ctrl+Alt, so AltGr+T (ț in
+ * Romanian, ₺ in Turkish Q) would match a Mod-Alt-t hotkey. A key that produces a character
+ * other than a plain letter or digit with Ctrl+Alt held is that character, not a hotkey.
+ */
+function isAltGrCharacter(e: KeyboardEvent): boolean {
+  return !isApple && e.ctrlKey && e.altKey && !e.metaKey && e.key.length === 1 && !/^[a-z0-9]$/i.test(e.key);
+}
+
 function inTextInput(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return !!target.closest('.cm-editor, input, textarea, select, [contenteditable="true"]');
@@ -40,23 +49,23 @@ function handle(e: KeyboardEvent, capture: boolean): void {
   if (e.defaultPrevented || e.isComposing) return;
   const spec = eventSpec(e);
   if (!spec) return;
+  const ctx = { activePath: activePath() };
+  const command = availableCommands(ctx).find((c) => c.hotkey !== undefined && normalize(c.hotkey) === spec);
+  if (!command) return;
   // The always-global hotkeys run in the capture phase, before the editor's keymap sees them
   // (CodeMirror would otherwise match Mod-Shift-f against its own Mod-f); the rest let focused
   // widgets (editor, explorer, dialogs) handle the key first.
-  const global = ALWAYS_GLOBAL.has(spec);
+  const global = ALWAYS_GLOBAL.has(spec) || command.globalHotkey === true;
   if (global !== capture) return;
   const editing = inTextInput(e.target);
   // A modal dialog owns the keyboard; only the always-global hotkeys pass through it.
   const inModal = e.target instanceof HTMLElement && !!e.target.closest('[aria-modal="true"]');
   if ((editing || inModal) && !global) return;
-  const ctx = { activePath: activePath() };
-  for (const command of availableCommands(ctx)) {
-    if (!command.hotkey || normalize(command.hotkey) !== spec) continue;
-    if (runCommand(command.id, ctx)) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    return;
+  // Where text is typed, a character typed with AltGr goes to the field.
+  if (editing && isAltGrCharacter(e)) return;
+  if (runCommand(command.id, ctx)) {
+    e.preventDefault();
+    e.stopPropagation();
   }
 }
 

@@ -6,8 +6,13 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 
 import tools.jackson.core.JsonGenerator;
+import tools.jackson.core.util.DefaultIndenter;
+import tools.jackson.core.util.DefaultPrettyPrinter;
+import tools.jackson.core.util.Separators;
+import tools.jackson.databind.ObjectWriter;
 import tools.jackson.databind.SerializationContext;
 import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.StdSerializer;
 
@@ -41,6 +46,20 @@ public class JsonConfig {
 	/** The module that formats instants; also used where a mapper is built outside Spring. */
 	public static SimpleModule notesModule() {
 		return new SimpleModule("notes-instants").addSerializer(Instant.class, new MillisInstantSerializer());
+	}
+
+	/**
+	 * The writer for JSON files the app keeps in the vault ({@code .notesapp/settings.json}, {@code .tasks} lists):
+	 * two-space indentation, {@code "key": value} and {@code []} for empty arrays, so files read and diff like
+	 * {@code JSON.stringify(value, null, 2)}.
+	 */
+	public static ObjectWriter vaultFileWriter(JsonMapper mapper) {
+		DefaultIndenter indenter = new DefaultIndenter("  ", "\n");
+		DefaultPrettyPrinter printer = new DefaultPrettyPrinter(Separators.createDefaultInstance()
+			.withObjectNameValueSpacing(Separators.Spacing.AFTER)
+			.withObjectEmptySeparator("")
+			.withArrayEmptySeparator("")).withObjectIndenter(indenter).withArrayIndenter(indenter);
+		return mapper.writer().with(printer);
 	}
 
 	static final class MillisInstantSerializer extends StdSerializer<Instant> {

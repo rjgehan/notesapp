@@ -3,7 +3,7 @@
 // On tablets it also toggles the right sidebar overlay.
 import { CalendarDays, CloudUpload, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useLocation } from 'react-router';
+import { matchPath, useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
 import { pageRoute, registeredPages, useExtensionsVersion } from '../../extensions';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
@@ -116,8 +116,18 @@ export function TopBar() {
   const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen]);
   const descriptor = entry && !pending ? viewFor(entry) : null;
   const phone = useBreakpoint() === 'phone';
-  const page = location.pathname.startsWith('/x/') ? registeredPages().find((p) => pageRoute(p) === location.pathname) : undefined;
-  const title = pending ? pending.title || `New ${pending.label}` : path ? displayName(path) : page ? page.title : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
+  const page = location.pathname.startsWith('/x/') ? registeredPages().find((p) => matchPath(pageRoute(p), location.pathname)) : undefined;
+  const title = pending
+    ? pending.title || `New ${pending.label}`
+    : path
+      ? displayName(path)
+      : location.pathname.startsWith('/settings')
+        ? 'Settings'
+        : location.pathname === '/trash'
+          ? 'Trash'
+          : location.pathname === '/search'
+            ? 'Search'
+            : (page?.title ?? 'Notes');
 
   return (
     <header className="top-bar">

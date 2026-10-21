@@ -57,6 +57,8 @@ export default defineConfig({
     'import.meta.env.VITE_EXCALIDRAW_ASSETS': JSON.stringify('/' + excalidrawAssets),
   },
   server: {
+    // Tests also read docs/API.md (src/api/types.test.ts); the dev server keeps Vite's default allow list.
+    fs: process.env.VITEST ? { allow: ['.', '../docs'] } : undefined,
     proxy: {
       // changeOrigin stays false so the backend's Host and Origin checks see the browser's host.
       '/api': {

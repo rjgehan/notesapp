@@ -47,6 +47,7 @@ import { toast } from '../state/toasts';
 import { useUi } from '../state/ui';
 import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
+import { registerTasks } from '../tasks/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
@@ -306,4 +307,6 @@ export function registerBuiltins(): void {
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 
+  // ---------- roadmap features, through the same extension points ----------
+  registerTasks();
 }

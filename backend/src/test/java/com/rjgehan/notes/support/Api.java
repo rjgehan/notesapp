@@ -95,6 +95,10 @@ public final class Api {
 		return send(HttpMethod.PUT, uri, MediaType.APPLICATION_JSON, json(body), headers);
 	}
 
+	public Reply patchJson(String uri, Object body, @Nullable String... headers) {
+		return send(HttpMethod.PATCH, uri, MediaType.APPLICATION_JSON, json(body), headers);
+	}
+
 	public Reply postBytes(String uri, byte[] body, @Nullable String... headers) {
 		return send(HttpMethod.POST, uri, MediaType.APPLICATION_OCTET_STREAM, body, headers);
 	}

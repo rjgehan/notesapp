@@ -13,6 +13,11 @@ export interface Command {
   name: string;
   /** CodeMirror-style key spec, e.g. `Mod-Alt-n`, handled by the global key handler. */
   hotkey?: string;
+  /**
+   * The hotkey also fires while the editor or a text field has focus, like Mod-P (a capture
+   * command such as quick add, used in the middle of writing). It must not be an editor key.
+   */
+  globalHotkey?: boolean;
   /** A key bound by the editor's own keymap; shown in the palette, not handled globally. */
   editorHotkey?: string;
   icon?: LucideIcon;
