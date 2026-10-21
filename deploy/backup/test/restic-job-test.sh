@@ -73,6 +73,20 @@ expect_count() {
 	if [ "$got" = "$2" ]; then pass; else fail "$1 has $got snapshots, expected $2"; fi
 }
 
+# $1 = repository, $2 = snapshot id (or a prefix of one), $3 = yes or no.
+expect_snapshot() {
+	if [ -z "$2" ]; then
+		fail "no snapshot id to look for"
+		return
+	fi
+	if restic -r "$1" snapshots --json --host homeserver --tag notes | jq -r '.[].id' | grep -q "^$2"; then
+		got=yes
+	else
+		got=no
+	fi
+	if [ "$got" = "$3" ]; then pass; else fail "$1: snapshot $2 present=$got, expected $3"; fi
+}
+
 printf 'test password\n' >"$RESTIC_PASSWORD_FILE"
 mkdir -p "$VAULT/.git/refs/heads" "$VAULT/.notesapp/tmp" "$VAULT/.notesapp/cache" "$VAULT/Projects" \
 	"$NOTES_BACKUP_SOURCE/tailscale-state" "$RESTIC_REPOSITORY"
@@ -152,17 +166,25 @@ expect_count "$RESTIC_REPOSITORY" 1
 fails discard
 fails discard "not-an-id"
 
-TEST="retention keeps one snapshot per day"
+# All snapshots here are from one day: retention keeps that day's newest, and restic (0.16 and
+# later) also keeps the oldest snapshot while there are fewer days than the keep counts allow.
+TEST="retention keeps the newest snapshot of each day, plus the oldest"
 succeeds snapshot
+THIRD=$(sed -n 's/^snapshot=//p' "$W/out")
 succeeds snapshot
+FOURTH=$(sed -n 's/^snapshot=//p' "$W/out")
 expect_count "$RESTIC_REPOSITORY" 3
 succeeds forget
-expect_count "$RESTIC_REPOSITORY" 1
+expect_count "$RESTIC_REPOSITORY" 2
+expect_snapshot "$RESTIC_REPOSITORY" "$FIRST" yes
+expect_snapshot "$RESTIC_REPOSITORY" "$THIRD" no
+expect_snapshot "$RESTIC_REPOSITORY" "$FOURTH" yes
 job_with NOTES_BACKUP_KEEP_DAILY=seven forget
 if [ "$STATUS" -ne 0 ]; then pass; else fail "forget accepted a keep value that is not a number"; fi
 
+# Off site already holds FIRST; offsite copies FOURTH, and the same retention keeps both.
 succeeds offsite
-expect_count "$NOTES_BACKUP_OFFSITE_REPO" 1
+expect_count "$NOTES_BACKUP_OFFSITE_REPO" 2
 succeeds check
 
 TEST="without an off-site repository, offsite does nothing"

@@ -57,8 +57,9 @@ public class IdempotencyCache {
 
 	private final Map<Key, Entry> entries = new LinkedHashMap<>(64, 0.75f, true) {
 
+		// Qualified: inside this LinkedHashMap subclass, javac 25 resolves a bare Entry to the inherited Map.Entry.
 		@Override
-		protected boolean removeEldestEntry(Map.Entry<Key, Entry> eldest) {
+		protected boolean removeEldestEntry(Map.Entry<Key, IdempotencyCache.Entry> eldest) {
 			return size() > CAPACITY;
 		}
 
