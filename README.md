@@ -21,7 +21,7 @@ A Spring Boot 4 backend (Java 21) serves the REST and SSE API ([docs/API.md](doc
 |---|---|
 | `backend/` | Spring Boot app (`com.rjgehan.notes`), Maven wrapper |
 | `frontend/` | React + TypeScript + Vite SPA |
-| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower), Tailscale serve config, `.env.example` |
+| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower), Tailscale serve config, `.env.example`, and `casaos-compose.yml` for CasaOS |
 | `.github/` | CI, image publishing, Dependabot |
 | `Dockerfile` | Three stages: frontend build, backend build, JRE runtime |
 | `docs/` | Design, API contract, deployment runbook, roadmap |
@@ -72,4 +72,5 @@ Rolling back, pausing updates, backups and everything else on the server side ar
 - [docs/DESIGN.md](docs/DESIGN.md): technical design (decisive)
 - [docs/API.md](docs/API.md): the REST and SSE contract between backend and frontend
 - [docs/DEPLOY.md](docs/DEPLOY.md): homeserver runbook (first deploy, operations, troubleshooting)
+- [docs/CASAOS.md](docs/CASAOS.md): installing on CasaOS by pasting one compose file
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes after v1
