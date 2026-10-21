@@ -4,6 +4,7 @@ import { RangeSet, type EditorSelection, type EditorState, type Range, RangeValu
 import { Decoration, type DecorationSet } from '@codemirror/view';
 import type { SyntaxVisibility } from '../../state/prefs';
 import type { NoteContext } from '../context';
+import { showsInCell } from './embeds';
 import { footnotesOf, type FootnoteIndex } from './footnotes';
 import { collectElements, hiddenPieces, isRevealed, layoutOf, type RevealOptions } from './model';
 import { widgetFor, type WidgetContext } from './widgets';
@@ -26,8 +27,10 @@ export interface BuildContext extends LivePreviewConfig {
   completing: boolean;
   /** The app (link resolution, embeds); null in a plain editor. */
   note: NoteContext | null;
-  /** The note's footnotes (a table cell's editor gives its note's); read from the state by default. */
+  /** The note's footnotes; read from the state by default. */
   footnotes?(): FootnoteIndex;
+  /** A table cell's editor: it shows images, and other embeds and footnotes as typed (a cell holds a line of text). */
+  inCell?: boolean;
 }
 
 export interface LivePreview {
@@ -59,7 +62,11 @@ export function revealOptions(ctx: Pick<BuildContext, 'visibility' | 'locked' | 
 
 /** Decorations and atomic ranges for `ranges` of `state` (the visible ranges in the editor). */
 export function buildLivePreview(state: EditorState, ranges: readonly { from: number; to: number }[], ctx: BuildContext): LivePreview {
-  const elements = collectElements(state, ranges);
+  const elements = collectElements(state, ranges).filter((el) => {
+    if (!ctx.inCell) return true;
+    const spec = el.pieces[0]?.widget;
+    return el.kind === 'footnote' ? false : el.kind !== 'embed' || (spec?.type === 'embed' && showsInCell(spec.embed, ctx.note));
+  });
   const options = revealOptions(ctx);
   const widgets: WidgetContext = { checkboxes: ctx.checkboxes, remoteImages: ctx.remoteImages ?? true, note: ctx.note, footnotes: ctx.footnotes ?? (() => footnotesOf(state)) };
   const decos: Range<Decoration>[] = [];

@@ -4,23 +4,22 @@
 // editing feel like a word processor: Backspace at the edge of bold text deletes a letter, typing
 // at the end of bold text continues in bold, and typing after a link does not extend it.
 import { completionStatus } from '@codemirror/autocomplete';
-import { deleteCharBackward } from '@codemirror/commands';
 import { deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
-import { EditorSelection, EditorState, Facet, findClusterBreak, Prec, RangeSet, type Extension, type SelectionRange } from '@codemirror/state';
+import { EditorSelection, EditorState, Facet, findClusterBreak, Prec, RangeSet, Transaction, type Extension, type SelectionRange, type StateCommand } from '@codemirror/state';
 import { Direction, EditorView, keymap, ViewPlugin, type Command, type ViewUpdate } from '@codemirror/view';
 import { isCoarsePointer, isIOS, modKey } from '../../features/platform';
 import { noteContext, vaultChanged } from '../context';
 import { followLink } from '../editorCommands';
 import { linkAt } from '../linkAt';
-import { liveBlocks } from './blocks';
+import { deleteNextToBlock, liveBlocks, shownBlocks } from './blocks';
 import { buildLivePreview, revealOptions, type LivePreview, type LivePreviewConfig } from './decorations';
-import { footnotesOf, footnoteTooltips } from './footnotes';
+import { footnoteTooltips } from './footnotes';
 import { formatToolbar } from './formatToolbar';
 import { inputRules } from './inputRules';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
 import { isPointerSelection, touchTracking } from './pointer';
-import { tables } from './table';
+import { deleteNextToTable, tableBlocks, tables } from './table';
 import { tableCellHost } from './table/facets';
 
 export type { LivePreviewConfig } from './decorations';
@@ -63,8 +62,7 @@ function build(view: EditorView): LivePreview {
     focused: view.hasFocus,
     completing: completionStatus(view.state) !== null,
     note: view.state.facet(noteContext),
-    // A table cell's footnotes are its note's.
-    footnotes: () => footnotesOf((view.state.facet(tableCellHost) ?? view).state),
+    inCell: view.state.facet(tableCellHost) !== null,
   });
 }
 
@@ -183,9 +181,86 @@ function joinTarget(view: EditorView, lineEnd: number): number {
 }
 
 /**
+ * Runs a state command as if the cursor were at `pos`, and applies what it does as one transaction
+ * of the real state, so undo gives the cursor back where it was. False when the command does nothing.
+ */
+function runAt(view: EditorView, pos: number, command: StateCommand): boolean {
+  const state = view.state.update({ selection: EditorSelection.cursor(pos), filter: false }).state;
+  let result: Transaction | null = null;
+  if (!command({ state, dispatch: (tr) => (result = tr) }) || !result) return false;
+  const tr: Transaction = result;
+  if (!tr.docChanged) return false;
+  view.dispatch({ changes: tr.changes, selection: tr.selection, scrollIntoView: true, userEvent: tr.annotation(Transaction.userEvent) ?? 'delete.backward' });
+  return true;
+}
+
+/** Joins the line starting at `pos` to the one before (Backspace at its start), as one transaction. */
+const joinBackward: StateCommand = ({ state, dispatch }) => {
+  const pos = state.selection.main.head;
+  if (pos === 0) return false;
+  dispatch(state.update({ changes: { from: pos - 1, to: pos }, selection: EditorSelection.cursor(pos - 1), userEvent: 'delete.backward' }));
+  return true;
+};
+
+/**
+ * Joining the line at `at` (its end going forward, its start going back) to the next or previous
+ * one, when that is a hidden block, a table or a hidden code fence: the caret goes past the block,
+ * into the table, or into the code block (whose fences then show), and nothing is deleted. True
+ * when it did that.
+ */
+function crossesBlock(view: EditorView, at: number, forward: boolean): boolean {
+  const { state } = view;
+  const place = (pos: number) => view.dispatch({ selection: EditorSelection.cursor(pos), scrollIntoView: true, userEvent: 'select' });
+  if (forward ? at < state.doc.length && shownBlocks(state).some((b) => b.from === at + 1) : at > 0 && shownBlocks(state).some((b) => b.to === at - 1)) {
+    place(at);
+    return deleteNextToBlock(forward)(view);
+  }
+  if (forward ? at < state.doc.length && tableBlocks(state).some((t) => t.from === at + 1) : at > 0 && tableBlocks(state).some((t) => t.to === at - 1)) {
+    place(at);
+    return deleteNextToTable(forward)(view);
+  }
+  // A hidden fence on the next (or previous) line: into the code block. (An empty line joins a
+  // fence harmlessly.)
+  const other = forward ? (at < state.doc.length ? at + 1 : null) : at > 0 ? at - 1 : null;
+  if (other === null || state.doc.lineAt(at).text.trim() === '') return false;
+  const fenceLine = state.doc.lineAt(other);
+  const fence = layoutAt(view, other).blocks.find((p) => p.kind === 'codeblock' && p.from >= fenceLine.from && p.to <= fenceLine.to);
+  if (!fence) return false;
+  if (forward && fenceLine.to < state.doc.length) place(fenceLine.to + 1);
+  else if (!forward && fenceLine.from > 0) place(fenceLine.from - 1);
+  return true;
+}
+
+/**
+ * How far a deletion from `at` toward `target` may go on its line: never into hidden markup it
+ * would split (a word deletion stops at the markup), and an atom next to `at` (an embed, a
+ * footnote) goes whole.
+ */
+function clipDeletion(layout: Layout, at: number, target: number): number {
+  const atoms = new Set<{ from: number; to: number }>(layout.blocks);
+  const pieces: Array<{ from: number; to: number }> = [...layout.zones, ...layout.runs, ...layout.blocks];
+  if (target < at) {
+    let from = target;
+    for (const p of pieces) {
+      if (p.to > at || p.to <= from) continue;
+      from = p.to === at && atoms.has(p) ? p.from : p.to;
+    }
+    return from;
+  }
+  let to = target;
+  for (const p of pieces) {
+    if (p.from < at || p.from >= to) continue;
+    to = p.from === at && atoms.has(p) ? p.to : p.from;
+  }
+  return to;
+}
+
+/**
  * Backspace and Delete next to hidden inline markup delete the letter beyond it, never a marker
- * (DESIGN §6.6.1). After Backspace at the end of bold text, the cursor stays inside the bold;
- * after a link, it stays after the link. Formatting left without text is removed by
+ * (DESIGN §6.6.1); a word deletion (Mod- or Alt-Backspace and -Delete) stops at hidden markup, and
+ * an embed or footnote next to it goes whole. After Backspace at the end of bold text, the cursor
+ * stays inside the bold; after a link, it stays after the link. A line never joins a hidden block,
+ * a table or a hidden code fence (`crossesBlock`). Formatting left without text is removed by
  * `removeEmptyFormatting`.
  */
 function deleteAcrossMarkup(forward: boolean, by: 'char' | 'group'): Command {
@@ -197,35 +272,41 @@ function deleteAcrossMarkup(forward: boolean, by: 'char' | 'group'): Command {
     const layout = layoutAt(view, pos);
     if (forward) {
       const run = layout.runs.find((r) => r.from === pos && r.to > pos);
-      if (!run) {
+      const at = run ? run.to : pos;
+      if (at === line.to) {
+        if (at === state.doc.length) return !!run;
+        if (crossesBlock(view, at, true)) return true;
         // An empty line just goes, and the next line keeps its markup (a heading stays a heading).
-        if (pos !== line.to || line.number === state.doc.lines || line.text.trim() === '') return false;
+        if (!run && line.text.trim() === '') return false;
         const to = joinTarget(view, line.to);
-        if (to === pos + 1) return false;
-        view.dispatch({ changes: { from: pos, to }, selection: EditorSelection.cursor(pos), scrollIntoView: true, userEvent: 'delete.forward' });
+        if (!run && to === pos + 1) return false;
+        view.dispatch({ changes: { from: at, to }, selection: EditorSelection.cursor(pos), scrollIntoView: true, userEvent: 'delete.forward' });
         return true;
       }
-      const at = run.to;
-      if (at === state.doc.length) return true;
-      const to = at === line.to ? joinTarget(view, line.to) : by === 'group' ? view.moveByGroup(EditorSelection.cursor(at), true).head : line.from + findClusterBreak(line.text, at - line.from, true);
-      if (to <= at) return true;
+      // A letter: CodeMirror's own deletion (an atom next to the cursor goes whole).
+      if (!run && by === 'char') return false;
+      const target = by === 'group' ? view.moveByGroup(EditorSelection.cursor(at), true).head : line.from + findClusterBreak(line.text, at - line.from, true);
+      const to = clipDeletion(layout, at, Math.min(target, line.to));
+      if (to <= at) return !!run;
       view.dispatch({ changes: { from: at, to }, selection: EditorSelection.cursor(pos), scrollIntoView: true, userEvent: 'delete.forward' });
       return true;
     }
     const run = layout.runs.find((r) => r.to === pos && r.from < pos);
-    if (!run) return false;
-    const at = run.from;
-    if (at === line.from || layout.zones.some((z) => z.to === at)) {
+    const at = run ? run.from : pos;
+    if (at === line.from || (run && layout.zones.some((z) => z.to === at))) {
+      if (at === line.from && crossesBlock(view, at, false)) return true;
+      if (!run) return false;
       // Nothing to delete on this line before the markup: Backspace acts where the text starts
       // (removes block markup, or joins the line to the one before).
-      view.dispatch({ selection: EditorSelection.cursor(at) });
-      return deleteMarkupBackward(view) || deleteCharBackward(view) || true;
+      return runAt(view, at, deleteMarkupBackward) || runAt(view, at, joinBackward) || true;
     }
-    const from = by === 'group' ? view.moveByGroup(EditorSelection.cursor(at), false).head : line.from + findClusterBreak(line.text, at - line.from, false);
-    if (from >= at) return true;
+    if (!run && by === 'char') return false;
+    const target = by === 'group' ? view.moveByGroup(EditorSelection.cursor(at), false).head : line.from + findClusterBreak(line.text, at - line.from, false);
+    const from = clipDeletion(layout, at, Math.max(target, line.from));
+    if (from >= at) return !!run;
     // Typing continues the formatting the deleted letter had; after a link or code it stays outside.
-    const inside = run.pieces[0].role === 'close';
-    const cursor = inside ? from : pos - (at - from);
+    const inside = run?.pieces[0].role === 'close';
+    const cursor = !run || inside ? from : pos - (at - from);
     view.dispatch({ changes: { from, to: at }, selection: EditorSelection.cursor(cursor, inside ? -1 : 1), scrollIntoView: true, userEvent: 'delete.backward' });
     return true;
   };

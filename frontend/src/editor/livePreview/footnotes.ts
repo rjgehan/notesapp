@@ -261,11 +261,15 @@ export function footnoteTooltips(): Extension {
   return [
     footnotesField,
     pinnedFootnote,
-    hoverTooltip((view, pos, side) => {
-      if (view.state.field(pinnedFootnote, false) !== null) return null;
-      const el = footnoteAt(view.state, pos, side);
-      return el ? tooltipFor(el) : null;
-    }),
+    // It closes on an edit: its links know where they are in the note's text as it was.
+    hoverTooltip(
+      (view, pos, side) => {
+        if (view.state.field(pinnedFootnote, false) !== null) return null;
+        const el = footnoteAt(view.state, pos, side);
+        return el ? tooltipFor(el) : null;
+      },
+      { hideOnChange: true },
+    ),
     keymap.of([
       {
         key: 'Escape',

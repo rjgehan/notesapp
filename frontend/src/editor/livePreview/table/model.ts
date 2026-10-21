@@ -417,7 +417,17 @@ export interface CellPad {
  */
 export function setCell(m: TableModel, row: number, column: number, content: string, pad?: CellPad): TableModel {
   const source = rowAt(m, row);
-  const text = escapeCell(content.replace(/\r?\n/g, ' '));
+  // Blanks at the edges of a row without outer pipes are not a cell's content (GFM trims them): they
+  // stay out of its text, where they would become the row's indentation or trailing blanks. An
+  // escaped blank (`\ `) is text.
+  let line = content.replace(/\r?\n/g, ' ');
+  if (column === 0 && !source.lead) line = line.replace(/^[ \t]+/, '');
+  if (column >= source.cells.length - 1 && !source.trail) {
+    const trail = /[ \t]*$/.exec(line)![0];
+    const core = line.slice(0, line.length - trail.length);
+    if (trail !== '') line = /\\*$/.exec(core)![0].length % 2 === 1 ? core + trail[0] : core;
+  }
+  const text = escapeCell(line);
   const cells = [...source.cells];
   while (cells.length <= column) cells.push(blankCell(m.style.margin));
   const old = cells[column];

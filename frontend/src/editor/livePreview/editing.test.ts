@@ -53,13 +53,14 @@ function editor(marked: string, { config, ctx, readOnly = false }: Options = {})
   const cursor = marked.indexOf('‸');
   const doc = cursor >= 0 ? marked.slice(0, cursor) + marked.slice(cursor + 1) : marked;
   const livePreview: LivePreviewConfig = { visibility: 'hide-all', locked: false, checkboxes: !readOnly, ...config };
-  const state = EditorState.create({
+  const created = EditorState.create({
     doc,
     selection: EditorSelection.cursor(Math.max(0, cursor)),
     extensions: noteExtensions(context(ctx), { onLocalChange: () => {}, onBlur: () => {}, readOnly, spellcheck: false, autocorrect: false, livePreview }),
   });
-  ensureSyntaxTree(state, state.doc.length, 5000);
-  const view = new EditorView({ state, parent: document.body });
+  ensureSyntaxTree(created, created.doc.length, 5000);
+  // The state's tree is the parse as of its transaction: an empty one brings the finished parse in.
+  const view = new EditorView({ state: created.update({}).state, parent: document.body });
   views.push(view);
   return view;
 }

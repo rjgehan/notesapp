@@ -146,7 +146,7 @@ describe('formatting keys on a selection (ROADMAP 10a)', () => {
     // A new editor state is parsed only to its first few thousand characters; the rest is parsed
     // in the background. Bold text further down must not be taken for plain text.
     const lines = Array.from({ length: 3000 }, (_, i) => `**line ${i}**`);
-    const view = noteEditor(`«${lines.join('\n')}»`);
+    const view = noteEditor(`«${lines.join('\n')}»`, { partial: true });
     expect(hasFormat(view.state, view.state.selection.main, 'strong')).toBe(true);
     press(view, 'b', { ctrlKey: true });
     expect(view.state.doc.toString()).toBe(Array.from({ length: 3000 }, (_, i) => `line ${i}`).join('\n'));
@@ -308,8 +308,8 @@ describe('links (Mod-K)', () => {
 });
 
 describe('heading, list and quote commands (palette, toolbars)', () => {
-  const run = (text: string, command: (v: ReturnType<typeof noteEditor>) => boolean, mode: 'live' | 'source' = 'source') => {
-    const view = noteEditor(text, { mode });
+  const run = (text: string, command: (v: ReturnType<typeof noteEditor>) => boolean, mode: 'live' | 'source' = 'source', partial = false) => {
+    const view = noteEditor(text, { mode, partial });
     command(view);
     // A selection's lines are compared by their text.
     return text.includes('«') ? view.state.doc.toString() : marked(view);
@@ -365,7 +365,7 @@ describe('heading, list and quote commands (palette, toolbars)', () => {
 
   it('leaves code blocks alone past the parsed part of a long note', () => {
     const body = Array.from({ length: 2000 }, (_, i) => `line ${i}`).join('\n');
-    const out = run(`«${body}\n\`\`\`\ncode\n\`\`\`»`, toggleBulletList);
+    const out = run(`«${body}\n\`\`\`\ncode\n\`\`\`»`, toggleBulletList, 'source', true);
     expect(out.endsWith('- line 1999\n```\ncode\n```')).toBe(true);
   });
 

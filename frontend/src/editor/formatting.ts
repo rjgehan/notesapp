@@ -7,6 +7,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorSelection, Prec, StateEffect, StateField, Transaction, type ChangeSpec, type EditorState, type Extension, type SelectionRange, type Text } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type Command } from '@codemirror/view';
 import { Tree, type SyntaxNode } from '@lezer/common';
+import { splitWikiBody } from '../features/syntax';
 import { toast } from '../state/toasts';
 import { collectElements, type ElementKind, type LiveElement } from './livePreview/model';
 
@@ -15,8 +16,11 @@ export type InlineFormat = 'strong' | 'emphasis' | 'strikethrough' | 'highlight'
 /** The Markdown each format writes. */
 export const FORMAT_MARKERS: Readonly<Record<InlineFormat, string>> = { strong: '**', emphasis: '*', strikethrough: '~~', highlight: '==', code: '`' };
 
-/** Inline elements a format never cuts into: code's text is not Markdown, and a wikilink's or URL's text is its target. */
-const ATOMIC: ReadonlySet<ElementKind> = new Set(['code', 'wikilink', 'autolink', 'url']);
+/**
+ * Inline elements a format never cuts into: code's text is not Markdown, a wikilink's or URL's text
+ * is its target, a tag is one word, and embeds, footnotes and comments show whole (or not at all).
+ */
+const ATOMIC: ReadonlySet<ElementKind> = new Set(['code', 'wikilink', 'autolink', 'url', 'tag', 'embed', 'footnote', 'comment']);
 /** Elements a format's range steps around when it crosses their edge, splitting in two (`*a **b*** **c**`). */
 const NESTING: ReadonlySet<ElementKind> = new Set(['emphasis', 'strong', 'strikethrough', 'highlight', 'link']);
 const LINKS: ReadonlySet<ElementKind> = new Set(['link', 'wikilink', 'autolink', 'url']);
@@ -68,14 +72,24 @@ function subtract(span: Span, gaps: readonly Span[]): Span[] {
 
 // ---------- lines ----------
 
-/** Block markup at a line start that inline formatting stays out of: quotes, list markers and task boxes, heading marks. */
-const BLOCK_PREFIX = /^[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?(?:#{1,6}(?:[ \t]+|$))?/;
+/**
+ * Block markup at a line start that inline formatting stays out of: quotes, list markers and task
+ * boxes, heading marks, a footnote definition's label.
+ */
+const BLOCK_PREFIX = /^[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?(?:#{1,6}(?:[ \t]+|$))?(?:\[\^[^\]\s]+\]:[ \t]*)?/;
 const HEADING_CLOSE = /[ \t]+#+[ \t]*$/;
 
-/** The name of the raw block (code, frontmatter, …) or table the line at `pos` is in, if any. */
+/** Lines that are markup, not text: a rule, a link reference definition. */
+const MARKUP_LINES = new Set(['HorizontalRule', 'LinkReference']);
+
+/**
+ * The name of the raw block (code, frontmatter, …) or table the line at `pos` is in, or of the
+ * markup the line is (a rule, a link reference, a setext heading's underline), if any.
+ */
 function blockAt(state: EditorState, pos: number, tree: Tree = syntaxTree(state)): string | null {
   for (let node: SyntaxNode | null = tree.resolveInner(pos, 1); node; node = node.parent) {
-    if (RAW_BLOCKS.has(node.name) || node.name === 'Table') return node.name;
+    if (RAW_BLOCKS.has(node.name) || node.name === 'Table' || MARKUP_LINES.has(node.name)) return node.name;
+    if (node.name === 'HeaderMark' && node.parent?.name.startsWith('SetextHeading')) return 'SetextUnderline';
   }
   return null;
 }
@@ -299,23 +313,43 @@ function unformatChanges(state: EditorState, segments: readonly Span[], format: 
     const right = trim(state, b, e.textTo);
     const keepLeft = left.to > left.from;
     const keepRight = right.to > right.from;
-    if (!keepLeft && !keepRight) {
+    // Markers that share a run with an enclosing element's (`***ab cd ef***`, bold in italic) would
+    // pair up differently once split: the format comes off all of the element instead.
+    const markerChar = state.sliceDoc(e.from, e.from + 1);
+    const sharesRun = format !== 'code' && (state.sliceDoc(e.from - 1, e.from) === markerChar || state.sliceDoc(e.to, e.to + 1) === markerChar);
+    if ((!keepLeft && !keepRight) || sharesRun) {
       removeAll();
       continue;
     }
     const open = state.sliceDoc(e.from, e.textFrom);
     const close = state.sliceDoc(e.textTo, e.to);
+    if (format === 'code') {
+      // Each piece of code gets the markers its own text needs (it may hold backticks).
+      if (keepLeft) {
+        const m = codeMarkers(state.sliceDoc(e.textFrom, left.to));
+        changes.push({ from: e.from, to: e.textFrom, insert: m.open }, { from: left.to, insert: m.close });
+      } else {
+        changes.push({ from: e.from, to: e.textFrom });
+      }
+      if (keepRight) {
+        const m = codeMarkers(state.sliceDoc(right.from, e.textTo));
+        changes.push({ from: right.from, insert: m.open }, { from: e.textTo, to: e.to, insert: m.close });
+      } else {
+        changes.push({ from: e.textTo, to: e.to });
+      }
+      continue;
+    }
     // Underscores cannot open or close inside a word, so a split writes the canonical markers.
-    const marker = format === 'code' ? null : FORMAT_MARKERS[format];
+    const marker = FORMAT_MARKERS[format];
     if (keepLeft) {
-      if (marker && open !== marker) changes.push({ from: e.from, to: e.textFrom, insert: marker });
-      changes.push({ from: left.to, insert: marker ?? close });
+      if (open !== marker) changes.push({ from: e.from, to: e.textFrom, insert: marker });
+      changes.push({ from: left.to, insert: marker });
     } else {
       changes.push({ from: e.from, to: e.textFrom });
     }
     if (keepRight) {
-      changes.push({ from: right.from, insert: marker ?? open });
-      if (marker && close !== marker) changes.push({ from: e.textTo, to: e.to, insert: marker });
+      changes.push({ from: right.from, insert: marker });
+      if (close !== marker) changes.push({ from: e.textTo, to: e.to, insert: marker });
     } else {
       changes.push({ from: e.textTo, to: e.to });
     }
@@ -407,8 +441,15 @@ const typeWithPending = EditorView.inputHandler.of((view, from, to, text) => {
     view.dispatch({ changes: { from, insert: text }, selection: EditorSelection.cursor(from + text.length), effects: setPending.of({ ...pending, pos: from + text.length }), userEvent: 'input.type' });
     return true;
   }
-  const body = text.slice(lead.length).trimEnd();
-  const trail = text.slice(lead.length + body.length);
+  const typed = text.slice(lead.length).trimEnd();
+  const trail = text.slice(lead.length + typed.length);
+  // A marker character at an edge of the typed text would merge with the markers (`=` with
+  // highlight pending would write `=====`, a heading underline): it is escaped. Inside code it is literal.
+  let body = typed;
+  if (!pending.formats.includes('code')) {
+    if (/^[*_~=]/.test(body)) body = '\\' + body;
+    if (body.length > 1 && /[*_~=]$/.test(body) && !/\\[*_~=]$/.test(body)) body = body.slice(0, -1) + '\\' + body.slice(-1);
+  }
   let open = '';
   let close = '';
   for (const f of pending.formats) {
@@ -460,14 +501,11 @@ function toggleAtCursor(state: EditorState, range: SelectionRange, format: Inlin
   const atomic = innermost(elements, (e) => ATOMIC.has(e.kind) && e.kind !== format && e.from < pos && pos < e.to);
   const word = atomic ? { from: atomic.from, to: atomic.to } : wordAround(state, pos);
   if (word) {
-    const { open, close } = markersFor(format, state.sliceDoc(word.from, word.to));
-    return {
-      changes: [
-        { from: word.from, insert: open },
-        { from: word.to, insert: close },
-      ],
-      range: EditorSelection.cursor(pos + open.length),
-    };
+    // As on a selection: the word merges with the same format it touches (`**bold**word`).
+    const { removals, inserts } = formatChanges(state, [word], format, new LineIndex(state.doc, elements));
+    const removed = state.changes(removals);
+    const changes = removed.compose(state.changes(inserts).map(removed));
+    return { changes: [changes], range: EditorSelection.cursor(changes.mapPos(pos, 1)) };
   }
   const pending = state.field(pendingFormats, false);
   if (single && pending !== undefined) {
@@ -545,14 +583,21 @@ export const toggleInlineCode: Command = toggleFormat('code');
 /** The text a link shows, for taking the link off. */
 function linkText(state: EditorState, e: LiveElement): string {
   if (e.kind === 'wikilink') {
-    const text = state.sliceDoc(e.textFrom, e.textTo);
-    // `[[Note#Heading]]` shows "Note > Heading", as the reading view does.
-    return state.sliceDoc(e.textFrom - 1, e.textFrom) === '|' ? text : state.sliceDoc(e.from + 2, e.to - 2).replace(/^#/, '').replace(/#/g, ' > ');
+    const { target, subpath, display } = splitWikiBody(state.sliceDoc(e.from + 2, e.to - 2));
+    if (display) return display;
+    // `[[Note#Heading]]` shows "Note > Heading", as the reading view does (`[[Note|]]` shows "Note").
+    const parts = [target, ...(subpath ? subpath.split('#') : [])].filter((p) => p !== '');
+    return parts.join(' > ');
   }
   return state.sliceDoc(e.textFrom, e.textTo);
 }
 
 const URL_LIKE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|www\.)\S+$/i;
+
+/** A web address as a link's destination: `www.example.com` gets its `https://` (without it, it reads as a note). */
+function webDestination(url: string): string {
+  return /^www\./i.test(url) ? `https://${url}` : url;
+}
 
 /**
  * Mod-K (DESIGN §6.6.1): in a link, takes the link off and keeps its text. A selected web address
@@ -567,7 +612,7 @@ export const toggleLink: Command = (view) => {
     const inLink = (e: LiveElement) => LINKS.has(e.kind) && e.from <= range.from && range.to <= e.to && (!range.empty || (e.from < range.head && range.head < e.to) || (e.kind === 'url' && range.head === e.to));
     const link = innermost(elements, inLink);
     if (link?.kind === 'url') {
-      const url = state.sliceDoc(link.from, link.to);
+      const url = webDestination(state.sliceDoc(link.from, link.to));
       return { changes: { from: link.from, to: link.to, insert: `[](${url})` }, range: EditorSelection.cursor(link.from + 1) };
     }
     if (link) {
@@ -578,7 +623,7 @@ export const toggleLink: Command = (view) => {
     const span = range.empty ? wordAround(state, range.head) : { from: range.from, to: range.to };
     if (!span) return { changes: { from: range.head, insert: '[]()' }, range: EditorSelection.cursor(range.head + 1) };
     const text = state.sliceDoc(span.from, span.to);
-    if (URL_LIKE.test(text)) return { changes: { from: span.from, to: span.to, insert: `[](${text})` }, range: EditorSelection.cursor(span.from + 1) };
+    if (URL_LIKE.test(text)) return { changes: { from: span.from, to: span.to, insert: `[](${webDestination(text)})` }, range: EditorSelection.cursor(span.from + 1) };
     return { changes: { from: span.from, to: span.to, insert: `[${text}]()` }, range: EditorSelection.cursor(span.from + text.length + 3) };
   });
   view.dispatch(state.update(tr, { userEvent: 'input.format', scrollIntoView: true }));
@@ -611,12 +656,18 @@ function selectionTree(state: EditorState): Tree | null {
  * The lines a line command changes: those of the selection (blank ones only when nothing else is
  * selected), outside code and tables. Null when the note is not parsed that far yet.
  */
+/** The last line a range covers: a selection that ends at the start of a line (a triple click) leaves that line out. */
+function lastLine(state: EditorState, r: SelectionRange): number {
+  const line = state.doc.lineAt(r.to);
+  return !r.empty && r.to === line.from && line.number > 1 ? line.number - 1 : line.number;
+}
+
 function targetLines(state: EditorState, tree: Tree | null = selectionTree(state)): LineMarkup[] | null {
   if (!tree) return null;
   const lines = new Map<number, LineMarkup>();
   for (const r of state.selection.ranges) {
-    const last = state.doc.lineAt(r.to);
-    for (let n = state.doc.lineAt(r.from).number; n <= last.number; n++) {
+    const last = lastLine(state, r);
+    for (let n = state.doc.lineAt(r.from).number; n <= last; n++) {
       const line = state.doc.line(n);
       if (lines.has(line.from) || (line.length > 0 && blockAt(state, line.from, tree) !== null)) continue;
       const m = LINE_MARKUP.exec(line.text)!;
@@ -709,7 +760,7 @@ export const toggleQuote: Command = (view) => {
   if (!tree) return true;
   const lines = new Map<number, string>();
   for (const r of state.selection.ranges) {
-    const last = state.doc.lineAt(r.to).number;
+    const last = lastLine(state, r);
     for (let n = state.doc.lineAt(r.from).number; n <= last; n++) {
       const line = state.doc.line(n);
       // Any block can be quoted, except the frontmatter (blank lines in it included).
@@ -717,14 +768,16 @@ export const toggleQuote: Command = (view) => {
     }
   }
   if (lines.size === 0) return true;
-  const quoted = [...lines.values()].every((t) => /^[ \t]*>/.test(t) || t.trim() === '');
+  // Quoted or not is the text lines' say; blank lines alone (an empty line) get quoted.
+  const texts = [...lines.values()].filter((t) => t.trim() !== '');
+  const quoted = texts.length > 0 && texts.every((t) => /^[ \t]*>/.test(t));
   const changes: ChangeSpec[] = [];
   for (const [from, text] of lines) {
     if (quoted) {
       const m = /^([ \t]*)>[ \t]?/.exec(text);
       if (m) changes.push({ from: from + m[1].length, to: from + m[0].length });
     } else {
-      changes.push({ from, insert: text.trim() === '' ? '>' : '> ' });
+      changes.push({ from, insert: text.trim() === '' && texts.length > 0 ? '>' : '> ' });
     }
   }
   const set = state.changes(changes);

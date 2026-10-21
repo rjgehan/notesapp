@@ -118,16 +118,24 @@ export function marked(view: EditorView): string {
   return out;
 }
 
-/** A note editor attached to the document. */
-export function noteEditor(text: string, { mode = 'live', config, ctx, readOnly = false }: TestEditorOptions = {}): EditorView {
+/**
+ * A note editor attached to the document, its note parsed to the end (as it is soon after a note
+ * opens; a new state is parsed only to its first few thousand characters, or less on a busy
+ * machine). `partial` keeps the new state's own parse.
+ */
+export function noteEditor(text: string, { mode = 'live', config, ctx, readOnly = false, partial = false }: TestEditorOptions & { partial?: boolean } = {}): EditorView {
   const { doc, selection } = unmark(text);
   const livePreview: LivePreviewConfig | null = mode === 'source' ? null : { visibility: 'hide-all', locked: mode === 'locked', checkboxes: !readOnly, ...config };
-  const state = EditorState.create({
+  let state = EditorState.create({
     doc,
     selection,
     extensions: noteExtensions(testContext(ctx), { onLocalChange: () => {}, onBlur: () => {}, readOnly, spellcheck: false, autocorrect: false, livePreview }),
   });
-  ensureSyntaxTree(state, state.doc.length, 5000);
+  if (!partial) {
+    ensureSyntaxTree(state, state.doc.length, 5000);
+    // A state's tree is the parse as of its transaction: an empty one brings the finished parse in.
+    state = state.update({}).state;
+  }
   const view = new EditorView({ state, parent: document.body });
   views.push(view);
   return view;

@@ -68,7 +68,9 @@ export type ElementKind =
   | 'footnote'
   | 'footnote-def'
   | 'comment'
-  | 'codeblock';
+  | 'codeblock'
+  /** A `#tag`: nothing hidden (its style comes from the highlighter); formatting treats it as one word. */
+  | 'tag';
 
 /** A replaced range of markup: hidden, or shown as a widget. */
 export interface Piece {
@@ -249,12 +251,16 @@ function delimited(node: SyntaxNode, kind: ElementKind, markName: string, closeR
   };
 }
 
-/** `[text](url "title")`: the text, as a link. Reference links and links without text show as typed. */
-function link(node: SyntaxNode): Draft | null {
+/**
+ * `[text](url "title")`: the text, as a link. Reference links and links without text show as typed,
+ * and so does a link whose destination or title is on another line than its text's end (`[a](\nurl)`):
+ * its hidden `](…)` would cross a line break.
+ */
+function link(state: EditorState, node: SyntaxNode): Draft | null {
   const marks = node.getChildren('LinkMark');
   if (!node.getChild('URL') || marks.length < 4) return null;
   const [open, close] = marks;
-  if (open.from !== node.from || close.from <= open.to) return null;
+  if (open.from !== node.from || close.from <= open.to || !oneLine(state, close.from, node.to)) return null;
   return {
     kind: 'link',
     from: node.from,
@@ -480,7 +486,7 @@ function draftFor(state: EditorState, node: SyntaxNode): Draft | null {
     case 'InlineCode':
       return delimited(node, 'code', 'CodeMark', 'close-link');
     case 'Link':
-      return link(node);
+      return link(state, node);
     case 'Autolink':
       return autolink(node);
     case 'WikiLink':
@@ -497,6 +503,8 @@ function draftFor(state: EditorState, node: SyntaxNode): Draft | null {
       return comment(state, node);
     case 'FencedCode':
       return codeBlock(state, node);
+    case 'Hashtag':
+      return { kind: 'tag', from: node.from, to: node.to, textFrom: node.from, textTo: node.to, revealFrom: node.from, revealTo: node.to, pieces: [], marks: [] };
     case 'URL': {
       // A bare web address (GFM autolink): styled and clickable, nothing hidden.
       const parent = node.parent?.name;
@@ -525,7 +533,10 @@ export function collectElements(state: EditorState, ranges: readonly { from: num
           if (seen.has(key)) return;
           seen.add(key);
           const draft = draftFor(state, node);
-          if (draft) out.push({ ...draft, pieces: draft.pieces.map((p) => ({ ...p, kind: draft.kind })) });
+          // A replaced range must never cross a line break (a view plugin provides them, and the
+          // editor throws): an element whose markup would shows as typed.
+          if (!draft || draft.pieces.some((p) => !oneLine(state, p.from, p.to))) return;
+          out.push({ ...draft, pieces: draft.pieces.map((p) => ({ ...p, kind: draft.kind })) });
         };
         if (SKIP.has(ref.name)) {
           // Some are elements themselves (a code block's fences, an embed, an inline comment).

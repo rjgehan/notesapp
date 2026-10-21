@@ -10,7 +10,8 @@
 import { syntaxTree } from '@codemirror/language';
 import { EditorSelection, EditorState, Facet, Prec, RangeSet, RangeValue, StateEffect, StateField, Transaction, type ChangeDesc, type Extension, type SelectionRange, type TransactionSpec } from '@codemirror/state';
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import { noteContext } from '../context';
+import { noteContext, vaultChanged } from '../context';
+import { textReplace } from '../remote';
 import { remeasureOnChange } from './embeds';
 import { isPointerSelection } from './pointer';
 import { tableEdit } from './table/facets';
@@ -67,13 +68,16 @@ const cleanups = new WeakMap<HTMLElement, () => void>();
 class PropertiesWidget extends WidgetType {
   readonly yaml: string;
   readonly editable: boolean;
-  constructor(yaml: string, editable: boolean) {
+  /** The note's path: its links resolve from there, so a move of the note draws them again. */
+  readonly source: string;
+  constructor(yaml: string, editable: boolean, source: string) {
     super();
     this.yaml = yaml;
     this.editable = editable;
+    this.source = source;
   }
   override eq(other: PropertiesWidget): boolean {
-    return other.yaml === this.yaml && other.editable === this.editable;
+    return other.yaml === this.yaml && other.editable === this.editable && other.source === this.source;
   }
   toDOM(view: EditorView): HTMLElement {
     const el = document.createElement('div');
@@ -195,7 +199,7 @@ function build(state: EditorState, frontmatter: Frontmatter | null, candidates: 
   const shown = candidates.filter((b) => !editing || b.from !== editing.from);
   const decorations = Decoration.set(
     shown.map((b) => {
-      const widget = b.kind === 'properties' && frontmatter ? new PropertiesWidget(state.sliceDoc(frontmatter.yamlFrom, frontmatter.yamlTo), editable) : hiddenComment;
+      const widget = b.kind === 'properties' && frontmatter ? new PropertiesWidget(state.sliceDoc(frontmatter.yamlFrom, frontmatter.yamlTo), editable, state.facet(noteContext)?.path() ?? '') : hiddenComment;
       return Decoration.replace({ widget, block: true }).range(b.from, b.to);
     }),
   );
@@ -211,7 +215,8 @@ const blocksField = StateField.define<Blocks>({
   update(value, tr) {
     const config = tr.state.facet(blocksConfig);
     // A mode switch keeps the field's value (the editor's state is reconfigured): it is computed again.
-    const reconfigured = config !== tr.startState.facet(blocksConfig) || tr.state.readOnly !== tr.startState.readOnly;
+    // So is a change of the vault (the note moved: the properties' links resolve from its new place).
+    const reconfigured = config !== tr.startState.facet(blocksConfig) || tr.state.readOnly !== tr.startState.readOnly || tr.effects.some((e) => e.is(vaultChanged));
     let { frontmatter, candidates } = value;
     if (reconfigured || tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state)) {
       frontmatter = frontmatterOf(tr.state);
@@ -339,7 +344,7 @@ const settleAroundBlocks = EditorState.transactionFilter.of((tr) => {
  * line of its own before or after a comment block.
  */
 const guardBlockEdges = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged || !tr.isUserEvent('input') || tr.annotation(tableEdit) !== undefined || tr.effects.some((e) => e.is(editProperties))) return tr;
+  if (!tr.docChanged || !tr.isUserEvent('input') || tr.annotation(tableEdit) !== undefined || tr.annotation(textReplace) || tr.effects.some((e) => e.is(editProperties))) return tr;
   const blocks = shownBlocks(tr.startState);
   if (blocks.length === 0) return tr;
   const changes: Array<{ from: number; to: number; insert: string }> = [];
@@ -370,9 +375,10 @@ const guardBlockEdges = EditorState.transactionFilter.of((tr) => {
 /**
  * Backspace at the start of the line under a block, and Delete at the end of the line above one,
  * would join that line to it (hiding the line in a comment, or breaking the frontmatter): the
- * caret moves past the block instead. An empty line next to a block is deleted as usual.
+ * caret moves past the block instead. An empty line next to a block is deleted from its other
+ * side, so the caret never ends up against (or in) the block.
  */
-function deleteNextToBlock(forward: boolean): Command {
+export function deleteNextToBlock(forward: boolean): Command {
   return (view) => {
     const { state } = view;
     const { selection } = state;
@@ -383,8 +389,28 @@ function deleteNextToBlock(forward: boolean): Command {
     // The caret never rests in a block; if it does (as a note opens), nothing of the block is deleted.
     if (blocks.some((b) => pos >= b.from && pos <= b.to)) return true;
     const b = blocks.find((x) => (forward ? pos === x.from - 1 : pos === x.to + 1));
-    if (!b || state.doc.lineAt(pos).length === 0) return false;
-    const target = forward ? (b.to < state.doc.length ? b.to + 1 : null) : b.from > 0 ? b.from - 1 : null;
+    if (!b) return false;
+    const { length } = state.doc;
+    const before = b.from > 0 ? b.from - 1 : null;
+    if (state.doc.lineAt(pos).length === 0) {
+      let changes: { from: number; to: number };
+      let caret: number;
+      if (!forward) {
+        // Its own line break goes (or, as the last line, the one before it); the caret goes above the block.
+        changes = pos < length ? { from: pos, to: pos + 1 } : { from: pos - 1, to: pos };
+        caret = before ?? (pos < length ? pos : b.to);
+      } else if (pos > 0) {
+        changes = { from: pos - 1, to: pos };
+        caret = pos - 1;
+      } else {
+        // An empty first line above a block: the caret goes under the block.
+        changes = { from: 0, to: 1 };
+        caret = b.to < length ? b.to : 0;
+      }
+      view.dispatch({ changes, selection: EditorSelection.cursor(caret), scrollIntoView: true, userEvent: forward ? 'delete.forward' : 'delete.backward' });
+      return true;
+    }
+    const target = forward ? (b.to < length ? b.to + 1 : null) : before;
     if (target !== null) view.dispatch({ selection: EditorSelection.cursor(target), scrollIntoView: true, userEvent: 'select' });
     return true;
   };

@@ -44,15 +44,18 @@ class FileEmbedWidget extends WidgetType {
   readonly entry: FileEntry;
   readonly spec: EmbedSpec;
   readonly note: NoteContext;
+  /** The note's path: a transcluded note's links resolve from it, so a move of the note redraws it. */
+  readonly source: string;
   constructor(entry: FileEntry, spec: EmbedSpec, note: NoteContext) {
     super();
     this.entry = entry;
     this.spec = spec;
     this.note = note;
+    this.source = note.path();
   }
   override eq(other: FileEmbedWidget): boolean {
     // The same file at the same version: an edit elsewhere in the note redraws nothing.
-    return other.entry.path === this.entry.path && other.entry.size === this.entry.size && other.entry.mtime === this.entry.mtime && sameSpec(other.spec, this.spec);
+    return other.entry.path === this.entry.path && other.entry.size === this.entry.size && other.entry.mtime === this.entry.mtime && other.source === this.source && sameSpec(other.spec, this.spec);
   }
   toDOM(view: EditorView): HTMLElement {
     const el = document.createElement('span');
@@ -146,6 +149,24 @@ class EmbedLinkWidget extends WidgetType {
     el.textContent = this.text;
     return el;
   }
+  override ignoreEvent(): boolean {
+    // A click or tap follows it as a link does (the editor's link handling).
+    return false;
+  }
+}
+
+/** The file an embed shows, when it is in the vault. */
+function embeddedFile(spec: EmbedSpec, note: NoteContext): FileEntry | null {
+  if (spec.target === null) return null;
+  const tree = note.tree();
+  const path = resolve(spec.target, note.path(), tree.links);
+  return (path ? tree.byPath.get(path) : undefined) ?? null;
+}
+
+/** Whether a table cell's editor shows this embed: only images (a cell holds a line of text). */
+export function showsInCell(spec: EmbedSpec, note: NoteContext | null): boolean {
+  if (spec.url !== null) return true;
+  return note !== null && embeddedFile(spec, note)?.kind === 'image';
 }
 
 /** The text a link to an embed shows: its display text, else "Note > Heading". */
@@ -162,10 +183,7 @@ function linkText(spec: EmbedSpec): string {
  */
 export function cellImage(view: EditorView, spec: EmbedSpec, note: NoteContext, remoteImages: boolean): HTMLElement | null {
   if (spec.url !== null) return new WebImageWidget(spec, remoteImages).toDOM(view);
-  if (spec.target === null) return null;
-  const tree = note.tree();
-  const path = resolve(spec.target, note.path(), tree.links);
-  const entry = path ? tree.byPath.get(path) : undefined;
+  const entry = embeddedFile(spec, note);
   if (!entry || entry.kind !== 'image') return null;
   const el = document.createElement('span');
   el.className = 'cm-lp-embed cm-lp-embed-image';
@@ -178,11 +196,8 @@ export function cellImage(view: EditorView, spec: EmbedSpec, note: NoteContext, 
 /** The widget for an embed: the file, a web image, or a link. */
 export function embedWidget(spec: EmbedSpec, note: NoteContext | null, remoteImages: boolean): WidgetType {
   if (spec.url !== null) return new WebImageWidget(spec, remoteImages);
-  if (!note || spec.target === null) return new EmbedLinkWidget(linkText(spec), true);
-  const tree = note.tree();
-  const path = resolve(spec.target, note.path(), tree.links);
-  const entry = path ? tree.byPath.get(path) : undefined;
-  if (!entry) return new EmbedLinkWidget(linkText(spec), true);
+  const entry = note ? embeddedFile(spec, note) : null;
+  if (!note || !entry) return new EmbedLinkWidget(linkText(spec), true);
   // Transclusion is one level deep and never of the note itself; block references are ROADMAP 20.
   if (entry.kind === 'note' && (entry.path === note.path() || spec.subpath?.startsWith('^'))) return new EmbedLinkWidget(linkText(spec), false);
   return new FileEmbedWidget(entry, spec, note);

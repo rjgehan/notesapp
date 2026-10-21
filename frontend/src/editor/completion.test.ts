@@ -75,7 +75,7 @@ afterEach(() => {
 function makeView(doc: string, cursor: number, ctx = context()): EditorView {
   const state = EditorState.create({ doc, selection: EditorSelection.cursor(cursor), extensions: noteExtensions(ctx, hooks) });
   ensureSyntaxTree(state, state.doc.length, 5000);
-  const view = new EditorView({ state });
+  const view = new EditorView({ state: state.update({}).state });
   views.push(view);
   return view;
 }

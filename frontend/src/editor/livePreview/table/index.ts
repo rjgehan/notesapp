@@ -9,6 +9,7 @@ import { EditorSelection, EditorState, Prec, RangeSet, RangeValue, StateField, T
 import { Decoration, EditorView, keymap, ViewPlugin, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { toast } from '../../../state/toasts';
 import { noteContext, vaultChanged } from '../../context';
+import { textReplace } from '../../remote';
 import { refreshTables, tableCellHost, tableEdit, tablesConfig, type TablesConfig } from './facets';
 import { gridAt, gridsOf, TableWidget, type TableBlock } from './grid';
 import { newTableText, parseTable, rowCount, type TableModel } from './model';
@@ -191,7 +192,7 @@ const settleAroundTables = EditorState.transactionFilter.of((tr) => {
  * after it.
  */
 const guardTableEdges = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged || !tr.isUserEvent('input') || tr.annotation(tableEdit) !== undefined) return tr;
+  if (!tr.docChanged || !tr.isUserEvent('input') || tr.annotation(tableEdit) !== undefined || tr.annotation(textReplace)) return tr;
   const blocks = tableBlocks(tr.startState);
   if (blocks.length === 0) return tr;
   const changes: Array<{ from: number; to: number; insert: string }> = [];
@@ -231,7 +232,7 @@ function joinsTable(line: string): boolean {
  * undo and redo, are left as they are.
  */
 const keepTablesApart = EditorState.transactionFilter.of((tr) => {
-  if (!tr.docChanged || !(tr.isUserEvent('input') || tr.isUserEvent('delete')) || tr.annotation(tableEdit) !== undefined) return tr;
+  if (!tr.docChanged || !(tr.isUserEvent('input') || tr.isUserEvent('delete')) || tr.annotation(tableEdit) !== undefined || tr.annotation(textReplace)) return tr;
   const blocks = tableBlocks(tr.startState);
   if (blocks.length === 0) return tr;
   const { doc } = tr.startState;
@@ -297,7 +298,7 @@ function horizontally(forward: boolean): Command {
  * table, is deleted as usual. Right against the table (a caret after a table that ends the note),
  * a deletion would take the whole table, which is atomic; it goes into the table too.
  */
-function deleting(forward: boolean): Command {
+export function deleteNextToTable(forward: boolean): Command {
   return (view) => {
     const pos = caret(view);
     if (pos === null) return false;
@@ -321,8 +322,8 @@ const tableKeymap = keymap.of([
   { key: 'ArrowUp', run: vertically(false) },
   { key: 'ArrowRight', run: horizontally(true) },
   { key: 'ArrowLeft', run: horizontally(false) },
-  ...['Backspace', 'Shift-Backspace', 'Mod-Backspace', 'Alt-Backspace'].map((key) => ({ key, run: deleting(false) })),
-  ...['Delete', 'Mod-Delete', 'Alt-Delete'].map((key) => ({ key, run: deleting(true) })),
+  ...['Backspace', 'Shift-Backspace', 'Mod-Backspace', 'Alt-Backspace'].map((key) => ({ key, run: deleteNextToTable(false) })),
+  ...['Delete', 'Mod-Delete', 'Alt-Delete'].map((key) => ({ key, run: deleteNextToTable(true) })),
 ]);
 
 /**

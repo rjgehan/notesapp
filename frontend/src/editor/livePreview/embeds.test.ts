@@ -3,7 +3,9 @@ import type { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { destroyEditors, fakeEmbed, marked, noteEditor, press, testContext, treeOf, typeText } from '../../test/noteEditor';
 import { noteExtensions } from '../editorSetup';
+import { vaultChanged } from '../context';
 import { footnoteIndex, footnotesOf } from './footnotes';
+import { gridOf } from './table/grid';
 
 afterEach(() => {
   destroyEditors();
@@ -203,5 +205,33 @@ describe('switching modes (ROADMAP 10b)', () => {
     expect(view.contentDOM.querySelector('.cm-lp-table')?.classList.contains('is-editable')).toBe(false);
     reconfigure(false);
     expect(view.contentDOM.querySelector('.cm-lp-table')?.classList.contains('is-editable')).toBe(true);
+  });
+});
+
+describe('embeds and links, review fixes', () => {
+  it('an embed shown as a link, and the " > " of a heading link, follow on a click in a locked note', () => {
+    const openLink = vi.fn();
+    const view = editor('See ![[Missing]] and [[Note#Part]]', { mode: 'locked', ctx: { openLink } });
+    view.contentDOM.querySelector<HTMLElement>('.cm-lp-embed-link')!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(openLink).toHaveBeenCalledWith('Missing', null);
+    view.contentDOM.querySelector<HTMLElement>('.cm-lp-subpath')!.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+    expect(openLink).toHaveBeenLastCalledWith('Note', 'Part');
+  });
+
+  it('a table cell being edited shows its images, and other embeds and footnotes as typed', () => {
+    const view = editor('| a |\n|---|\n| x ![[Note]] ![[pic.png]] ^[inline] |');
+    gridOf(view.contentDOM.querySelector('.cm-lp-table'))!.activate(1, 0);
+    const cell = gridOf(view.contentDOM.querySelector('.cm-lp-table'))!.activeCell()!.editor;
+    expect(cell.contentDOM.textContent).toBe('x ![[Note]] pic.png|| ^[inline]');
+  });
+
+  it('the properties draw again when the note moves (their links resolve from its new place)', () => {
+    let path = 'A/Here.md';
+    const sources: string[] = [];
+    const view = editor('---\nup: "[[Next]]"\n---\nBody', { ctx: { path: () => path, renderProperties: (el) => (sources.push(path), el.append('Properties'), () => el.replaceChildren()) } });
+    expect(sources).toEqual(['A/Here.md']);
+    path = 'B/Here.md';
+    view.dispatch({ effects: vaultChanged.of(null) });
+    expect(sources).toEqual(['A/Here.md', 'B/Here.md']);
   });
 });

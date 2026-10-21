@@ -473,12 +473,14 @@ export class TableGrid {
   activate(row: number, column: number, place: Place = 'end'): boolean {
     if (!this.editable() || !this.cells[row]?.[column]) return false;
     const old = this.active;
-    if (old && old.row === row && old.column === column) {
+    const m = this.model();
+    // The cell already open, unless another cell's content is there now (a row or column deleted,
+    // inserted or moved under it): then it opens afresh, so typing never writes the old text over it.
+    if (old && old.row === row && old.column === column && canonical(old.editor.state.doc.toString()) === canonical(cellContent(m, row, column))) {
       old.editor.focus();
       this.place(old.editor, place);
       return true;
     }
-    const m = this.model();
     const setup = this.view.state.facet(tableCellSetup);
     const editor = new EditorView({
       state: EditorState.create({ doc: cellContent(m, row, column), extensions: [setup ? setup() : cellLanguage, this.cellExtensions(row, column)] }),
@@ -785,7 +787,21 @@ export class TableGrid {
     const ctx = this.view.state.facet(noteContext);
     if (!ctx || !this.editable()) return;
     const label = kind === 'row' ? (row === 0 ? 'Header row' : `Row ${row}`) : kind === 'column' ? `Column ${columnName(column)}` : cellLabel(row, column);
-    ctx.showMenu({ x, y }, label, this.menuItems(row, column, kind));
+    // The menu names rows and columns by their place when it opened: if the table changes while it
+    // is open (another device's edit), its items would act on another row, so they do nothing.
+    const text = this.widget.block.text;
+    const items = this.menuItems(row, column, kind).map((item): EditorMenuEntry =>
+      item === 'separator'
+        ? item
+        : {
+            ...item,
+            run: () => {
+              if (this.widget.block.text !== text || !this.dom.isConnected) toast('The table changed; open its menu again');
+              else item.run();
+            },
+          },
+    );
+    ctx.showMenu({ x, y }, label, items);
   }
 
   /** Removes the whole table (one undo step), with the line break after it. */

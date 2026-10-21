@@ -4,13 +4,14 @@
 // The live content is CodeMirror's Text inside the session's EditorState (LF-only). Strings are
 // produced only for saves and drafts. `baseText` is the content at `version`, kept for merges.
 import { history } from '@codemirror/commands';
-import { EditorState, Transaction, type ChangeSpec, type Extension, type StateEffect } from '@codemirror/state';
+import { EditorState, Transaction, type Annotation, type ChangeSpec, type Extension, type StateEffect } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { errorMessage, isProblem, isStorageProblem, isTransient, isVersionConflict, type ApiError } from '../api/client';
 import type { Endpoints } from '../api/endpoints';
 import type { FileEntry, TextFile, Version, WriteResult } from '../api/types';
 import { markdownNoteLanguage } from '../editor/language';
-import { isComposing, remoteChanges, remoteTransaction, sessionEdit, waitForComposition } from '../editor/remote';
+import { tableBlocks } from '../editor/livePreview/table';
+import { isComposing, remoteChanges, remoteTransaction, sessionEdit, textReplace, waitForComposition } from '../editor/remote';
 import { addUpload, endUpload, pendingUploads, uploadsField } from '../editor/uploads';
 import { detectEol, fromLf, toLf, type Eol } from '../features/eol';
 import { isNotePath } from '../features/paths';
@@ -281,6 +282,10 @@ export class DocumentSession {
     const state = this.editorState;
     if (!this.selectionKnown) return { from: state.doc.length, to: state.doc.length };
     const { from, to } = state.selection.main;
+    // In Live Preview the selection rests on a table's open cell: a template or an attachment goes
+    // after the table, never into its text (the table's edge rules keep it apart).
+    const table = tableBlocks(state).find((t) => (from > t.from && from < t.to) || (to > t.from && to < t.to));
+    if (table) return { from: table.to, to: table.to };
     return { from, to };
   }
 
@@ -299,10 +304,10 @@ export class DocumentSession {
   /** Applies a local edit from outside the editor (reading-view checkbox, generic views). */
   applyEdit(
     changes: ChangeSpec,
-    opts: { selection?: { anchor: number; head?: number }; userEvent?: string; effects?: StateEffect<unknown>[] } = {},
+    opts: { selection?: { anchor: number; head?: number }; userEvent?: string; effects?: StateEffect<unknown>[]; annotations?: Annotation<unknown>[] } = {},
   ): void {
     if (!this.isEditable()) return;
-    const spec = { changes, selection: opts.selection, effects: opts.effects, userEvent: opts.userEvent ?? 'input', scrollIntoView: !!opts.selection };
+    const spec = { changes, selection: opts.selection, effects: opts.effects, annotations: opts.annotations, userEvent: opts.userEvent ?? 'input', scrollIntoView: !!opts.selection };
     if (this.view) {
       this.view.dispatch(spec);
       // The editor's update listener calls markDirty.
@@ -314,7 +319,7 @@ export class DocumentSession {
 
   /** Replaces the whole text as a local edit (generic textual views). */
   setText(text: string): void {
-    this.applyEdit(remoteChanges(this.editorState.doc.toString(), text));
+    this.applyEdit(remoteChanges(this.editorState.doc.toString(), text), { annotations: [textReplace.of(true)] });
   }
 
   /** Effects that change no text (pending uploads). */
@@ -437,7 +442,7 @@ export class DocumentSession {
   private replaceUndoable(text: string): void {
     const spec = {
       changes: remoteChanges(this.editorState.doc.toString(), text),
-      annotations: [sessionEdit.of(true), Transaction.userEvent.of('input.replace')],
+      annotations: [sessionEdit.of(true), textReplace.of(true), Transaction.userEvent.of('input.replace')],
     };
     if (this.view) this.view.dispatch(spec);
     else this.state = this.state.update(spec).state;

@@ -8,7 +8,8 @@ import { collectElements, hiddenPieces, HIDE_ALL, isRevealed, type RevealOptions
 function state(doc: string, cursor = 0): EditorState {
   const s = EditorState.create({ doc, selection: EditorSelection.cursor(cursor), extensions: [markdownNoteLanguage()] });
   ensureSyntaxTree(s, s.doc.length, 5000);
-  return s;
+  // The state's tree is the parse as of its transaction: an empty one brings the finished parse in.
+  return s.update({}).state;
 }
 
 function token(widget: WidgetSpec | null): string {

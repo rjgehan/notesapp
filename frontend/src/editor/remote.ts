@@ -12,6 +12,13 @@ import type { EditorView } from '@codemirror/view';
  */
 export const sessionEdit = Annotation.define<boolean>();
 
+/**
+ * Marks a transaction that replaces the note's text as a whole (Take theirs and its undo, a merged or
+ * restored text): Live Preview's editing rules (around tables and hidden blocks) leave it exactly as
+ * it comes, so the editor holds the text the session meant.
+ */
+export const textReplace = Annotation.define<boolean>();
+
 /** True for a transaction that changes the document on behalf of the user. */
 export function isLocalEdit(tr: Transaction): boolean {
   return tr.docChanged && !tr.annotation(Transaction.remote) && !tr.annotation(sessionEdit);

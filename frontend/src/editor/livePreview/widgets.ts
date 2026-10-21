@@ -114,6 +114,10 @@ class TextWidget extends WidgetType {
     el.textContent = this.text;
     return el;
   }
+  override ignoreEvent(): boolean {
+    // The " > " of a heading link is part of the link: a click on it follows the link.
+    return false;
+  }
 }
 
 const rule = new RuleWidget();

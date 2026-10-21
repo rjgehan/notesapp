@@ -3,8 +3,11 @@ import { ensureSyntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MockVault } from '../../../api/mock/vault';
 import { buildVaultTree } from '../../../api/vaultTree';
 import { DEFAULT_SETTINGS } from '../../../features/settings';
+import { DocumentSession } from '../../../sync/DocumentSession';
+import { fakeApi, sessionDeps } from '../../../test/fakes';
 import { activeEditor, setActiveEditor } from '../../activeEditor';
 import type { EditorMenuEntry, NoteContext } from '../../context';
 import { noteExtensions } from '../../editorSetup';
@@ -456,6 +459,49 @@ describe('rows and columns', () => {
     run(view, 'row-up');
     expect(grid(view).activeCell()).toMatchObject({ row: 1, column: 0 });
     expect(cellEditor(view).state.doc.toString()).toBe('Milk');
+  });
+
+  it('a row or column change under the open cell opens the cell that is there now (review)', () => {
+    const cases: Array<[number, number, string, string, string]> = [
+      // Deleting the open cell's row: the row below takes its place, and typing goes there.
+      [1, 0, 'row-delete', 'Milk', '| Name  | Qty |\n|:------|----:|\n| MilkX |  10 |'],
+      // Inserting a row above it: the new empty row is where the cell was.
+      [1, 0, 'row-above', '', '| Name | Qty |\n|:-----|----:|\n| X    |     |\n| Tea  |   2 |\n| Milk |  10 |'],
+    ];
+    for (const [row, column, id, shownText, expected] of cases) {
+      const view = editor(TABLE);
+      grid(view).activate(row, column, 'end');
+      openMenu(view, row, column);
+      run(view, id);
+      expect(cellEditor(view).state.doc.toString(), id).toBe(shownText);
+      type(cellEditor(view), 'X');
+      expect(view.state.doc.toString(), id).toBe(expected);
+    }
+  });
+
+  it('a menu opened before another device changed the table does nothing (review)', () => {
+    const view = editor(TABLE);
+    openMenu(view, 2, 0);
+    view.dispatch(remoteTransaction(view.state, TABLE.replace('| Tea  |   2 |', '| Jam  |   1 |\n| Tea  |   2 |'))!);
+    run(view, 'row-delete');
+    expect(view.state.doc.toString()).toBe(TABLE.replace('| Tea  |   2 |', '| Jam  |   1 |\n| Tea  |   2 |'));
+  });
+
+  it('a template or attachment inserted while a cell is open goes after the table (review)', () => {
+    const view = editor(`Intro\n\n${TABLE}\n\nOutro`);
+    grid(view).activate(1, 0);
+    const table = view.state.doc.toString().indexOf(TABLE);
+    const session = new DocumentSession('t.md', sessionDeps(fakeApi(new MockVault(false)).api));
+    session.attach(view);
+    expect(session.insertionRange()).toEqual({ from: table + TABLE.length, to: table + TABLE.length });
+  });
+
+  it('a cell at the edge of a row without outer pipes takes an edit that leaves blanks at its edge (review)', () => {
+    const view = editor('a | b\n--|--\nx y | d\n\nafter');
+    grid(view).activate(1, 0, 'start');
+    const cell = cellEditor(view);
+    cell.dispatch({ changes: { from: 0, to: 1 }, userEvent: 'delete.forward' });
+    expect(view.state.doc.toString()).toBe('a | b\n--|--\ny | d\n\nafter');
   });
 
   it('moves a row by dragging its grip', () => {
