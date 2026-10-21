@@ -21,7 +21,7 @@ export function ListDot({ list }: { list: TaskList | undefined }) {
 export function TaskCheck({ task, disabled }: { task: Task; disabled?: boolean }) {
   const closed = task.status !== 'open';
   return (
-    <label className={`task-check-wrap priority-${task.priority}`} onClick={(e) => e.stopPropagation()}>
+    <label className={`task-check-wrap priority-${task.priority}${task.status === 'cancelled' ? ' is-cancelled' : ''}`} onClick={(e) => e.stopPropagation()}>
       <input
         type="checkbox"
         className="task-check"

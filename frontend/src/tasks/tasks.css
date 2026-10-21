@@ -424,6 +424,14 @@ button.link-button {
     center / 12px no-repeat;
 }
 
+/* A cancelled task: a grey cross instead of the check. */
+.task-check-wrap.is-cancelled .task-check:checked {
+  border-color: var(--text-faint);
+  background: var(--text-faint)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 4.5l7 7M11.5 4.5l-7 7' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E")
+    center / 12px no-repeat;
+}
+
 .task-check:disabled {
   cursor: default;
   opacity: 0.5;
@@ -1066,6 +1074,67 @@ textarea[data-unsaved='true'] {
 @media (max-width: 767px) {
   .tasks-page .page-header {
     flex-wrap: wrap;
+  }
+
+  /* An open row editor: the title and notes stay beside the check, and the fields below them take
+     the row's whole width (beside the handle and the check they would not fit a phone). */
+  .task-row.is-tree.is-expanded {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    gap: 4px 6px;
+    align-items: start;
+  }
+
+  .task-row.is-expanded > .task-drag-handle {
+    grid-area: 1 / 1 / 3 / 2;
+  }
+
+  .task-row.is-expanded > .task-check-wrap {
+    grid-area: 1 / 2 / 3 / 3;
+  }
+
+  .task-row.is-expanded > .task-collapse {
+    grid-area: 1 / 4 / 2 / 5;
+  }
+
+  .task-row.is-expanded > .task-inline-editor {
+    display: contents;
+  }
+
+  .task-row.is-expanded .task-inline-title {
+    grid-area: 1 / 3 / 2 / 4;
+  }
+
+  .task-row.is-expanded .task-inline-notes {
+    grid-area: 2 / 3 / 3 / 4;
+  }
+
+  .task-row.is-expanded .task-inline-props {
+    grid-area: 3 / 1 / 4 / -1;
+    padding: 6px 0 4px;
+  }
+
+  /* Whatever the width, the fields wrap rather than run off the screen. */
+  .task-inline-props > *,
+  .task-date-field,
+  .segmented.task-priority-field {
+    max-width: 100%;
+  }
+
+  .task-date-field {
+    flex-wrap: wrap;
+  }
+
+  .task-date-field .text-input {
+    min-width: 0;
+  }
+
+  .segmented.task-priority-field {
+    flex-wrap: wrap;
+  }
+
+  .task-priority-field button {
+    padding: 3px 8px;
   }
 
   /* The floating "+" adds tasks on phones. */
