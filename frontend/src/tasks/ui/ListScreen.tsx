@@ -7,6 +7,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  Ban,
   ChevronDown,
   ChevronRight,
   Columns3,
@@ -35,7 +36,7 @@ import { navigateTo } from '../../features/navigation';
 import { confirmAction, promptText } from '../../state/dialogs';
 import { useToday } from '../dates';
 import { buildRows, childrenByParent, isClosed, MAX_DEPTH, subtreeHeight, type ListRow, type SectionRow, type TaskRow } from '../model';
-import { createSection, deleteSection, deleteTask, isPending, moveTask, renameSection, type Placement } from '../mutations';
+import { cancelTask, createSection, deleteSection, deleteTask, isPending, moveTask, renameSection, type Placement } from '../mutations';
 import { loadParser } from '../quickadd/loadParser';
 import { listParams, useTaskView } from '../queries';
 import { Loading, LoadError, TaskFab, TaskProblems, TasksNav } from './common';
@@ -340,6 +341,7 @@ export function ListScreen({ listId: id, headerExtra, highlight = null, asFile =
     if (!readOnly) {
       items.push(
         { id: 'subtask', label: 'Add subtask', icon: <CornerDownRight size={16} />, disabled: depth >= MAX_DEPTH, run: () => openQuickAdd({ parentId: task.id }) },
+        ...(task.status === 'open' ? [{ id: 'cancel', label: 'Cancel task', icon: <Ban size={16} />, run: () => void cancelTask(task) }] : []),
         'separator',
         { id: 'up', label: 'Move up', icon: <ArrowUp size={16} />, disabled: !moveUp(task, all), run: () => place(task, moveUp(task, all)) },
         { id: 'down', label: 'Move down', icon: <ArrowDown size={16} />, disabled: !moveDown(task, all), run: () => place(task, moveDown(task, all)) },

@@ -4,10 +4,10 @@
 // as a local draft while it is being edited; the task underneath stays live.
 import { Flag, X } from 'lucide-react';
 import { useState } from 'react';
-import type { Task, TaskDate, TaskPriority } from '../../api/types';
+import type { Task, TaskDate, TaskPriority, TaskStatus } from '../../api/types';
 import { datePart, joinDate, timePart } from '../dates';
 import { PRIORITY_NAMES } from '../model';
-import { updateTask } from '../mutations';
+import { setTaskStatus, updateTask } from '../mutations';
 import { cleanTag } from './textField';
 
 /** A date with an optional time (`due` or `start`). */
@@ -42,6 +42,21 @@ export function DateTimeField({ task, field, label, disabled }: { task: Task; fi
           <X size={15} />
         </button>
       )}
+    </div>
+  );
+}
+
+const STATUS_LABELS: Record<TaskStatus, string> = { open: 'To do', done: 'Done', cancelled: 'Cancelled' };
+
+/** The status: Done completes (a recurring task rolls forward), Cancelled closes for good, To do reopens. */
+export function StatusField({ task, disabled }: { task: Task; disabled?: boolean }) {
+  return (
+    <div className="segmented task-status-field" role="radiogroup" aria-label="Status">
+      {(['open', 'done', 'cancelled'] as TaskStatus[]).map((s) => (
+        <button key={s} type="button" role="radio" aria-checked={task.status === s} className={task.status === s ? 'is-active' : ''} disabled={disabled} onClick={() => setTaskStatus(task, s)}>
+          {STATUS_LABELS[s]}
+        </button>
+      ))}
     </div>
   );
 }

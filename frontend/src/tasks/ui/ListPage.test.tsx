@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { queryClient } from '../../api/queryClient';
 import type { Task, TaskList, TaskWriteResult } from '../../api/types';
+import { useToasts } from '../../state/toasts';
 import { taskApi } from '../api';
 import { taskStore } from '../store';
 import { makeList, makeSection, makeTask } from '../testing';
@@ -126,6 +127,22 @@ describe('List page (ROADMAP item 4)', () => {
     expect(useTaskUi.getState().quickAdd).toEqual({ listId: 'L1' });
   });
 
+  it('cancels a task from its menu, with Undo', async () => {
+    serve();
+    const update = vi.spyOn(taskApi, 'update').mockImplementation(async (_id, req) => result({ ...tasks[2], ...req.changes, completedAt: '2026-10-17T10:00:00.000Z' } as Task));
+    const uncomplete = vi.spyOn(taskApi, 'uncomplete').mockResolvedValue(result({ ...tasks[2], status: 'open', completedAt: null }));
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'More for “Pay rent”' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel task' }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith('B', { changes: { status: 'cancelled' }, base: { status: 'open' } }, expect.any(String)));
+    await waitFor(() => expect(titles()).toEqual(['0:Plan the move', '1:Book the van', '0:Buy milk']));
+    const toast = useToasts.getState().toasts.at(-1)!;
+    expect(toast.message).toBe('Cancelled “Pay rent”');
+    act(() => toast.action!.run());
+    await waitFor(() => expect(uncomplete).toHaveBeenCalledWith('B', expect.any(String)));
+    await waitFor(() => expect(titles()).toContain('0:Pay rent'));
+  });
+
   it('shows a list written by a newer version read-only', async () => {
     serve({ ...list, writable: false });
     renderList();
@@ -175,13 +192,25 @@ describe('the Kanban view of a list (ROADMAP item 4)', () => {
     renderList();
     fireEvent.click(await screen.findByRole('radio', { name: /Board/ }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Columns' }), { target: { value: 'board-status' } });
-    expect(columnTitles()).toEqual(['To do: Plan the move, Pay rent, Buy milk', 'Done: Old chore']);
+    expect(columnTitles()).toEqual(['To do: Plan the move, Pay rent, Buy milk', 'Done: Old chore', 'Cancelled: ']);
     fireEvent.click(screen.getByRole('button', { name: 'More for “Pay rent”' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Mark as done' }));
     await waitFor(() => expect(complete).toHaveBeenCalledWith('B', expect.objectContaining({ base: { due: null, start: null } }), expect.any(String)));
-    await waitFor(() => expect(columnTitles()).toEqual(['To do: Plan the move, Buy milk', 'Done: Pay rent, Old chore']));
+    await waitFor(() => expect(columnTitles()).toEqual(['To do: Plan the move, Buy milk', 'Done: Pay rent, Old chore', 'Cancelled: ']));
     const old = screen.getByText('Old chore').closest('[data-board-card]') as HTMLElement;
     fireEvent.keyDown(old, { key: 'ArrowLeft', altKey: true });
     await waitFor(() => expect(uncomplete).toHaveBeenCalledWith('D', expect.any(String)));
+  });
+
+  it('by status: a card dropped on the (always shown) Cancelled column cancels the task', async () => {
+    serve();
+    const update = vi.spyOn(taskApi, 'update').mockImplementation(async (_id, req) => result({ ...tasks[4], ...req.changes, completedAt: '2026-10-17T10:00:00.000Z' } as Task));
+    renderList();
+    fireEvent.click(await screen.findByRole('radio', { name: /Board/ }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Columns' }), { target: { value: 'board-status' } });
+    fireEvent.click(screen.getByRole('button', { name: 'More for “Buy milk”' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mark as cancelled' }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith('E', { changes: { status: 'cancelled' }, base: { status: 'open' } }, expect.any(String)));
+    await waitFor(() => expect(columnTitles()).toEqual(['To do: Plan the move, Pay rent', 'Done: Old chore', 'Cancelled: Buy milk']));
   });
 });

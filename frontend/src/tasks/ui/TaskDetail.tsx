@@ -22,7 +22,7 @@ import { datePart, useToday } from '../dates';
 import { childrenByParent, depthOf, isClosed, MAX_DEPTH } from '../model';
 import { createTask, deleteTask, isPending, updateTask } from '../mutations';
 import { taskStore, useTaskStore } from '../store';
-import { DateTimeField, PriorityField, TagsField } from './fields';
+import { DateTimeField, PriorityField, StatusField, TagsField } from './fields';
 import { RepeatField } from './RepeatField';
 import { useTextField } from './textField';
 import { ListDot, TaskCheck, TaskTitle } from './parts';
@@ -413,6 +413,9 @@ export default function TaskDetail({ id }: { id: string }) {
           </p>
         )}
 
+        <Field label="Status">
+          <StatusField task={task} disabled={readOnly} />
+        </Field>
         <Field label="Due">
           <DateTimeField task={task} field="due" label="Due" disabled={readOnly} />
         </Field>

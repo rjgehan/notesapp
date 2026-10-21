@@ -392,10 +392,22 @@ export function toggleTask(task: Task, store: TaskStore = taskStore): void {
   else void uncompleteTask(task, store);
 }
 
+/**
+ * Cancels an open task (PATCH status: cancelled), with Undo. Unlike completing, it never rolls a
+ * recurring task forward (it stops repeating) and leaves the subtasks as they are.
+ */
+export async function cancelTask(task: Task, store: TaskStore = taskStore): Promise<Task | null> {
+  if (isPending(task) || task.status !== 'open') return null;
+  const after = await updateTask(task, { status: 'cancelled' }, { status: 'open' }, store);
+  if (after?.status === 'cancelled') toast(`Cancelled “${task.title}”`, { action: { label: 'Undo', run: () => void uncompleteTask(store.task(after.id) ?? after, store) } });
+  return after;
+}
+
 /** Sets a task's status (a board move): done goes through complete (recurrence, subtasks, Undo), open through uncomplete. */
 export function setTaskStatus(task: Task, status: TaskStatus, store: TaskStore = taskStore): void {
   if (status === task.status) return;
   if (status === 'done' && task.status === 'open') void completeTask(task, store);
+  else if (status === 'cancelled' && task.status === 'open') void cancelTask(task, store);
   else if (status === 'open') void uncompleteTask(task, store);
   else void updateTask(task, { status }, { status: task.status }, store);
 }

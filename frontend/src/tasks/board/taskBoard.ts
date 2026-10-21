@@ -52,12 +52,12 @@ export function taskColumns(list: TaskList, tasks: readonly Task[], group: Board
   const open = top.filter((t) => t.status === 'open').sort((a, b) => sectionRank(a) - sectionRank(b) || compareOrder(a, b));
   const done = top.filter((t) => t.status === 'done').sort(compareCompleted);
   const cancelled = top.filter((t) => t.status === 'cancelled').sort(compareCompleted);
-  const columns: TaskColumn[] = [
+  // Cancelled is always there, even empty: dropping a card on it is how a task gets cancelled.
+  return [
     { id: statusColumnId('open'), title: 'To do', status: 'open', tasks: open },
     { id: statusColumnId('done'), title: 'Done', status: 'done', tasks: done },
+    { id: statusColumnId('cancelled'), title: 'Cancelled', status: 'cancelled', tasks: cancelled },
   ];
-  if (cancelled.length > 0) columns.push({ id: statusColumnId('cancelled'), title: 'Cancelled', status: 'cancelled', tasks: cancelled });
-  return columns;
 }
 
 export type TaskBoardAction = { kind: 'place'; task: Task; placement: Placement } | { kind: 'status'; task: Task; status: TaskStatus } | null;

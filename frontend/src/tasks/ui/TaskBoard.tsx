@@ -1,14 +1,14 @@
 // The Kanban view of a list (ROADMAP item 4): its sections, or the task statuses, as the columns
 // of the generic Board, with a card per top-level task. Moves become the same writes as on the
 // list page (reorder with the section; complete, reopen or cancel), optimistic and undoable.
-import { ArrowRightLeft, Ellipsis, ListPlus, Maximize2, Plus, SquareSplitVertical, Trash2 } from 'lucide-react';
+import { ArrowRightLeft, Ban, Ellipsis, ListPlus, Maximize2, Plus, SquareSplitVertical, Trash2 } from 'lucide-react';
 import { useMemo, useState, type MouseEvent } from 'react';
 import type { Task, TaskList, TaskSection, TaskStatus } from '../../api/types';
 import { ContextMenu, type MenuEntry } from '../../components/overlays/ContextMenu';
 import { Board, type BoardColumn, type BoardMove } from '../board/Board';
 import { actionFor, taskColumns, type BoardGroup, type TaskColumn } from '../board/taskBoard';
 import { childrenByParent, isClosed } from '../model';
-import { deleteTask, isPending, moveTask, setTaskStatus } from '../mutations';
+import { cancelTask, deleteTask, isPending, moveTask, setTaskStatus } from '../mutations';
 import { TaskCheck, TaskMeta, TaskTitle } from './parts';
 import { openQuickAdd, openTaskDetail } from './state';
 
@@ -82,6 +82,8 @@ export function TaskBoard({ list, tasks, group, showCompleted, readOnly, today, 
           run: () => apply({ itemKey: task.id, from: here?.id ?? '', to: c.id, index: c.tasks.length }),
         });
       }
+      // By status, Cancelled is one of the columns above.
+      if (group === 'section' && task.status === 'open') items.push({ id: 'cancel', label: 'Cancel task', icon: <Ban size={16} />, run: () => void cancelTask(task) });
       items.push('separator', { id: 'delete', label: 'Delete…', icon: <Trash2 size={16} />, danger: true, run: () => void deleteTask(task) });
     }
     setMenu({ x: rect.left, y: rect.bottom + 4, label: `${task.title} actions`, items });

@@ -551,7 +551,8 @@ button.link-button {
   padding: 3px 6px;
 }
 
-.segmented.task-priority-field {
+.segmented.task-priority-field,
+.segmented.task-status-field {
   margin: 0;
 }
 
@@ -1011,6 +1012,7 @@ textarea[data-unsaved='true'] {
   }
 
   .task-priority-field button,
+  .task-status-field button,
   .task-date-field .text-input,
   .task-tag-input {
     min-height: 44px;

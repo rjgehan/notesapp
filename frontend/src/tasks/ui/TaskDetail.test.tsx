@@ -180,6 +180,20 @@ describe('task detail sheet', () => {
     await waitFor(() => expect(taskStore.task('A')?.title).toBe('Pay the rent'));
   });
 
+  it('sets the status: cancelled, then back to To do', async () => {
+    taskStore.upsert([makeTask({ id: 'A', title: 'Renew passport' })]);
+    const patch = update();
+    const reopen = vi.spyOn(taskApi, 'uncomplete').mockImplementation(async (id) => result({ ...taskStore.task(id)!, status: 'open', completedAt: null }));
+    renderWithApp(<TaskDetail id="A" />);
+    const status = screen.getByRole('radiogroup', { name: 'Status' });
+    expect(within(status).getByRole('radio', { name: 'To do' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(status).getByRole('radio', { name: 'Cancelled' }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('A', { changes: { status: 'cancelled' }, base: { status: 'open' } }, expect.any(String)));
+    await waitFor(() => expect(within(status).getByRole('radio', { name: 'Cancelled' })).toHaveAttribute('aria-checked', 'true'));
+    fireEvent.click(within(status).getByRole('radio', { name: 'To do' }));
+    await waitFor(() => expect(reopen).toHaveBeenCalledWith('A', expect.any(String)));
+  });
+
   it('adds subtasks and opens them', async () => {
     taskStore.upsert([makeTask({ id: 'A', title: 'Move' }), makeTask({ id: 'C', title: 'Book the van', parentId: 'A' })]);
     const create = vi.spyOn(taskApi, 'create').mockImplementation(async (req) => result(makeTask({ ...req, id: 'N' } as Partial<Task>)));

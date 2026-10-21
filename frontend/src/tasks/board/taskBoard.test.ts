@@ -34,7 +34,8 @@ describe('a list as a board', () => {
 
   it('by status: To do in the list’s order, then Done and Cancelled by completion, newest first', () => {
     expect(titles(taskColumns(list, tasks, 'status', false))).toEqual(['To do: A,B,C', 'Done: E,D', 'Cancelled: X']);
-    expect(taskColumns(list, tasks.filter((t) => t.status !== 'cancelled'), 'status', false).map((c) => c.id)).toEqual([statusColumnId('open'), statusColumnId('done')]);
+    // Cancelled shows even when empty, as the place to drop a task to cancel it.
+    expect(taskColumns(list, tasks.filter((t) => t.status !== 'cancelled'), 'status', false).map((c) => c.id)).toEqual([statusColumnId('open'), statusColumnId('done'), statusColumnId('cancelled')]);
   });
 });
 
