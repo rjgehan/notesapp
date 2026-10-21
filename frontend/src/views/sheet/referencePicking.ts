@@ -124,6 +124,11 @@ export function useReferencePicking({ gridBox, gridRef, portalRef, barInput, lay
 
     const onPointerMove = (e: PointerEvent) => {
       if (!drag) return;
+      // Released outside the window: the drag is over.
+      if (e.buttons === 0) {
+        drag = null;
+        return;
+      }
       swallow(e);
       const at = cellAt(e.clientX, e.clientY);
       if (at && last) place(drag.el, drag.start, last.end, spanOf(drag.anchor, at));

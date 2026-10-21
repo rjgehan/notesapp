@@ -400,7 +400,7 @@ describe('the spreadsheet view', () => {
     const down = fireEvent.pointerDown(grid, { clientX: 150, clientY: 5, pointerType: 'mouse', button: 0 });
     expect(down).toBe(false); // default prevented: the field keeps the focus
     expect(input.value).toBe('=SUM(B2');
-    fireEvent.pointerMove(grid, { clientX: 150, clientY: 25, pointerType: 'mouse' });
+    fireEvent.pointerMove(grid, { clientX: 150, clientY: 25, pointerType: 'mouse', buttons: 1 });
     expect(input.value).toBe('=SUM(B2:B3');
     fireEvent.pointerUp(grid, { clientX: 150, clientY: 25, pointerType: 'mouse' });
     // The pointed-at range is outlined, and the selection did not move.
