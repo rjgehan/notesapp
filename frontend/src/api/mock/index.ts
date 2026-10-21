@@ -79,6 +79,9 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     getHistoryContent: (path, commit) => call(() => vault.getHistoryContent(path, commit)),
     restoreHistory: (req) => call(() => vault.restoreHistory(req, clientId)),
     commitHistory: () => call(() => vault.commitNow()),
+    getHistoryLog: (f, opts = {}) => call(() => vault.getHistoryLog(f, opts.limit, opts.offset)),
+    getHistoryChanges: (f) => call(() => vault.getHistoryChanges(f)),
+    getDeletedFiles: (q, opts = {}) => call(() => vault.getDeletedFiles(q, opts.limit, opts.offset)),
     getTemplates: () => call(() => vault.getTemplates()),
     rawUrl: (entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>) =>
       blobUrl(`file:${entry.path}:${entry.size}:${entry.mtime}`, vault.rawBytes(entry.path), entry.path),

@@ -4,8 +4,10 @@ import { apiFetch, query } from './client';
 import type {
   AttachmentResult,
   BacklinksResponse,
+  ChangesResponse,
   CommitResult,
   CreateFileRequest,
+  DeletedFilesResponse,
   FileEntry,
   FolderResult,
   HistoryContent,
@@ -32,6 +34,7 @@ import type {
   TagsResponse,
   TemplatesResponse,
   TextFile,
+  TimelineResponse,
   TrashEntry,
   TrashListResponse,
   TreeResponse,
@@ -65,6 +68,13 @@ export interface SearchOptions {
   fuzzy?: boolean;
 }
 
+export interface TimelineFilter {
+  path?: string;
+  author?: string;
+  since?: string;
+  until?: string;
+}
+
 export interface Endpoints {
   getMe(): Promise<MeResponse>;
   getStatus(): Promise<StatusResponse>;
@@ -95,6 +105,9 @@ export interface Endpoints {
   getHistoryContent(path: string, commit: string): Promise<HistoryContent>;
   restoreHistory(req: HistoryRestoreRequest): Promise<HistoryRestoreResult>;
   commitHistory(): Promise<CommitResult>;
+  getHistoryLog(filter: TimelineFilter, opts?: { limit?: number; offset?: number }): Promise<TimelineResponse>;
+  getHistoryChanges(filter: TimelineFilter): Promise<ChangesResponse>;
+  getDeletedFiles(q: string, opts?: { limit?: number; offset?: number }): Promise<DeletedFilesResponse>;
   getTemplates(): Promise<TemplatesResponse>;
   /** Content-addressed raw URL (API.md §9.1). */
   rawUrl(entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>, opts?: { download?: boolean }): string;
@@ -149,6 +162,10 @@ export const httpEndpoints: Endpoints = {
   getHistoryContent: (path, commit) => apiFetch('/api/history/content' + query({ path, commit })),
   restoreHistory: (req) => apiFetch('/api/history/restore', { method: 'POST', json: req }),
   commitHistory: () => apiFetch('/api/history/commit', { method: 'POST' }),
+  getHistoryLog: (f, opts = {}) =>
+    apiFetch('/api/history/log' + query({ path: f.path, author: f.author, since: f.since, until: f.until, limit: opts.limit, offset: opts.offset })),
+  getHistoryChanges: (f) => apiFetch('/api/history/changes' + query({ since: f.since, until: f.until, path: f.path })),
+  getDeletedFiles: (q, opts = {}) => apiFetch('/api/history/deleted' + query({ q: q || undefined, limit: opts.limit, offset: opts.offset })),
   getTemplates: () => apiFetch('/api/templates'),
   rawUrl: (entry, opts) =>
     '/api/files/raw?path=' +

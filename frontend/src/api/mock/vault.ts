@@ -1,6 +1,7 @@
 // In-memory vault behind the dev mock. It follows the server's rules closely enough that the UI
 // can be built and exercised without the backend: version protocol (API.md §4), name rules,
 // case policy, trash, link rewriting on move, backlinks, search, tags, history and events.
+import type { TimelineFilter } from '../endpoints';
 import { buildLinkIndex, createPath, linkText, linkTextRaw, resolve, type LinkIndex } from '../../features/links';
 import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, newPathError, pathSafetyError, rebasePath, stripMd } from '../../features/paths';
 import { splitWikiBody } from '../../features/syntax';
@@ -10,8 +11,11 @@ import type {
   BacklinkGroup,
   BacklinksResponse,
   ChangeType,
+  ChangesResponse,
   CommitResult,
   CreateFileRequest,
+  DeletedFile,
+  DeletedFilesResponse,
   FileEntry,
   FileKind,
   FolderResult,
@@ -39,6 +43,9 @@ import type {
   TagCount,
   TemplatesResponse,
   TextFile,
+  TimelineEntry,
+  TimelineFile,
+  TimelineResponse,
   TrashEntry,
   TreeResponse,
   WriteResult,
@@ -1005,6 +1012,94 @@ export class MockVault {
       { path: req.path, change: existing ? 'modified' : 'added', renamedFrom: null },
     ])!;
     return { file, created: !existing, createdFolders, commitId };
+  }
+
+  // ---------- vault-wide history (API.md §14.6–14.8) ----------
+
+  private inPeriod(c: Commit, f: TimelineFilter): boolean {
+    return (!f.since || c.time >= Date.parse(f.since)) && (!f.until || c.time < Date.parse(f.until));
+  }
+
+  private underPath(path: string, prefix: string | undefined): boolean {
+    return !prefix || path === prefix || path.startsWith(prefix + '/');
+  }
+
+  getHistoryLog(f: TimelineFilter, limit = 50, offset = 0): TimelineResponse {
+    const author = f.author?.toLowerCase();
+    const matching = [...this.commits]
+      .reverse()
+      .filter((c) => this.inPeriod(c, f) && (!author || 'owner'.includes(author) || 'owner@notes'.includes(author)))
+      .filter((c) => !f.path || c.changes.some((x) => this.underPath(x.path, f.path) || (x.renamedFrom && this.underPath(x.renamedFrom, f.path))));
+    const entries: TimelineEntry[] = matching.slice(offset, offset + limit).map((c) => {
+      const files = c.changes
+        .filter((x) => !f.path || this.underPath(x.path, f.path) || (x.renamedFrom !== null && this.underPath(x.renamedFrom, f.path)))
+        .map((x) => ({ path: x.path, change: x.change, renamedFrom: x.renamedFrom }));
+      return {
+        commitId: c.commitId,
+        shortId: c.commitId.slice(0, 7),
+        parentCommitId: c.parentCommitId,
+        time: isoMs(c.time),
+        authorName: 'Owner',
+        authorLogin: 'owner@notes',
+        message: c.message,
+        files: files.slice(0, 100),
+        filesTotal: files.length,
+      };
+    });
+    return { entries, hasMore: matching.length > offset + limit };
+  }
+
+  getHistoryChanges(f: TimelineFilter): ChangesResponse {
+    const inRange = this.commits.filter((c) => this.inPeriod(c, f));
+    const before = this.commits.filter((c) => f.since && c.time < Date.parse(f.since));
+    const net = new Map<string, TimelineFile>();
+    for (const c of inRange) {
+      for (const x of c.changes) {
+        if (!this.underPath(x.path, f.path)) continue;
+        const prior = net.get(x.renamedFrom ?? x.path);
+        if (x.renamedFrom) net.delete(x.renamedFrom);
+        const change = prior?.change === 'added' && x.change !== 'deleted' ? 'added' : x.change;
+        if (prior?.change === 'added' && x.change === 'deleted') net.delete(x.path);
+        else net.set(x.path, { path: x.path, change, renamedFrom: x.renamedFrom ?? prior?.renamedFrom ?? null });
+      }
+    }
+    return {
+      since: f.since ?? null,
+      until: f.until ?? null,
+      fromCommitId: before.length ? before[before.length - 1].commitId : null,
+      toCommitId: inRange.length ? inRange[inRange.length - 1].commitId : null,
+      commits: inRange.length,
+      authors: inRange.length ? ['Owner'] : [],
+      files: [...net.values()].sort((a, b) => cmp(a.path.toLowerCase(), b.path.toLowerCase())),
+      truncated: false,
+    };
+  }
+
+  getDeletedFiles(q: string, limit = 50, offset = 0): DeletedFilesResponse {
+    const latest = new Map<string, DeletedFile>();
+    const decided = new Set<string>();
+    for (let i = this.commits.length - 1; i >= 0; i--) {
+      const c = this.commits[i];
+      for (const x of c.changes) {
+        if (x.renamedFrom) decided.add(x.renamedFrom);
+        if (decided.has(x.path)) continue;
+        decided.add(x.path);
+        if (x.change === 'deleted' && c.parentCommitId && !this.files.has(x.path)) {
+          latest.set(x.path, {
+            path: x.path,
+            deletedAt: isoMs(c.time),
+            commitId: c.commitId,
+            shortId: c.commitId.slice(0, 7),
+            parentCommitId: c.parentCommitId,
+            authorName: 'Owner',
+            authorLogin: 'owner@notes',
+            message: c.message,
+          });
+        }
+      }
+    }
+    const all = [...latest.values()].filter((d) => !q || d.path.toLowerCase().includes(q.toLowerCase()));
+    return { entries: all.slice(offset, offset + limit), total: all.length, hasMore: all.length > offset + limit };
   }
 
   commitNow(): CommitResult {

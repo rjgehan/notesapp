@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { DEFAULT_SETTINGS } from '../features/settings';
 import { treePatchCount } from '../sync/treePatch';
 import { ApiError } from './client';
-import { api } from './endpoints';
+import { api, type TimelineFilter } from './endpoints';
 import { queryClient } from './queryClient';
 import { queryKeys, STALE } from './queryKeys';
 import type { NoteMeta, Settings, SettingsResponse, TagsResponse, TreeResponse } from './types';
@@ -132,6 +132,42 @@ export function useHistoryContent(commit: string | null, path: string | null) {
     queryFn: () => api.getHistoryContent(path!, commit!),
     staleTime: STALE.historyContent,
     enabled: commit !== null && path !== null,
+  });
+}
+
+const TIMELINE_PAGE = 50;
+
+/** The vault-wide timeline (API.md §14.6), paged with "Load more". */
+export function useHistoryLog(filter: TimelineFilter, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.historyLog(filter),
+    queryFn: ({ pageParam }) => api.getHistoryLog(filter, { limit: TIMELINE_PAGE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => (last.hasMore ? pages.reduce((n, p) => n + p.entries.length, 0) : undefined),
+    staleTime: STALE.vaultHistory,
+    enabled,
+  });
+}
+
+/** What changed over a period (API.md §14.7). */
+export function useHistoryChanges(filter: TimelineFilter, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.historyChanges(filter),
+    queryFn: () => api.getHistoryChanges(filter),
+    staleTime: STALE.vaultHistory,
+    enabled,
+  });
+}
+
+/** Files deleted in history that do not exist now (API.md §14.8). */
+export function useDeletedFiles(q: string, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.historyDeleted(q),
+    queryFn: ({ pageParam }) => api.getDeletedFiles(q, { limit: TIMELINE_PAGE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => (last.hasMore ? pages.reduce((n, p) => n + p.entries.length, 0) : undefined),
+    staleTime: STALE.vaultHistory,
+    enabled,
   });
 }
 

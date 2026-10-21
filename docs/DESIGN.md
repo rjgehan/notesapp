@@ -416,6 +416,7 @@ Thumbs.db
 | | `CommitBatcher` | `SmartLifecycle` at phase `DEFAULT_PHASE - 4096`. Batches autosaves; `prepareWrite`, `markDirty`, `flush`, `commitNow`; retries failed commits with backoff; flushes on shutdown. |
 | | `GitBootstrap` | Runs the initial, import or "changed while stopped" commit asynchronously after readiness (§5.17). |
 | | `HistoryService` | API operations: list, content, raw, restore, commit now. |
+| | `GitTimeline`, `TimelineService` | The vault-wide history: timeline, changes over a period, deleted files (§5.8, ROADMAP item 28). |
 | | `GitHousekeeping` | `@Scheduled(cron = "${notes.git.gc-cron}")` runs `autoGC` under `gitLock`. |
 | `watch` | `VaultWatcher` | `SmartLifecycle`. Recursive inotify through `WatchService`, per-path debounce (§5.9). |
 | | `VaultReconciler` | `reconcile(path)` (takes the locks), `reconcileLocked(path)` (for callers that already hold them), `reconcileSubtree(dir)`, `fullRescan()`. Compares disk with the index by hash (text) or by size and mtime (binary). |
@@ -429,7 +430,7 @@ Thumbs.db
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
 | | `TailscaleInterfaceCheck` | Refuses to start outside the dev profile when no kernel Tailscale interface is visible (§5.13). |
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `SavedSearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `SavedSearchController`, `TagController`, `TrashController`, `HistoryController`, `TimelineController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -907,6 +908,12 @@ This is `MoveService.move(from, to, updateLinks, dryRun, identity, origin)`. `up
 3. `preserve(path)` (§5.4), **before** anything is written. The batch stages each path by reading the disk at commit time, so without this step the pending entry for `path` would stage the restored bytes, the user's latest uncommitted edits (up to 5 minutes, and the session is flushed to disk right before a restore) would never reach git, and the restore commit would be empty.
 4. Write the historical bytes **verbatim**, through a byte-level path that never decodes and re-encodes them, so a BOM, CRLF or invalid UTF-8 survive: `atomicWrite` when the file exists, `createExclusive` when it is absent (creating parents as needed). Update the index.
 5. `commitNow("Restore <path> to version <short>", [path])`, then publish `file.changed` or `file.created`, then `history.committed`.
+
+**Vault-wide history** (`GitTimeline`, API.md §14.6–14.8, ROADMAP item 28). Read-only, with its own walkers like every read.
+
+- **Timeline.** A `RevWalk` from `HEAD` sorted by commit time; `since` stops the walk, `until` and the author (a case-insensitive substring of name or email) skip commits, and a path filter is a `PathFilter` with `ANY_DIFF` (on the on-disk form of the folder or file when it is indexed, so NFD names work). Each returned commit is diffed against its first parent with a recursive `TreeWalk`; when the diff has both additions and deletions, a `RenameDetector` (with `diff.renameLimit`) pairs renames. Hidden paths are dropped and at most 100 files are listed per commit.
+- **Changes over a period.** Walking from `HEAD`, the first commit before `until` is the end and the first before `since` the start; their trees are diffed once (with renames), so the result is the net change, and the commits in between give the count and the authors.
+- **Deleted files.** Walking newest first, the first change seen for a path decides it: a deletion records `(path, commit, parent)`; anything else (or a rename away from it) clears it. The map is kept with the `HEAD` it was computed for; on the next request only the commits since that `HEAD` are walked (`markUninteresting`), and when that `HEAD` is not an ancestor any more the map is rebuilt. Paths that exist in the vault now are left out at request time. Restoring uses the existing history restore with `baseVersion: null` (§5.8 *Restore*), which re-creates the parents.
 
 **Housekeeping.** Nightly at 03:30 (`notes.git.gc-cron`), `repo.autoGC(NullProgressMonitor.INSTANCE)` runs under `gitLock`. With `gc.autoDetach=false` it runs inline and does nothing when it is not needed. JGit itself never auto-gcs on commit.
 
@@ -1422,6 +1429,7 @@ frontend/src/
 | `['tags']` | `GET /api/tags` | 30 s | |
 | `['history', path]` | `GET /api/history` | 0 | |
 | `['historyContent', commit, path]` | `GET /api/history/content` | Infinity | Immutable |
+| `['vaultHistory', 'log' \| 'changes' \| 'deleted', filter]` | `GET /api/history/log`, `/changes`, `/deleted` | 0 | The vault history page (§6.11.1); all invalidated by `history.committed` |
 | `['trash']`, `['settings']`, `['me']`, `['status']`, `['templates']` | | 60 s / Infinity / Infinity / 10 s / 60 s | |
 
 There is no `['resolve']` query: link resolution runs on the client over the tree (§6.6).
@@ -1455,7 +1463,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | `folder.created` / `folder.deleted` | Patch the `['tree']` folders. `folder.deleted` also removes descendant files, removes their `['file']` queries and notifies their sessions. |
 | `entry.moved` | Re-key the entries in `['tree']` (for a folder, every descendant). Record `from → to` in the client move map (`sync/moves.ts`). Call `session.onRemoteMoved(to)` for affected open docs and re-key their drafts. `removeQueries(['file', from])`. If the active route is affected, `navigate(newRoute, {replace:true})`. Invalidate `['backlinks']`. |
 | `trash.changed` | Invalidate `['trash']`. |
-| `history.committed` | Invalidate `['history', p]` for each `p` in `paths`, and `['status']`. |
+| `history.committed` | Invalidate `['history', p]` for each `p` in `paths`, `['vaultHistory']`, and `['status']`. |
 | `settings.changed` | Invalidate `['settings']`. |
 | `searches.changed` | Invalidate `['savedSearches']`. |
 | `status.changed` | Invalidate `['status']`. |
@@ -1768,6 +1776,16 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
   - **Full text tab:** the old version in a read-only editor.
   - Images show old and new side by side through `GET /api/history/raw`.
 - **Restore.** **Restore this version** asks for confirmation, flushes the session, and calls `POST /api/history/restore {path: currentPath, commit, sourcePath: entry.path, baseVersion: session.version}`. A 409 leads to the conflict flow. **Copy text** copies the old version to the clipboard.
+
+#### 6.11.1 Vault history page (ROADMAP item 28)
+
+`/x/history`, registered with `registerPage` (so it has a ribbon and drawer entry and an "Open Vault history" command) and linked from the bottom of the History panel. Three tabs:
+
+- **Timeline.** Commits grouped by local day, each with its message, time, author, short id and files (change badge; "and N more" past 100). Filters: a folder or file path, an author, and a period (Today, This week from Monday, This month, Last 30 days, All time). A file opens the version view of §6.11 at that commit (a deleted file shows its last version); a file that exists now also has **Open**. "Load more" pages by 50.
+- **Changes.** "What changed this week" by default: the net changes of the period (`GET /api/history/changes`), summarized as "This week: 12 files changed in 31 commits by …". A file opens a diff between the start and the end of the period (added files start empty, deleted ones end empty), so any two points in time can be compared.
+- **Deleted files.** Files deleted at some point that do not exist now, with a search box. **Preview** opens the last version before deletion; **Restore** asks, then restores it from git (`baseVersion: null`), even after the trash was emptied, and offers to open it.
+
+The version view of §6.11 also gains **Compare with**: in the History panel it lists the file's other versions, and choosing one diffs the two historical versions (always older to newer) instead of the selected version and the current text.
 
 ### 6.12 Daily notes and templates UX
 

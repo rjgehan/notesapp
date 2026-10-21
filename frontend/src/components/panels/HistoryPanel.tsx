@@ -9,6 +9,7 @@ import { queryClient } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
 import type { HistoryEntry } from '../../api/types';
 import { formatDateTime, formatRelative } from '../../features/format';
+import { navigateTo } from '../../features/navigation';
 import { displayName } from '../../features/paths';
 import { toastError } from '../../features/errors';
 
@@ -92,16 +93,33 @@ function HistoryList({ path }: { path: string }) {
           {history.isFetchingNextPage ? 'Loading…' : 'Load more'}
         </button>
       )}
+      <VaultHistoryLink />
       {selected && (
         <Suspense fallback={null}>
-          <HistoryVersion entry={selected} currentPath={path} onClose={() => setSelected(null)} />
+          <HistoryVersion entry={selected} currentPath={path} onClose={() => setSelected(null)} versions={entries} />
         </Suspense>
       )}
     </div>
   );
 }
 
+/** To the vault-wide history page (ROADMAP item 28). */
+function VaultHistoryLink() {
+  return (
+    <button type="button" className="link-button history-vault-link" onClick={() => navigateTo('/x/history')}>
+      Vault history: timeline, changes, deleted files
+    </button>
+  );
+}
+
 export default function HistoryPanel({ activePath }: { activePath: string | null }) {
-  if (!activePath) return <div className="panel-empty">Open a file to see its history.</div>;
+  if (!activePath) {
+    return (
+      <div className="history">
+        <div className="panel-empty">Open a file to see its history.</div>
+        <VaultHistoryLink />
+      </div>
+    );
+  }
   return <HistoryList key={activePath} path={activePath} />;
 }

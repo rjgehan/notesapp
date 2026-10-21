@@ -1163,6 +1163,76 @@ No body. This commits the pending batch now.
 
 `200 CommitResult`: `{"commitId": "f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5"}`, or `{"commitId": null}` when nothing was pending. Errors: `503 history-unavailable` (including `reason: "commit-failed"` when the commit itself fails; the paths stay pending and the server keeps retrying).
 
+### 14.6 `GET /api/history/log[?path=][&author=][&since=][&until=][&limit=50][&offset=0]`
+
+The vault-wide timeline (ROADMAP item 28): every commit, newest first (by commit time), with the files it changed.
+
+| Parameter | Meaning |
+|---|---|
+| `path` | Only commits that change this file, or anything under this folder (case-sensitive vault path); `files` then lists only those |
+| `author` | Case-insensitive substring of the author's name or login |
+| `since`, `until` | ISO-8601 instants; `since` is inclusive, `until` exclusive. Anything else is `400 bad-request`. |
+| `limit`, `offset` | Paging, as in §14.1 (`limit` 1 to 200) |
+
+`200 TimelineResponse`:
+
+```json
+{ "hasMore": false,
+  "entries": [
+    { "commitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2", "shortId": "c3d4e5f",
+      "parentCommitId": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+      "time": "2026-10-16T14:20:02.000Z", "authorName": "R. J. Gehan", "authorLogin": "rjgehan@github",
+      "message": "Rename Projects/Plan.md → Projects/Roadmap.md",
+      "files": [ { "path": "Projects/Roadmap.md", "change": "renamed", "renamedFrom": "Projects/Plan.md" } ],
+      "filesTotal": 1 } ] }
+```
+
+- `files` is the diff against the first parent (a root commit: against nothing), with renames detected as in §14.1, sorted by path, at most 100 of `filesTotal`. Hidden paths (`.notesapp/settings.json`, `.notesapp/searches.json`) are left out, so a commit that only saved settings has no files.
+- To show a file at a commit, use §14.2 with `commit=<commitId>` (or `parentCommitId` for a `deleted` file) and the entry's `path`.
+
+### 14.7 `GET /api/history/changes[?since=][&until=][&path=]`
+
+What changed over a period ("what changed this week"): the net difference between the last commit before `since` (or nothing, when `since` is absent or older than history) and the last commit before `until` (or `HEAD`).
+
+`200 ChangesResponse`:
+
+```json
+{ "since": "2026-10-12T00:00:00.000Z", "until": null,
+  "fromCommitId": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", "toCommitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+  "commits": 14, "authors": ["R. J. Gehan"],
+  "files": [ { "path": "Ideas/Plan B.md", "change": "added", "renamedFrom": null },
+             { "path": "Projects/Roadmap.md", "change": "renamed", "renamedFrom": "Projects/Plan.md" } ],
+  "truncated": false }
+```
+
+- `files` compares the two trees, so a file created and deleted within the period is not listed, and one edited ten times is listed once. Renames are detected; hidden paths are left out; at most 1,000 files (`truncated`).
+- `commits` and `authors` count the commits in the period. When there are none, `toCommitId` equals `fromCommitId` (or both are `null`) and `files` is empty.
+- To diff one file over the period, read it at `fromCommitId` (path `renamedFrom ?? path`; absent for `added`) and at `toCommitId` (absent for `deleted`) with §14.2.
+- `400 bad-request` when `since` is not before `until` or an instant is invalid.
+
+### 14.8 `GET /api/history/deleted[?q=][&limit=50][&offset=0]`
+
+Files that were deleted at some point and do not exist now, so they can be brought back from git even after the trash was emptied. Each path is listed once, with its latest deletion; newest first. A path whose latest change is not a deletion (it was re-created, or renamed away) is not listed, nor is a path that exists now.
+
+| Parameter | Meaning |
+|---|---|
+| `q` | Case-insensitive substring of the path |
+| `limit`, `offset` | Paging (`limit` 1 to 200) |
+
+`200 DeletedFilesResponse`:
+
+```json
+{ "total": 1, "hasMore": false,
+  "entries": [ { "path": "Projects/Old plan.md", "deletedAt": "2026-09-02T08:12:40.000Z",
+                 "commitId": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3", "shortId": "d4e5f6a",
+                 "parentCommitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+                 "authorName": "R. J. Gehan", "authorLogin": "rjgehan@github", "message": "Delete Projects/Old plan.md" } ] }
+```
+
+**Restore** with §14.4: `{"path": <path>, "commit": <parentCommitId>, "sourcePath": <path>, "baseVersion": null}`. The file and its folders are re-created, and the restore is committed; the path then leaves this list.
+
+The list is computed from the whole history on first use and then updated from the commits made since, so the first request on a long history can take a few seconds.
+
 ---
 
 ## 15. Templates, daily notes and shared algorithms
@@ -1800,6 +1870,42 @@ export interface HistoryRestoreRequest { path: VaultPath; commit: string; source
 export interface HistoryRestoreResult { file: FileEntry; created: boolean; createdFolders: VaultPath[]; commitId: string | null }
 export interface CommitResult { commitId: string | null }
 
+// ---------- vault-wide history (§14.6–14.8) ----------
+export interface TimelineFile { path: VaultPath; change: ChangeType; renamedFrom: VaultPath | null }
+export interface TimelineEntry {
+  commitId: string;
+  shortId: string;
+  parentCommitId: string | null;
+  time: IsoInstant;
+  authorName: string;
+  authorLogin: string;
+  message: string;
+  files: TimelineFile[];          // at most 100; hidden paths (.notesapp/…) left out
+  filesTotal: number;
+}
+export interface TimelineResponse { entries: TimelineEntry[]; hasMore: boolean }
+export interface ChangesResponse {
+  since: IsoInstant | null;
+  until: IsoInstant | null;
+  fromCommitId: string | null;    // the last commit before since; null = the beginning
+  toCommitId: string | null;      // the last commit before until; null = no commits
+  commits: number;
+  authors: string[];
+  files: TimelineFile[];          // net change from fromCommitId to toCommitId, at most 1000
+  truncated: boolean;
+}
+export interface DeletedFile {
+  path: VaultPath;
+  deletedAt: IsoInstant;
+  commitId: string;
+  shortId: string;
+  parentCommitId: string;         // its last content; restore with POST /api/history/restore
+  authorName: string;
+  authorLogin: string;
+  message: string;
+}
+export interface DeletedFilesResponse { entries: DeletedFile[]; total: number; hasMore: boolean }
+
 // ---------- templates (§15.4) ----------
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
@@ -1896,6 +2002,9 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | GET | `/api/history/raw?path=&commit=` | | 200 bytes | 14.3 |
 | POST | `/api/history/restore` | `HistoryRestoreRequest` | 200 `HistoryRestoreResult` | 14.4 |
 | POST | `/api/history/commit` | | 200 `CommitResult` | 14.5 |
+| GET | `/api/history/log?path=&author=&since=&until=&limit=&offset=` | | 200 `TimelineResponse` | 14.6 |
+| GET | `/api/history/changes?since=&until=&path=` | | 200 `ChangesResponse` | 14.7 |
+| GET | `/api/history/deleted?q=&limit=&offset=` | | 200 `DeletedFilesResponse` | 14.8 |
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
@@ -1924,6 +2033,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `SavedSearch`, `SavedSearchesResponse`, `SavedSearchesUpdateRequest` | Same | `SavedSearch.sort` is a `String` (`relevance` or `mtime`); `SavedSearchesUpdateRequest.searches` is a `@Nullable JsonNode`, so every invalid field is reported by name |
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | |
+| `TimelineFile`, `TimelineEntry`, `TimelineResponse`, `ChangesResponse`, `DeletedFile`, `DeletedFilesResponse` | Same | `TimelineFile.change` is `ChangeType` |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`, `searches.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |

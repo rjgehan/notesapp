@@ -282,6 +282,42 @@ export interface HistoryRestoreRequest { path: VaultPath; commit: string; source
 export interface HistoryRestoreResult { file: FileEntry; created: boolean; createdFolders: VaultPath[]; commitId: string | null }
 export interface CommitResult { commitId: string | null }
 
+// ---------- vault-wide history (§14.6–14.8) ----------
+export interface TimelineFile { path: VaultPath; change: ChangeType; renamedFrom: VaultPath | null }
+export interface TimelineEntry {
+  commitId: string;
+  shortId: string;
+  parentCommitId: string | null;
+  time: IsoInstant;
+  authorName: string;
+  authorLogin: string;
+  message: string;
+  files: TimelineFile[];          // at most 100; hidden paths (.notesapp/…) left out
+  filesTotal: number;
+}
+export interface TimelineResponse { entries: TimelineEntry[]; hasMore: boolean }
+export interface ChangesResponse {
+  since: IsoInstant | null;
+  until: IsoInstant | null;
+  fromCommitId: string | null;    // the last commit before since; null = the beginning
+  toCommitId: string | null;      // the last commit before until; null = no commits
+  commits: number;
+  authors: string[];
+  files: TimelineFile[];          // net change from fromCommitId to toCommitId, at most 1000
+  truncated: boolean;
+}
+export interface DeletedFile {
+  path: VaultPath;
+  deletedAt: IsoInstant;
+  commitId: string;
+  shortId: string;
+  parentCommitId: string;         // its last content; restore with POST /api/history/restore
+  authorName: string;
+  authorLogin: string;
+  message: string;
+}
+export interface DeletedFilesResponse { entries: DeletedFile[]; total: number; hasMore: boolean }
+
 // ---------- templates (§15.4) ----------
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }

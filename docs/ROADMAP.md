@@ -796,6 +796,12 @@ Plugs into the view registry. `.canvas` is already a text kind.
 |---|---|---|
 | M | M | |
 
+**Status: built (2026-10-21, branch `feat/search`).** API.md §14.6–14.8, DESIGN §5.8 and §6.11.1.
+
+- The **Vault history** page (`/x/history`, in the ribbon and linked from the History panel) has three tabs: the timeline of every commit with its files, filtered by path, author and period; **Changes**, the net change over a period ("This week" by default) with a start-to-end diff per file; and **Deleted files**, which previews and restores files from git even after the trash was emptied.
+- The version view's **Compare with** diffs any two versions of a file.
+- The deleted-files list is computed from the whole history once, then only from new commits.
+
 ### 29. Customizable hotkeys and per-device preferences
 
 **One line:** rebind any command, with conflict detection. Bindings are stored per device.
