@@ -15,12 +15,13 @@ import { followLink } from '../editorCommands';
 import { linkAt } from '../linkAt';
 import { liveBlocks } from './blocks';
 import { buildLivePreview, revealOptions, type LivePreview, type LivePreviewConfig } from './decorations';
-import { footnoteTooltips } from './footnotes';
+import { footnotesOf, footnoteTooltips } from './footnotes';
 import { formatToolbar } from './formatToolbar';
 import { inputRules } from './inputRules';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
 import { isPointerSelection, touchTracking } from './pointer';
 import { tables } from './table';
+import { tableCellHost } from './table/facets';
 
 export type { LivePreviewConfig } from './decorations';
 
@@ -62,6 +63,8 @@ function build(view: EditorView): LivePreview {
     focused: view.hasFocus,
     completing: completionStatus(view.state) !== null,
     note: view.state.facet(noteContext),
+    // A table cell's footnotes are its note's.
+    footnotes: () => footnotesOf((view.state.facet(tableCellHost) ?? view).state),
   });
 }
 

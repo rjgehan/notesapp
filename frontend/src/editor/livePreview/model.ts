@@ -530,8 +530,9 @@ export function collectElements(state: EditorState, ranges: readonly { from: num
         if (SKIP.has(ref.name)) {
           // Some are elements themselves (a code block's fences, an embed, an inline comment).
           add(ref.node);
-          // The `>` of the lines a skipped block spans (a quoted table or code block) still hides.
-          for (let child = ref.node.firstChild; child; child = child.nextSibling) if (child.name === 'QuoteMark') add(child);
+          // The `>` of the lines a skipped block spans (a quoted table or code block) still hides:
+          // those of the requested range (a long quoted code block costs its visible lines).
+          for (let child = ref.node.childAfter(from - 1); child && child.from <= to; child = child.nextSibling) if (child.name === 'QuoteMark') add(child);
           return false;
         }
         add(ref.node);

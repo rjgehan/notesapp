@@ -3,7 +3,7 @@ import type { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { destroyEditors, fakeEmbed, marked, noteEditor, press, testContext, treeOf, typeText } from '../../test/noteEditor';
 import { noteExtensions } from '../editorSetup';
-import { footnoteIndex } from './footnotes';
+import { footnoteIndex, footnotesOf } from './footnotes';
 
 afterEach(() => {
   destroyEditors();
@@ -101,7 +101,31 @@ describe('footnotes (ROADMAP 10b)', () => {
     const index = footnoteIndex(editor(doc).state.doc);
     expect(index.number('1')).toBe(1);
     expect(index.number('2')).toBeNull();
-    expect(index.definition('1')?.map((p) => p.text)).toEqual(['One']);
+    expect(index.definition('1')?.map((p) => doc.slice(p.from, p.to))).toEqual(['One']);
+  });
+
+  it('keeps the numbers through edits elsewhere, and reads them again when footnotes change', () => {
+    const view = editor('A[^b] B[^a]\n\nplain‸\n\n[^a]: Alpha\n[^b]: Beta');
+    const numbers = () => [...view.contentDOM.querySelectorAll('.cm-lp-footnote')].map((el) => el.textContent);
+    expect(numbers()).toEqual(['[1]', '[2]']);
+    const before = footnotesOf(view.state);
+    typeText(view, ' text');
+    // Mapped, not read again: the same numbers, the definitions moved along.
+    expect(footnotesOf(view.state)).not.toBe(before);
+    expect(view.state.sliceDoc(footnotesOf(view.state).definition('a')![0].from, footnotesOf(view.state).definition('a')![0].to)).toBe('Alpha');
+    // A new reference first in the note renumbers.
+    view.dispatch({ changes: { from: 0, insert: 'Z[^a] ' } });
+    expect(numbers()).toEqual(['[1]', '[2]', '[1]']);
+    // Typing in a definition shows in its text.
+    const at = view.state.doc.toString().indexOf('Alpha') + 5;
+    view.dispatch({ changes: { from: at, insert: 'bet' } });
+    const part = footnotesOf(view.state).definition('a')![0];
+    expect(view.state.sliceDoc(part.from, part.to)).toBe('Alphabet');
+    // Typing on a blank but indented line under a definition continues it.
+    const doc = editor('A[^a]\n\n[^a]: Alpha\n    ‸');
+    footnotesOf(doc.state);
+    typeText(doc, 'more');
+    expect(footnotesOf(doc.state).definition('a')!.map((p) => doc.state.sliceDoc(p.from, p.to))).toEqual(['Alpha', 'more']);
   });
 
   it('a tap on a number shows the footnote’s text; moving the cursor or Escape hides it', () => {

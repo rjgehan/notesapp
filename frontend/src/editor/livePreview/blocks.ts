@@ -7,19 +7,22 @@
 // Editing them: the properties have an edit button (and ArrowUp from the line under them goes in),
 // which shows the frontmatter's YAML as text; a comment block shows while you type in it (as you
 // close it) or a search selects text in it. Either goes back to a block when the caret leaves it.
-import { syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
+import { syntaxTree } from '@codemirror/language';
 import { EditorSelection, EditorState, Facet, Prec, RangeSet, RangeValue, StateEffect, StateField, Transaction, type ChangeDesc, type Extension, type SelectionRange, type TransactionSpec } from '@codemirror/state';
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { noteContext } from '../context';
 import { remeasureOnChange } from './embeds';
 import { isPointerSelection } from './pointer';
 import { tableEdit } from './table/facets';
+import { parsedPast, topLevel, wholeLines } from './topLevel';
 
 export interface HiddenBlock {
   kind: 'properties' | 'comment';
   /** The start of the block's first line, and the end of its last. */
   from: number;
   to: number;
+  /** A comment block's node, to know it again after an edit. */
+  node?: { from: number; to: number };
 }
 
 /** The note's frontmatter: its block and its YAML (between the start of its second line and the start of its closing line). */
@@ -130,23 +133,28 @@ function frontmatterOf(state: EditorState): Frontmatter | null {
   return { block: { kind: 'properties', from: 0, to: state.doc.lineAt(close.from).to }, yamlFrom: open.to, yamlTo: close.from };
 }
 
-/** Whether the parse has reached past `to` (its next line), so a block is not cut short. */
-function parsedPast(state: EditorState, to: number): boolean {
-  return to >= state.doc.length || syntaxTreeAvailable(state, state.doc.lineAt(to + 1).to);
-}
-
 /** The note's top-level comment blocks: closed ones while editing, every one in a locked note. */
 function commentBlocks(state: EditorState, config: BlocksConfig, previous: Blocks | null, changes: ChangeDesc | null): HiddenBlock[] {
   if (!config.hideComments) return [];
-  const top = syntaxTree(state).topNode;
-  const body = top.getChild('Document') ?? top;
+  // A block the edit did not touch is known again by its node, without reading its lines again.
+  const kept = new Map<number, HiddenBlock>();
+  for (const b of previous?.candidates ?? []) {
+    if (!b.node || (changes && !changes.empty && changes.touchesRange(b.from, b.to))) continue;
+    if (!changes || changes.empty) kept.set(b.node.from, b);
+    else kept.set(changes.mapPos(b.node.from), { kind: 'comment', from: changes.mapPos(b.from), to: changes.mapPos(b.to), node: { from: changes.mapPos(b.node.from), to: changes.mapPos(b.node.to) } });
+  }
   const out: HiddenBlock[] = [];
-  for (let node = body.firstChild; node; node = node.nextSibling) {
-    if (node.name !== 'CommentBlock') continue;
+  const top = topLevel(state);
+  for (const node of top.comments) {
     // An unclosed `%%` runs to the end of the note: while you write, it stays text (dimmed).
-    if (!config.locked && node.getChildren('CommentMark').length < 2) continue;
-    const to = state.doc.lineAt(node.to).to;
-    if (parsedPast(state, to)) out.push({ kind: 'comment', from: state.doc.lineAt(node.from).from, to });
+    if (!config.locked && !node.closed) continue;
+    const same = kept.get(node.from);
+    if (same && same.node!.to === node.to) {
+      out.push(same);
+      continue;
+    }
+    const lines = wholeLines(state, node);
+    if (lines) out.push({ kind: 'comment', ...lines, node: { from: node.from, to: node.to } });
   }
   // Where the parse has not caught up with an edit yet, a block keeps its place (mapped through the
   // edit) while its lines still start and end it, so it never blinks out.
@@ -155,7 +163,7 @@ function commentBlocks(state: EditorState, config: BlocksConfig, previous: Block
       if (b.kind !== 'comment') continue;
       const from = changes.mapPos(b.from, 1);
       const to = changes.mapPos(b.to, -1);
-      if (to <= from || parsedPast(state, to) || out.some((o) => o.from <= to && o.to >= from)) continue;
+      if (from < top.lastFrom || to <= from || parsedPast(state, to) || out.some((o) => o.from <= to && o.to >= from)) continue;
       const first = state.doc.lineAt(from);
       if (first.from === from && state.doc.lineAt(to).to === to && first.text.startsWith('%%')) out.push({ kind: 'comment', from, to });
     }
@@ -169,6 +177,16 @@ function entersByEditing(tr: Transaction): boolean {
   if (tr.isUserEvent('select.search')) return true;
   if (!tr.docChanged || tr.annotation(Transaction.remote)) return false;
   return tr.isUserEvent('input') || tr.isUserEvent('delete') || tr.isUserEvent('undo') || tr.isUserEvent('redo') || tr.isUserEvent('move');
+}
+
+/** Whether the blocks are those of `value`, moved by `changes` but none of them touched, and the same one is edited. */
+function unchanged(value: Blocks, changes: ChangeDesc, candidates: readonly HiddenBlock[], editing: Blocks['editing']): boolean {
+  if (candidates.length !== value.candidates.length || (editing === null) !== (value.editing === null)) return false;
+  if (editing && value.editing && (editing.from !== changes.mapPos(value.editing.from) || editing.to !== changes.mapPos(value.editing.to))) return false;
+  return candidates.every((c, i) => {
+    const old = value.candidates[i];
+    return c.kind === old.kind && !(!changes.empty && changes.touchesRange(old.from, old.to)) && c.from === changes.mapPos(old.from) && c.to === changes.mapPos(old.to);
+  });
 }
 
 function build(state: EditorState, frontmatter: Frontmatter | null, candidates: readonly HiddenBlock[], editing: Blocks['editing']): Blocks {
@@ -214,14 +232,11 @@ const blocksField = StateField.define<Blocks>({
       const b = candidates.find(holding);
       if (b) editing = { from: b.from, to: b.to };
     }
-    const same =
-      frontmatter?.block.to === value.frontmatter?.block.to &&
-      (frontmatter === null || value.frontmatter === null || tr.state.sliceDoc(frontmatter.yamlFrom, frontmatter.yamlTo) === tr.startState.sliceDoc(value.frontmatter.yamlFrom, value.frontmatter.yamlTo)) &&
-      candidates.length === value.candidates.length &&
-      candidates.every((c, i) => c.from === value.candidates[i].from && c.to === value.candidates[i].to) &&
-      editing?.from === value.editing?.from &&
-      editing?.to === value.editing?.to;
-    if (same && !tr.docChanged && !reconfigured) return value;
+    if (!reconfigured && unchanged(value, tr.changes, candidates, editing)) {
+      // Only positions moved (ROADMAP 10c: a keystroke in a long note builds no new widgets).
+      if (!tr.docChanged && candidates === value.candidates && editing === value.editing) return value;
+      return { frontmatter, candidates, editing, decorations: value.decorations.map(tr.changes), atomic: value.atomic.map(tr.changes) };
+    }
     return build(tr.state, frontmatter, candidates, editing);
   },
   provide: (field) => [EditorView.decorations.from(field, (b) => b.decorations), EditorView.atomicRanges.of((view) => view.state.field(field).atomic)],

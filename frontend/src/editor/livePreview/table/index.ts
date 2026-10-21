@@ -4,14 +4,15 @@
 // text. Around a grid, the note's caret follows a few rules, so that typing next to a table never
 // makes the text part of it (a line right under a table is one of its rows in GFM).
 import { markdownLanguage } from '@codemirror/lang-markdown';
-import { syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
+import { syntaxTree } from '@codemirror/language';
 import { EditorSelection, EditorState, Prec, RangeSet, RangeValue, StateField, Transaction, type ChangeDesc, type Extension, type SelectionRange } from '@codemirror/state';
 import { Decoration, EditorView, keymap, ViewPlugin, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { toast } from '../../../state/toasts';
 import { noteContext, vaultChanged } from '../../context';
 import { refreshTables, tableCellHost, tableEdit, tablesConfig, type TablesConfig } from './facets';
 import { gridAt, gridsOf, TableWidget, type TableBlock } from './grid';
-import { newTableText, parseTable, rowCount } from './model';
+import { newTableText, parseTable, rowCount, type TableModel } from './model';
+import { parsedPast, topLevel, wholeLines } from '../topLevel';
 
 export { historyEditor, isTableCell, refreshTables, tableCellFormatters, tableCellSetup, type TableCellFormatter, type TableGridData } from './facets';
 export type { TableBlock } from './grid';
@@ -22,35 +23,52 @@ interface Tables {
   decorations: DecorationSet;
   atomic: RangeSet<RangeValue>;
   revision: number;
+  editable: boolean;
 }
 
 class Atom extends RangeValue {}
 const atom = new Atom();
 
-/** Whether the parse has reached past the table ending at `to` (its next line), so no rows are missing. */
-function parsedPast(state: EditorState, to: number): boolean {
-  return to >= state.doc.length || syntaxTreeAvailable(state, state.doc.lineAt(to + 1).to);
+/** A table's lines, and its node in the tree (a table the parse found), to know it again after an edit. */
+interface FoundTable extends TableBlock {
+  node?: { from: number; to: number };
 }
 
 function findTables(state: EditorState, previous: Tables | null, changes: ChangeDesc | null, revision: number): Tables {
-  const known = new Map(previous?.blocks.map((b) => [b.text, b.model]));
-  const blocks: TableBlock[] = [];
-  const add = (from: number, to: number) => {
+  const editable = !state.facet(tablesConfig).locked && !state.readOnly;
+  // A table the edit did not touch keeps its text and model, at its new place (ROADMAP 10c: a
+  // keystroke in a long note slices no table's text and reads no table's lines again).
+  const kept = new Map<number, FoundTable>();
+  for (const b of (previous?.blocks ?? []) as readonly FoundTable[]) {
+    if (!b.node || (changes && !changes.empty && changes.touchesRange(b.from, b.to))) continue;
+    if (!changes || changes.empty) {
+      kept.set(b.node.from, b);
+      continue;
+    }
+    const node = { from: changes.mapPos(b.node.from), to: changes.mapPos(b.node.to) };
+    kept.set(node.from, { ...b, from: changes.mapPos(b.from), to: changes.mapPos(b.to), node });
+  }
+  let known: Map<string, TableModel> | null = null;
+  let reused = 0;
+  const blocks: FoundTable[] = [];
+  const add = (from: number, to: number, node?: { from: number; to: number }) => {
     const text = state.sliceDoc(from, to);
+    known ??= new Map(previous?.blocks.map((b) => [b.text, b.model]));
     const model = known.get(text) ?? parseTable(text);
-    if (model) blocks.push({ from, to, text, model });
+    if (model) blocks.push({ from, to, text, model, node });
   };
-  syntaxTree(state).iterate({
-    enter(node) {
-      // Only the note's own blocks: tables inside quotes, lists and callouts stay text.
-      if (node.name === 'Document') return undefined;
-      if (node.name === 'Table' && node.node.parent?.name === 'Document') {
-        const to = state.doc.lineAt(node.to).to;
-        if (parsedPast(state, to)) add(state.doc.lineAt(node.from).from, to);
-      }
-      return false;
-    },
-  });
+  // Only the note's own blocks: tables inside quotes, lists and callouts stay text.
+  const top = topLevel(state);
+  for (const t of top.tables) {
+    const same = kept.get(t.from);
+    if (same && same.node!.to === t.to) {
+      blocks.push(same);
+      reused++;
+      continue;
+    }
+    const lines = wholeLines(state, t);
+    if (lines) add(lines.from, lines.to, { from: t.from, to: t.to });
+  }
   // Where the parse has not caught up with an edit yet, a table keeps its place, mapped through
   // the edit, while its text still reads as a table: an edit never makes a grid blink out (and
   // close the cell being edited). The parse decides again once it gets there.
@@ -58,17 +76,21 @@ function findTables(state: EditorState, previous: Tables | null, changes: Change
     for (const b of previous.blocks) {
       const from = changes.mapPos(b.from, 1);
       const to = changes.mapPos(b.to, -1);
-      if (to <= from || parsedPast(state, to) || blocks.some((t) => t.from <= to && t.to >= from)) continue;
+      if (from < top.lastFrom || to <= from || parsedPast(state, to) || blocks.some((t) => t.from <= to && t.to >= from)) continue;
       if (state.doc.lineAt(from).from === from && state.doc.lineAt(to).to === to) add(from, to);
     }
     blocks.sort((a, b) => a.from - b.from);
   }
-  const editable = !state.facet(tablesConfig).locked && !state.readOnly;
+  // No table changed: the decorations map through the edit, with no new widgets.
+  if (previous && changes && reused === blocks.length && blocks.length === previous.blocks.length && revision === previous.revision && editable === previous.editable) {
+    return { blocks, decorations: previous.decorations.map(changes), atomic: previous.atomic.map(changes), revision, editable };
+  }
   return {
     blocks,
     decorations: Decoration.set(blocks.map((b) => Decoration.replace({ widget: new TableWidget(b, editable, revision), block: true }).range(b.from, b.to))),
     atomic: RangeSet.of(blocks.map((b) => atom.range(b.from, b.to))),
     revision,
+    editable,
   };
 }
 

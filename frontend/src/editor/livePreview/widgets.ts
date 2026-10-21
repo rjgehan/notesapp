@@ -2,11 +2,10 @@
 // a heading link, footnote numbers, code fences, and (embeds.ts) images and embeds. Each stands in
 // for markup without changing the document; a checkbox click is an ordinary edit of the one
 // character between its brackets.
-import type { Text } from '@codemirror/state';
 import { EditorView, WidgetType } from '@codemirror/view';
 import type { NoteContext } from '../context';
 import { embedWidget } from './embeds';
-import { footnoteIndex, showFootnote } from './footnotes';
+import { showFootnote, type FootnoteIndex } from './footnotes';
 import { LIST_INDENT_EM, type WidgetSpec } from './model';
 
 /** Bullet glyphs by nesting level, as the reading view's disc, circle and square. */
@@ -197,8 +196,8 @@ export interface WidgetContext {
   remoteImages: boolean;
   /** The app (link resolution, embeds); null in a plain editor. */
   note: NoteContext | null;
-  /** The document, for its footnotes' numbers. */
-  doc: Text;
+  /** The note's footnotes, for their numbers. */
+  footnotes(): FootnoteIndex;
 }
 
 /** The widget for `spec`. */
@@ -215,11 +214,11 @@ export function widgetFor(spec: WidgetSpec, ctx: WidgetContext): WidgetType {
     case 'embed':
       return embedWidget(spec.embed, ctx.note, ctx.remoteImages);
     case 'footnote': {
-      const index = footnoteIndex(ctx.doc);
+      const index = ctx.footnotes();
       return new FootnoteWidget(spec.label === null ? index.inlineNumber(spec.at) : index.number(spec.label), spec.label);
     }
     case 'footnote-label': {
-      const n = footnoteIndex(ctx.doc).number(spec.label);
+      const n = ctx.footnotes().number(spec.label);
       return new FootnoteLabelWidget(n === null ? `${spec.label}.` : `${n}.`);
     }
     case 'fence':

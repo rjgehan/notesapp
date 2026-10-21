@@ -48,7 +48,14 @@ function lineClasses(view: EditorView): DecorationSet {
   const { state } = view;
   const doc = state.doc;
   const classes = new Map<number, string[]>();
-  const add = (from: number, to: number, cls: string) => {
+  // The visible range being decorated: a block's lines outside it get no class (ROADMAP 10c: a
+  // 5,000-line code block costs its visible lines, not all of them, on every update).
+  let lo = 0;
+  let hi = doc.length;
+  const add = (blockFrom: number, blockTo: number, cls: string) => {
+    const from = Math.max(blockFrom, lo);
+    const to = Math.min(blockTo, hi);
+    if (from > to) return;
     const last = doc.lineAt(Math.max(from, to - 1)).number;
     for (let n = doc.lineAt(from).number; n <= last; n++) {
       const list = classes.get(n);
@@ -58,6 +65,8 @@ function lineClasses(view: EditorView): DecorationSet {
   };
   const tree = syntaxTree(state);
   for (const { from, to } of view.visibleRanges) {
+    lo = from;
+    hi = to;
     tree.iterate({
       from,
       to,

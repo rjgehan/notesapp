@@ -4,6 +4,7 @@ import { RangeSet, type EditorSelection, type EditorState, type Range, RangeValu
 import { Decoration, type DecorationSet } from '@codemirror/view';
 import type { SyntaxVisibility } from '../../state/prefs';
 import type { NoteContext } from '../context';
+import { footnotesOf, type FootnoteIndex } from './footnotes';
 import { collectElements, hiddenPieces, isRevealed, layoutOf, type RevealOptions } from './model';
 import { widgetFor, type WidgetContext } from './widgets';
 
@@ -25,6 +26,8 @@ export interface BuildContext extends LivePreviewConfig {
   completing: boolean;
   /** The app (link resolution, embeds); null in a plain editor. */
   note: NoteContext | null;
+  /** The note's footnotes (a table cell's editor gives its note's); read from the state by default. */
+  footnotes?(): FootnoteIndex;
 }
 
 export interface LivePreview {
@@ -58,7 +61,7 @@ export function revealOptions(ctx: Pick<BuildContext, 'visibility' | 'locked' | 
 export function buildLivePreview(state: EditorState, ranges: readonly { from: number; to: number }[], ctx: BuildContext): LivePreview {
   const elements = collectElements(state, ranges);
   const options = revealOptions(ctx);
-  const widgets: WidgetContext = { checkboxes: ctx.checkboxes, remoteImages: ctx.remoteImages ?? true, note: ctx.note, doc: state.doc };
+  const widgets: WidgetContext = { checkboxes: ctx.checkboxes, remoteImages: ctx.remoteImages ?? true, note: ctx.note, footnotes: ctx.footnotes ?? (() => footnotesOf(state)) };
   const decos: Range<Decoration>[] = [];
   for (const el of elements) {
     for (const m of el.marks) if (m.to > m.from) decos.push(mark(m.className).range(m.from, m.to));

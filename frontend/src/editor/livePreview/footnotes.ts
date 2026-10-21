@@ -3,7 +3,7 @@
 // numbers are those the markdown-it footnote plugin gives: the order of each footnote's first
 // reference, counting only labels that have a definition (a reference without one stays text in
 // the reading of the note, and here it shows "?").
-import { StateEffect, StateField, type EditorState, type Extension, type Text } from '@codemirror/state';
+import { StateEffect, StateField, type ChangeDesc, type EditorState, type Extension, type Text } from '@codemirror/state';
 import { EditorView, hoverTooltip, keymap, showTooltip, type Tooltip } from '@codemirror/view';
 import { resolve } from '../../features/links';
 import { noteContext } from '../context';
@@ -12,19 +12,46 @@ import { linkAt } from '../linkAt';
 import { collectElements, type LiveElement } from './model';
 import { renderCell } from './table/render';
 
-/** A part of a footnote's text: a line of its definition, or an inline footnote's text. */
+/** A part of a footnote's text in the note: a line of its definition, or an inline footnote's text. */
 export interface FootnotePart {
   from: number;
-  text: string;
+  to: number;
 }
 
-export interface FootnoteIndex {
+/** The note's footnotes: their numbers, and where their texts are. */
+export class FootnoteIndex {
+  private readonly numbers: ReadonlyMap<string, number>;
+  private readonly inline: ReadonlyMap<number, number>;
+  private readonly definitions: ReadonlyMap<string, readonly FootnotePart[]>;
+  constructor(numbers: ReadonlyMap<string, number>, inline: ReadonlyMap<number, number>, definitions: ReadonlyMap<string, readonly FootnotePart[]>) {
+    this.numbers = numbers;
+    this.inline = inline;
+    this.definitions = definitions;
+  }
+
   /** The number a reference to `label` shows, or null when the label has no definition. */
-  number(label: string): number | null;
+  number(label: string): number | null {
+    return this.numbers.get(label) ?? null;
+  }
+
   /** The number of the inline footnote `^[…]` that starts at `pos`. */
-  inlineNumber(pos: number): number | null;
-  /** The text of `label`'s definition, line by line. */
-  definition(label: string): FootnotePart[] | null;
+  inlineNumber(pos: number): number | null {
+    return this.inline.get(pos) ?? null;
+  }
+
+  /** Where the text of `label`'s definition is, line by line. */
+  definition(label: string): readonly FootnotePart[] | null {
+    return this.definitions.get(label) ?? null;
+  }
+
+  /** The index after `changes`, which touched no footnote syntax. */
+  map(changes: ChangeDesc): FootnoteIndex {
+    const inline = new Map<number, number>();
+    for (const [pos, n] of this.inline) inline.set(changes.mapPos(pos, 1), n);
+    const definitions = new Map<string, FootnotePart[]>();
+    for (const [label, parts] of this.definitions) definitions.set(label, parts.map((p) => ({ from: changes.mapPos(p.from, -1), to: changes.mapPos(p.to, 1) })));
+    return new FootnoteIndex(this.numbers, inline, definitions);
+  }
 }
 
 const DEFINITION = /^ {0,3}\[\^([^\]\s]+)\]:[ \t]*/;
@@ -75,7 +102,7 @@ function scan(doc: Text): FootnoteIndex {
     let at = 0;
     if (open && text.trim() !== '' && /^(?: {4}|\t)/.test(text)) {
       const indent = /^[ \t]*/.exec(text)![0].length;
-      open.push({ from: from + indent, text: text.slice(indent) });
+      open.push({ from: from + indent, to: from + text.length });
       at = indent;
     } else {
       open = null;
@@ -84,7 +111,7 @@ function scan(doc: Text): FootnoteIndex {
       if (d) {
         at = d[0].length;
         if (!definitions.has(d[1])) {
-          open = [{ from: from + at, text: text.slice(at) }];
+          open = [{ from: from + at, to: from + text.length }];
           definitions.set(d[1], open);
         }
       }
@@ -99,16 +126,12 @@ function scan(doc: Text): FootnoteIndex {
     if (r.label === null) inline.set(r.pos, next++);
     else if (definitions.has(r.label) && !numbers.has(r.label)) numbers.set(r.label, next++);
   }
-  return {
-    number: (label) => numbers.get(label) ?? null,
-    inlineNumber: (p) => inline.get(p) ?? null,
-    definition: (label) => definitions.get(label) ?? null,
-  };
+  return new FootnoteIndex(numbers, inline, definitions);
 }
 
 const indexes = new WeakMap<Text, FootnoteIndex>();
 
-/** The footnotes of `doc` (computed once per document, when a footnote is first shown). */
+/** The footnotes of `doc`, read from all of it (once per document). */
 export function footnoteIndex(doc: Text): FootnoteIndex {
   let index = indexes.get(doc);
   if (!index) {
@@ -116,6 +139,42 @@ export function footnoteIndex(doc: Text): FootnoteIndex {
     indexes.set(doc, index);
   }
   return index;
+}
+
+/** What of a line decides the footnotes: its indentation (or blankness), and its footnote syntax, backticks, fences and delimiters. */
+const SHAPE_TOKENS = /\[\^[^\]\s]*\]?:?|\^\[|`+|~{3,}|^---/g;
+
+function shape(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => (line.trim() === '' ? 'blank' : String(/^[ \t]*/.exec(line)![0].length)) + ':' + (line.match(SHAPE_TOKENS) ?? []).join(' '))
+    .join('\n');
+}
+
+/**
+ * The note's footnotes, kept through edits (ROADMAP 10c): an edit that leaves the shape of its
+ * lines alone (typing words, in a footnote's text too) maps the index instead of reading the whole
+ * note again. A stale index (null) is read again when a footnote is next shown.
+ */
+const footnotesField = StateField.define<FootnoteIndex | null>({
+  create: () => null,
+  update(value, tr) {
+    if (!tr.docChanged) return value;
+    const previous = value ?? indexes.get(tr.startState.doc) ?? null;
+    if (!previous) return null;
+    let touches = false;
+    const before = tr.startState.doc;
+    const after = tr.state.doc;
+    tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+      if (!touches) touches = shape(before.sliceString(before.lineAt(fromA).from, before.lineAt(toA).to)) !== shape(after.sliceString(after.lineAt(fromB).from, after.lineAt(toB).to));
+    });
+    return touches ? null : previous.map(tr.changes);
+  },
+});
+
+/** The footnotes of the note in `state`. */
+export function footnotesOf(state: EditorState): FootnoteIndex {
+  return state.field(footnotesField, false) ?? footnoteIndex(state.doc);
 }
 
 // ---------- the footnote's text, on hover or tap ----------
@@ -132,15 +191,15 @@ function footnoteAt(state: EditorState, pos: number, side: -1 | 0 | 1 = 0): Live
 }
 
 /** The text an element's footnote shows: its definition's lines, or an inline footnote's text. */
-function partsOf(state: EditorState, el: LiveElement): FootnotePart[] | null {
+function partsOf(state: EditorState, el: LiveElement): readonly FootnotePart[] | null {
   const spec = el.pieces[0]?.widget;
   if (!spec || spec.type !== 'footnote') return null;
-  if (spec.label === null) return [{ from: el.from + 2, text: state.sliceDoc(el.from + 2, el.to - 1) }];
-  return footnoteIndex(state.doc).definition(spec.label);
+  if (spec.label === null) return [{ from: el.from + 2, to: el.to - 1 }];
+  return footnotesOf(state).definition(spec.label);
 }
 
 /** The tooltip's content: the footnote's text as inline Markdown (links follow on a click). */
-function tooltipDom(view: EditorView, parts: FootnotePart[] | null): HTMLElement {
+function tooltipDom(view: EditorView, parts: readonly FootnotePart[] | null): HTMLElement {
   const dom = document.createElement('div');
   dom.className = 'cm-lp-footnote-tooltip';
   if (!parts) {
@@ -154,7 +213,7 @@ function tooltipDom(view: EditorView, parts: FootnotePart[] | null): HTMLElement
     if (i > 0) dom.appendChild(document.createTextNode(' '));
     const span = document.createElement('span');
     span.dataset.from = String(part.from);
-    span.appendChild(renderCell(part.text, { resolves }));
+    span.appendChild(renderCell(view.state.sliceDoc(part.from, part.to), { resolves }));
     dom.appendChild(span);
   });
   dom.addEventListener('mousedown', (e) => e.preventDefault());
@@ -200,6 +259,7 @@ const pinnedFootnote = StateField.define<number | null>({
  */
 export function footnoteTooltips(): Extension {
   return [
+    footnotesField,
     pinnedFootnote,
     hoverTooltip((view, pos, side) => {
       if (view.state.field(pinnedFootnote, false) !== null) return null;
