@@ -197,8 +197,9 @@ export class DocumentSession {
 
   /**
    * Increments whenever the session itself puts text into the buffer (load, remote change, Take
-   * theirs, merge, restored draft), also when that text equals the buffer's. A view that keeps
-   * its own model (`markDirty(serialize)`) re-reads the buffer when it changes.
+   * theirs, merge, restored draft, an edit from outside the view), also when that text equals the
+   * buffer's. A view that keeps its own model (`markDirty(serialize)`) re-reads the buffer when it
+   * changes.
    */
   get remoteChangeCount(): number {
     return this.remoteChanges;
@@ -274,8 +275,8 @@ export class DocumentSession {
   /**
    * The document text, LF-only. A view that marks edits with a serializer (DESIGN §6.8) is asked
    * for it; text the session put into the buffer itself (a load, a remote change, Take theirs, a
-   * merge, a restored draft) is the text until the view reports its next edit, so that text is
-   * never shadowed by a scene the view has not caught up with yet.
+   * merge, a restored draft, an edit from outside the view) is the text until the view reports its
+   * next edit, so that text is never shadowed by a scene the view has not caught up with yet.
    */
   getText(): string {
     return this.serializer ? this.serializer() : this.editorState.doc.toString();
@@ -315,13 +316,21 @@ export class DocumentSession {
     this.view = null;
   }
 
-  /** Applies a local edit from outside the editor (reading-view checkbox, generic views). */
+  /**
+   * Applies a local edit from outside the editor (reading-view checkbox, generic views, a restored
+   * text, a linked mention), at positions in `getText()`. A view that keeps its own model
+   * (`markDirty(serialize)`) may have edits the buffer does not show yet: the buffer takes them
+   * first, and the edited buffer is then the text, which such a view re-reads like any other text
+   * the session puts there (`remoteChangeCount`).
+   */
   applyEdit(
     changes: ChangeSpec,
     opts: { selection?: { anchor: number; head?: number }; userEvent?: string; effects?: StateEffect<unknown>[] } = {},
   ): void {
     if (!this.isEditable()) return;
+    this.settleSerializer();
     const spec = { changes, selection: opts.selection, effects: opts.effects, userEvent: opts.userEvent ?? 'input', scrollIntoView: !!opts.selection };
+    this.remoteChanges++;
     if (this.view) {
       this.view.dispatch(spec);
       // The editor's update listener calls markDirty.
@@ -331,9 +340,25 @@ export class DocumentSession {
     this.markDirty();
   }
 
-  /** Replaces the whole text as a local edit (generic textual views). */
+  /** Replaces the whole text as a local edit (generic textual views, a restored text). */
   setText(text: string): void {
+    if (!this.isEditable()) return;
+    this.settleSerializer();
     this.applyEdit(remoteChanges(this.editorState.doc.toString(), text));
+  }
+
+  /**
+   * The serialized text of a view that keeps its own model becomes the buffer's, outside the undo
+   * history and without counting as an edit (it is the text already); the serializer goes.
+   */
+  private settleSerializer(): void {
+    const serialize = this.serializer;
+    if (!serialize) return;
+    this.serializer = null;
+    const spec = remoteTransaction(this.editorState, serialize());
+    if (!spec) return;
+    if (this.view) this.view.dispatch(spec);
+    else this.state = this.state.update(spec).state;
   }
 
   /** Effects that change no text (pending uploads). */

@@ -1143,6 +1143,26 @@ describe('views that keep their own model (markDirty(serialize), DESIGN §6.8)',
     expect(vault.readFile('a.md').content).toBe('x'.repeat(50));
   });
 
+  it('an edit from outside the view applies to its serialized text, which the view then re-reads', async () => {
+    const { vault, session } = setup('one');
+    await session.ready;
+    const { view, edit } = modelView(session, 'one');
+    edit('one two');
+    await vi.advanceTimersByTimeAsync(1000);
+    // The buffer still holds "one"; a mention linked at its offsets in the text.
+    session.applyEdit({ from: 4, to: 7, insert: '[[two]]' });
+    expect(session.getText()).toBe('one [[two]]');
+    expect(view.model).toBe('one [[two]]');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vault.readFile('a.md').content).toBe('one [[two]]');
+    // A restored text lands even though the view edited before (its serializer is gone).
+    edit('one [[two]] three');
+    expect(await session.restoreText('restored')).toBe(true);
+    expect(view.model).toBe('restored');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vault.readFile('a.md').content).toBe('restored');
+  });
+
   it('counts uploads of views without editor widgets as unsaved work', async () => {
     const { session } = setup();
     await session.ready;

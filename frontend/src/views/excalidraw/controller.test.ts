@@ -3,7 +3,7 @@ import { MockVault } from '../../api/mock/vault';
 import type { SaveFileRequest } from '../../api/types';
 import { el, markdownDrawing, scene, text } from '../../test/drawings';
 import { fakeApi, sessionDeps } from '../../test/fakes';
-import { DocumentSession } from '../../sync/DocumentSession';
+import { DocumentSession, type Notice, type SessionDeps } from '../../sync/DocumentSession';
 import { DrawingController, type AppStateLike, type DrawingEnv, type SceneApi, type SceneLib } from './controller';
 import type { LiveFile } from './files';
 import { drawingFormat, markdownParts, markdownRest, parseDrawing, type Scene, type SceneElement } from './format';
@@ -100,12 +100,12 @@ function fakeEnv(overrides: Partial<DrawingEnv> = {}): DrawingEnv & { uploads: A
   };
 }
 
-async function setup(path: string, content: string, envOverrides: Partial<DrawingEnv> = {}) {
+async function setup(path: string, content: string, envOverrides: Partial<DrawingEnv> = {}, depsOverrides: Partial<SessionDeps> = {}) {
   const vault = new MockVault(false);
   vault.createFile({ path, content }, 'other-device-1');
   const fake = fakeApi(vault);
   const format = drawingFormat(path);
-  const deps = sessionDeps(fake.api, { mergeFor: () => (b, m, t) => mergeDrawingTexts(format, b, m, t) });
+  const deps = sessionDeps(fake.api, { mergeFor: () => (b, m, t) => mergeDrawingTexts(format, b, m, t), ...depsOverrides });
   const session = new DocumentSession(path, deps);
   await session.ready;
   const env = fakeEnv(envOverrides);
@@ -272,6 +272,41 @@ describe('remote changes', () => {
     expect(status(session)).toBe('clean');
     expect(controller.getState().mode).toMatchObject({ kind: 'fallback', reason: 'malformed' });
     expect(session.getText()).toBe('{broken');
+  });
+});
+
+describe('text put into the buffer from outside the view', () => {
+  it('Undo of Take theirs brings mine back onto the canvas, and the next edit keeps it', async () => {
+    const notices: Notice[] = [];
+    // A merge that gives up, so that the banner appears.
+    const { session, canvas, deps, saved, remote } = await setup('Plan.excalidraw', json(scene([el('a')])), {}, { mergeFor: () => () => null, notify: (n) => notices.push(n) });
+    canvas.add(el('mine'));
+    await remote((s) => ({ ...s, elements: [...s.elements, el('theirs')] }));
+    expect(status(session)).toBe('conflict');
+    await session.takeTheirs();
+    expect(canvas.ids()).toEqual(['a', 'theirs']);
+    expect(deps.drafts.discarded).toHaveLength(1);
+    notices.find((n) => n.action?.label === 'Undo')!.action!.run();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(canvas.ids()).toEqual(['a', 'mine']);
+    expect(deps.drafts.discarded).toEqual([]);
+    canvas.add(el('next'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => e.id)).toEqual(['a', 'mine', 'next']);
+  });
+
+  it('a text restored after edits here lands, on the canvas too (Settings › This device, a draft from another tab)', async () => {
+    const { session, canvas, saved } = await setup('Plan.excalidraw', json(scene([el('a')])));
+    canvas.add(el('b'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => e.id)).toEqual(['a', 'b']);
+    expect(await session.restoreText(json(scene([el('a'), el('z')])))).toBe(true);
+    expect(canvas.ids()).toEqual(['a', 'z']);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => e.id)).toEqual(['a', 'z']);
+    canvas.add(el('c'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => e.id)).toEqual(['a', 'z', 'c']);
   });
 });
 
