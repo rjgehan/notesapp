@@ -10,11 +10,13 @@ export interface Prefs {
   loadRemoteImages: boolean;
   /** Keep copies of recently opened notes, the tree and note images for offline reading (DESIGN §6.26). */
   offlineNotes: boolean;
+  /** Vim keys in the note and text editors (DESIGN §6.36); used only with a mouse or trackpad. */
+  vimMode: boolean;
 }
 
 export const PREFS_KEY = 'notesapp:prefs';
 
-export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true };
+export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true, vimMode: false };
 
 function load(): Prefs {
   try {
@@ -27,6 +29,7 @@ function load(): Prefs {
       autocorrect: typeof parsed.autocorrect === 'boolean' ? parsed.autocorrect : true,
       loadRemoteImages: typeof parsed.loadRemoteImages === 'boolean' ? parsed.loadRemoteImages : true,
       offlineNotes: typeof parsed.offlineNotes === 'boolean' ? parsed.offlineNotes : true,
+      vimMode: parsed.vimMode === true,
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -41,9 +44,9 @@ export const usePrefs = create<PrefsState>()((set, get) => ({
   ...load(),
   update(patch) {
     set(patch);
-    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes } = get();
+    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode } = get();
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode }));
     } catch {
       // Private mode or quota: the preference still applies to this page load.
     }

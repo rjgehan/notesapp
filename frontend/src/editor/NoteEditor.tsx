@@ -15,6 +15,7 @@ import { clearActiveEditor, setActiveEditor } from './activeEditor';
 import { vaultChanged, type NoteContext } from './context';
 import { noteExtensions, type EditorHooks } from './editorSetup';
 import { maybeShowTabEscapeHint } from './tabEscapeHint';
+import { attachVim, vimWanted } from './vimMode';
 
 export interface NoteEditorProps {
   session: DocumentSession;
@@ -32,6 +33,7 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
   const view = useRef<EditorView | null>(null);
   const spellcheck = usePrefs((s) => s.spellcheck);
   const autocorrect = usePrefs((s) => s.autocorrect);
+  const vim = vimWanted(usePrefs((s) => s.vimMode));
   const tree = useTree().data;
   const callbacks = useRef({ onToggleMode, onView });
 
@@ -62,10 +64,13 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
       readOnly,
       spellcheck,
       autocorrect,
+      vim,
     };
     const state = session.prepareState((st) => st.update({ effects: StateEffect.reconfigure.of(extensions(ctx, hooks)) }).state);
     const v = new EditorView({ state, parent });
     view.current = v;
+    // The first vim editor loads its chunk, then switches it on.
+    attachVim(v, vim);
     session.attach(v);
     setActiveEditor(v);
     const onFocus = () => {
@@ -84,7 +89,7 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
     };
     // `autoFocus` only matters at mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, readOnly, spellcheck, autocorrect, extensions]);
+  }, [session, readOnly, spellcheck, autocorrect, vim, extensions]);
 
   // Link decorations re-resolve when the vault changes.
   useEffect(() => {

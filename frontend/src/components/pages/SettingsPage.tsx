@@ -17,6 +17,7 @@ import { mirrorSummary } from '../../features/mirror';
 import { openPath } from '../../features/navigation';
 import { displayName, newNameError, pathSafetyError } from '../../features/paths';
 import { DEFAULT_SETTINGS } from '../../features/settings';
+import { vimAvailable } from '../../editor/vimMode';
 import { clearOfflineCopies, noteCache } from '../../offline/offlineStore';
 import { setOfflineMedia } from '../../pwa/serviceWorker';
 import { pageBuild } from '../../state/buildCheck';
@@ -523,6 +524,16 @@ function DeviceSection() {
       </Row>
       <Row label="Load remote images" description="Off: images from other sites show a placeholder until tapped.">
         <Toggle label="Load remote images" checked={prefs.loadRemoteImages} onChange={(loadRemoteImages) => prefs.update({ loadRemoteImages })} />
+      </Row>
+      <Row
+        label="Vim key bindings"
+        description={
+          vimAvailable()
+            ? 'Vim keys in the editor. :w saves, :q leaves the editor; the app’s hotkeys keep working. The mode shows in the status bar.'
+            : 'Needs a keyboard with a mouse or trackpad; not used on a touch screen.'
+        }
+      >
+        <Toggle label="Vim key bindings" checked={prefs.vimMode && vimAvailable()} disabled={!vimAvailable()} onChange={(vimMode) => prefs.update({ vimMode })} />
       </Row>
       <Row label="Keep recent notes for offline reading" description={<OfflineCopiesInfo enabled={prefs.offlineNotes} />}>
         <Toggle label="Keep recent notes for offline reading" checked={prefs.offlineNotes} onChange={(offlineNotes) => setOfflineCopies(offlineNotes)} />

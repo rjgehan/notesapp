@@ -3,7 +3,7 @@
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, syntaxHighlighting, type LanguageSupport } from '@codemirror/language';
-import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
+import { highlightSelectionMatches, openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightActiveLine, keymap, placeholder } from '@codemirror/view';
 import { isCustomized } from '../features/hotkeyPrefs';
@@ -21,6 +21,7 @@ import { smartPunctuationGuard } from './smartPunctuation';
 import { unresolvedLinks } from './unresolved';
 import { trackedRangesField } from './tracked';
 import { uploadsField } from './uploads';
+import { editorCommandKeys, vimSlot, type CommandKey } from './vimMode';
 
 export interface EditorHooks {
   /** A local (non-remote) document change: the session marks itself dirty. */
@@ -30,6 +31,8 @@ export interface EditorHooks {
   readOnly: boolean;
   spellcheck: boolean;
   autocorrect: boolean;
+  /** Vim keys (DESIGN §6.36): the preference, on a device where vim applies. */
+  vim?: boolean;
 }
 
 /**
@@ -56,6 +59,8 @@ function coveredMargins(view: EditorView): { top: number } {
 
 function common(hooks: EditorHooks): Extension[] {
   return [
+    // Vim (lazy, empty until its chunk has loaded); it sets its own precedence.
+    vimSlot(hooks.vim === true),
     history(),
     // The session's pending attachment uploads and tracked ranges (the same field instances, so
     // they survive mounts).
@@ -96,6 +101,27 @@ function ifDefault(id: string, run: (view: EditorView) => boolean): (view: Edito
 
 /** The search panel's keys, with Mod-f following the `editor.find` command's key. */
 const findKeymap = searchKeymap.map((b) => (b.key === 'Mod-f' && b.run ? { ...b, run: ifDefault('editor.find', b.run) } : b));
+
+/** The keymap for an editor's command keys, each stepping aside once customized. */
+function commandKeymap(keys: readonly CommandKey[]): Extension {
+  return [
+    editorCommandKeys.of(keys),
+    keymap.of(keys.map((k) => ({ key: k.key, run: ifDefault(k.id, k.run), preventDefault: k.preventDefault }))),
+  ];
+}
+
+const noteCommandKeys: readonly CommandKey[] = [
+  { key: 'Mod-s', id: 'editor.save', run: saveNow, preventDefault: true },
+  { key: 'Mod-Enter', id: 'editor.followLink', run: followLinkAtCursor },
+  { key: 'Mod-l', id: 'editor.toggleCheckbox', run: toggleCheckbox, preventDefault: true },
+  { key: 'Mod-b', id: 'editor.bold', run: toggleBold, preventDefault: true },
+  { key: 'Mod-i', id: 'editor.italic', run: toggleItalic, preventDefault: true },
+  { key: 'Mod-k', id: 'editor.insertLink', run: insertMarkdownLink, preventDefault: true },
+  { key: 'Mod-e', id: 'editor.toggleMode', run: toggleMode, preventDefault: true },
+];
+
+/** Mod-f, for vim's benefit only: the search keymap binds it in the editor (findKeymap). */
+const findCommandKey: CommandKey = { key: 'Mod-f', id: 'editor.find', run: openSearchPanel };
 
 function baseKeymaps(): Extension {
   return [
@@ -150,15 +176,8 @@ export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[
     searchHighlight,
     pasteAndDrop,
     baseKeymaps(),
-    keymap.of([
-      { key: 'Mod-s', run: ifDefault('editor.save', saveNow), preventDefault: true },
-      { key: 'Mod-Enter', run: ifDefault('editor.followLink', followLinkAtCursor) },
-      { key: 'Mod-l', run: ifDefault('editor.toggleCheckbox', toggleCheckbox), preventDefault: true },
-      { key: 'Mod-b', run: ifDefault('editor.bold', toggleBold), preventDefault: true },
-      { key: 'Mod-i', run: ifDefault('editor.italic', toggleItalic), preventDefault: true },
-      { key: 'Mod-k', run: ifDefault('editor.insertLink', insertMarkdownLink), preventDefault: true },
-      { key: 'Mod-e', run: ifDefault('editor.toggleMode', toggleMode), preventDefault: true },
-    ]),
+    commandKeymap(noteCommandKeys),
+    editorCommandKeys.of([findCommandKey]),
     keymap.of([...closeBracketsKeymap, ...findKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
   ];
 }
@@ -170,10 +189,18 @@ export function plainTextExtensions(hooks: EditorHooks & { save(): void }, langu
     language ?? [],
     language ? syntaxHighlighting(obsidianHighlight) : [],
     baseKeymaps(),
-    keymap.of([{ key: 'Mod-s', run: ifDefault('editor.save', () => {
+    commandKeymap([
+      {
+        key: 'Mod-s',
+        id: 'editor.save',
+        run: () => {
           hooks.save();
           return true;
-        }), preventDefault: true }]),
+        },
+        preventDefault: true,
+      },
+    ]),
+    editorCommandKeys.of([findCommandKey]),
     keymap.of([...closeBracketsKeymap, ...findKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
   ];
 }

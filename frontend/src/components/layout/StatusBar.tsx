@@ -1,9 +1,10 @@
 // Desktop status bar (DESIGN §6.5): connection, save summary, history and mirror warnings, the
-// open note's word and character counts, and its backlink count.
+// vim mode (§6.36), the open note's word and character counts, and its backlink count.
 import { CircleAlert, CloudAlert, History } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
 import { useBacklinks } from '../../api/hooks';
+import { useVimMode } from '../../editor/vimMode';
 import { countWords } from '../../features/format';
 import { mirrorMisconfigured, mirrorWarningDetail, pushMirrorNow } from '../../features/mirror';
 import { isNotePath, pathFromLocation } from '../../features/paths';
@@ -57,6 +58,7 @@ export function StatusBar() {
   const mirrorWarning = useMirrorWarning();
   const path = pathFromLocation(useLocation().pathname);
   const note = path !== null && isNotePath(path);
+  const vimMode = useVimMode();
   return (
     <footer className="status-bar" aria-label="Status">
       <ConnectionIndicator />
@@ -84,6 +86,11 @@ export function StatusBar() {
       <span className={`status-item status-save status-${summary}`} aria-live="polite">
         {SUMMARY[summary]}
       </span>
+      {vimMode && (
+        <span className="status-item status-vim" title="Vim mode (Settings, This device)">
+          {vimMode}
+        </span>
+      )}
       {note && <BacklinkCount key={`b:${path}`} path={path} />}
       {note && isMarkdownViewPath(path) && <Counts key={path} path={path} />}
     </footer>
