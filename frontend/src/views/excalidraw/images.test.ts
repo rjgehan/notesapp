@@ -43,6 +43,13 @@ describe('imageFor', () => {
     expect(e.loadAttachment).not.toHaveBeenCalled();
   });
 
+  it('loads a cropped attachment in full', async () => {
+    const r = refs({ crop: { id: 'crop', mimeType: 'image/png', path: 'Attachments/one.png' } });
+    const e = env();
+    await imageFor('crop', r, e, 'Plan.excalidraw', undefined, true);
+    expect(e.loadAttachment).toHaveBeenCalledWith('Attachments/one.png', 'Plan.excalidraw', { fullSize: true });
+  });
+
   it('shows a missing or failing attachment as a placeholder', async () => {
     const r = refs({ gone: { id: 'gone', mimeType: 'image/png', path: 'Attachments/gone.png' } });
     expect(decode((await imageFor('gone', r, env(), 'P.excalidraw'))!.dataURL!)).toContain('Missing image');

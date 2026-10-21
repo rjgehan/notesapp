@@ -51,12 +51,12 @@ async function embeddedFile(path: string, subpath: string | null, box: Box | und
 /** Images of a drawing shown at `depth`: 0 for the editor and `![[drawing]]` embeds. */
 export function imageEnv(depth: number): ImageEnv {
   return {
-    async loadAttachment(path, source) {
+    async loadAttachment(path, source, opts) {
       const entry = findAttachment(path, source);
       if (!entry) return null;
       const response = await fetch(api.rawUrl(entry));
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      return { ...(await displayDataUrl(await response.blob())), path: entry.path };
+      return { ...(await displayDataUrl(await response.blob(), opts)), path: entry.path };
     },
     resolveLink: (target, source) => resolve(target, source, currentTree().links),
     embeddedFile: (path, subpath, _source, box) => embeddedFile(path, subpath, box, depth),

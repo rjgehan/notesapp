@@ -601,6 +601,29 @@ describe('images', () => {
     expect(JSON.parse(vault.readFile('Plan.excalidraw').content).files).toEqual(files);
   });
 
+  it('keeps crops in the original image’s pixels, also while a scaled-down copy is shown', async () => {
+    const files = {
+      f1: { id: 'f1', mimeType: 'image/png', created: 5, path: 'Attachments/big.png' },
+      f2: { id: 'f2', mimeType: 'image/png', created: 6, path: 'Attachments/cropped.png' },
+    };
+    const scaled = { natural: { width: 2880, height: 2160 }, display: { width: 1440, height: 1080 } };
+    const loadAttachment = vi.fn(async (p: string, _source: string, opts?: { fullSize?: boolean }) => ({ dataURL: 'data:image/png;base64,AAAA', mimeType: 'image/png', path: p, ...(opts?.fullSize ? {} : { scaled }) }));
+    const crop = { x: 400, y: 300, width: 2000, height: 1500, naturalWidth: 2880, naturalHeight: 2160 };
+    const { canvas, saved, remote } = await setup('Plan.excalidraw', json(scene([el('a', { type: 'image', fileId: 'f1' }), el('b', { type: 'image', fileId: 'f2', crop })], { files })), { loadAttachment });
+    // A cropped image is shown in full, so its crop is right as it is.
+    expect(loadAttachment).toHaveBeenCalledWith('Attachments/cropped.png', 'Plan.excalidraw', { fullSize: true });
+    expect(loadAttachment).toHaveBeenCalledWith('Attachments/big.png', 'Plan.excalidraw');
+    expect(canvas.elements[1].crop).toEqual(crop);
+    // Excalidraw crops the scaled-down copy in the copy's pixels; the file stores the original's.
+    const shownCrop = { x: 100, y: 50, width: 720, height: 540, naturalWidth: 1440, naturalHeight: 1080 };
+    canvas.change('a', { crop: shownCrop });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => e.crop)).toEqual([{ x: 200, y: 100, width: 1440, height: 1080, naturalWidth: 2880, naturalHeight: 2160 }, crop]);
+    // And text from elsewhere comes back in the copy's pixels.
+    await remote((s) => ({ ...s, elements: s.elements.map((e) => (e.id === 'a' ? { ...e, x: 9, version: e.version + 1 } : e)) }));
+    expect(canvas.elements.find((e) => e.id === 'a')).toMatchObject({ x: 9, crop: shownCrop });
+  });
+
   it('shows a missing attachment as a placeholder and keeps its reference', async () => {
     const files = { f1: { id: 'f1', mimeType: 'image/png', created: 5, path: 'Attachments/gone.png' } };
     const { canvas, vault } = await setup('Plan.excalidraw', json(scene([el('i', { type: 'image', fileId: 'f1' })], { files })), { loadAttachment: vi.fn(async () => null) });

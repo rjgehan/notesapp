@@ -17,6 +17,17 @@ export const EMBED_LIMIT = 256 * 1024;
 /** Excalidraw's DEFAULT_MAX_IMAGE_WIDTH_OR_HEIGHT: what it scales inserted images down to. */
 export const MAX_IMAGE_DIMENSION = 1440;
 
+export interface Size {
+  width: number;
+  height: number;
+}
+
+/** An attachment shown scaled down: its own size and the size Excalidraw has. */
+export interface Scaled {
+  natural: Size;
+  display: Size;
+}
+
 /** A file as Excalidraw holds it in memory, plus the vault path when it is an attachment. */
 export interface LiveFile {
   id: string;
@@ -122,12 +133,12 @@ export function dataUrlToBlob(dataURL: string): Blob {
 
 /**
  * The in-memory image for an attachment: scaled down to what Excalidraw itself keeps for an
- * inserted image, so a few phone photos do not exhaust the iPhone's memory. The vault keeps the
- * original. SVG and GIF (animation) are used as they are.
+ * inserted image, so a few phone photos do not exhaust the iPhone's memory, unless `fullSize`.
+ * The vault keeps the original. SVG and GIF (animation) are used as they are.
  */
-export async function displayDataUrl(blob: Blob): Promise<{ dataURL: string; mimeType: string }> {
+export async function displayDataUrl(blob: Blob, opts: { fullSize?: boolean } = {}): Promise<{ dataURL: string; mimeType: string; scaled?: Scaled }> {
   const original = async () => ({ dataURL: await blobToDataUrl(blob), mimeType: blob.type || 'application/octet-stream' });
-  if (blob.type === 'image/svg+xml' || blob.type === 'image/gif' || typeof createImageBitmap !== 'function') return original();
+  if (opts.fullSize || blob.type === 'image/svg+xml' || blob.type === 'image/gif' || typeof createImageBitmap !== 'function') return original();
   try {
     const bitmap = await createImageBitmap(blob);
     const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
@@ -139,11 +150,36 @@ export async function displayDataUrl(blob: Blob): Promise<{ dataURL: string; mim
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const natural = { width: bitmap.width, height: bitmap.height };
     bitmap.close();
     const mimeType = blob.type === 'image/jpeg' || blob.type === 'image/webp' ? blob.type : 'image/png';
-    const scaled = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mimeType, 0.92));
-    return scaled ? { dataURL: await blobToDataUrl(scaled), mimeType: scaled.type || mimeType } : original();
+    const smaller = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mimeType, 0.92));
+    if (!smaller) return original();
+    return { dataURL: await blobToDataUrl(smaller), mimeType: smaller.type || mimeType, scaled: { natural, display: { width: canvas.width, height: canvas.height } } };
   } catch {
     return original();
   }
+}
+
+// ---------- crops ----------
+
+/**
+ * An image element with its crop in the pixels of an image `to` big, when the crop is in those of
+ * one `from` big (Excalidraw crops in the pixels of the image it holds, and so does Obsidian's
+ * canvas: a crop made on a scaled-down copy is stored in the original's pixels, and back).
+ */
+export function scaleCrop(e: SceneElement, from: Size, to: Size): SceneElement {
+  const crop = e.crop as { x: number; y: number; width: number; height: number; naturalWidth: number; naturalHeight: number } | null | undefined;
+  if (e.type !== 'image' || !crop || typeof crop !== 'object' || crop.naturalWidth !== from.width || crop.naturalHeight !== from.height) return e;
+  if (from.width === to.width && from.height === to.height) return e;
+  const fx = to.width / from.width;
+  const fy = to.height / from.height;
+  return { ...e, crop: { ...crop, x: crop.x * fx, y: crop.y * fy, width: crop.width * fx, height: crop.height * fy, naturalWidth: to.width, naturalHeight: to.height } };
+}
+
+/** Image elements that crop their file. */
+export function croppedFileIds(elements: readonly SceneElement[]): Set<string> {
+  const ids = new Set<string>();
+  for (const e of elements) if (e.type === 'image' && !e.isDeleted && typeof e.fileId === 'string' && e.crop) ids.add(e.fileId);
+  return ids;
 }

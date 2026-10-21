@@ -15,7 +15,7 @@
 // - Excalidraw is given only what is safe to show: no generated HTML of `iframe` elements, no
 //   images by URL; the file keeps both.
 import type { DocumentSession } from '../../sync/DocumentSession';
-import { dataUrlToBlob, EMBED_LIMIT, fileIdFor, filesToStore, referencedFileIds, type LiveFile } from './files';
+import { croppedFileIds, dataUrlToBlob, EMBED_LIMIT, fileIdFor, filesToStore, referencedFileIds, scaleCrop, type LiveFile, type Scaled } from './files';
 import { imageBoxes, imageFor, isDataUrl, type ImageEnv } from './images';
 import {
   EXPORTED_APP_STATE,
@@ -157,6 +157,8 @@ export class DrawingController {
   private reported = new Set<string>();
   /** The generated HTML of `iframe` elements, by id: kept in the file, never shown. */
   private iframeData = new Map<string, unknown>();
+  /** Attachments shown scaled down, by file id: their crops are converted to the original's pixels and back. */
+  private scaled = new Map<string, Scaled>();
   /** The last serialization, reused while nothing changed (a draft, then the save after it). */
   private memo: { key: readonly unknown[]; purpose: 'save' | 'draft'; text: string } | null = null;
   private readonly listeners = new Set<() => void>();
@@ -191,6 +193,8 @@ export class DrawingController {
     this.appliedRemote = this.session.remoteChangeCount;
     this.latest = null;
     this.initialized = false;
+    // A new Excalidraw loads every image again.
+    this.scaled.clear();
     const result = parseDrawing(this.format, this.session.getText());
     if (!result.ok) return { generation, mode: { kind: 'fallback', reason: result.reason, message: result.message }, initial: null };
     this.adopt(result.drawing);
@@ -240,7 +244,7 @@ export class DrawingController {
 
   /**
    * What Excalidraw is given of an element: an `iframe` without its generated HTML (Excalidraw
-   * would render it as a page, unsanitized).
+   * would render it as a page, unsanitized), a crop in the pixels of the image it shows.
    */
   private forDisplay(e: SceneElement): SceneElement {
     if (this.iframeData.has(e.id) && generatedHtml(e).has) {
@@ -248,15 +252,17 @@ export class DrawingController {
       delete custom.generationData;
       return { ...e, customData: custom };
     }
-    return e;
+    const scaled = e.type === 'image' && typeof e.fileId === 'string' ? this.scaled.get(e.fileId) : undefined;
+    return scaled ? scaleCrop(e, scaled.natural, scaled.display) : e;
   }
 
-  /** An element as the file stores it: the generated HTML put back. */
+  /** An element as the file stores it: the generated HTML put back, a crop in the original image's pixels. */
   private forFile(e: SceneElement): SceneElement {
     if (e.type === 'iframe' && this.iframeData.has(e.id) && !generatedHtml(e).has) {
       return { ...e, customData: { ...(isRecord(e.customData) ? e.customData : {}), generationData: this.iframeData.get(e.id) } };
     }
-    return e;
+    const scaled = e.type === 'image' && typeof e.fileId === 'string' ? this.scaled.get(e.fileId) : undefined;
+    return scaled ? scaleCrop(e, scaled.display, scaled.natural) : e;
   }
 
   private signature(elements: readonly SceneElement[], appState: AppStateLike): string {
@@ -438,11 +444,17 @@ export class DrawingController {
         const live = api.getFiles();
         const elements = api.getSceneElementsIncludingDeleted();
         const boxes = imageBoxes(elements);
+        // A cropped image is shown in full: its crop is in the original's pixels.
+        const cropped = croppedFileIds(elements);
         for (const id of referencedFileIds(elements)) {
           if (this.requested.has(id) || live[id]?.dataURL) continue;
           this.requested.add(id);
-          const file = await imageFor(id, { stored: this.stored, section: this.sectionRefs, vault: this.vault }, this.env, this.session.path, boxes.get(id));
-          if (file && this.api === api) api.addFiles([file]);
+          const file = await imageFor(id, { stored: this.stored, section: this.sectionRefs, vault: this.vault }, this.env, this.session.path, boxes.get(id), cropped.has(id));
+          if (!file || this.api !== api) continue;
+          const { scaled, ...shown } = file;
+          if (scaled) this.scaled.set(id, scaled);
+          else this.scaled.delete(id);
+          api.addFiles([shown]);
         }
       } while (this.loadAgain);
     } finally {

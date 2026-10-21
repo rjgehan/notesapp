@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { el } from '../../test/drawings';
-import { blobToDataUrl, dataUrlToBlob, filesToStore, isPastedName, referencedFileIds, type FileSources } from './files';
+import { blobToDataUrl, croppedFileIds, dataUrlToBlob, filesToStore, isPastedName, referencedFileIds, scaleCrop, type FileSources } from './files';
 import { sameOriginFontSources } from './fonts';
 
 const none: FileSources = { stored: new Map(), section: new Set(), vault: new Map() };
@@ -36,6 +36,26 @@ describe('filesToStore', () => {
   it('lists attachments of a Markdown drawing under Embedded Files instead of the JSON', () => {
     const sources: FileSources = { stored: new Map(), section: new Set(['f1']), vault: new Map([['f2', { path: 'Attachments/b.png', mimeType: 'image/png', created: 2 }]]) };
     expect(filesToStore('markdown', images, {}, sources)).toEqual({ files: {}, attachments: [{ id: 'f2', path: 'Attachments/b.png' }] });
+  });
+});
+
+describe('crops of scaled-down images', () => {
+  const natural = { width: 2880, height: 2160 };
+  const display = { width: 1440, height: 1080 };
+
+  it('converts a crop between the pixels of the copy shown and the original', () => {
+    const shown = el('i', { type: 'image', fileId: 'f', crop: { x: 10, y: 20, width: 100, height: 50, naturalWidth: 1440, naturalHeight: 1080 } });
+    const stored = scaleCrop(shown, display, natural);
+    expect(stored.crop).toEqual({ x: 20, y: 40, width: 200, height: 100, naturalWidth: 2880, naturalHeight: 2160 });
+    expect(scaleCrop(stored, natural, display).crop).toEqual(shown.crop);
+  });
+
+  it('leaves crops in other pixels, uncropped images and other elements alone', () => {
+    const other = el('i', { type: 'image', fileId: 'f', crop: { x: 1, y: 1, width: 5, height: 5, naturalWidth: 800, naturalHeight: 600 } });
+    expect(scaleCrop(other, display, natural)).toBe(other);
+    const plain = el('j', { type: 'image', fileId: 'g', crop: null });
+    expect(scaleCrop(plain, display, natural)).toBe(plain);
+    expect(croppedFileIds([other, plain, el('k', { type: 'image', fileId: 'h', crop: other.crop, isDeleted: true })])).toEqual(new Set(['f']));
   });
 });
 
