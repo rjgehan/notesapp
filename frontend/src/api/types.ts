@@ -203,17 +203,34 @@ export interface ResolvedLink { path: VaultPath | null; createPath: VaultPath | 
 export interface ResolveResponse { resolved: Record<string, ResolvedLink> }
 
 // ---------- search / tags (§12) ----------
-export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
+export interface SearchMatch {
+  line: number;
+  text: string;
+  ranges: TextRange[];
+  page: number | null;            // 1-based page of a PDF match; null otherwise
+}
 export interface SearchHit {
   path: VaultPath;
   basename: string;
+  kind: FileKind;                 // 'note', or 'pdf' for a PDF's extracted text
   score: number;
   mtime: IsoInstant;
   titleRanges: TextRange[];
   matches: SearchMatch[];
   moreMatches: number;
 }
-export interface SearchResponse { query: string; total: number; tookMs: number; results: SearchHit[] }
+export interface SearchCorrection { term: string; replacements: string[] }   // typo tolerance (§12.1)
+export interface SearchResponse {
+  query: string;
+  total: number;
+  tookMs: number;
+  results: SearchHit[];
+  corrections: SearchCorrection[];
+}
+export type SearchSort = 'relevance' | 'mtime';
+export interface SavedSearch { id: string; name: string; query: string; sort: SearchSort }
+export interface SavedSearchesResponse { searches: SavedSearch[]; version: Version | null }
+export interface SavedSearchesUpdateRequest { searches: SavedSearch[]; baseVersion: Version | null }
 export interface TagCount { tag: string; count: number; total: number }
 export interface TagsResponse { tags: TagCount[] }
 
@@ -296,6 +313,7 @@ export interface HistoryCommittedEvent {
 export interface SettingsChangedEvent { version: Version; origin: string | null }
 export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
+export interface SavedSearchesChangedEvent { version: Version; origin: string | null }
 
 export interface VaultEventMap {
   'hello': HelloEvent;
@@ -311,10 +329,12 @@ export interface VaultEventMap {
   'settings.changed': SettingsChangedEvent;
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
+  'searches.changed': SavedSearchesChangedEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
+  'searches.changed',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).

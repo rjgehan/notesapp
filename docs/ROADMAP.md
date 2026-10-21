@@ -719,6 +719,15 @@ Results update through SSE.
 - Saved searches and typo tolerance.
 - Text from PDFs (Apache PDFBox), `.sheet` and `.excalidraw` files.
 
+**Status: built (2026-10-21, branch `feat/search`).** API.md §12, DESIGN §5.5.10 and §6.4.1.
+
+- The grammar has `OR`, parentheses, `/regex/` (also as `file:`, `path:` and `tag:` values), `line:(…)` and `section:(…)`; the client parses it the same way to highlight hits.
+- Regular expressions are safe: at most 500 characters, one 2 s budget per query enforced while the engine reads the text (catastrophic backtracking ends in a clear `400`), at most two such queries at once, and never under the index lock. Search p95 on the 10k-note perf vault stays under 100 ms with the new forms included.
+- Typo tolerance: a word that is not in the index matches words one or two edits away (never short words or numbers); the panel says so and offers "Exact words only".
+- Saved searches live in `.notesapp/searches.json`, so they sync to every device and have history; the panel lists them when the field is empty.
+- PDF text is extracted with PDFBox 3.0.8 (Apache-2.0) in the background, within size, page, character and time limits, cached in `.notesapp/cache/search-text/`, and hits open the PDF at the matching page.
+- `.sheet` and `.excalidraw` text is indexed by the `DocumentIndexer` of items 5 and 6 (their branches), not here.
+
 ### 23. Large-attachment policy for git history
 
 **One line:** keep files above a configurable size (for example 25 MB) out of git history so the repo stays small. They stay in the vault and in backups (item 1).

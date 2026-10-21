@@ -1,7 +1,7 @@
 // Search-hit navigation in the reading view (DESIGN §6.4 `?line=N&q=`): the target block flashes,
 // and the query's terms are highlighted with the CSS Custom Highlight API, which never touches the
 // rendered DOM (so block patching and embeds are unaffected). Browsers without it only flash.
-import { findTermRanges } from '../features/searchTerms';
+import { findTermRanges, type HighlightTerm } from '../features/searchTerms';
 
 const HIGHLIGHT_NAME = 'search-term';
 const MAX_RANGES = 500;
@@ -11,7 +11,7 @@ function highlightRegistry(): HighlightRegistry | null {
 }
 
 /** Highlights `terms` in the container's text; returns the cleanup. */
-export function highlightTermsIn(container: HTMLElement, terms: readonly string[]): () => void {
+export function highlightTermsIn(container: HTMLElement, terms: readonly HighlightTerm[]): () => void {
   const registry = highlightRegistry();
   if (!registry || terms.length === 0) return () => {};
   const ranges: Range[] = [];

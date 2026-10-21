@@ -1,46 +1,46 @@
-// The words and phrases of a search query (API.md §12.1 grammar) that a hit view highlights:
-// positive `word` and `"phrase"` clauses; filters (`tag:`, `path:`, `file:`) and negations are
-// not highlighted.
+// What a search hit view highlights for a query (API.md §12.1 grammar): the words and phrases of
+// positive clauses (lower-cased), and positive /regular expressions/ over the text. Filters
+// (`tag:`, `path:`, `file:`) and negated clauses are not highlighted.
+import { parseSearchQuery, queryLeaves, toJsRegExp } from './searchQuery';
 
-export function highlightTerms(query: string): string[] {
-  const terms: string[] = [];
-  let i = 0;
-  const q = query;
-  const readValue = (): string => {
-    if (q[i] === '"') {
-      const end = q.indexOf('"', i + 1);
-      const value = end < 0 ? q.slice(i + 1) : q.slice(i + 1, end);
-      i = end < 0 ? q.length : end + 1;
-      return value;
+export type HighlightTerm = string | RegExp;
+
+export function highlightTerms(query: string): HighlightTerm[] {
+  const words: string[] = [];
+  const regexes: RegExp[] = [];
+  for (const { leaf, negated } of queryLeaves(parseSearchQuery(query))) {
+    if (negated) continue;
+    if (leaf.kind === 'word' || leaf.kind === 'phrase') {
+      const value = leaf.value.trim().toLowerCase();
+      if (value) words.push(value);
+    } else if (leaf.kind === 'regex') {
+      const re = toJsRegExp(leaf.value);
+      if (re && !regexes.some((r) => r.source === re.source && r.flags === re.flags)) regexes.push(re);
     }
-    const start = i;
-    while (i < q.length && !/\s/.test(q[i]) && q[i] !== '"') i++;
-    return q.slice(start, i);
-  };
-  while (i < q.length) {
-    while (i < q.length && /\s/.test(q[i])) i++;
-    if (i >= q.length) break;
-    let negated = false;
-    if (q[i] === '-') {
-      negated = true;
-      i++;
-    }
-    const filter = /^(tag|path|file):/i.exec(q.slice(i));
-    if (filter) i += filter[0].length;
-    const value = readValue().trim();
-    if (!filter && !negated && value) terms.push(value.toLowerCase());
   }
-  return [...new Set(terms)];
+  return [...new Set(words), ...regexes];
 }
 
-/** Case-insensitive occurrences of `terms` in `text`, as sorted, non-overlapping ranges. */
-export function findTermRanges(text: string, terms: readonly string[], limit = 500): Array<{ from: number; to: number }> {
+/** Occurrences of `terms` in `text` (strings case-insensitively), as sorted, non-overlapping ranges. */
+export function findTermRanges(text: string, terms: readonly HighlightTerm[], limit = 500): Array<{ from: number; to: number }> {
   if (terms.length === 0) return [];
-  const lower = text.toLowerCase();
+  let lower: string | null = null;
   const ranges: Array<{ from: number; to: number }> = [];
   for (const term of terms) {
-    for (let at = lower.indexOf(term); at >= 0 && ranges.length < limit; at = lower.indexOf(term, at + term.length)) {
-      ranges.push({ from: at, to: at + term.length });
+    if (typeof term === 'string') {
+      lower ??= text.toLowerCase();
+      for (let at = lower.indexOf(term); at >= 0 && ranges.length < limit; at = lower.indexOf(term, at + term.length)) {
+        ranges.push({ from: at, to: at + term.length });
+      }
+      continue;
+    }
+    const re = new RegExp(term.source, term.flags.includes('g') ? term.flags : term.flags + 'g');
+    for (let m = re.exec(text); m && ranges.length < limit; m = re.exec(text)) {
+      if (m[0].length === 0) {
+        re.lastIndex++;
+        continue;
+      }
+      ranges.push({ from: m.index, to: m.index + m[0].length });
     }
   }
   ranges.sort((a, b) => a.from - b.from || b.to - a.to);

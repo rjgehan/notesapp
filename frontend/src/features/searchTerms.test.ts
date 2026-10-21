@@ -15,6 +15,17 @@ describe('highlightTerms', () => {
   it('runs an unterminated phrase to the end', () => {
     expect(highlightTerms('"open loops')).toEqual(['open loops']);
   });
+
+  it('understands OR, groups and scopes, and skips negated groups', () => {
+    expect(highlightTerms('(cats OR dogs) -(fish OR birds) line:(mix flour)')).toEqual(['cats', 'dogs', 'mix', 'flour']);
+  });
+
+  it('turns positive regular expressions into RegExps', () => {
+    const terms = highlightTerms('/colou?r/ -/x+/ file:/^a/');
+    expect(terms).toHaveLength(1);
+    expect(terms[0]).toBeInstanceOf(RegExp);
+    expect((terms[0] as RegExp).source).toBe('colou?r');
+  });
 });
 
 describe('findTermRanges', () => {
@@ -26,5 +37,14 @@ describe('findTermRanges', () => {
     ]);
     expect(findTermRanges('weekly review', ['weekly review', 'review'])).toEqual([{ from: 0, to: 13 }]);
     expect(findTermRanges('nothing', [])).toEqual([]);
+  });
+
+  it('finds regular expression matches, skipping empty ones', () => {
+    expect(findTermRanges('Color or colour, 555-1234', [/colou?r/gimu, /\d*/gmu])).toEqual([
+      { from: 0, to: 5 },
+      { from: 9, to: 15 },
+      { from: 17, to: 20 },
+      { from: 21, to: 25 },
+    ]);
   });
 });

@@ -68,6 +68,8 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     getBacklinks: (path, unlinked) => call(() => vault.getBacklinks(path, unlinked)),
     resolveLinks: (req) => call(() => ({ resolved: vault.resolveTargets(req.source, req.targets) })),
     search: (q, opts = {}) => call(() => vault.search(q, opts.limit, opts.sort, opts.prefix ?? false)),
+    getSavedSearches: () => call(() => vault.getSavedSearches()),
+    putSavedSearches: (req) => call(() => vault.putSavedSearches(req, clientId)),
     getTags: () => call(() => ({ tags: vault.getTags() })),
     listTrash: () => call(() => ({ entries: vault.listTrash() })),
     restoreTrash: (id, req) => call(() => vault.restoreTrash(id, req, clientId)),

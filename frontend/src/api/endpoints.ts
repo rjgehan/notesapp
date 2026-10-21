@@ -22,7 +22,10 @@ import type {
   RestoreRequest,
   RestoreResult,
   SaveFileRequest,
+  SavedSearchesResponse,
+  SavedSearchesUpdateRequest,
   SearchResponse,
+  SearchSort,
   SettingsResponse,
   SettingsUpdateRequest,
   StatusResponse,
@@ -57,8 +60,9 @@ export type RawConflict = 'fail' | 'rename' | 'overwrite';
 
 export interface SearchOptions {
   limit?: number;
-  sort?: 'relevance' | 'mtime';
+  sort?: SearchSort;
   prefix?: boolean;
+  fuzzy?: boolean;
 }
 
 export interface Endpoints {
@@ -80,6 +84,8 @@ export interface Endpoints {
   getBacklinks(path: string, unlinked: boolean): Promise<BacklinksResponse>;
   resolveLinks(req: ResolveRequest): Promise<ResolveResponse>;
   search(q: string, opts?: SearchOptions): Promise<SearchResponse>;
+  getSavedSearches(): Promise<SavedSearchesResponse>;
+  putSavedSearches(req: SavedSearchesUpdateRequest): Promise<SavedSearchesResponse>;
   getTags(): Promise<TagsResponse>;
   listTrash(): Promise<TrashListResponse>;
   restoreTrash(id: string, req?: RestoreRequest): Promise<RestoreResult>;
@@ -130,7 +136,10 @@ export const httpEndpoints: Endpoints = {
   getNoteMeta: (path) => apiFetch('/api/notes/meta' + query(p(path))),
   getBacklinks: (path, unlinked) => apiFetch('/api/notes/backlinks' + query({ path, unlinked })),
   resolveLinks: (req) => apiFetch('/api/links/resolve', { method: 'POST', json: req }),
-  search: (q, opts = {}) => apiFetch('/api/search' + query({ q, limit: opts.limit, sort: opts.sort, prefix: opts.prefix })),
+  search: (q, opts = {}) =>
+    apiFetch('/api/search' + query({ q, limit: opts.limit, sort: opts.sort, prefix: opts.prefix, fuzzy: opts.fuzzy })),
+  getSavedSearches: () => apiFetch('/api/searches'),
+  putSavedSearches: (req) => apiFetch('/api/searches', { method: 'PUT', json: req }),
   getTags: () => apiFetch('/api/tags'),
   listTrash: () => apiFetch('/api/trash'),
   restoreTrash: (id, req) => apiFetch(`/api/trash/${encodeURIComponent(id)}/restore`, { method: 'POST', json: req ?? {} }),

@@ -836,14 +836,15 @@ Request `ResolveRequest`:
 
 ## 12. Search and tags
 
-### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true]`
+### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true][&fuzzy=true]`
 
-This is full-text search over notes. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes and over the text of PDF attachments (§12.4). Files whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
 | `sort` | `relevance` (the default) or `mtime` (newest first) |
 | `prefix` | With `true`, the last bare word of the query matches as a prefix when it is 2 or more characters long (search-as-you-type) |
+| `fuzzy` | With `true` (the default), a word or phrase term that is not in the index also matches indexed words one edit away (4–7 characters) or two edits away (8 or more): insertions, deletions, substitutions and swaps of adjacent characters. Terms shorter than 4 characters, terms with digits, and negated terms are never corrected. The response lists what was used in `corrections`. |
 
 `200 SearchResponse`:
 
@@ -853,47 +854,64 @@ This is full-text search over notes. Notes whose path matches `settings.files.ex
   "total": 3,
   "tookMs": 4,
   "results": [
-    { "path": "Work/Weekly review.md", "basename": "Weekly review", "score": 12.84,
+    { "path": "Work/Weekly review.md", "basename": "Weekly review", "kind": "note", "score": 12.84,
       "mtime": "2026-10-14T18:20:11.000Z",
       "titleRanges": [ { "from": 0, "to": 13 } ],
       "matches": [
-        { "line": 7, "text": "…so the weekly review covers open loops and next actions", "ranges": [ { "from": 7, "to": 20 } ] }
+        { "line": 7, "text": "…so the weekly review covers open loops and next actions", "ranges": [ { "from": 7, "to": 20 } ],
+          "page": null }
       ],
       "moreMatches": 2 }
-  ]
+  ],
+  "corrections": []
 }
 ```
 
 | Field | Meaning |
 |---|---|
-| `total` | All matching notes; `results` holds at most `limit` of them |
-| `matches` | Up to 3 matching body lines, each clipped to 200 characters (with `…` marking a clip). `ranges` are relative to `text`. `line` is the 0-based line number; the client opens a hit with `/n/<path>?line=<line>&q=<query>` (DESIGN §6.4). |
+| `total` | All matching files; `results` holds at most `limit` of them |
+| `kind` | `note`, or `pdf` for a PDF's extracted text (§12.4) |
+| `matches` | Up to 3 matching body lines, each clipped to 200 characters (with `…` marking a clip). `ranges` are relative to `text` and cover word, phrase and regular-expression matches. `line` is the 0-based line number; the client opens a note hit with `/n/<path>?line=<line>&q=<query>` (DESIGN §6.4). For a PDF, `line` counts lines of the extracted text, and `page` is the 1-based page (the client opens `/n/<path>?page=<page>`); `page` is `null` for notes. |
 | `titleRanges` | Ranges in `basename` |
-| `score` | Higher is better; 0 for filter-only queries |
+| `score` | Higher is better; 0 for queries made only of filters and regular expressions |
+| `corrections` | `[{term, replacements}]`: each query term (normalized) that typo tolerance replaced, and the indexed words that were searched in its place (at most 8, closest first). Empty when `fuzzy=false` or nothing was corrected. |
 
-- An empty or all-negative query returns `200` with `total: 0`.
-- Errors: `400 bad-request` when `limit` is out of range or `sort` is unknown.
+- An empty query, or one made only of negated clauses, returns `200` with `total: 0`.
+- Errors: `400 bad-request` when `limit` is out of range or `sort` is unknown; and with `errors: [{field: "q", message}]` when the query is longer than 2,000 characters or has more than 64 clauses, a regular expression is invalid or longer than 500 characters, or the regular expressions and `line:`/`section:` clauses run out of their time budget (`notes.search.timeout`, 2 s, which stops catastrophic backtracking). `503 busy` when more than `notes.search.max-concurrent-expensive` (2) such queries run at once and none finishes within that budget.
 
 **Query grammar.** This is normative.
 
 ```
-query   = ws* [ clause { ws+ clause } ] ws*
-clause  = [ "-" ] ( filter | phrase | word )
-filter  = ( "tag:" | "path:" | "file:" ) ( phrase | word )          ; keywords are case-insensitive
-phrase  = '"' { char - '"' } ( '"' | end-of-query )                  ; an unterminated phrase runs to the end
-word    = 1*( char - ws - '"' )
+query   = ws* [ or ] ws*
+or      = and { ws+ "OR" ws+ and }                                ; OR (upper case only) binds looser than AND
+and     = unary { ws* unary }                                     ; juxtaposition is AND
+unary   = [ "-" ] primary                                         ; "-" followed by whitespace is a word
+primary = group | scoped | clause
+group   = "(" ws* [ or ] ws* ( ")" | end-of-query )
+scoped  = ( "line:" | "section:" ) ( group | clause )
+clause  = [ "tag:" | "path:" | "file:" ] ( regex | phrase | word ) ; keywords are case-insensitive
+regex   = "/" 1*( "\" char | char - "/" ) "/"                     ; only before ws, ")" or the end; else a word
+phrase  = '"' { char - '"' } ( '"' | end-of-query )              ; an unterminated phrase runs to the end
+word    = 1*( char - ws - '"' )                                   ; inside a group, ")" also ends a word
 ```
+
+Parsing never fails: a keyword with nothing after it is an ordinary word, an empty phrase or group is ignored, an unclosed group runs to the end of the query, a stray `)` is ignored, and a leading, trailing or doubled `OR` is dropped. A slash that does not close a regular expression before whitespace, `)` or the end keeps the clause a word, so `/usr/bin` is the phrase "usr bin"; write `\/` for a slash inside a regular expression.
 
 | Clause | Matches |
 |---|---|
 | `word` | Notes containing the word in the title, aliases, headings, tags or body. Matching is case-, accent- and width-insensitive. A word that tokenizes into several tokens (`e-mail`) acts as a phrase. |
 | `"a phrase"` | Consecutive tokens |
-| `tag:x` / `tag:#x` | Notes tagged `x` or any nested `x/…` |
-| `path:x` | Case-insensitive substring of the full vault path |
-| `file:x` | Case-insensitive substring of the file name |
-| `-clause` | Excludes matches |
+| `/regex/` | A Java regular expression found anywhere in the file's text (a note's whole content, frontmatter included; a PDF's extracted text). Case-insensitive (Unicode) unless it starts with `(?-i)`; `^` and `$` match at line breaks. At most 500 characters. |
+| `tag:x` / `tag:#x` | Notes tagged `x` or any nested `x/…`. `tag:/regex/`: a tag (without `#`) matching it. |
+| `path:x` | Case-insensitive substring of the full vault path. `path:/regex/`: a path matching it. |
+| `file:x` | Case-insensitive substring of the file name. `file:/regex/`: a name matching it. |
+| `a OR b` | Either side |
+| `( … )` | Groups clauses |
+| `line:(…)` | Every clause inside matches within one line of the body (frontmatter lines excluded). Filters inside keep their file-level meaning. |
+| `section:(…)` | Every clause inside matches within one section: the text from one heading to the next (the part before the first heading is a section too). A PDF's sections are its pages. |
+| `-clause` | Excludes matches. A group (or the whole query) made only of negated clauses matches nothing: negations only remove what the other clauses of the same group match. |
 
-All clauses must match (AND). `OR`, parentheses and regular expressions are not supported in v1.
+Clauses next to each other must all match (AND).
 
 ### 12.2 `GET /api/tags`
 
@@ -911,6 +929,53 @@ All clauses must match (AND). `OR`, parentheses and regular expressions are not 
 - `total` is the number of distinct notes with this tag or any descendant.
 - A parent that only exists through nesting has `count: 0`.
 - Display casing is the first one seen.
+
+### 12.3 Saved searches: `GET /api/searches` and `PUT /api/searches`
+
+Named queries, stored in the vault as `.notesapp/searches.json`, so they sync to every device and are committed with the vault's history (DESIGN §4.1).
+
+`GET /api/searches` returns `200 SavedSearchesResponse`:
+
+```json
+{ "searches": [ { "id": "s-6f1c2a9e", "name": "Open loops", "query": "tag:#todo -done", "sort": "relevance" } ],
+  "version": "3b18e512dba79e4c8300dd08aeb37f8e728b8dad" }
+```
+
+`version` is the blob id of the file (§1.6), or `null` while it does not exist (no search was ever saved). A file that cannot be read as saved searches lists none; entries that are invalid are skipped (both are logged).
+
+`PUT /api/searches` replaces the whole list. Request `SavedSearchesUpdateRequest`:
+
+```json
+{ "searches": [ { "id": "s-6f1c2a9e", "name": "Open loops", "query": "tag:#todo -done", "sort": "relevance" } ],
+  "baseVersion": "3b18e512dba79e4c8300dd08aeb37f8e728b8dad" }
+```
+
+| Field | Rule |
+|---|---|
+| `searches` | At most 100, in display order |
+| `id` | 1 to 64 characters from `[A-Za-z0-9-]`, unique; chosen by the client |
+| `name` | 1 to 120 characters, trimmed |
+| `query` | 1 to 2,000 characters (§12.1); stored as given |
+| `sort` | `relevance` or `mtime`; missing means `relevance` |
+| `baseVersion` | The `version` the client last read, or `null` (or `""`) when the file does not exist yet |
+
+`200 SavedSearchesResponse` with the new `version`. Saving a list equal to the stored one succeeds whatever `baseVersion` says.
+
+| Errors |
+|---|
+| `400 bad-request` with `errors[]` naming each invalid field, for example `searches[2].name` |
+| `409 version-conflict` (`path: ".notesapp/searches.json"`, `currentVersion`, `currentContent`): another device saved meanwhile. The client fetches the list again and re-applies its change (add, rename, delete). |
+
+Event: `searches.changed` (§16.4). The file is added to the pending history batch like a save.
+
+### 12.4 PDF text in search
+
+The text of every PDF in the vault is extracted with Apache PDFBox in the background and searched like a note's body (DESIGN §5.5.10). A PDF hit has `kind: "pdf"`, its `basename` is the file name without `.pdf`, and each match carries the `page` it is on.
+
+- Extraction never runs on a request: a new or changed PDF becomes searchable a moment after it is written (seconds for a large one). Until then it is not found by its text, and it is not found by `file:` or `path:` either.
+- Limits (`notes.search.pdf.*`): files over 64 MB, pages after the 2,000th, text after 1,000,000 characters, and work after 60 s per file are skipped. A PDF that cannot be read (encrypted with a password, damaged, over a limit) is still found by its name.
+- PDF text has no tags, links or headings: `tag:` never matches it, it is never a backlink source, and it does not count as a note in `/api/status`. Its sections (`section:`) are its pages.
+- Spreadsheets and drawings are searchable through their own document indexers (ROADMAP items 5 and 6).
 
 ---
 
@@ -1411,6 +1476,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `trash.changed` | `TrashChangedEvent` (`{}`) | yes | The trash list changed |
 | `history.committed` | `HistoryCommittedEvent` | yes | A commit was made. `paths` has at most 100 entries, and `truncated` is true when there were more. Not sent when an operation had nothing to commit. |
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
+| `searches.changed` | `SavedSearchesChangedEvent` | no | The saved searches were saved (§12.3); refetch them |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, or free space crossing 1 GiB); refetch it |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 
@@ -1655,17 +1721,34 @@ export interface ResolvedLink { path: VaultPath | null; createPath: VaultPath | 
 export interface ResolveResponse { resolved: Record<string, ResolvedLink> }
 
 // ---------- search / tags (§12) ----------
-export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
+export interface SearchMatch {
+  line: number;
+  text: string;
+  ranges: TextRange[];
+  page: number | null;            // 1-based page of a PDF match; null otherwise
+}
 export interface SearchHit {
   path: VaultPath;
   basename: string;
+  kind: FileKind;                 // 'note', or 'pdf' for a PDF's extracted text
   score: number;
   mtime: IsoInstant;
   titleRanges: TextRange[];
   matches: SearchMatch[];
   moreMatches: number;
 }
-export interface SearchResponse { query: string; total: number; tookMs: number; results: SearchHit[] }
+export interface SearchCorrection { term: string; replacements: string[] }   // typo tolerance (§12.1)
+export interface SearchResponse {
+  query: string;
+  total: number;
+  tookMs: number;
+  results: SearchHit[];
+  corrections: SearchCorrection[];
+}
+export type SearchSort = 'relevance' | 'mtime';
+export interface SavedSearch { id: string; name: string; query: string; sort: SearchSort }
+export interface SavedSearchesResponse { searches: SavedSearch[]; version: Version | null }
+export interface SavedSearchesUpdateRequest { searches: SavedSearch[]; baseVersion: Version | null }
 export interface TagCount { tag: string; count: number; total: number }
 export interface TagsResponse { tags: TagCount[] }
 
@@ -1748,6 +1831,7 @@ export interface HistoryCommittedEvent {
 export interface SettingsChangedEvent { version: Version; origin: string | null }
 export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
+export interface SavedSearchesChangedEvent { version: Version; origin: string | null }
 
 export interface VaultEventMap {
   'hello': HelloEvent;
@@ -1763,11 +1847,13 @@ export interface VaultEventMap {
   'settings.changed': SettingsChangedEvent;
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
+  'searches.changed': SavedSearchesChangedEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
+  'searches.changed',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
 ```
@@ -1798,6 +1884,8 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | POST | `/api/links/resolve` | `ResolveRequest` | 200 `ResolveResponse` | 11.3 |
 | GET | `/api/search?q=&limit=&sort=&prefix=` | | 200 `SearchResponse` | 12.1 |
 | GET | `/api/tags` | | 200 `TagsResponse` | 12.2 |
+| GET | `/api/searches` | | 200 `SavedSearchesResponse` | 12.3 |
+| PUT | `/api/searches` | `SavedSearchesUpdateRequest` | 200 `SavedSearchesResponse` | 12.3 |
 | GET | `/api/trash` | | 200 `TrashListResponse` | 13.1 |
 | GET | `/api/trash/{id}/raw` | | 200/206/304 bytes | 13.2 |
 | POST | `/api/trash/{id}/restore` | `RestoreRequest` (optional) | 200 `RestoreResult` | 13.3 |
@@ -1832,11 +1920,12 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `TextFile`, `CreateFileRequest`, `SaveFileRequest`, `WriteResult`, `AttachmentResult` | Same | `SaveFileRequest.baseVersion` is a `@Nullable String` (missing and `null` both mean "create"). `flushHistory` is `@Nullable Boolean` (default false). |
 | `CreateFolderRequest`, `FolderResult`, `MoveRequest`, `MovedFile`, `LinkUpdate`, `FailedUpdate`, `MoveResult` | Same | `MoveRequest.updateLinks` and `dryRun` are `@Nullable Boolean`. `FailedUpdate.reason` is the enum `FailedReason` |
 | `HeadingInfo`, `OutgoingLink`, `NoteMeta`, `Mention`, `BacklinkGroup`, `BacklinksResponse`, `ResolveRequest`, `ResolvedLink`, `ResolveResponse` | Same | `NoteMeta.frontmatter` is `@Nullable Map<String, Object>` |
-| `SearchMatch`, `SearchHit`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | |
+| `SearchMatch`, `SearchHit`, `SearchCorrection`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | `SearchMatch.page` is a `@Nullable Integer`; `SearchHit.kind` is `FileKind` |
+| `SavedSearch`, `SavedSearchesResponse`, `SavedSearchesUpdateRequest` | Same | `SavedSearch.sort` is a `String` (`relevance` or `mtime`); `SavedSearchesUpdateRequest.searches` is a `@Nullable JsonNode`, so every invalid field is reported by name |
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
-| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
+| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`, `searches.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.

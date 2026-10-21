@@ -2,6 +2,7 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { DEFAULT_SETTINGS } from '../features/settings';
 import { treePatchCount } from '../sync/treePatch';
+import { ApiError } from './client';
 import { api } from './endpoints';
 import { queryClient } from './queryClient';
 import { queryKeys, STALE } from './queryKeys';
@@ -86,14 +87,21 @@ export function useBacklinks(path: string | null, unlinked: boolean, enabled = t
   });
 }
 
-export function useSearch(q: string, sort: 'relevance' | 'mtime' = 'relevance') {
+export function useSearch(q: string, sort: 'relevance' | 'mtime' = 'relevance', fuzzy = true) {
   return useQuery({
-    queryKey: queryKeys.search(q, sort),
-    queryFn: () => api.search(q, { sort, prefix: true }),
+    queryKey: queryKeys.search(q, sort, fuzzy),
+    queryFn: () => api.search(q, { sort, prefix: true, fuzzy }),
     staleTime: STALE.search,
     enabled: q.trim() !== '',
     placeholderData: (prev) => prev,
+    // A bad regular expression is a 400: retrying cannot help.
+    retry: (count, error) => !(error instanceof ApiError) && count < 3,
   });
+}
+
+/** Saved searches (API.md §12.3), kept current by `searches.changed`. */
+export function useSavedSearches() {
+  return useQuery({ queryKey: queryKeys.savedSearches(), queryFn: () => api.getSavedSearches(), staleTime: STALE.savedSearches });
 }
 
 export function useTags() {

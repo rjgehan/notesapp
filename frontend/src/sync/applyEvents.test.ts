@@ -106,7 +106,7 @@ describe('applyEvent (DESIGN §6.3)', () => {
     applyEvent(target, 'file.created', { file: entry('Ideas/New.md'), origin: null });
     expect(paths()).toContain('Ideas/New.md');
     expect(folders()).toContain('Ideas');
-    expect(invalidated()).toEqual(expect.arrayContaining(['tags', 'search:plan:relevance']));
+    expect(invalidated()).toEqual(expect.arrayContaining(['tags', 'search:plan:relevance:true']));
     expect(invalidated()).not.toContain('templates');
     applyEvent(target, 'file.created', { file: entry('Templates/Meeting.md'), origin: null });
     expect(invalidated()).toContain('templates');
@@ -123,7 +123,7 @@ describe('applyEvent (DESIGN §6.3)', () => {
     const updated = qc.getQueryData<TreeResponse>(queryKeys.tree())!.files.find((f) => f.path === 'Plan.md')!;
     expect(updated).toMatchObject({ version: 'v2', aliases: ['Roadmap'] });
     expect(qc.getQueryData(queryKeys.file('Plan.md'))).toBeUndefined();
-    expect(invalidated()).toEqual(expect.arrayContaining(['meta:Plan.md', 'backlinks:Plan.md:false', 'tags', 'search:plan:relevance']));
+    expect(invalidated()).toEqual(expect.arrayContaining(['meta:Plan.md', 'backlinks:Plan.md:false', 'tags', 'search:plan:relevance:true']));
     expect(invalidated()).not.toContain('meta:Other.md');
   });
 
@@ -166,7 +166,7 @@ describe('applyEvent (DESIGN §6.3)', () => {
     expect(paths()).not.toContain('Plan.md');
     expect(qc.getQueryData(queryKeys.file('Plan.md'))).toBeUndefined();
     expect(s.onRemoteDeleted).toHaveBeenCalledWith('01JA7Q3M9K2Z');
-    expect(invalidated()).toEqual(expect.arrayContaining(['backlinks:Plan.md:false', 'tags', 'search:plan:relevance']));
+    expect(invalidated()).toEqual(expect.arrayContaining(['backlinks:Plan.md:false', 'tags', 'search:plan:relevance:true']));
   });
 
   it('folder.created and folder.deleted patch the folders; a delete removes descendants and notifies their sessions', () => {
@@ -247,7 +247,7 @@ describe('own mutations (DESIGN §6.3)', () => {
     expect(qc.getQueryData(queryKeys.file('Projects/Spec.md'))).toBeUndefined();
     expect(rekey).toHaveBeenCalledWith('Plan.md', 'Ideas/Roadmap.md');
     expect(target.moves.lookup('Plan.md')).toBe('Ideas/Roadmap.md');
-    expect(invalidated()).toEqual(expect.arrayContaining(['backlinks:Plan.md:false', 'tags', 'search:plan:relevance']));
+    expect(invalidated()).toEqual(expect.arrayContaining(['backlinks:Plan.md:false', 'tags', 'search:plan:relevance:true']));
   });
 
   it('a dry run changes nothing', () => {
@@ -262,7 +262,7 @@ describe('own mutations (DESIGN §6.3)', () => {
     applyTrashEntry(target, { id: 'T', originalPath: 'Projects', type: 'folder', deletedAt: '', deletedBy: '', size: 0, fileCount: 2 });
     expect(paths()).toEqual(['Plan.md', 'Templates/Daily.md']);
     expect(qc.getQueryData(queryKeys.file('Projects/Spec.md'))).toBeUndefined();
-    expect(invalidated()).toEqual(expect.arrayContaining(['trash', 'tags', 'backlinks:Plan.md:false', 'search:plan:relevance']));
+    expect(invalidated()).toEqual(expect.arrayContaining(['trash', 'tags', 'backlinks:Plan.md:false', 'search:plan:relevance:true']));
   });
 
   it('RestoreResult adds files and folders, lets a tombstone session adopt the file, and invalidates', () => {
@@ -278,7 +278,7 @@ describe('own mutations (DESIGN §6.3)', () => {
     const s = session('Plan.md');
     applyHistoryRestoreResult(target, { file: entry('Plan.md', 'v5'), created: false, createdFolders: [], commitId: 'c' });
     expect(s.onRemoteChanged).toHaveBeenCalledWith(expect.objectContaining({ version: 'v5' }), { quiet: true });
-    expect(invalidated()).toEqual(expect.arrayContaining(['meta:Plan.md', 'tags', 'backlinks:Plan.md:false', 'search:plan:relevance']));
+    expect(invalidated()).toEqual(expect.arrayContaining(['meta:Plan.md', 'tags', 'backlinks:Plan.md:false', 'search:plan:relevance:true']));
   });
 
   it('AttachmentResult and FolderResult add their entries', () => {

@@ -2,10 +2,10 @@
 // query's terms are highlighted until the user edits the note.
 import { StateEffect, StateField, type Extension, type Range } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
-import { findTermRanges } from '../features/searchTerms';
+import { findTermRanges, type HighlightTerm } from '../features/searchTerms';
 import { isLocalEdit } from './remote';
 
-export const setSearchHighlight = StateEffect.define<{ terms: string[]; line: number | null } | null>();
+export const setSearchHighlight = StateEffect.define<{ terms: HighlightTerm[]; line: number | null } | null>();
 
 const termMark = Decoration.mark({ class: 'cm-search-term' });
 const flashLine = Decoration.line({ class: 'cm-flash-line' });

@@ -87,7 +87,8 @@ public class SearchService {
 			throw invalidQuery(ex.getMessage());
 		}
 		catch (SearchRegex.TimeoutException ex) {
-			logger.info("SEARCH timed out after {} ms: {}", this.timeout.toMillis(), query);
+			// Search queries are never logged (DESIGN §5.18).
+			logger.info("SEARCH timed out after {} ms", this.timeout.toMillis());
 			throw invalidQuery("The search took too long. Simplify the regular expression (nested repetition such "
 					+ "as (a+)+ is a common cause), or add words that narrow the search down.");
 		}

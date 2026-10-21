@@ -182,11 +182,12 @@ NotesApp/                              (monorepo; branch main)
 | Path in vault | Meaning | Tree/index/search | Git |
 |---|---|---|---|
 | `**/*.md` | Notes | yes | committed |
-| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes are content-indexed | committed |
+| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; notes and the text of PDFs are content-indexed (§5.5.10) | committed |
 | `.notesapp/settings.json` | App settings (§5.12) | hidden | committed, so settings have history |
+| `.notesapp/searches.json` | Saved searches (§5.5.10, API.md §12.3) | hidden | committed, so they sync and have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
-| `.notesapp/cache/` | Reserved for derived caches (unused in v1) | hidden | excluded |
+| `.notesapp/cache/` | Derived caches: `search-text/` holds the extracted text of PDFs (§5.5.10) | hidden | excluded |
 | `.trash/` | Deleted items, stored **flat**: each trashed file or folder is one top-level entry, `.trash/<name>`, with ` 1`, ` 2`, ... on collisions. The original path is kept only in `trash.json`. | hidden; shown only in the Trash view | excluded |
 | `.git/` | JGit repository | hidden, never served | n/a |
 | `.obsidian/` | Obsidian desktop config, if the user ever opens the vault there. Never touched. | hidden | committed except `workspace*.json` |
@@ -408,7 +409,8 @@ Thumbs.db
 | | `LinkTextGenerator` | Link text for the new-link formats `shortest`, `relative` and `absolute`, in wiki or markdown style (§5.5.7). |
 | | `LinkGraph` | Outgoing resolved links, incoming backlinks, target-name buckets for re-resolution, and unresolved links. |
 | | `TagIndex` | Tag to notes, display casing, nested totals. |
-| | `SearchIndex`, `Tokenizer`, `SearchQueryParser`, `SnippetBuilder` | Full-text search (§5.5.10). |
+| | `SearchIndex`, `Tokenizer`, `SearchQuery`, `SearchQueryParser`, `SearchEvaluation`, `SearchRegex`, `Fuzzy`, `SnippetBuilder`, `SearchService` | Full-text search (§5.5.10): the query tree, its three-step evaluation, regular-expression time budgets and typo tolerance. |
+| | `PdfText`, `PdfTextIndexer` | PDF text for search: PDFBox extraction within limits, the background queue and the text cache (§5.5.10). |
 | | `MentionFinder` | Unlinked mentions (§5.5.9). |
 | `history` | `GitStore` | Owns the single `Git`/`Repository`. Handles open or init, stale-lock cleanup, repo config and exclude file, `stage`, `commit`, `readAt`, `log --follow`, gc. Takes `ApiPath` values and uses on-disk paths for every git call. Every mutating JGit call runs under its `gitLock`. |
 | | `CommitBatcher` | `SmartLifecycle` at phase `DEFAULT_PHASE - 4096`. Batches autosaves; `prepareWrite`, `markDirty`, `flush`, `commitNow`; retries failed commits with backoff; flushes on shutdown. |
@@ -422,11 +424,12 @@ Thumbs.db
 | `events` | `EventHub` | SSE connections, the 1024-event replay ring, the publish lock, echo suppression, `ping` heartbeats (§5.10). |
 | | `VaultEvent` | Sealed interface with one record per event type, matching API.md §16. |
 | | `EventIds` | Formats and parses `bootId.seq`. |
+| `search` | `SavedSearchService` | Saved searches in `.notesapp/searches.json`, with a version token (API.md §12.3). |
 | `settings` | `Settings` (+ nested records), `SettingsService` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12). |
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
 | | `TailscaleInterfaceCheck` | Refuses to start outside the dev profile when no kernel Tailscale interface is visible (§5.13). |
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `SavedSearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -686,7 +689,7 @@ These are computed on demand, only when the panel section is expanded.
 
 #### 5.5.10 Full-text search
 
-**Scope.** Notes only, minus any path matching `settings.files.excludedPaths` (case-insensitive prefix match, applied at query time), as in Obsidian. Attachments are found by name through the quick switcher, which works client-side over the tree.
+**Scope.** Notes, and the text of PDF attachments (below), minus any path matching `settings.files.excludedPaths` (case-insensitive prefix match, applied at query time), as in Obsidian. Other attachments are found by name through the quick switcher, which works client-side over the tree. Spreadsheets and drawings feed search through their own document indexers (ROADMAP items 5 and 6).
 
 **Tokenizer.** Normalization steps:
 
@@ -706,32 +709,57 @@ Tokens are maximal runs of `[\p{L}\p{N}]`, except that each Han, Hiragana or Kat
 | tags (as words) | 2 |
 | body (excluding frontmatter) | 1 |
 
-**Index.** `Map<String fieldTerm, Postings>`. Postings hold sorted `int[] docIds` and `int[] tf`. Each doc keeps its term list so it can be removed on update. A `TreeMap` view of body and title terms supports prefix expansion, capped at 64 expansions per prefix.
+**Index.** `Map<String fieldTerm, Postings>`. Postings hold sorted `int[] docIds` and `int[] tf`. Each doc keeps its term list so it can be removed on update, its token sequence per field (two bytes per token, as indexes into its distinct terms), and the token index at which each line starts (`lineTokens`, four bytes per line, about 4 MB at 10k notes). A `TreeMap` vocabulary supports prefix expansion, capped at 64 expansions per prefix.
 
-**Query syntax** (grammar in API.md §12):
+**Query syntax** (grammar in API.md §12.1, ROADMAP item 22):
 
 | Form | Meaning |
 |---|---|
 | `word` | AND of all terms |
 | `"exact phrase"` | Consecutive tokens, normalized |
+| `/regex/` | A Java regular expression found in the text |
 | `tag:x` or `tag:#x` | The note has tag `x` or a nested `x/...` |
 | `path:x` | Case-insensitive substring of the full path |
 | `file:x` | Case-insensitive substring of the file name |
-| `-clause` | Negates any of the above |
+| `tag:/re/`, `path:/re/`, `file:/re/` | A tag, the path or the name matches the regular expression |
+| `a OR b`, `( … )` | Either side; grouping. `OR` binds looser than juxtaposition (AND). |
+| `line:(…)`, `section:(…)` | Everything inside matches within one line, or one section (heading to heading; a PDF page) |
+| `-clause` | Negates any of the above, groups included |
 
-- Every clause must match. `OR` and regular expressions are roadmap item 22.
-- With `prefix=true` (the default), the **last bare word** matches as a prefix if it is at least 2 characters, which gives search-as-you-type.
-- An empty query, or one containing only negations, returns zero results.
+- `SearchQueryParser` builds a tree (`SearchQuery`: `And`, `Or`, `Not`, `Scoped`, `Leaf`). Parsing never fails; the client parses the same grammar (`features/searchQuery.ts`) to highlight hits.
+- A group, or the whole query, made only of negated clauses matches nothing; negations only remove what the other clauses of their group match. A word or phrase without letters or digits is ignored.
+- With `prefix=true` (the default), the **last bare word** (nothing but whitespace or `)` after it, not negated) matches as a prefix if it is at least 2 characters, which gives search-as-you-type.
 
-**Ranking.** BM25 with `k1=1.2` and `b=0.75` per field, summed with the field weights. A note matching **only** through filters (for example `tag:x` alone) scores 0. Ties sort by `mtime` descending, so `sort=mtime` lists the most recently modified notes first.
+**Evaluation** (`SearchEvaluation`), in three steps so the index lock is never held while regular expressions run:
+
+1. *Resolve*, under the index read lock. Word and phrase clauses become term patterns (with prefix expansion and typo variants) and are answered from the postings, phrases verified on the kept token sequences; tags from `TagIndex`, `path:` and `file:` substrings from the records. When the query has a regular expression or a scope, every document is snapshotted: its immutable `NoteRecord` and the body arrays the index keeps (never changed once stored, so they may be read after the lock is released).
+2. *Evaluate*, without a lock. The tree is evaluated over bit sets, cheapest clauses first; an expensive clause (a regular expression or a scope) only runs over the documents still in play, in parallel above 64 documents. A scope first narrows to the documents that contain everything its clauses need (from the postings), then checks lines or sections on the token sequences (a mask per local term, no tokenizing); regular expressions run on the text with the unit's bounds as the matcher region.
+3. *Score*, under the read lock again: the matching documents that still exist are scored and sorted.
+
+**Regular expressions are kept safe.** Java's engine backtracks, and modern JDKs only defuse some catastrophic patterns (`(.*?,){15}P` on a line of numbers still takes minutes). So: a pattern is at most 500 characters; patterns are case-insensitive (Unicode) and `MULTILINE` unless they say `(?-i)`; and every match reads its text through a `CharSequence` that checks the query's deadline every 2,048 characters read (`SearchRegex`), so even one pathological match stops within milliseconds of the budget. The budget (`notes.search.timeout`, 2 s) covers the whole query, regular expressions and scopes together; running out, or a `StackOverflowError` from a deeply recursive pattern, is a `400` with a message that suggests simplifying the pattern. At most `notes.search.max-concurrent-expensive` (2) such queries run at once; others wait up to the budget, then get `503 busy`. Snippets reuse the budget and simply stop highlighting regular-expression matches once it is spent.
+
+**Typo tolerance** (`fuzzy=true`, the default). A positive word or phrase term that is not in the vocabulary (for the prefix term: that no vocabulary term starts with) is matched with up to 8 vocabulary terms within the optimal-string-alignment distance `Fuzzy.allowedEdits` allows: 1 for 4–7 characters, 2 from 8, none for shorter terms or terms with digits (a year is never "corrected"). The scan skips terms whose length differs by more than the allowed edits, and ranks by distance, then document frequency. The variants become alternatives of that pattern position, so they are matched, scored and highlighted like the term itself, and the response lists them as `corrections`.
+
+**Ranking.** BM25 with `k1=1.2` and `b=0.75` per field, summed with the field weights, over the positive word and phrase patterns (those not under a negation, inside scopes included); for each pattern position the best of its alternatives counts. A note matching **only** through filters or regular expressions (for example `tag:x` alone) scores 0. Ties sort by `mtime` descending, so `sort=mtime` lists the most recently modified notes first.
 
 **Snippets.** For each hit, scan the body lines and return up to 3 matching lines.
 
 - Each line is clipped to 200 characters, centred on its first match.
-- `ranges` are given relative to the clipped text.
+- `ranges` are given relative to the clipped text; regular-expression matches are highlighted too (at most 50 per line).
 - A phrase match highlights its full span.
 - `moreMatches` counts the remaining matching lines.
 - Title matches are returned as `titleRanges`.
+- For a PDF, each match carries its page, counted from the form-feed lines between pages.
+
+**PDF text** (`PdfTextIndexer`, `PdfText`). Extraction never runs on a request thread.
+
+- `VaultIndex` tells its `ExtractionListener` (under the write lock, so the listener only queues) about every PDF that is added, changes size or mtime, or is moved, and drops a changed PDF's stale text at once. The startup build reports every PDF.
+- One low-priority daemon thread works the queue. Each file is extracted with Apache PDFBox 3.0.8 (Apache-2.0) on a separate extractor thread, page by page, within `notes.search.pdf.*`: files over `max-size` (64 MB) are skipped, extraction stops after `max-pages` (2,000) pages or `max-chars` (1,000,000) characters, and no new page starts after `timeout` (60 s). If a page itself hangs, the worker gives up 10 s after the deadline and abandons that extractor thread for a fresh one. A PDF that cannot be read (password, damage, a limit) gets empty text, so it is still found by its name.
+- Pages are joined with a line holding a form feed (`\n\f\n`); control characters are dropped. The text is swapped in with `putExtracted` only if the file still has the size and mtime it was read with; it becomes a search document (title and body) in `VaultIndex`'s separate `extracted` map: never linked, tagged, counted as a note or offered for unlinked mentions.
+- Results are cached in `.notesapp/cache/search-text/<sha1(path)>-<size>-<mtimeMillis>.txt` (outside git, §4.6), so a restart re-extracts nothing; a move renames the entry. When the first backlog after startup is done, entries of files that no longer exist are deleted.
+- Memory: the text is kept in memory like a note's (Latin-1 text takes one byte per character).
+
+**Saved searches** (`SavedSearchService`, API.md §12.3) live in `.notesapp/searches.json` (`{"schemaVersion": 1, "searches": [{id, name, query, sort}]}`), written atomically like settings with the version protocol on its blob id, marked dirty for the next history batch, and announced with `searches.changed`. The whole list is replaced on each save; the client re-applies its change after a `409`.
 
 #### 5.5.11 Tags
 
@@ -1121,7 +1149,7 @@ public record NotesProperties(
     @DefaultValue List<String> allowedHosts /* NOTES_ALLOWED_HOSTS; must be non-empty outside the dev profile (§5.13) */,
     @DefaultValue Git git, @DefaultValue Watcher watcher, @DefaultValue Sse sse,
     @DefaultValue Limits limits, @DefaultValue Identity identity, @DefaultValue Security security,
-    @DefaultValue TailscaleWatchdog tailscaleWatchdog,
+    @DefaultValue TailscaleWatchdog tailscaleWatchdog, @DefaultValue Search search /* notes.search.*, §5.5.10 */,
     @DefaultValue({"md","markdown","txt","json","canvas","excalidraw","sheet","tasks","csv","tsv","yaml","yml"}) List<String> textExtensions,
     @DefaultValue("true") boolean welcomeNote,
     @DefaultValue("dev") String buildSha /* NOTES_BUILD_SHA, set by the image; shown in /api/status, hello and X-Notes-Build */) {
@@ -1146,6 +1174,11 @@ public record NotesProperties(
                          @DefaultValue List<String> allowedLogins /* NOTES_IDENTITY_ALLOWED_LOGINS; empty = any tailnet user */) {}
   public record Security(@DefaultValue("true") boolean requireTailscaleInterface /* false in dev and tests */,
                          @DefaultValue("false") boolean allowUserspaceTailscale) {}
+  public record Search(@DefaultValue("2s") Duration timeout /* regular expressions and scopes, per query */,
+                       @DefaultValue("2") int maxConcurrentExpensive, @DefaultValue Pdf pdf) {}
+  public record Pdf(@DefaultValue("true") boolean enabled, @DefaultValue("64MB") DataSize maxSize,
+                    @DefaultValue("2000") int maxPages, @DefaultValue("1000000") int maxChars,
+                    @DefaultValue("60s") Duration timeout) {}
   public record TailscaleWatchdog(@DefaultValue("false") boolean enabled,
                                   @DefaultValue("http://127.0.0.1:9002/healthz") URI url,
                                   @DefaultValue("10s") Duration interval, @DefaultValue("6") int failures,
@@ -1257,6 +1290,8 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | SSE fan-out to 5 clients | < 50 ms |
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
+
+The search p95 covers the item 22 forms too (`OR`, groups, typo tolerance, `line:`, `section:`, and a regular expression narrowed by words). A regular expression alone reads every note (about 50 MB) and is measured separately (about 40 ms in parallel on a desktop CPU; target < 1 s).
 
 ---
 
@@ -1382,7 +1417,8 @@ frontend/src/
 | `['file', path]` | `GET /api/files` | Infinity | Initial content only; live content lives in `DocumentSession`. **Removed** (`removeQueries`) on `file.changed`, `file.deleted` and `entry.moved` for that path, and replaced with `setQueryData` (saved content and version) on an own `WriteResult`, so reopening a closed note never shows a stale copy. |
 | `['meta', path]` | `GET /api/notes/meta` | 30 s | `[[Note#` heading completion for **other** notes. Headings of the open note (Outline panel, `[[#`) come from its live Lezer tree (§6.6). |
 | `['backlinks', path, unlinked]` | `GET /api/notes/backlinks` | 0 | Refetched when the panel is visible |
-| `['search', q, sort]` | `GET /api/search` | 10 s | Input debounced 200 ms |
+| `['search', q, sort, fuzzy]` | `GET /api/search` | 10 s | Input debounced 200 ms; a `400` is not retried |
+| `['savedSearches']` | `GET /api/searches` | Infinity | Invalidated by `searches.changed`; replaced from each `PUT` response |
 | `['tags']` | `GET /api/tags` | 30 s | |
 | `['history', path]` | `GET /api/history` | 0 | |
 | `['historyContent', commit, path]` | `GET /api/history/content` | Infinity | Immutable |
@@ -1421,6 +1457,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | `trash.changed` | Invalidate `['trash']`. |
 | `history.committed` | Invalidate `['history', p]` for each `p` in `paths`, and `['status']`. |
 | `settings.changed` | Invalidate `['settings']`. |
+| `searches.changed` | Invalidate `['savedSearches']`. |
 | `status.changed` | Invalidate `['status']`. |
 | `ping` | Nothing; it only feeds the watchdog and the Live indicator (§6.18). |
 | Names registered with `registerEventHandler` (§6.8) | The registered handler. |
@@ -1448,7 +1485,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | Route | View |
 |---|---|
 | `/` | `HomePage`. If `dailyNotes.openOnStartup`, open today's note. Otherwise open the last-opened path (`localStorage notesapp:lastPath`) if it still exists, then `Welcome.md`, then an empty state with "New note" and "Today". |
-| `/n/<path>` | `FileView`. The registry picks the view. `#<heading text>` scrolls to the heading. `?line=N` scrolls to 0-based line `N` (a search hit), flashes it, and highlights the terms of `&q=`. `?mode=read` forces the reading view. |
+| `/n/<path>` | `FileView`. The registry picks the view. `#<heading text>` scrolls to the heading. `?line=N` scrolls to 0-based line `N` (a search hit), flashes it, and highlights the terms of `&q=` (words, phrases and regular expressions). For a PDF, `?page=N` opens the viewer at that page. `?mode=read` forces the reading view. |
 | `/search?q=…` | Search page, **phones only**. On desktop the search panel keeps its query in zustand and never changes the route, so typing in it never navigates away from the open note. |
 | `/trash` | Trash page |
 | `/settings`, `/settings/<section>` | Settings page (lazy) |
@@ -1466,6 +1503,16 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 - Pages registered by extensions (`registerPage`, §6.8) live under the reserved prefix `/x/`, for example `/x/tasks/today` later.
 
 **Heading targets** (`[[Note#Heading]]`, `#H1#H2`, route `#…`): take the last subpath segment (`H1#H2` gives `H2`), compare it case-insensitively with whitespace collapsed against the note's headings in document order, and use the first match. The editor uses the Lezer tree's headings; the reading view stamps each heading with `data-heading` for the same comparison. `^blockid` subpaths open the note at the top in v1.
+
+#### 6.4.1 Search panel (ROADMAP item 22)
+
+`SearchView` serves the desktop panel and the phone page.
+
+- **Results.** Notes show a note icon; PDF hits a PDF icon and badge, and each match its page (`p. 2`). A note match opens `/n/<path>?line=N&q=…`; a PDF match opens `/n/<path>?page=N`, which `PdfView` turns into the viewer's `#page=N` fragment (the iframe is keyed by its URL, because a fragment change alone does not move the viewer).
+- **Highlighting.** `features/searchQuery.ts` parses the API.md §12.1 grammar exactly as the server does; `highlightTerms` takes the positive words and phrases and the positive regular expressions (converted to JavaScript: case-insensitive unless `(?-i)`, skipped when JavaScript cannot compile them). The editor and the reading view highlight both.
+- **Typo tolerance.** When the response has `corrections`, a line reads "Including similar words: ~~recieve~~ → receive. Exact words only"; the link repeats the query with `fuzzy=false` (the query key is `['search', q, sort, fuzzy]`). The replacements are appended to the `q=` of the hit route, so the opened note highlights them too.
+- **Errors.** A `400` (an invalid or runaway regular expression) is shown in place of the results with its `detail`, and is not retried.
+- **Saved searches** (`['savedSearches']`, staleTime Infinity, invalidated by `searches.changed`). With the field empty, the panel lists them above the syntax help; a click fills the field and the sort. A toolbar button saves the current query and sort under a name (prompted; the query is the default) or, when that query and sort are already saved, removes it after confirmation. Rename and delete sit on each row. Every change goes through `updateSavedSearches(change)`: it applies the change to the latest list and `PUT`s it with the cached version, and on `409` fetches the list and re-applies the change (three attempts), so two devices editing at once both keep their change.
 
 ### 6.5 Component tree
 
