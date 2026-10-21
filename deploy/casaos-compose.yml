@@ -1,0 +1,121 @@
+# NotesApp for CasaOS: paste into App Store → Custom Install → Import (Docker Compose).
+# Self-contained: no .env, no extra files on the server. Before installing, replace the
+# three CHANGE-ME values below (Tailscale auth key, tailnet host name, Tailscale login).
+#
+# Data lives under /DATA/AppData/notesapp:
+#   data/vault       your notes (plain Markdown + git history), editable over SSH as uid 1000
+#   tailscale/       Tailscale node identity + HTTPS certs (never delete)
+#
+# The app is reachable ONLY over your tailnet at https://notes.<tailnet>.ts.net — no ports are
+# published on the LAN. Full runbook and troubleshooting: docs/DEPLOY.md and docs/CASAOS.md.
+name: notesapp
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    container_name: notesapp-tailscale
+    # Writes serve.json (HTTPS :443 → the app on 127.0.0.1:8080) and makes the data folder
+    # writable by the app's uid 1000, then hands over to Tailscale's normal entrypoint.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /config /notes-data/vault /notes-data/.config
+        chown -R 1000:1000 /notes-data
+        cat > /config/serve.json <<'JSON'
+        {
+          "TCP": { "443": { "HTTPS": true } },
+          "Web": { "notes.CHANGE-ME.ts.net:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:8080" } } } },
+          "AllowFunnel": { "notes.CHANGE-ME.ts.net:443": false }
+        }
+        JSON
+        exec /usr/local/bin/containerboot
+    environment:
+      TS_AUTHKEY: tskey-auth-CHANGE-ME          # one-off auth key with tag:notes (see docs/CASAOS.md)
+      TS_EXTRA_ARGS: --advertise-tags=tag:notes
+      TS_HOSTNAME: notes                        # → https://notes.<tailnet>.ts.net
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_AUTH_ONCE: "true"
+      TS_USERSPACE: "false"                     # kernel mode is required by the app's startup check
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:9002
+    volumes:
+      - /DATA/AppData/notesapp/tailscale:/var/lib/tailscale
+      - /DATA/AppData/notesapp/data:/notes-data
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9002/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *logging
+    restart: unless-stopped
+
+  notes:
+    image: ghcr.io/rjgehan/notesapp:latest
+    container_name: notesapp
+    network_mode: service:tailscale             # only reachable through Tailscale; no ports
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      TZ: America/New_York
+      NOTES_ALLOWED_HOSTS: notes.CHANGE-ME.ts.net
+      NOTES_IDENTITY_ALLOWED_LOGINS: you@example.com   # your Tailscale login; comma-separate several
+      NOTES_TAILSCALE_WATCHDOG_ENABLED: "true"
+    volumes:
+      - /DATA/AppData/notesapp/data:/data
+    mem_limit: 1g
+    stop_grace_period: 45s
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    logging: *logging
+    restart: unless-stopped
+
+  watchtower:
+    image: nickfedor/watchtower:1.23.1@sha256:3175c006eb20112f3a70f7002f82dbf4a4078c97e7033735a4d153668fc3dfb1
+    container_name: notesapp-watchtower
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"           # only updates the notesapp container
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "300"           # checks GHCR every 5 minutes
+      WATCHTOWER_TIMEOUT: 45s
+      TZ: America/New_York
+      # Only if the GHCR package is PRIVATE: a classic GitHub token with read:packages.
+      # REPO_USER: rjgehan
+      # REPO_PASS: ghp_CHANGE-ME
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging: *logging
+    restart: unless-stopped
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: notes
+  author: rjgehan
+  category: Productivity
+  title:
+    en_us: NotesApp
+  tagline:
+    en_us: Self-hosted Obsidian-style notes, tailnet only
+  description:
+    en_us: Markdown vault with wikilinks, backlinks, search, history and live sync. Open it at https://notes.<tailnet>.ts.net from any Tailscale device.
+  icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/obsidian.png
+  scheme: https
+  hostname: notes.CHANGE-ME.ts.net
+  port_map: "443"
+  index: /

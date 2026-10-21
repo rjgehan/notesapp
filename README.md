@@ -26,7 +26,7 @@ A Spring Boot 4 backend (Java 21 bytecode, run on JDK 25) serves the REST and SS
 |---|---|
 | `backend/` | Spring Boot app (`com.rjgehan.notes`), Maven wrapper |
 | `frontend/` | React + TypeScript + Vite SPA |
-| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, the empty mirror-token placeholder in `mirror/`, Tailscale serve config, `.env.example` |
+| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, the empty mirror-token placeholder in `mirror/`, Tailscale serve config, `.env.example`, and `casaos-compose.yml` for CasaOS |
 | `.github/` | CI, image publishing, Dependabot |
 | `Dockerfile` | Three stages: frontend build, backend build (JDK 21), JDK 25 runtime with an AOT cache |
 | `docs/` | Design, API contract, deployment runbook, roadmap |
@@ -77,4 +77,5 @@ Rolling back, pausing updates, backups and everything else on the server side ar
 - [docs/DESIGN.md](docs/DESIGN.md): technical design (decisive)
 - [docs/API.md](docs/API.md): the REST and SSE contract between backend and frontend
 - [docs/DEPLOY.md](docs/DEPLOY.md): homeserver runbook (first deploy, operations, troubleshooting)
+- [docs/CASAOS.md](docs/CASAOS.md): installing on CasaOS by pasting one compose file
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes after v1

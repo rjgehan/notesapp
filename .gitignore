@@ -5,6 +5,7 @@ dev-vault/
 deploy/.env
 deploy/docker-compose.override.yml
 deploy/secrets/
+deploy/*.local.yml
 
 # Build output and dependencies
 node_modules/
