@@ -4,6 +4,7 @@
 // resync (every query but the tree), after a change to a `.tasks` file that came without task
 // events (sync.ts), and after a write fails.
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
+import { isProblem } from '../api/client';
 import { queryClient } from '../api/queryClient';
 import type { LocalDate, Task, TaskFileProblem, TaskList, TasksResponse } from '../api/types';
 import { taskApi, type TaskQueryParams } from './api';
@@ -132,6 +133,30 @@ export function useCompletedTasks(filter: Omit<TaskQueryParams, 'view' | 'before
     queryFn: ({ pageParam }) => loadCompletedPage(filter, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.next ?? undefined,
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * A task the store may not hold (a link to it, a subtask's parent shown beside a view's row):
+ * fetched by its id (GET /api/tasks/{id}) when `known` is false. The data is false when the task
+ * no longer exists.
+ */
+export function useTaskById(id: string | null, known: boolean) {
+  return useQuery({
+    queryKey: ['tasks', 'task', id],
+    queryFn: async () => {
+      const since = taskStore.generation();
+      try {
+        const task = await taskApi.get(id!);
+        taskStore.mergeTasks([task], since);
+        return true;
+      } catch (e) {
+        if (isProblem(e, 'not-found')) return false;
+        throw e;
+      }
+    },
+    enabled: id !== null && !known,
     staleTime: Infinity,
   });
 }

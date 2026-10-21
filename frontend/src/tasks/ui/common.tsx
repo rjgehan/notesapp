@@ -8,6 +8,7 @@ import { navigateTo, openPath } from '../../features/navigation';
 import { displayName } from '../../features/paths';
 import { isClosed } from '../model';
 import { isPending } from '../mutations';
+import { useTaskById } from '../queries';
 import type { TaskData } from './useTaskData';
 import { TaskCheck, TaskMeta, TaskTitle } from './parts';
 import { openTaskDetail } from './state';
@@ -16,6 +17,8 @@ import { openTaskDetail } from './state';
 export function FlatTaskRow({ task, today, data, showList = true }: { task: Task; today: LocalDate; data: TaskData; showList?: boolean }) {
   const list = data.listMap.get(task.listId);
   const parent = task.parentId ? data.tasks.get(task.parentId) : undefined;
+  // A view's response holds the tasks it shows, not their parents: a missing one is fetched.
+  useTaskById(task.parentId, parent !== undefined);
   const pending = isPending(task);
   const open = () => !pending && openTaskDetail(task.id);
   return (

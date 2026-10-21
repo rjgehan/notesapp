@@ -1,10 +1,8 @@
 // The task detail sheet (ROADMAP item 4): every field of a task, each saved on its own as a
 // per-field PATCH (API.md §20.4). Full screen on phones. The task stays live while it is open:
 // changes from other devices show up in the fields that are not being edited.
-import { useQuery } from '@tanstack/react-query';
 import { Bell, ExternalLink, FileText, Plus, Trash2, X } from 'lucide-react';
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { isProblem } from '../../api/client';
 import { useTree, useVaultSettings } from '../../api/hooks';
 import type { LocalDateTime, Task, TaskList, TaskReminder } from '../../api/types';
 import { autoGrow } from '../../components/autoGrow';
@@ -17,10 +15,10 @@ import { usePrefs } from '../../state/prefs';
 import { makeRenderContext } from '../../render/context';
 import { renderNote } from '../../render/render';
 import { useUi } from '../../state/ui';
-import { taskApi } from '../api';
 import { datePart, useToday } from '../dates';
 import { childrenByParent, depthOf, isClosed, MAX_DEPTH } from '../model';
 import { createTask, deleteTask, isPending, updateTask } from '../mutations';
+import { useTaskById } from '../queries';
 import { taskStore, useTaskStore } from '../store';
 import { DateTimeField, PriorityField, StatusField, TagsField } from './fields';
 import { RepeatField } from './RepeatField';
@@ -324,22 +322,7 @@ function ListField({ task, lists, disabled }: { task: Task; lists: TaskList[]; d
 function useTask(id: string): { task: Task | undefined; missing: boolean } {
   useTaskStore();
   const known = taskStore.task(id);
-  const fetched = useQuery({
-    queryKey: ['tasks', 'task', id],
-    queryFn: async () => {
-      const since = taskStore.generation();
-      try {
-        const task = await taskApi.get(id);
-        taskStore.mergeTasks([task], since);
-        return true;
-      } catch (e) {
-        if (isProblem(e, 'not-found')) return false;
-        throw e;
-      }
-    },
-    enabled: known === undefined,
-    staleTime: Infinity,
-  });
+  const fetched = useTaskById(id, known !== undefined);
   return { task: known, missing: known === undefined && fetched.data === false };
 }
 

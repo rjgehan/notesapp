@@ -41,6 +41,16 @@ describe('Today page (ROADMAP item 4)', () => {
     expect(within(todays).getAllByRole('listitem').map((li) => li.querySelector('.task-title')?.textContent)).toEqual(['Call the plumber', 'Start the essay']);
   });
 
+  it('names a subtask’s parent, fetching it when the view did not bring it', async () => {
+    serve([makeTask({ id: 'C', title: 'Call landlord', due: today, parentId: 'P' })]);
+    const get = vi.spyOn(taskApi, 'get').mockResolvedValue(makeTask({ id: 'P', title: 'Pay rent', due: addDays(today, 1) }));
+    renderWithApp(<TodayPage />);
+    expect(await screen.findByTitle('Subtask of Pay rent')).toHaveTextContent('Pay rent');
+    expect(get).toHaveBeenCalledWith('P');
+    // The parent is not one of today's tasks, so it is not listed itself.
+    expect(screen.queryByRole('checkbox', { name: 'Complete “Pay rent”' })).not.toBeInTheDocument();
+  });
+
   it('checks a task off at once and keeps it gone when the server agrees', async () => {
     serve([makeTask({ id: 'T', title: 'Call the plumber', due: today })]);
     let finish!: (r: TaskWriteResult) => void;
