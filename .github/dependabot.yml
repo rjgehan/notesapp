@@ -18,7 +18,7 @@ updates:
       - dependency-name: eclipse-temurin   # JDK 21 builds (--release 21), JDK 25 runs (DESIGN §7.1); majors by hand
         update-types: ['version-update:semver-major']
 
-  - package-ecosystem: docker-compose      # watchtower, restic and docker:cli images (tag + digest pins); tailscale follows :stable
+  - package-ecosystem: docker-compose      # watchtower, restic, docker:cli and whisper images (tag + digest pins); tailscale follows :stable
     directory: /deploy
     schedule: { interval: weekly }
     groups: { compose: { patterns: ['*'] } }

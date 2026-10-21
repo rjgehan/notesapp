@@ -54,6 +54,15 @@ services:
       NOTES_MIRROR_URL: ${NOTES_MIRROR_URL:-}   # https://github.com/<you>/<repo>.git; empty = no mirror
       NOTES_MIRROR_TOKEN_FILE: /run/secrets/mirror_token
       # App-error alerts (ROADMAP item 38) are on when /data/secrets/ntfy.json exists (DEPLOY.md "App alerts").
+      # ---- Voice-note transcription (ROADMAP item 33, DEPLOY.md "Voice notes"): off while empty. With the
+      # whisper service below (COMPOSE_PROFILES=transcription): http://whisper:9000
+      NOTES_TRANSCRIPTION_URL: ${NOTES_TRANSCRIPTION_URL:-}
+      NOTES_TRANSCRIPTION_API: ${NOTES_TRANSCRIPTION_API:-whisper-asr}       # or openai (whisper.cpp server, speaches, OpenAI)
+      NOTES_TRANSCRIPTION_LANGUAGE: ${NOTES_TRANSCRIPTION_LANGUAGE:-}        # e.g. en; empty = detected per recording
+      NOTES_TRANSCRIPTION_MODEL: ${NOTES_TRANSCRIPTION_MODEL:-whisper-1}     # openai only: the server's model name
+      NOTES_TRANSCRIPTION_API_KEY_FILE: ${NOTES_TRANSCRIPTION_API_KEY_FILE:-} # openai only, e.g. /data/secrets/transcription-key
+      NOTES_TRANSCRIPTION_TIMEOUT: ${NOTES_TRANSCRIPTION_TIMEOUT:-10m}       # per recording
+      NOTES_TRANSCRIPTION_MAX_SIZE: ${NOTES_TRANSCRIPTION_MAX_SIZE:-25MB}    # larger recordings are not sent
     secrets: [mirror_token]
     volumes:
       - notes-data:/data
@@ -83,6 +92,24 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/watchtower:/config:ro              # DIRECTORY containing config.json from `docker --config /etc/watchtower login ghcr.io`
+    logging: *logging
+    restart: unless-stopped
+
+  # ---- Voice-note transcription (ROADMAP item 33, DEPLOY.md "Voice notes"): off until deploy/.env adds
+  # transcription to COMPOSE_PROFILES and sets NOTES_TRANSCRIPTION_URL=http://whisper:9000. whisper-asr-webservice
+  # (MIT) with faster-whisper on the CPU; the model is downloaded into whisper-models on first start. Reachable only
+  # from the app's network (no ports), and it stores no audio. No watchtower label: Dependabot proposes bumps.
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:v1.10.0@sha256:0616c3d5fc6924e9d59aa8a7a3a944fbe8f3a5d701e5fc1fa2ce5b933dfecb73
+    profiles: [transcription]
+    environment:
+      ASR_ENGINE: faster_whisper
+      ASR_MODEL: ${NOTES_WHISPER_MODEL:-small}   # base: faster on a slow CPU; medium: better, slower, more memory
+      ASR_MODEL_PATH: /data/whisper
+      MODEL_IDLE_TIMEOUT: "900"                 # frees the model's memory after 15 idle minutes
+    volumes:
+      - whisper-models:/data/whisper
+    mem_limit: 3g
     logging: *logging
     restart: unless-stopped
 
@@ -148,6 +175,7 @@ volumes:
     external: true
   backup-cache: {}                              # restic's cache; disposable
   backup-state: {}                              # backup-scheduler writes status.json; notes reads it (ro)
+  whisper-models: {}                            # the transcription model (about 0.5 GB for small); re-downloadable
 
 secrets:                                        # files under deploy/secrets/ (gitignored, mode 600); DEPLOY.md "Backups", "Mirror"
   restic_password:
