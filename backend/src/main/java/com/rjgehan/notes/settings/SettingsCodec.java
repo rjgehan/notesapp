@@ -82,8 +82,9 @@ final class SettingsCodec {
 				reader.enumValue(editor, "settings.editor.defaultMode", EditorMode.values(), ed.defaultMode()),
 				reader.bool(editor, "settings.editor.readableLineLength", ed.readableLineLength()),
 				reader.bool(editor, "settings.editor.strictLineBreaks", ed.strictLineBreaks()));
+		AiSettings aiSettings = reader.ai(node.get("ai"));
 		Settings settings = new Settings(Settings.SCHEMA_VERSION, filesSettings, dailySettings, templatesSettings,
-				editorSettings);
+				editorSettings, aiSettings);
 		return new Parsed(settings, List.copyOf(reader.errors));
 	}
 
@@ -129,6 +130,16 @@ final class SettingsCodec {
 		editor.put("defaultMode", wire(e.defaultMode()));
 		editor.put("readableLineLength", e.readableLineLength());
 		editor.put("strictLineBreaks", e.strictLineBreaks());
+		AiSettings a = settings.ai();
+		ObjectNode ai = group(merged, "ai");
+		ai.put("enabled", a.enabled());
+		ai.put("provider", a.provider());
+		ai.put("model", a.model());
+		ArrayNode aiExcluded = NODES.arrayNode();
+		a.excludedPaths().forEach(aiExcluded::add);
+		ai.set("excludedPaths", aiExcluded);
+		ai.put("maxContextChars", a.maxContextChars());
+		ai.put("monthlyBudgetUsd", a.monthlyBudgetUsd());
 		return (ObjectNode) sorted(merged);
 	}
 
@@ -257,6 +268,57 @@ final class SettingsCodec {
 				paths.add(item.stringValue());
 			}
 			return paths;
+		}
+
+		/**
+		 * {@code settings.ai} (ROADMAP item 18). It came after schema version 1 shipped, so a file or request without the
+		 * group, or without one of its fields, is valid and gets the defaults; a field that is present must be valid.
+		 */
+		AiSettings ai(@Nullable JsonNode group) {
+			AiSettings d = AiSettings.defaults();
+			if (group == null || group.isNull()) {
+				return d;
+			}
+			if (!group.isObject()) {
+				this.errors.add(new FieldError("settings.ai", "must be an object"));
+				return d;
+			}
+			boolean enabled = present(group, "enabled") ? bool(group, "settings.ai.enabled", d.enabled()) : d.enabled();
+			String provider = present(group, "provider") ? checked(group, "settings.ai.provider", d.provider(),
+					(s) -> AiSettings.PROVIDERS.contains(s) ? null
+							: "must be one of " + String.join(", ", AiSettings.PROVIDERS))
+					: d.provider();
+			String model = present(group, "model") ? checked(group, "settings.ai.model", d.model(),
+					(s) -> AiSettings.MODELS.contains(s) ? null : "must be one of " + String.join(", ", AiSettings.MODELS))
+					: d.model();
+			List<String> excluded = present(group, "excludedPaths")
+					? paths(group, "settings.ai.excludedPaths", d.excludedPaths()) : d.excludedPaths();
+			int maxContext = d.maxContextChars();
+			if (present(group, "maxContextChars")) {
+				maxContext = integer(group, "settings.ai.maxContextChars", d.maxContextChars());
+				if (maxContext < AiSettings.MIN_CONTEXT_CHARS || maxContext > AiSettings.MAX_CONTEXT_CHARS) {
+					maxContext = invalid("settings.ai.maxContextChars", "must be between " + AiSettings.MIN_CONTEXT_CHARS
+							+ " and " + AiSettings.MAX_CONTEXT_CHARS, d.maxContextChars());
+				}
+			}
+			double budget = d.monthlyBudgetUsd();
+			if (present(group, "monthlyBudgetUsd")) {
+				JsonNode value = group.get("monthlyBudgetUsd");
+				if (!value.isNumber() || !Double.isFinite(value.doubleValue()) || value.doubleValue() <= 0
+						|| value.doubleValue() > AiSettings.MAX_BUDGET_USD) {
+					budget = invalid("settings.ai.monthlyBudgetUsd",
+							"must be a number above 0 and at most " + (int) AiSettings.MAX_BUDGET_USD, budget);
+				}
+				else {
+					budget = value.doubleValue();
+				}
+			}
+			return new AiSettings(enabled, provider, model, excluded, maxContext, budget);
+		}
+
+		private static boolean present(JsonNode group, String name) {
+			JsonNode value = group.get(name);
+			return value != null && !value.isNull();
 		}
 
 		private String checked(@Nullable JsonNode group, String field, String fallback,

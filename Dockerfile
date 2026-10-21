@@ -23,7 +23,28 @@ RUN sh ./mvnw -B -ntp -DskipTests package \
  && java -Djarmode=tools -jar /tmp/application.jar extract --layers --destination /extracted \
  && mkdir -p /out/data/vault /out/data/.config
 
-# ---------- 3) runtime: one per target arch, on JDK 25. Its two RUN steps run under QEMU for arm64 (DESIGN §7.1) ----------
+# ---------- 3) Claude Code CLI for Ask your vault (ROADMAP item 18, DESIGN §5.25): Anthropic's native binary for the
+# target arch, downloaded on the build host (no emulation) from the official release bucket and checked against the
+# release manifest's SHA-256. About 290 MB per arch (about 100 MB compressed). Claude Code is Anthropic's proprietary
+# software ("all rights reserved"): an image that contains it is for your own use, so keep the GHCR package private
+# (DEPLOY.md, "Ask your vault"), or build with --build-arg CLAUDE_CODE_VERSION=none and mount the CLI instead.
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS claude-code
+ARG TARGETARCH
+ARG CLAUDE_CODE_VERSION=2.1.304
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl jq \
+ && rm -rf /var/lib/apt/lists/*
+RUN set -eu; mkdir -p /out/bin; \
+    if [ "$CLAUDE_CODE_VERSION" = "none" ]; then echo "building without Claude Code"; exit 0; fi; \
+    case "$TARGETARCH" in amd64) p=linux-x64 ;; arm64) p=linux-arm64 ;; *) echo "no Claude Code for $TARGETARCH" >&2; exit 1 ;; esac; \
+    base="https://downloads.claude.ai/claude-code-releases/$CLAUDE_CODE_VERSION"; \
+    sum="$(curl -fsSL "$base/manifest.json" | jq -r ".platforms[\"$p\"].checksum")"; \
+    echo "$sum" | grep -Eq '^[0-9a-f]{64}$'; \
+    curl -fsSL -o /out/bin/claude "$base/$p/claude"; \
+    echo "$sum  /out/bin/claude" | sha256sum -c -; \
+    chmod 755 /out/bin/claude
+
+# ---------- 4) runtime: one per target arch, on JDK 25. Its two RUN steps run under QEMU for arm64 (DESIGN §7.1) ----------
 FROM eclipse-temurin:25-jre-noble
 ARG GIT_SHA=dev
 ARG TARGETARCH
@@ -38,7 +59,9 @@ COPY --from=backend /extracted/spring-boot-loader/ ./
 COPY --from=backend /extracted/snapshot-dependencies/ ./
 COPY --from=backend /extracted/application/ ./
 COPY --from=backend --chown=1000:1000 /out/data /data
+COPY --from=claude-code /out/bin/ /opt/claude/bin/
 ENV NOTES_VAULT_DIR=/data/vault \
+    NOTES_AI_CLAUDE_COMMAND=/opt/claude/bin/claude \
     NOTES_BUILD_SHA=${GIT_SHA} \
     XDG_CONFIG_HOME=/data/.config \
     GIT_CONFIG_NOSYSTEM=1 \

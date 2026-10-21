@@ -772,6 +772,19 @@ Results update through SSE.
 - **Off by default.** The API key comes from a compose `secrets:` file (`ANTHROPIC_API_KEY_FILE`), not from `deploy/.env` and never from the vault.
 - **Privacy.** Every request is explicitly user-initiated, because note content leaves the tailnet.
 
+**Status:** built (2026-10-21). Design in DESIGN §5.25 (server) and §6.31 (client), contract in API.md §24, setup in DEPLOY.md *Ask your vault* and CASAOS.md *Ask your vault*. `POST /api/ai/ask` and `POST /api/ai/summarize` stream answers as server-sent events to an *Ask* panel (the bottom sheet on phones and tablets) and the page `/x/ask` (the phone's drawer entry); citations are wikilinks that open the notes. Summaries of the open note, its folder, the editor's selection and this week's daily notes, and suggested links, tags and tasks for a note, from the palette and the panel. Conversations are kept per device. Deviations and additions:
+
+- **Claude Code with your Claude subscription is the default provider**, not the API (your direction, 2026-10-21: no per-token bill). The image ships Anthropic's Claude Code CLI (pinned 2.1.304, about 290 MB per architecture); the server runs it headless once per answer with every tool disabled, a fresh empty home and a clean environment holding only the OAuth token from `claude setup-token` (`/data/secrets/claude-token`, `NOTES_AI_CLAUDE_TOKEN_FILE`). Usage counts against the plan's limits, for personal use. Because Claude Code is proprietary, **the GHCR package should stay private** (CASAOS.md and DEPLOY.md now say so), or the image is built with `CLAUDE_CODE_VERSION=none`.
+- **The Anthropic API stays as the second provider** (Settings › Provider), as first specified: `com.anthropic:anthropic-java` 3.0.0, the key in `/data/secrets/anthropic-key` (`NOTES_AI_API_KEY_FILE`, named like the app's other `NOTES_*` settings rather than `ANTHROPIC_API_KEY_FILE`; the plain-compose deploy uses a compose secret, `NOTES_AI_KEY_SECRET`, with `deploy/ai/no-key` as the empty placeholder).
+- **The default model is Claude Sonnet 5.5** (`claude-sonnet-5-5`), not Opus (your direction, 2026-10-21). Opus 5.5 and Haiku 5.5 are one setting away.
+- **Two locks, not one.** Besides the credential, a vault setting (`settings.ai.enabled`) must be switched on; Settings, the panel's first-use notice and its footer say that note text goes to Anthropic. Credentials are read again when they change, and never logged.
+- **Excluded folders** (`settings.ai.excludedPaths`, `Private` by default, plus the search exclusions) are never read; naming one explicitly is refused (`403 ai-excluded`).
+- **Caps and a spend guard.** A context cap per request (`maxContextChars`, 60,000 characters by default, history included), 16,000 output tokens on the API, and a monthly budget (`monthlyBudgetUsd`, $5 by default) counted in `.notesapp/cache/ai-usage.json`: what the API bills, or with Claude Code the API value it reports, as a guard against using up the plan; requests are refused once it is reached (`429 ai-budget-exceeded`).
+- **Retrieval** ranks the notes containing *any* of the question's words with the index's BM25 (the search endpoint ANDs its words); long notes are cut to their best paragraphs. Embeddings are still for later.
+- **Follow-ups use the prompt cache.** Earlier turns come back from the device with their sources and are rebuilt byte for byte, so their notes are read from Anthropic's cache.
+- **Refusals** fall back server-side (`fallbacks: "default"`) on Sonnet and Opus through the API.
+- **Development** runs with `notes.ai.fake=true`: canned answers that cite the retrieved notes, without a key or the network.
+
 ### 19. Web clipper
 
 **One line:** save a web page as a clean Markdown note (title, source URL, date, readable body) from the desktop browser or the iPhone Share Sheet.

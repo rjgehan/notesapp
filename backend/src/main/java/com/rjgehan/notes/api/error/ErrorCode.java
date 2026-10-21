@@ -38,7 +38,10 @@ public enum ErrorCode {
 	INSUFFICIENT_STORAGE("insufficient-storage", HttpStatus.INSUFFICIENT_STORAGE, "Insufficient storage"),
 	NOT_AUDIO("not-audio", HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Not an audio or video file"),
 	TRANSCRIPTION_OFF("transcription-off", HttpStatus.CONFLICT, "Transcription is off"),
-	TRANSCRIPTION_FAILED("transcription-failed", HttpStatus.SERVICE_UNAVAILABLE, "Transcription failed");
+	TRANSCRIPTION_FAILED("transcription-failed", HttpStatus.SERVICE_UNAVAILABLE, "Transcription failed"),
+	AI_UNAVAILABLE("ai-unavailable", HttpStatus.CONFLICT, "Ask and summaries are unavailable"),
+	AI_EXCLUDED("ai-excluded", HttpStatus.FORBIDDEN, "Excluded from Ask and summaries"),
+	AI_BUDGET_EXCEEDED("ai-budget-exceeded", HttpStatus.TOO_MANY_REQUESTS, "Monthly AI budget reached");
 
 	private final String code;
 

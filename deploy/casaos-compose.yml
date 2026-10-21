@@ -4,7 +4,8 @@
 #
 # Data lives under /DATA/AppData/notesapp:
 #   data/vault       your notes (plain Markdown + git history), editable over SSH as uid 1000
-#   data/secrets/    optional, outside the vault: ntfy.json (app alerts), mirror-token (GitHub mirror)
+#   data/secrets/    optional, outside the vault: ntfy.json (app alerts), mirror-token (GitHub mirror),
+#                    claude-token or anthropic-key (Ask your vault, Claude)
 #   tailscale/       Tailscale node identity + HTTPS certs (never delete)
 #   backup/          only with the optional NotesApp Backup app (casaos-backup-compose.yml)
 #
@@ -90,6 +91,9 @@ services:
       # Optional transcription of voice notes (docs/CASAOS.md "Voice note transcription"): with the NotesApp
       # Whisper app (casaos-whisper-compose.yml) installed, http://notesapp-whisper:9000. Empty = off.
       NOTES_TRANSCRIPTION_URL: ""
+      # Ask your vault (Claude) runs Claude Code with your subscription, using the token (claude setup-token) in
+      # /DATA/AppData/notesapp/data/secrets/claude-token (or an API key in .../anthropic-key), and stays
+      # off until switched on in Settings › Ask and summaries (docs/CASAOS.md "Ask your vault").
     volumes:
       - /DATA/AppData/notesapp/data:/data
       # The last nightly backup's status for the status page, read-only. Written by the optional
