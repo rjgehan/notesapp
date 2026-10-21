@@ -141,7 +141,7 @@ sequenceDiagram
 
 There is no app-level login. Tailscale identity admits requests (the allowlist), and is used for display and for the git author. "Inside the boundary" therefore means: a user-owned device of an allowed login, reaching `notes:443` through the policy.
 
-**Outbound.** The app makes two kinds of internet connection, each only when it is configured. One is the optional mirror push (ROADMAP item 2, §5.8 *Mirror*) to the `https://` URL in `NOTES_MIRROR_URL`, authenticated with a token from a compose secret. It goes out through the host's normal network, which the tailnet policy does not restrict. With the mirror on, the vault's history (every note and every attachment under the large-file threshold) leaves the tailnet for that repository. The other is Ask your vault and summaries (ROADMAP item 18, §5.20): HTTPS to `api.anthropic.com`, only when `settings.ai.enabled` is on, an API key file exists, and someone asks. Each request carries the question and the text of the notes it needs (never of excluded folders), so that text leaves the tailnet for Anthropic.
+**Outbound.** The app makes two kinds of internet connection, each only when it is configured. One is the optional mirror push (ROADMAP item 2, §5.8 *Mirror*) to the `https://` URL in `NOTES_MIRROR_URL`, authenticated with a token from a compose secret. It goes out through the host's normal network, which the tailnet policy does not restrict. With the mirror on, the vault's history (every note and every attachment under the large-file threshold) leaves the tailnet for that repository. The other is Ask your vault and summaries (ROADMAP item 18, §5.20): HTTPS to Anthropic (through the Claude Code CLI with the user's subscription, or `api.anthropic.com` with an API key), only when `settings.ai.enabled` is on, the provider's credential exists, and someone asks. Each request carries the question and the text of the notes it needs (never of excluded folders), so that text leaves the tailnet for Anthropic.
 
 ---
 
@@ -205,7 +205,7 @@ NotesApp/                              (monorepo; branch main)
 | `.obsidian/` | Obsidian desktop config, if the user ever opens the vault there. Never touched. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
-**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), `anthropic-key`, the Anthropic API key of Ask your vault (item 18, §5.20), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties (`NOTES_AI_API_KEY_FILE` points the API key there in the plain-compose deploy).
+**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), `claude-token` and `anthropic-key`, the Claude Code token and the Anthropic API key of Ask your vault (item 18, §5.20), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties (`NOTES_AI_API_KEY_FILE` points the API key there in the plain-compose deploy).
 
 ### 4.2 File kinds
 
@@ -452,8 +452,8 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | `notify` | `NtfyConfig`, `NtfyConfigFile` | `ntfy.json` in `notes.secrets-dir`: the server, the default topic, an optional token and the `alerts` section; read again when it changes (§5.18.1). Shared with the reminders of ROADMAP item 9. |
 | | `NtfyClient` | Publishes one message as JSON to the server's root URL, with the token as `Authorization: Bearer`; never follows a redirect. |
 | `ai` | `AiService`, `PromptBuilder`, `QueryTerms`, `Excerpts` | Ask your vault and summaries (ROADMAP item 18, §5.20): availability and budget checks, retrieval over the search index, the prompt with its caps and the rebuild of earlier turns, the stream of events. |
-| | `ClaudeGateway`, `AnthropicGateway`, `FakeGateway`, `AiConfig` | One streamed Messages API call: through the official SDK, or canned for development (`notes.ai.fake`). |
-| | `ApiKeyFile`, `UsageLedger`, `AiModels`, `AiProperties` | The API key file (read again when it changes), the monthly spend in `.notesapp/cache/ai-usage.json`, the models and their prices, `notes.ai.*`. |
+| | `AiProviders`, `ClaudeGateway`, `ClaudeCodeGateway`, `AnthropicGateway`, `FakeGateway` | The two providers and one streamed answer: Claude Code run headless with the subscription (the default), the Messages API through the official SDK, or canned for development (`notes.ai.fake`). |
+| | `ApiKeyFile`, `UsageLedger`, `AiModels`, `AiProperties` | The credential files, the Claude Code token or the API key (read again when they change), the monthly spend in `.notesapp/cache/ai-usage.json`, the models and their prices, `notes.ai.*`. |
 | `ops` | `AlertMarker` | The stable log markers of §5.18, each with its alert's fixed title, text and priority. |
 | | `AlertLogBridge` | A Logback appender on the root logger: hands each WARN or ERROR whose message pattern starts with a marker to `AppAlerts` (§5.18.1). |
 | | `AppAlerts` | Counts the markers; deduplicates, rate-limits and sends them to ntfy on its own thread (§5.18.1). |
@@ -1383,9 +1383,14 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 
 Questions about the notes answered by Claude with citations, summaries of a note, a folder, a list of notes (this week's daily notes) or a selection, and suggested links, tags and tasks for a note. The wire contract is API.md §20; the code is the `ai` package (§5.2) and `AiController`. The client side is §6.21.
 
-**Off by default, three locks.** A request is refused (`409 ai-unavailable`) unless (1) `settings.ai.enabled` is on (a vault setting, off in the defaults), and (2) the server has an API key file; and nothing is sent until (3) someone asks. There is no background use: no indexing, embedding or summarizing without a request.
+**Two providers** (`AiProviders`, `settings.ai.provider`). The model call sits behind `ClaudeGateway`:
 
-**The key** (`ApiKeyFile`) is read from `notes.ai.api-key-file` (`NOTES_AI_API_KEY_FILE`), by default `<notes.secrets-dir>/anthropic-key` (`/data/secrets/anthropic-key`, outside the vault, §4.1): CasaOS uses that path; the plain-compose deploy mounts a compose secret at `/run/secrets/anthropic_key` (§7.2, `deploy/ai/no-key` is its empty placeholder), like the mirror token. The file is read again whenever its size or modification time changes, so a new key needs no restart. Its content must be one printable line; problems are described without quoting it (`"no API key: anthropic-key is empty"`). The key is never in the vault, the settings, `.env`, an environment variable, a log line or an error text, and `ApiKeyFile.Loaded` and the gateway's request records leave it out of `toString()`.
+- **Claude Code** (`claude-code`, the default; `ClaudeCodeGateway`): the user's Claude Pro or Max subscription, through the Claude Code CLI that the image ships (`/opt/claude/bin/claude`, `notes.ai.claude-command`, §7.1). One headless run per answer: `claude -p --output-format stream-json --verbose --include-partial-messages --model <id> --system-prompt <the app's> --tools "" --permission-mode dontAsk --strict-mcp-config --no-session-persistence --disable-slash-commands`, the prompt on stdin. **Every tool is disabled**, so Claude cannot read the vault or anything else: it sees only the notes the app retrieved, and excluded folders stay out. The process gets a fresh, empty home and working directory under `notes.ai.claude-work-dir` (default `<tmp>/notesapp-claude`), deleted afterwards, so no `CLAUDE.md`, setting, hook, MCP server or session is loaded or kept, and a **clean environment** (nothing inherited) holding only `HOME`, `PATH`, `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `CLAUDE_CODE_OAUTH_TOKEN`, the token from `claude setup-token` read from `notes.ai.claude-token-file` (default `/data/secrets/claude-token`). The token is never on the command line. The CLI takes one user message, so earlier turns become a transcript (`<earlier_turns>`) before the new message. The app reads the JSON lines: `stream_event` text deltas go to the browser, `assistant` messages are the fallback for a CLI without partial messages, and `result` gives the stop reason, the usage and `total_cost_usd` (the API value of the run, which the spend guard counts) or the error (`is_error`: a refused token becomes `auth`, a plan's usage limit `rate-limited`). A run that outlives `notes.ai.timeout` or whose browser leaves is killed with its process tree (`ProcessHandle.descendants()`). Usage counts against the subscription's limits; it is for the user's personal use under their plan's terms. Effort, `max_tokens`, the server-side fallback and prompt-cache breakpoints are not controllable through the CLI (Claude Code caches on its own).
+- **Anthropic API** (`api`; `AnthropicGateway`, below): an API key, billed per token.
+
+**Off by default, three locks.** A request is refused (`409 ai-unavailable`) unless (1) `settings.ai.enabled` is on (a vault setting, off in the defaults), and (2) the server has the provider's credential (and, for Claude Code, the CLI); and nothing is sent until (3) someone asks. There is no background use: no indexing, embedding or summarizing without a request.
+
+**The credentials** (`ApiKeyFile`: the Claude Code token as above, or the API key) are read the same way. The API key is read from `notes.ai.api-key-file` (`NOTES_AI_API_KEY_FILE`), by default `<notes.secrets-dir>/anthropic-key` (`/data/secrets/anthropic-key`, outside the vault, §4.1): CasaOS uses that path; the plain-compose deploy mounts a compose secret at `/run/secrets/anthropic_key` (§7.2, `deploy/ai/no-key` is its empty placeholder), like the mirror token. The file is read again whenever its size or modification time changes, so a new key needs no restart. Its content must be one printable line; problems are described without quoting it (`"no API key: anthropic-key is empty"`). The key is never in the vault, the settings, `.env`, an environment variable, a log line or an error text, and `ApiKeyFile.Loaded` and the gateway's request records leave it out of `toString()`.
 
 **Privacy rules.**
 
@@ -1402,7 +1407,7 @@ Questions about the notes answered by Claude with citations, summaries of a note
 
 **Conversations and the prompt cache.** The device sends earlier turns back as `history`: what was asked, the answer, and the paths the server reported in `start`. `PromptBuilder.rebuild` sends those notes again **as they are now**, with the same rules (the same terms, the same per-note budget, the same count), so an unchanged note gives byte-for-byte the same turn. The last user block carries `cache_control: ephemeral`; the next request's prefix (system, earlier turns) is then read from Anthropic's prompt cache for five minutes, at a tenth of the input price. A new question does not send again a note already in the conversation, and says so to the model when nothing new matched. The newest 12 turns are used; when they outgrow `maxContextChars` (with 10 % slack), the oldest lose their notes first, and every older one with them, so the prefix only changes once.
 
-**The call** (`AnthropicGateway`, through `com.anthropic:anthropic-java` 3.0.0). `client.beta().messages().createStreaming(...)`: the model from `settings.ai.model` (default **Claude Sonnet 5.5**; Opus 5.5 and Haiku 5.5 selectable), `max_tokens` 16,000 (`notes.ai.max-output-tokens`), `output_config.effort` `medium` (`notes.ai.effort`), adaptive thinking (the models' default, so nothing is sent), and, for Sonnet and Opus, the server-side refusal fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`; Haiku 5.5 has none). One OkHttp client is kept per key, built with the key alone (no `fromEnv()`: no environment variable can redirect requests or substitute credentials) and `maxRetries(2)` for 429 and 5xx before the stream starts. While streaming, text deltas go to the browser as they arrive; a `fallback` content block means another model answers from the start (`restart` event); `message_delta` carries the stop reason, the refusal category and the cumulative usage, per model when a fallback ran (`usage.iterations`). Thinking blocks are not shown (they arrive empty by default) and never sent back: earlier turns are text only. API errors become `auth`, `rate-limited`, `overloaded`, `bad-request` or `unavailable` with a short text (the API's `error.message`, scrubbed of key-shaped strings and capped at 200 characters).
+**The API call** (`AnthropicGateway`, the `api` provider, through `com.anthropic:anthropic-java` 3.0.0). `client.beta().messages().createStreaming(...)`: the model from `settings.ai.model` (default **Claude Sonnet 5.5**; Opus 5.5 and Haiku 5.5 selectable), `max_tokens` 16,000 (`notes.ai.max-output-tokens`), `output_config.effort` `medium` (`notes.ai.effort`), adaptive thinking (the models' default, so nothing is sent), and, for Sonnet and Opus, the server-side refusal fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`; Haiku 5.5 has none). One OkHttp client is kept per key, built with the key alone (no `fromEnv()`: no environment variable can redirect requests or substitute credentials) and `maxRetries(2)` for 429 and 5xx before the stream starts. While streaming, text deltas go to the browser as they arrive; a `fallback` content block means another model answers from the start (`restart` event); `message_delta` carries the stop reason, the refusal category and the cumulative usage, per model when a fallback ran (`usage.iterations`). Thinking blocks are not shown (they arrive empty by default) and never sent back: earlier turns are text only. API errors become `auth`, `rate-limited`, `overloaded`, `bad-request` or `unavailable` with a short text (the API's `error.message`, scrubbed of key-shaped strings and capped at 200 characters).
 
 **Streaming to the browser.** `AiController` checks the request and builds the prompt before answering (so refusals are problem documents), then returns an `SseEmitter` and writes the answer from a virtual thread: `start`, `delta`…, `restart`, `done` or `error` (API.md §20.5). When the browser closes the stream (Stop, a closed tab), the next write fails, the exception leaves the gateway's stream loop, and closing the SDK stream cancels the upstream request, so nothing more is generated or paid for. At most `notes.ai.max-concurrent` (2) answers are written at once; another gets `error: busy`.
 
@@ -1412,11 +1417,11 @@ Questions about the notes answered by Claude with citations, summaries of a note
 
 **Development** (`notes.ai.fake=true`, `FakeGateway`): answers with canned Markdown that cites the notes the prompt carried, streamed word by word, with token counts estimated from the characters; no key and no network. The status says `fake: true` and the panel says so. Never set in production.
 
-**Configuration** (`AiProperties`, `notes.ai.*`): `api-key-file` (empty: `<secrets-dir>/anthropic-key`), `fake` (false), `max-output-tokens` (16000), `effort` (`medium`), `timeout` (5m), `max-concurrent` (2).
+**Configuration** (`AiProperties`, `notes.ai.*`): `claude-token-file` (empty: `<secrets-dir>/claude-token`), `claude-command` (`claude`; the image sets `/opt/claude/bin/claude`), `claude-work-dir` (empty: `<tmp>/notesapp-claude`), `api-key-file` (empty: `<secrets-dir>/anthropic-key`), `fake` (false), `max-output-tokens` (16000), `effort` (`medium`), `timeout` (5m), `max-concurrent` (2).
 
 **Alternatives considered.** Embeddings (a vector index needs an embedding provider, since Anthropic has no embeddings API, and its storage and refresh; BM25 over the existing index answers personal-scale questions well, and the roadmap defers embeddings). Server-side conversations (they would keep questions and answers on the server and need their own retention; the device keeping them matches "conversation history per device"). Tool use to let Claude search the vault itself (more calls and cost per question, and harder to keep excluded folders out). Opus as the default (the roadmap's first choice; Sonnet 5.5 answers note questions well at half the price, and Opus is one setting away).
 
-**Tests.** `AiServiceTest` (availability, retrieval, exclusions, caps, the byte-for-byte rebuild of earlier turns, summaries, suggestions, the stream of events, the spend guard, a browser leaving part way) with a recording gateway; `AnthropicGatewayTest` against a local HTTP server that replays recorded Messages API streams (the request's shape, the key as a bearer token, the fallback, refusals, error mapping without the key, stopping on a listener's exception); `ExcerptsTest`, `QueryTermsTest`, the settings tests, and `AiIntegrationTest` (the HTTP contract with `notes.ai.fake`). No test calls Anthropic.
+**Tests.** `ClaudeCodeGatewayTest` with the CLI replaced by a fake process (the locked-down command line and environment, the stream-json lines, an older CLI without partial messages, a refused token, a usage limit, a crash with its stderr scrubbed, cancellation and the timeout); `AiServiceTest` (the providers, availability, retrieval, exclusions, caps, the byte-for-byte rebuild of earlier turns, summaries, suggestions, the stream of events, the spend guard, a browser leaving part way) with a recording gateway; `AnthropicGatewayTest` against a local HTTP server that replays recorded Messages API streams (the request's shape, the key as a bearer token, the fallback, refusals, error mapping without the key, stopping on a listener's exception); `ExcerptsTest`, `QueryTermsTest`, the settings tests, and `AiIntegrationTest` (the HTTP contract with `notes.ai.fake`). No test calls Anthropic.
 
 ---
 
@@ -2256,7 +2261,7 @@ The conversation view of §5.20, in `features/ai/`, registered through the exten
 - **Answers** render with the reading-view pipeline (`renderNote`, §6.7, at depth 1 so no note is transcluded, remote images always as placeholders) into `.markdown-rendered`. A click on a citation resolves it over the tree (from the vault root) and opens the note (closing the sheet); a link that does not resolve shows "… is not a note in this vault" and **never creates a note**, unlike a link in a note. Tags open tag search. Each answer lists the notes sent (each opens the note; *excerpt* marks a cut note), how many matching notes were excluded or did not fit, the model, the estimated cost, and Copy. `max_tokens` and `refusal` stops are explained.
 - **Conversations per device** (`conversations.ts`, zustand): in `localStorage` under `notesapp:ai:conversations`, never on the server. A turn keeps its prompt as sent, its label, the answer, the notes and the outcome; follow-ups send the answered turns as `history` (API.md §20.1). The newest 30 conversations of at most 40 turns and 1.5 MB are kept; a page closed mid-answer reads back as *stopped*. The toolbar has *New conversation* and *Conversations on this device* (reopen, delete one, delete all).
 - **Privacy in the UI.** Before the first question on a device, a notice says that the question and the text of the notes it needs are sent to Anthropic, and which folders never are (*Got it* stores `notesapp:ai:noticeSeen`). The footer always says "Sent to Anthropic when you ask" (or "Fake answers" on a development server), the model and the month's spend against the budget. While the feature is off, not configured or over budget, the view says why (with a link to Settings, or the key file's path) and the input is disabled.
-- **Settings › Ask and summaries** edits `settings.ai`: the privacy explanation, *Use Claude* (off by default), the model (Sonnet 5.5 recommended, Opus 5.5, Haiku 5.5), *Never send* (one path per line), the context per request, the monthly budget, and the status from `GET /api/ai/status`: whether the server has a key (by file name), and this month's estimated spend and requests.
+- **Settings › Ask and summaries** edits `settings.ai`: the privacy explanation, *Use Claude* (off by default), the provider (Claude Code with the subscription, or the Anthropic API), the model (Sonnet 5.5 recommended, Opus 5.5, Haiku 5.5), *Never send* (one path per line), the context per request, the monthly budget, and the status from `GET /api/ai/status`: whether the server has a key (by file name), and this month's estimated spend and requests.
 - **Layout.** The panel is a flex column whose messages scroll above the input; on the page the workspace scrolls (§6.16) and the input is sticky at the bottom with the safe-area inset. Both follow a streaming answer unless the reader scrolled up. Inputs are 16 px and chips and buttons 44 px on touch screens; the input is a textarea that grows, Enter sends and Shift+Enter breaks the line (`enterkeyhint="send"`).
 
 **Tests** (Vitest): `sse.test.ts` (any split, CRLF, comments), `aiClient.test.ts` (the request, the events, problems, a cut-off stream, aborts), `conversations.test.ts` (storage, history, limits, damaged data), `actions.test.ts` (the week, citations) and `AiChat.test.tsx` (registration, the off and unconfigured states, the notice, a streamed answer whose citation opens the note, history and the include toggle, an unresolved citation creating nothing).
@@ -2293,7 +2298,28 @@ RUN sh ./mvnw -B -ntp -DskipTests package \
  && java -Djarmode=tools -jar /tmp/application.jar extract --layers --destination /extracted \
  && mkdir -p /out/data/vault /out/data/.config
 
-# ---------- 3) runtime: one per target arch, on JDK 25. Its two RUN steps run under QEMU for arm64 (DESIGN §7.1) ----------
+# ---------- 3) Claude Code CLI for Ask your vault (ROADMAP item 18, DESIGN §5.20): Anthropic's native binary for the
+# target arch, downloaded on the build host (no emulation) from the official release bucket and checked against the
+# release manifest's SHA-256. About 290 MB per arch (about 100 MB compressed). Claude Code is Anthropic's proprietary
+# software ("all rights reserved"): an image that contains it is for your own use, so keep the GHCR package private
+# (DEPLOY.md, "Ask your vault"), or build with --build-arg CLAUDE_CODE_VERSION=none and mount the CLI instead.
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS claude-code
+ARG TARGETARCH
+ARG CLAUDE_CODE_VERSION=2.1.304
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl jq \
+ && rm -rf /var/lib/apt/lists/*
+RUN set -eu; mkdir -p /out/bin; \
+    if [ "$CLAUDE_CODE_VERSION" = "none" ]; then echo "building without Claude Code"; exit 0; fi; \
+    case "$TARGETARCH" in amd64) p=linux-x64 ;; arm64) p=linux-arm64 ;; *) echo "no Claude Code for $TARGETARCH" >&2; exit 1 ;; esac; \
+    base="https://downloads.claude.ai/claude-code-releases/$CLAUDE_CODE_VERSION"; \
+    sum="$(curl -fsSL "$base/manifest.json" | jq -r ".platforms[\"$p\"].checksum")"; \
+    echo "$sum" | grep -Eq '^[0-9a-f]{64}$'; \
+    curl -fsSL -o /out/bin/claude "$base/$p/claude"; \
+    echo "$sum  /out/bin/claude" | sha256sum -c -; \
+    chmod 755 /out/bin/claude
+
+# ---------- 4) runtime: one per target arch, on JDK 25. Its two RUN steps run under QEMU for arm64 (DESIGN §7.1) ----------
 FROM eclipse-temurin:25-jre-noble
 ARG GIT_SHA=dev
 ARG TARGETARCH
@@ -2308,7 +2334,9 @@ COPY --from=backend /extracted/spring-boot-loader/ ./
 COPY --from=backend /extracted/snapshot-dependencies/ ./
 COPY --from=backend /extracted/application/ ./
 COPY --from=backend --chown=1000:1000 /out/data /data
+COPY --from=claude-code /out/bin/ /opt/claude/bin/
 ENV NOTES_VAULT_DIR=/data/vault \
+    NOTES_AI_CLAUDE_COMMAND=/opt/claude/bin/claude \
     NOTES_BUILD_SHA=${GIT_SHA} \
     XDG_CONFIG_HOME=/data/.config \
     GIT_CONFIG_NOSYSTEM=1 \
@@ -2335,7 +2363,7 @@ RUN set -eu; \
       rm -f /app/notesapp.aot; \
     fi; \
     rm -rf "$t" /app/notesapp.aot.config /tmp/hsperfdata_*
-# uid/gid 1000 = the 'ubuntu' user that ships in the noble base image (no useradd needed); see §7.7 for why 1000
+# uid/gid 1000 = the 'ubuntu' user that ships in the noble base image (no useradd needed); see DESIGN §7.7 for why 1000
 USER 1000:1000
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
