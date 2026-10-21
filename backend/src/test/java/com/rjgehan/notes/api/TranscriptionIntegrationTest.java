@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 import com.rjgehan.notes.history.CommitBatcher;
@@ -201,9 +202,12 @@ class TranscriptionIntegrationTest {
 		String path = record("Recording 20261021170000.m4a", new byte[40]);
 		fake.gate = new CountDownLatch(1);
 		fake.entered = new CountDownLatch(1);
-		CompletableFuture<Reply> first = CompletableFuture.supplyAsync(() -> transcribe(path));
+		// Each request on its own thread, not the common pool: on a 2-CPU runner that pool has one worker, which the
+		// first (blocked) request would hold while JDK 25's HTTP client needs it for the second.
+		Executor ownThread = (task) -> Thread.ofPlatform().daemon().name("transcribe-request").start(task);
+		CompletableFuture<Reply> first = CompletableFuture.supplyAsync(() -> transcribe(path), ownThread);
 		assertThat(fake.entered.await(10, TimeUnit.SECONDS)).isTrue();
-		CompletableFuture<Reply> second = CompletableFuture.supplyAsync(() -> transcribe(path));
+		CompletableFuture<Reply> second = CompletableFuture.supplyAsync(() -> transcribe(path), ownThread);
 		Thread.sleep(200);
 		fake.gate.countDown();
 		assertThat(first.get(10, TimeUnit.SECONDS).ok(200).get("text").asString()).startsWith("Words of");
