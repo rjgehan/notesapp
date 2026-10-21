@@ -152,7 +152,10 @@ class VaultPerformanceTest {
 			report("save p95", p95(saves), 30);
 
 			String[] queries = { "garden river", "\"copper signal\"", "lantern -orbit", "tag:topic/ember", "harb",
-					"path:area 7 quartz", "zephyr anchor beacon", "file:note 99", "velvet", "tag:perf glacier" };
+					"path:area 7 quartz", "zephyr anchor beacon", "file:note 99", "velvet", "tag:perf glacier",
+					// item 22: OR and groups, typo tolerance, scopes, and a regular expression narrowed by words
+					"garden OR river", "(velvet OR thunder) -compass", "lanturn", "line:(garden river)",
+					"section:(\"copper signal\" ember)", "quartz /quart[sz] ledg/", "file:/^Note 42\\d\\d\\.md$/" };
 			List<Long> searches = new ArrayList<>();
 			for (String query : queries) {
 				List<Long> times = sample(2, 6, () -> api.get("/api/search?q=" + Api.enc(query)).ok(200));
@@ -161,6 +164,12 @@ class VaultPerformanceTest {
 				searches.addAll(times);
 			}
 			report("search p95", p95(searches), 100);
+
+			// A regular expression alone reads every note (about 50 MB): bounded, not instant.
+			List<Long> scans = sample(1, 5, () -> api.get("/api/search?q=" + Api.enc("/quantum l[e]dger/")).ok(200));
+			System.out.printf("PERF   search %-30s median %4d ms, total %d%n", "/quantum l[e]dger/", median(scans),
+					api.get("/api/search?q=" + Api.enc("/quantum l[e]dger/")).ok(200).get("total").asInt());
+			report("full-text regular expression (median)", median(scans), 1_000);
 
 			JsonNode hub = api.get("/api/notes/backlinks?path=Hub.md").ok(200);
 			assertThat(hub.get("linked").size()).isEqualTo(200);

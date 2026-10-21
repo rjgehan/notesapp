@@ -26,7 +26,13 @@ interface Props {
   entry: HistoryEntry;
   currentPath: string;
   onClose(): void;
+  /** Other versions of the file, offered in "Compare with" (ROADMAP item 28). */
+  versions?: readonly HistoryEntry[];
 }
+
+/** The commit that holds an entry's content: its own, or its parent's for a deletion. */
+const contentCommit = (e: HistoryEntry): string | null => (e.change === 'deleted' ? e.parentCommitId : e.commitId);
+const versionKey = (e: HistoryEntry): string => `${e.commitId}:${e.path}`;
 
 /** The current text to compare with: the open session's buffer, else the server copy. */
 function useCurrentText(path: string, exists: boolean, textual: boolean): string | null {
@@ -43,7 +49,18 @@ function SessionText({ path, children }: { path: string; children(text: string):
   return <>{children(session.getText())}</>;
 }
 
-function DiffPane({ historical, current, markdown }: { historical: string; current: string; markdown: boolean }) {
+/** A read-only unified diff from `historical` (old) to `current` (new), with change navigation. */
+export function DiffPane({
+  historical,
+  current,
+  markdown,
+  sameLabel = 'Identical to the current version',
+}: {
+  historical: string;
+  current: string;
+  markdown: boolean;
+  sameLabel?: string;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const handle = useRef<DiffViewHandle | null>(null);
   const [chunks, setChunks] = useState<number | null>(null);
@@ -60,7 +77,7 @@ function DiffPane({ historical, current, markdown }: { historical: string; curre
   return (
     <div className="history-diff">
       <div className="history-diff-tools">
-        <span className="muted">{chunks === null ? '' : chunks === 0 ? 'Identical to the current version' : `${chunks} ${chunks === 1 ? 'change' : 'changes'}`}</span>
+        <span className="muted">{chunks === null ? '' : chunks === 0 ? sameLabel : `${chunks} ${chunks === 1 ? 'change' : 'changes'}`}</span>
         <button type="button" className="icon-button" aria-label="Previous change" title="Previous change" onClick={() => handle.current?.previous()}>
           <ChevronUp size={16} />
         </button>
@@ -83,7 +100,7 @@ function FullTextPane({ text, markdown }: { text: string; markdown: boolean }) {
   return <div ref={host} className="history-editor" />;
 }
 
-export default function HistoryVersion({ entry, currentPath, onClose }: Props) {
+export default function HistoryVersion({ entry, currentPath, onClose, versions = [] }: Props) {
   const deleted = entry.change === 'deleted';
   const commit = deleted ? entry.parentCommitId : entry.commitId;
   const kind = kindOfPath(entry.path);
@@ -97,6 +114,11 @@ export default function HistoryVersion({ entry, currentPath, onClose }: Props) {
   const open = documents.get(currentPath);
   const currentText = useCurrentText(currentPath, !!currentEntry, textual);
   const historical = content.data && content.data.content !== null ? toLf(content.data.content) : null;
+  const others = versions.filter((v) => versionKey(v) !== versionKey(entry) && contentCommit(v) !== null);
+  const [compareKey, setCompareKey] = useState('current');
+  const other = others.find((v) => versionKey(v) === compareKey) ?? null;
+  const otherContent = useHistoryContent(textual && other ? contentCommit(other) : null, textual && other ? other.path : null);
+  const otherText = otherContent.data && otherContent.data.content !== null ? toLf(otherContent.data.content) : null;
 
   useEffect(() => {
     if (!commit) onClose();
@@ -109,9 +131,11 @@ export default function HistoryVersion({ entry, currentPath, onClose }: Props) {
     const large = currentEntry !== undefined && limit !== null && isLargeFile(currentEntry.size);
     const ok = await confirmAction({
       title: 'Restore this version?',
-      message: large
-        ? `“${displayName(currentPath)}” will be replaced with the version from ${formatDateTime(entry.time)}. The current version is larger than ${formatLimit(limit)}, so it is not in history: it is moved to the trash instead.`
-        : `“${displayName(currentPath)}” will be replaced with the version from ${formatDateTime(entry.time)}. The current version stays in history.`,
+      message: !currentEntry
+        ? `“${displayName(currentPath)}” will be brought back with its version from ${formatDateTime(entry.time)}.`
+        : large
+          ? `“${displayName(currentPath)}” will be replaced with the version from ${formatDateTime(entry.time)}. The current version is larger than ${formatLimit(limit)}, so it is not in history: it is moved to the trash instead.`
+          : `“${displayName(currentPath)}” will be replaced with the version from ${formatDateTime(entry.time)}. The current version stays in history.`,
       confirmLabel: 'Restore',
     });
     if (!ok) return;
@@ -152,6 +176,28 @@ export default function HistoryVersion({ entry, currentPath, onClose }: Props) {
 
   const diff = (current: string) => (historical === null ? null : <DiffPane historical={historical} current={current} markdown={markdown} />);
 
+  // Two historical versions: always from the older to the newer one.
+  const versionDiff = () => {
+    if (!other || historical === null) return null;
+    if (otherContent.isPending) {
+      return (
+        <div className="view-loading" aria-busy="true">
+          <div className="skeleton-line" />
+        </div>
+      );
+    }
+    if (otherText === null) return <div className="panel-empty">{otherContent.isError ? errorMessage(otherContent.error) : 'That version is not text.'}</div>;
+    const otherIsNewer = Date.parse(other.time) > Date.parse(entry.time);
+    return (
+      <DiffPane
+        historical={otherIsNewer ? historical : otherText}
+        current={otherIsNewer ? otherText : historical}
+        markdown={markdown}
+        sameLabel="The two versions are identical"
+      />
+    );
+  };
+
   return (
     <Modal label={`Version of ${displayName(entry.path)}`} onClose={onClose} variant="sheet" className="history-version" dismissible={!busy}>
       <header className="compare-header">
@@ -167,13 +213,28 @@ export default function HistoryVersion({ entry, currentPath, onClose }: Props) {
         </button>
       </header>
       {textual && (
-        <div className="segmented" role="tablist" aria-label="Version view">
-          <button type="button" role="tab" aria-selected={tab === 'diff'} className={tab === 'diff' ? 'is-active' : ''} onClick={() => setTab('diff')}>
-            Diff
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'text'} className={tab === 'text' ? 'is-active' : ''} onClick={() => setTab('text')}>
-            Full text
-          </button>
+        <div className="history-version-tools">
+          <div className="segmented" role="tablist" aria-label="Version view">
+            <button type="button" role="tab" aria-selected={tab === 'diff'} className={tab === 'diff' ? 'is-active' : ''} onClick={() => setTab('diff')}>
+              Diff
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'text'} className={tab === 'text' ? 'is-active' : ''} onClick={() => setTab('text')}>
+              Full text
+            </button>
+          </div>
+          {tab === 'diff' && others.length > 0 && (
+            <label className="history-compare">
+              Compare with
+              <select value={other ? compareKey : 'current'} onChange={(e) => setCompareKey(e.target.value)} aria-label="Compare with">
+                <option value="current">the current version</option>
+                {others.map((v) => (
+                  <option key={versionKey(v)} value={versionKey(v)}>
+                    {formatDateTime(v.time)} · {v.change === 'deleted' ? 'last version before deletion' : v.message}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       )}
       <div className="history-version-body">
@@ -209,6 +270,8 @@ export default function HistoryVersion({ entry, currentPath, onClose }: Props) {
           <div className="panel-empty">This version is not text.</div>
         ) : tab === 'text' ? (
           <FullTextPane text={historical} markdown={markdown} />
+        ) : other ? (
+          versionDiff()
         ) : open ? (
           <SessionText path={currentPath}>{diff}</SessionText>
         ) : currentText === null ? (

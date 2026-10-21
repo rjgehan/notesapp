@@ -3,6 +3,7 @@ package com.rjgehan.notes.index;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -82,8 +83,11 @@ public final class SearchIndex {
 
 		private final FieldTerms[] fields;
 
-		private Doc(FieldTerms[] fields) {
+		private final int[] lineTokens;
+
+		private Doc(FieldTerms[] fields, int[] lineTokens) {
 			this.fields = fields;
+			this.lineTokens = lineTokens;
 		}
 
 		/** Tokenizes a note: {@code basename} is its title, {@code text} its BOM-stripped content. */
@@ -93,9 +97,34 @@ public final class SearchIndex {
 			for (int f = 0; f < FIELDS.length; f++) {
 				fields[f] = FieldTerms.of(tokens.get(f));
 			}
-			return new Doc(fields);
+			return new Doc(fields, lineTokens(tokens.get(Field.BODY.ordinal()), parse.lineStarts()));
 		}
 
+	}
+
+	/**
+	 * For every line, the index of the first body token at or after its start, plus the token count at the end, so
+	 * line {@code i} holds body tokens {@code [lineTokens[i], lineTokens[i + 1])}. Lines of the frontmatter hold none.
+	 */
+	static int[] lineTokens(List<Tokenizer.Token> body, int[] lineStarts) {
+		int[] starts = new int[lineStarts.length + 1];
+		int t = 0;
+		for (int line = 0; line < lineStarts.length; line++) {
+			while (t < body.size() && body.get(t).from() < lineStarts[line]) {
+				t++;
+			}
+			starts[line] = t;
+		}
+		starts[lineStarts.length] = body.size();
+		return starts;
+	}
+
+	/**
+	 * A document's body as the index keeps it: its distinct terms, its token sequence as indexes into them, and the
+	 * token index at which each line starts ({@link #lineTokens}). The arrays are never changed once stored, so they
+	 * may be read after the index lock is released.
+	 */
+	public record Body(String[] terms, char[] sequence, int[] lineTokens) {
 	}
 
 	/**
@@ -113,11 +142,14 @@ public final class SearchIndex {
 
 		final char @Nullable [][] sequences;
 
-		Stored(String path, String[][] terms, int[] lengths, char @Nullable [][] sequences) {
+		final int[] lineTokens;
+
+		Stored(String path, String[][] terms, int[] lengths, char @Nullable [][] sequences, int[] lineTokens) {
 			this.path = path;
 			this.terms = terms;
 			this.lengths = lengths;
 			this.sequences = sequences;
+			this.lineTokens = lineTokens;
 		}
 
 	}
@@ -225,7 +257,7 @@ public final class SearchIndex {
 			sequenced &= field.sequence() != null;
 			this.totalLengths[f] += lengths[f];
 		}
-		this.docs.put(docId, new Stored(path, terms, lengths, sequenced ? sequences : null));
+		this.docs.put(docId, new Stored(path, terms, lengths, sequenced ? sequences : null, doc.lineTokens));
 	}
 
 	void remove(int docId) {
@@ -323,20 +355,121 @@ public final class SearchIndex {
 		return set;
 	}
 
-	/** The vocabulary terms a pattern position can match: the term itself, or up to 64 terms it prefixes. */
+	/**
+	 * The vocabulary terms a pattern position can match: the term itself, or up to 64 terms it prefixes, plus its typo
+	 * variants.
+	 */
 	public List<String> alternatives(TermPattern pattern, int index) {
 		String term = pattern.terms().get(index);
-		if (!(pattern.prefixLast() && index == pattern.terms().size() - 1)) {
-			return List.of(term);
-		}
 		List<String> expanded = new ArrayList<>();
-		for (String candidate : this.vocabulary.tailMap(term, true).navigableKeySet()) {
-			if (!candidate.startsWith(term) || expanded.size() == MAX_EXPANSIONS) {
-				break;
+		if (!pattern.isPrefix(index)) {
+			expanded.add(term);
+		}
+		else {
+			for (String candidate : this.vocabulary.tailMap(term, true).navigableKeySet()) {
+				if (!candidate.startsWith(term) || expanded.size() == MAX_EXPANSIONS) {
+					break;
+				}
+				expanded.add(candidate);
 			}
-			expanded.add(candidate);
+		}
+		for (String variant : pattern.variants().get(index)) {
+			if (!expanded.contains(variant)) {
+				expanded.add(variant);
+			}
 		}
 		return expanded;
+	}
+
+	/** True when some field of some document contains {@code term}. */
+	public boolean hasTerm(String term) {
+		return this.vocabulary.containsKey(term);
+	}
+
+	/** True when some vocabulary term starts with {@code prefix}. */
+	public boolean hasPrefix(String prefix) {
+		String next = this.vocabulary.ceilingKey(prefix);
+		return next != null && next.startsWith(prefix);
+	}
+
+	/**
+	 * Typo tolerance: up to {@code limit} vocabulary terms within {@code maxDistance} edits (insertions, deletions,
+	 * substitutions and transpositions of adjacent characters) of {@code term}, closest first, then the most common.
+	 */
+	public List<String> similarTerms(String term, int maxDistance, int limit) {
+		record Candidate(String term, int distance, int frequency) {
+		}
+		List<Candidate> found = new ArrayList<>();
+		int length = term.length();
+		for (String candidate : this.vocabulary.keySet()) {
+			if (Math.abs(candidate.length() - length) > maxDistance || candidate.equals(term)) {
+				continue;
+			}
+			int distance = Fuzzy.distance(term, candidate, maxDistance);
+			if (distance <= maxDistance) {
+				found.add(new Candidate(candidate, distance, documentFrequency(candidate)));
+			}
+		}
+		found.sort(Comparator.comparingInt(Candidate::distance)
+			.thenComparing(Comparator.comparingInt(Candidate::frequency).reversed())
+			.thenComparing(Candidate::term));
+		return found.stream().limit(limit).map(Candidate::term).toList();
+	}
+
+	/** The number of documents in the largest field postings of {@code term}. */
+	private int documentFrequency(String term) {
+		int frequency = 0;
+		for (Map<String, Postings> field : this.postings) {
+			Postings list = field.get(term);
+			if (list != null) {
+				frequency = Math.max(frequency, list.size);
+			}
+		}
+		return frequency;
+	}
+
+	/** The body of a document, or null when it is unknown or its token sequences were too large to keep. */
+	public @Nullable Body body(int docId) {
+		Stored stored = this.docs.get(docId);
+		if (stored == null || stored.sequences == null) {
+			return null;
+		}
+		int body = Field.BODY.ordinal();
+		return new Body(stored.terms[body], stored.sequences[body], stored.lineTokens);
+	}
+
+	/** For every term a position of {@code pattern} accepts, the bit mask of the positions it fills. */
+	public Map<String, Long> positions(TermPattern pattern) {
+		Map<String, Long> positions = new HashMap<>();
+		int size = Math.min(pattern.terms().size(), MAX_SEQUENCE_PHRASE);
+		for (int i = 0; i < size; i++) {
+			long bit = 1L << i;
+			for (String term : alternatives(pattern, i)) {
+				positions.merge(term, bit, (a, b) -> a | b);
+			}
+		}
+		return positions;
+	}
+
+	/** The longest pattern {@link #occurs(char[], long[], int, int, int)} can check. */
+	public static int maxSequencePattern() {
+		return MAX_SEQUENCE_PHRASE;
+	}
+
+	/**
+	 * True when positions {@code 0..size-1} are filled by consecutive tokens of {@code sequence} between token
+	 * {@code from} and {@code to}; {@code masks[j]} holds the positions that local term {@code j} fills.
+	 */
+	public static boolean occurs(char[] sequence, long[] masks, int size, int from, int to) {
+		next: for (int start = from; start + size <= to; start++) {
+			for (int k = 0; k < size; k++) {
+				if ((masks[sequence[start + k]] & (1L << k)) == 0) {
+					continue next;
+				}
+			}
+			return true;
+		}
+		return false;
 	}
 
 	/** Documents containing every term of the pattern in some field (consecutiveness is checked separately). */
@@ -378,13 +511,7 @@ public final class SearchIndex {
 			return;
 		}
 		// For every term a position accepts, the bit mask of the phrase positions it fills.
-		Map<String, Long> positions = new HashMap<>();
-		for (int i = 0; i < size; i++) {
-			long bit = 1L << i;
-			for (String term : alternatives(pattern, i)) {
-				positions.merge(term, bit, (a, b) -> a | b);
-			}
-		}
+		Map<String, Long> positions = positions(pattern);
 		long[] masks = new long[64];
 		for (int docId = docs.nextSetBit(0); docId >= 0; docId = docs.nextSetBit(docId + 1)) {
 			Stored stored = this.docs.get(docId);
@@ -416,15 +543,7 @@ public final class SearchIndex {
 
 	/** True when positions {@code 0..size-1} are filled by consecutive tokens of {@code sequence}. */
 	private static boolean occurs(char[] sequence, long[] masks, int size) {
-		next: for (int start = 0; start + size <= sequence.length; start++) {
-			for (int k = 0; k < size; k++) {
-				if ((masks[sequence[start + k]] & (1L << k)) == 0) {
-					continue next;
-				}
-			}
-			return true;
-		}
-		return false;
+		return occurs(sequence, masks, size, 0, sequence.length);
 	}
 
 	/** Documents whose body contains every one of {@code terms} (exact terms). */

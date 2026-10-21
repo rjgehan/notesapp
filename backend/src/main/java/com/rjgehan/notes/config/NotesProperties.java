@@ -33,6 +33,7 @@ public record NotesProperties(
 		@DefaultValue Backup backup,
 		@DefaultValue("/data/secrets") Path secretsDir,
 		@DefaultValue Tasks tasks,
+		@DefaultValue Search search,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
 				"yml" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
@@ -121,6 +122,28 @@ public record NotesProperties(
 	public record Tasks(
 			@DefaultValue("90d") Duration archiveAfter,
 			@DefaultValue("0 20 3 * * *") String archiveCron) {
+	}
+
+	/**
+	 * Full-text search (DESIGN §5.5.10). {@code timeout} bounds one query's regular expressions and
+	 * {@code line:}/{@code section:} clauses; at most {@code maxConcurrentExpensive} such queries run at once.
+	 */
+	public record Search(
+			@DefaultValue("2s") Duration timeout,
+			@DefaultValue("2") int maxConcurrentExpensive,
+			@DefaultValue Pdf pdf) {
+	}
+
+	/**
+	 * Text extraction from PDF attachments for search, in the background: files over {@code maxSize}, pages after
+	 * {@code maxPages}, text after {@code maxChars} characters and work after {@code timeout} per file are skipped.
+	 */
+	public record Pdf(
+			@DefaultValue("true") boolean enabled,
+			@DefaultValue("64MB") DataSize maxSize,
+			@DefaultValue("2000") int maxPages,
+			@DefaultValue("1000000") int maxChars,
+			@DefaultValue("60s") Duration timeout) {
 	}
 
 	public record TailscaleWatchdog(

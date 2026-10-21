@@ -294,17 +294,34 @@ export interface HeadingRenameResult {
 }
 
 // ---------- search / tags (§12) ----------
-export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
+export interface SearchMatch {
+  line: number;
+  text: string;
+  ranges: TextRange[];
+  page: number | null;            // 1-based page of a PDF match; null otherwise
+}
 export interface SearchHit {
   path: VaultPath;
   basename: string;
+  kind: FileKind;                 // 'note', or 'pdf' for a PDF's extracted text
   score: number;
   mtime: IsoInstant;
   titleRanges: TextRange[];
   matches: SearchMatch[];
   moreMatches: number;
 }
-export interface SearchResponse { query: string; total: number; tookMs: number; results: SearchHit[] }
+export interface SearchCorrection { term: string; replacements: string[] }   // typo tolerance (§12.1)
+export interface SearchResponse {
+  query: string;
+  total: number;
+  tookMs: number;
+  results: SearchHit[];
+  corrections: SearchCorrection[];
+}
+export type SearchSort = 'relevance' | 'mtime';
+export interface SavedSearch { id: string; name: string; query: string; sort: SearchSort }
+export interface SavedSearchesResponse { searches: SavedSearch[]; version: Version | null }
+export interface SavedSearchesUpdateRequest { searches: SavedSearch[]; baseVersion: Version | null }
 export interface TagCount { tag: string; count: number; total: number }
 export interface TagsResponse { tags: TagCount[] }
 
@@ -363,6 +380,42 @@ export interface HistoryRestoreRequest { path: VaultPath; commit: string; source
 export interface HistoryRestoreResult { file: FileEntry; created: boolean; createdFolders: VaultPath[]; commitId: string | null }
 export interface CommitResult { commitId: string | null }
 
+// ---------- vault-wide history (§14.6–14.8) ----------
+export interface TimelineFile { path: VaultPath; change: ChangeType; renamedFrom: VaultPath | null }
+export interface TimelineEntry {
+  commitId: string;
+  shortId: string;
+  parentCommitId: string | null;
+  time: IsoInstant;
+  authorName: string;
+  authorLogin: string;
+  message: string;
+  files: TimelineFile[];          // at most 100; hidden paths (.notesapp/…) left out
+  filesTotal: number;
+}
+export interface TimelineResponse { entries: TimelineEntry[]; hasMore: boolean }
+export interface ChangesResponse {
+  since: IsoInstant | null;
+  until: IsoInstant | null;
+  fromCommitId: string | null;    // the last commit before since; null = the beginning
+  toCommitId: string | null;      // the last commit before until; null = no commits
+  commits: number;
+  authors: string[];
+  files: TimelineFile[];          // net change from fromCommitId to toCommitId, at most 1000
+  truncated: boolean;
+}
+export interface DeletedFile {
+  path: VaultPath;
+  deletedAt: IsoInstant;
+  commitId: string;
+  shortId: string;
+  parentCommitId: string;         // its last content; restore with POST /api/history/restore
+  authorName: string;
+  authorLogin: string;
+  message: string;
+}
+export interface DeletedFilesResponse { entries: DeletedFile[]; total: number; hasMore: boolean }
+
 // ---------- templates (§15.4) ----------
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
@@ -415,6 +468,7 @@ export interface SettingsChangedEvent { version: Version; origin: string | null 
 export interface BookmarksChangedEvent { version: Version; origin: string | null }   // origin null: re-keyed by the server after a move or restore
 export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' | 'mirror' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
+export interface SavedSearchesChangedEvent { version: Version; origin: string | null }
 
 export interface VaultEventMap {
   'hello': HelloEvent;
@@ -431,12 +485,13 @@ export interface VaultEventMap {
   'bookmarks.changed': BookmarksChangedEvent;
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
+  'searches.changed': SavedSearchesChangedEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'bookmarks.changed', 'status.changed',
-  'resync',
+  'resync', 'searches.changed',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
 

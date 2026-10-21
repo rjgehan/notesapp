@@ -983,14 +983,15 @@ Request `ResolveRequest`:
 
 ## 12. Search and tags
 
-### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true]`
+### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true][&fuzzy=true]`
 
-This is full-text search over notes and over the indexed documents of §1.8: the tasks of `.tasks` lists (§20.9), the texts of `.excalidraw` drawings and the cells of `.sheet` spreadsheets (§12.3). A hit's `path` is then the document, and `matches` are lines of its indexed text, never of its JSON. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes, over the indexed documents of §1.8 (the tasks of `.tasks` lists, §20.9; the texts of `.excalidraw` drawings; the cells of `.sheet` spreadsheets, §12.3) and over the text of PDF attachments (§12.5). A hit's `path` is then the document, and `matches` are lines of its indexed text, never of its JSON. Files whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
 | `sort` | `relevance` (the default) or `mtime` (newest first) |
 | `prefix` | With `true`, the last bare word of the query matches as a prefix when it is 2 or more characters long (search-as-you-type) |
+| `fuzzy` | With `true` (the default), a word or phrase term that is not in the index also matches indexed words one edit away (4–7 characters) or two edits away (8 or more): insertions, deletions, substitutions and swaps of adjacent characters. Terms shorter than 4 characters, terms with digits, and negated terms are never corrected. The response lists what was used in `corrections`. |
 
 `200 SearchResponse`:
 
@@ -1000,47 +1001,64 @@ This is full-text search over notes and over the indexed documents of §1.8: the
   "total": 3,
   "tookMs": 4,
   "results": [
-    { "path": "Work/Weekly review.md", "basename": "Weekly review", "score": 12.84,
+    { "path": "Work/Weekly review.md", "basename": "Weekly review", "kind": "note", "score": 12.84,
       "mtime": "2026-10-14T18:20:11.000Z",
       "titleRanges": [ { "from": 0, "to": 13 } ],
       "matches": [
-        { "line": 7, "text": "…so the weekly review covers open loops and next actions", "ranges": [ { "from": 7, "to": 20 } ] }
+        { "line": 7, "text": "…so the weekly review covers open loops and next actions", "ranges": [ { "from": 7, "to": 20 } ],
+          "page": null }
       ],
       "moreMatches": 2 }
-  ]
+  ],
+  "corrections": []
 }
 ```
 
 | Field | Meaning |
 |---|---|
-| `total` | All matching notes; `results` holds at most `limit` of them |
-| `matches` | Up to 3 matching body lines, each clipped to 200 characters (with `…` marking a clip). `ranges` are relative to `text`. `line` is the 0-based line number; the client opens a hit with `/n/<path>?line=<line>&q=<query>` (DESIGN §6.4). |
+| `total` | All matching files; `results` holds at most `limit` of them |
+| `kind` | `note`, or `pdf` for a PDF's extracted text (§12.5) |
+| `matches` | Up to 3 matching body lines, each clipped to 200 characters (with `…` marking a clip). `ranges` are relative to `text` and cover word, phrase and regular-expression matches. `line` is the 0-based line number; the client opens a note hit with `/n/<path>?line=<line>&q=<query>` (DESIGN §6.4). For a PDF, `line` counts lines of the extracted text, and `page` is the 1-based page (the client opens `/n/<path>?page=<page>`); `page` is `null` for notes. |
 | `titleRanges` | Ranges in `basename` |
-| `score` | Higher is better; 0 for filter-only queries |
+| `score` | Higher is better; 0 for queries made only of filters and regular expressions |
+| `corrections` | `[{term, replacements}]`: each query term (normalized) that typo tolerance replaced, and the indexed words that were searched in its place (at most 8, closest first). Empty when `fuzzy=false` or nothing was corrected. |
 
-- An empty or all-negative query returns `200` with `total: 0`.
-- Errors: `400 bad-request` when `limit` is out of range or `sort` is unknown.
+- An empty query, or one made only of negated clauses, returns `200` with `total: 0`.
+- Errors: `400 bad-request` when `limit` is out of range or `sort` is unknown; and with `errors: [{field: "q", message}]` when the query is longer than 2,000 characters or has more than 64 clauses, a regular expression is invalid or longer than 500 characters, or the regular expressions and `line:`/`section:` clauses run out of their time budget (`notes.search.timeout`, 2 s, which stops catastrophic backtracking). `503 busy` when more than `notes.search.max-concurrent-expensive` (2) such queries run at once and none finishes within that budget.
 
 **Query grammar.** This is normative.
 
 ```
-query   = ws* [ clause { ws+ clause } ] ws*
-clause  = [ "-" ] ( filter | phrase | word )
-filter  = ( "tag:" | "path:" | "file:" ) ( phrase | word )          ; keywords are case-insensitive
-phrase  = '"' { char - '"' } ( '"' | end-of-query )                  ; an unterminated phrase runs to the end
-word    = 1*( char - ws - '"' )
+query   = ws* [ or ] ws*
+or      = and { ws+ "OR" ws+ and }                                ; OR (upper case only) binds looser than AND
+and     = unary { ws* unary }                                     ; juxtaposition is AND
+unary   = [ "-" ] primary                                         ; "-" followed by whitespace is a word
+primary = group | scoped | clause
+group   = "(" ws* [ or ] ws* ( ")" | end-of-query )
+scoped  = ( "line:" | "section:" ) ( group | clause )
+clause  = [ "tag:" | "path:" | "file:" ] ( regex | phrase | word ) ; keywords are case-insensitive
+regex   = "/" 1*( "\" char | char - "/" ) "/"                     ; only before ws, ")" or the end; else a word
+phrase  = '"' { char - '"' } ( '"' | end-of-query )              ; an unterminated phrase runs to the end
+word    = 1*( char - ws - '"' )                                   ; inside a group, ")" also ends a word
 ```
+
+Parsing never fails: a keyword with nothing after it is an ordinary word, an empty phrase or group is ignored, an unclosed group runs to the end of the query, a stray `)` is ignored, and a leading, trailing or doubled `OR` is dropped. A slash that does not close a regular expression before whitespace, `)` or the end keeps the clause a word, so `/usr/bin` is the phrase "usr bin"; write `\/` for a slash inside a regular expression.
 
 | Clause | Matches |
 |---|---|
 | `word` | Notes containing the word in the title, aliases, headings, tags or body. Matching is case-, accent- and width-insensitive. A word that tokenizes into several tokens (`e-mail`) acts as a phrase. |
 | `"a phrase"` | Consecutive tokens |
-| `tag:x` / `tag:#x` | Notes tagged `x` or any nested `x/…` |
-| `path:x` | Case-insensitive substring of the full vault path |
-| `file:x` | Case-insensitive substring of the file name |
-| `-clause` | Excludes matches |
+| `/regex/` | A Java regular expression found anywhere in the file's text (a note's whole content, frontmatter included; a PDF's extracted text). Case-insensitive (Unicode) unless it starts with `(?-i)`; `^` and `$` match at line breaks. At most 500 characters. |
+| `tag:x` / `tag:#x` | Notes tagged `x` or any nested `x/…`. `tag:/regex/`: a tag (without `#`) matching it. |
+| `path:x` | Case-insensitive substring of the full vault path. `path:/regex/`: a path matching it. |
+| `file:x` | Case-insensitive substring of the file name. `file:/regex/`: a name matching it. |
+| `a OR b` | Either side |
+| `( … )` | Groups clauses |
+| `line:(…)` | Every clause inside matches within one line of the body (frontmatter lines excluded). Filters inside keep their file-level meaning. |
+| `section:(…)` | Every clause inside matches within one section: the text from one heading to the next (the part before the first heading is a section too). A PDF's sections are its pages. |
+| `-clause` | Excludes matches. A group (or the whole query) made only of negated clauses matches nothing: negations only remove what the other clauses of the same group match. |
 
-All clauses must match (AND). `OR`, parentheses and regular expressions are not supported in v1.
+Clauses next to each other must all match (AND).
 
 ### 12.2 `GET /api/tags`
 
@@ -1070,6 +1088,53 @@ All clauses must match (AND). `OR`, parentheses and regular expressions are not 
 - A file that is not a readable spreadsheet (not JSON, another `type`, a newer format `version`) is listed and served, but not content-indexed.
 
 Nothing else in the API changes for spreadsheets: they are text files read and saved through §8 with the version and conflict protocol of §4.
+
+### 12.4 Saved searches: `GET /api/searches` and `PUT /api/searches`
+
+Named queries, stored in the vault as `.notesapp/searches.json`, so they sync to every device and are committed with the vault's history (DESIGN §4.1).
+
+`GET /api/searches` returns `200 SavedSearchesResponse`:
+
+```json
+{ "searches": [ { "id": "s-6f1c2a9e", "name": "Open loops", "query": "tag:#todo -done", "sort": "relevance" } ],
+  "version": "3b18e512dba79e4c8300dd08aeb37f8e728b8dad" }
+```
+
+`version` is the blob id of the file (§1.6), or `null` while it does not exist (no search was ever saved). A file that cannot be read as saved searches lists none; entries that are invalid are skipped (both are logged).
+
+`PUT /api/searches` replaces the whole list. Request `SavedSearchesUpdateRequest`:
+
+```json
+{ "searches": [ { "id": "s-6f1c2a9e", "name": "Open loops", "query": "tag:#todo -done", "sort": "relevance" } ],
+  "baseVersion": "3b18e512dba79e4c8300dd08aeb37f8e728b8dad" }
+```
+
+| Field | Rule |
+|---|---|
+| `searches` | At most 100, in display order |
+| `id` | 1 to 64 characters from `[A-Za-z0-9-]`, unique; chosen by the client |
+| `name` | 1 to 120 characters, trimmed |
+| `query` | 1 to 2,000 characters (§12.1); stored as given |
+| `sort` | `relevance` or `mtime`; missing means `relevance` |
+| `baseVersion` | The `version` the client last read, or `null` (or `""`) when the file does not exist yet |
+
+`200 SavedSearchesResponse` with the new `version`. Saving a list equal to the stored one succeeds whatever `baseVersion` says.
+
+| Errors |
+|---|
+| `400 bad-request` with `errors[]` naming each invalid field, for example `searches[2].name` |
+| `409 version-conflict` (`path: ".notesapp/searches.json"`, `currentVersion`, `currentContent`): another device saved meanwhile. The client fetches the list again and re-applies its change (add, rename, delete). |
+
+Event: `searches.changed` (§16.4). The file is added to the pending history batch like a save.
+
+### 12.5 PDF text in search
+
+The text of every PDF in the vault is extracted with Apache PDFBox in the background and searched like a note's body (DESIGN §5.5.10). A PDF hit has `kind: "pdf"`, its `basename` is the file name without `.pdf`, and each match carries the `page` it is on.
+
+- Extraction never runs on a request: a new or changed PDF becomes searchable a moment after it is written (seconds for a large one). Until then it is not found by its text, and it is not found by `file:` or `path:` either.
+- Limits (`notes.search.pdf.*`): files over 64 MB, pages after the 2,000th, text after 1,000,000 characters, and work after 60 s per file are skipped. A PDF that cannot be read (encrypted with a password, damaged, over a limit) is still found by its name.
+- PDF text has no tags, links or headings: `tag:` never matches it, it is never a backlink source, and it does not count as a note in `/api/status`. Its sections (`section:`) are its pages.
+- Task lists, drawings and spreadsheets are searchable through their own document indexers (§1.8), not as PDFs.
 
 ---
 
@@ -1263,6 +1328,76 @@ Events: `file.changed` or `file.created` (with `folder.created` first for any re
 No body. This commits the pending batch now.
 
 `200 CommitResult`: `{"commitId": "f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5"}`, or `{"commitId": null}` when nothing was pending. Errors: `503 history-unavailable` (including `reason: "commit-failed"` when the commit itself fails; the paths stay pending and the server keeps retrying).
+
+### 14.6 `GET /api/history/log[?path=][&author=][&since=][&until=][&limit=50][&offset=0]`
+
+The vault-wide timeline (ROADMAP item 28): every commit, newest first (by commit time), with the files it changed.
+
+| Parameter | Meaning |
+|---|---|
+| `path` | Only commits that change this file, or anything under this folder (case-sensitive vault path); `files` then lists only those |
+| `author` | Case-insensitive substring of the author's name or login |
+| `since`, `until` | ISO-8601 instants; `since` is inclusive, `until` exclusive. Anything else is `400 bad-request`. |
+| `limit`, `offset` | Paging, as in §14.1 (`limit` 1 to 200) |
+
+`200 TimelineResponse`:
+
+```json
+{ "hasMore": false,
+  "entries": [
+    { "commitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2", "shortId": "c3d4e5f",
+      "parentCommitId": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+      "time": "2026-10-16T14:20:02.000Z", "authorName": "R. J. Gehan", "authorLogin": "rjgehan@github",
+      "message": "Rename Projects/Plan.md → Projects/Roadmap.md",
+      "files": [ { "path": "Projects/Roadmap.md", "change": "renamed", "renamedFrom": "Projects/Plan.md" } ],
+      "filesTotal": 1 } ] }
+```
+
+- `files` is the diff against the first parent (a root commit: against nothing), with renames detected as in §14.1, sorted by path, at most 100 of `filesTotal`. Hidden paths (`.notesapp/settings.json`, `.notesapp/searches.json`) are left out, so a commit that only saved settings has no files.
+- To show a file at a commit, use §14.2 with `commit=<commitId>` (or `parentCommitId` for a `deleted` file) and the entry's `path`.
+
+### 14.7 `GET /api/history/changes[?since=][&until=][&path=]`
+
+What changed over a period ("what changed this week"): the net difference between the last commit before `since` (or nothing, when `since` is absent or older than history) and the last commit before `until` (or `HEAD`).
+
+`200 ChangesResponse`:
+
+```json
+{ "since": "2026-10-12T00:00:00.000Z", "until": null,
+  "fromCommitId": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", "toCommitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+  "commits": 14, "authors": ["R. J. Gehan"],
+  "files": [ { "path": "Ideas/Plan B.md", "change": "added", "renamedFrom": null },
+             { "path": "Projects/Roadmap.md", "change": "renamed", "renamedFrom": "Projects/Plan.md" } ],
+  "truncated": false }
+```
+
+- `files` compares the two trees, so a file created and deleted within the period is not listed, and one edited ten times is listed once. Renames are detected; hidden paths are left out; at most 1,000 files (`truncated`).
+- `commits` and `authors` count the commits in the period. When there are none, `toCommitId` equals `fromCommitId` (or both are `null`) and `files` is empty.
+- To diff one file over the period, read it at `fromCommitId` (path `renamedFrom ?? path`; absent for `added`) and at `toCommitId` (absent for `deleted`) with §14.2.
+- `400 bad-request` when `since` is not before `until` or an instant is invalid.
+
+### 14.8 `GET /api/history/deleted[?q=][&limit=50][&offset=0]`
+
+Files that were deleted at some point and do not exist now, so they can be brought back from git even after the trash was emptied. Each path is listed once, with its latest deletion; newest first. A path whose latest change is not a deletion (it was re-created, or renamed away) is not listed, nor is a path that exists now.
+
+| Parameter | Meaning |
+|---|---|
+| `q` | Case-insensitive substring of the path |
+| `limit`, `offset` | Paging (`limit` 1 to 200) |
+
+`200 DeletedFilesResponse`:
+
+```json
+{ "total": 1, "hasMore": false,
+  "entries": [ { "path": "Projects/Old plan.md", "deletedAt": "2026-09-02T08:12:40.000Z",
+                 "commitId": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3", "shortId": "d4e5f6a",
+                 "parentCommitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+                 "authorName": "R. J. Gehan", "authorLogin": "rjgehan@github", "message": "Delete Projects/Old plan.md" } ] }
+```
+
+**Restore** with §14.4: `{"path": <path>, "commit": <parentCommitId>, "sourcePath": <path>, "baseVersion": null}`. The file and its folders are re-created, and the restore is committed; the path then leaves this list.
+
+The list is computed from the whole history on first use and then updated from the commits made since, so the first request on a long history can take a few seconds.
 
 ---
 
@@ -1577,6 +1712,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `trash.changed` | `TrashChangedEvent` (`{}`) | yes | The trash list changed |
 | `history.committed` | `HistoryCommittedEvent` | yes | A commit was made. `paths` has at most 100 entries, and `truncated` is true when there were more. Not sent when an operation had nothing to commit. |
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
+| `searches.changed` | `SavedSearchesChangedEvent` | no | The saved searches were saved (§12.4); refetch them |
 | `bookmarks.changed` | `BookmarksChangedEvent` | no | The bookmarks were saved (§21). After a move or a trash restore the server re-keys them itself and sends this with `origin: null`, so it reaches every client, the mover's included. Refetch `GET /api/bookmarks`. |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
@@ -1918,17 +2054,34 @@ export interface HeadingRenameResult {
 }
 
 // ---------- search / tags (§12) ----------
-export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
+export interface SearchMatch {
+  line: number;
+  text: string;
+  ranges: TextRange[];
+  page: number | null;            // 1-based page of a PDF match; null otherwise
+}
 export interface SearchHit {
   path: VaultPath;
   basename: string;
+  kind: FileKind;                 // 'note', or 'pdf' for a PDF's extracted text
   score: number;
   mtime: IsoInstant;
   titleRanges: TextRange[];
   matches: SearchMatch[];
   moreMatches: number;
 }
-export interface SearchResponse { query: string; total: number; tookMs: number; results: SearchHit[] }
+export interface SearchCorrection { term: string; replacements: string[] }   // typo tolerance (§12.1)
+export interface SearchResponse {
+  query: string;
+  total: number;
+  tookMs: number;
+  results: SearchHit[];
+  corrections: SearchCorrection[];
+}
+export type SearchSort = 'relevance' | 'mtime';
+export interface SavedSearch { id: string; name: string; query: string; sort: SearchSort }
+export interface SavedSearchesResponse { searches: SavedSearch[]; version: Version | null }
+export interface SavedSearchesUpdateRequest { searches: SavedSearch[]; baseVersion: Version | null }
 export interface TagCount { tag: string; count: number; total: number }
 export interface TagsResponse { tags: TagCount[] }
 
@@ -1987,6 +2140,42 @@ export interface HistoryRestoreRequest { path: VaultPath; commit: string; source
 export interface HistoryRestoreResult { file: FileEntry; created: boolean; createdFolders: VaultPath[]; commitId: string | null }
 export interface CommitResult { commitId: string | null }
 
+// ---------- vault-wide history (§14.6–14.8) ----------
+export interface TimelineFile { path: VaultPath; change: ChangeType; renamedFrom: VaultPath | null }
+export interface TimelineEntry {
+  commitId: string;
+  shortId: string;
+  parentCommitId: string | null;
+  time: IsoInstant;
+  authorName: string;
+  authorLogin: string;
+  message: string;
+  files: TimelineFile[];          // at most 100; hidden paths (.notesapp/…) left out
+  filesTotal: number;
+}
+export interface TimelineResponse { entries: TimelineEntry[]; hasMore: boolean }
+export interface ChangesResponse {
+  since: IsoInstant | null;
+  until: IsoInstant | null;
+  fromCommitId: string | null;    // the last commit before since; null = the beginning
+  toCommitId: string | null;      // the last commit before until; null = no commits
+  commits: number;
+  authors: string[];
+  files: TimelineFile[];          // net change from fromCommitId to toCommitId, at most 1000
+  truncated: boolean;
+}
+export interface DeletedFile {
+  path: VaultPath;
+  deletedAt: IsoInstant;
+  commitId: string;
+  shortId: string;
+  parentCommitId: string;         // its last content; restore with POST /api/history/restore
+  authorName: string;
+  authorLogin: string;
+  message: string;
+}
+export interface DeletedFilesResponse { entries: DeletedFile[]; total: number; hasMore: boolean }
+
 // ---------- templates (§15.4) ----------
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
@@ -2039,6 +2228,7 @@ export interface SettingsChangedEvent { version: Version; origin: string | null 
 export interface BookmarksChangedEvent { version: Version; origin: string | null }   // origin null: re-keyed by the server after a move or restore
 export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' | 'mirror' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
+export interface SavedSearchesChangedEvent { version: Version; origin: string | null }
 
 export interface VaultEventMap {
   'hello': HelloEvent;
@@ -2055,12 +2245,13 @@ export interface VaultEventMap {
   'bookmarks.changed': BookmarksChangedEvent;
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
+  'searches.changed': SavedSearchesChangedEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'bookmarks.changed', 'status.changed',
-  'resync',
+  'resync', 'searches.changed',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
 
@@ -2214,6 +2405,8 @@ export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task
 | POST | `/api/links/resolve` | `ResolveRequest` | 200 `ResolveResponse` | 11.3 |
 | GET | `/api/search?q=&limit=&sort=&prefix=` | | 200 `SearchResponse` | 12.1 |
 | GET | `/api/tags` | | 200 `TagsResponse` | 12.2 |
+| GET | `/api/searches` | | 200 `SavedSearchesResponse` | 12.3 |
+| PUT | `/api/searches` | `SavedSearchesUpdateRequest` | 200 `SavedSearchesResponse` | 12.3 |
 | GET | `/api/trash` | | 200 `TrashListResponse` | 13.1 |
 | GET | `/api/trash/{id}/raw` | | 200/206/304 bytes | 13.2 |
 | POST | `/api/trash/{id}/restore` | `RestoreRequest` (optional) | 200 `RestoreResult` | 13.3 |
@@ -2224,6 +2417,9 @@ export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task
 | GET | `/api/history/raw?path=&commit=` | | 200 bytes | 14.3 |
 | POST | `/api/history/restore` | `HistoryRestoreRequest` | 200 `HistoryRestoreResult` | 14.4 |
 | POST | `/api/history/commit` | | 200 `CommitResult` | 14.5 |
+| GET | `/api/history/log?path=&author=&since=&until=&limit=&offset=` | | 200 `TimelineResponse` | 14.6 |
+| GET | `/api/history/changes?since=&until=&path=` | | 200 `ChangesResponse` | 14.7 |
+| GET | `/api/history/deleted?q=&limit=&offset=` | | 200 `DeletedFilesResponse` | 14.8 |
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
 | GET | `/api/tasks?view=&list=&tag=&priority=&status=&q=&date=&tz=&days=&limit=&before=` | | 200 `TasksResponse` | 20.2 |
 | GET | `/api/tasks/{id}` | | 200 `Task` | 20.3 |
@@ -2273,13 +2469,15 @@ export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task
 | `CaptureRequest`, `CaptureResult`, `CaptureTarget` | Same | Every `CaptureRequest` component is `@Nullable`; `CaptureTarget` is an enum (`inbox`, `daily`); `CaptureResult.attachment` is a `@Nullable FileEntry`. |
 | `CreateFolderRequest`, `FolderResult`, `MoveRequest`, `MovedFile`, `LinkUpdate`, `FailedUpdate`, `MoveResult` | Same | `MoveRequest.updateLinks` and `dryRun` are `@Nullable Boolean`. `FailedUpdate.reason` is the enum `FailedReason` |
 | `HeadingInfo`, `OutgoingLink`, `NoteMeta`, `Mention`, `BacklinkGroup`, `BacklinksResponse`, `ResolveRequest`, `ResolvedLink`, `ResolveResponse` | Same | `NoteMeta.frontmatter` is `@Nullable Map<String, Object>` |
-| `SearchMatch`, `SearchHit`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | |
+| `SearchMatch`, `SearchHit`, `SearchCorrection`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | `SearchMatch.page` is a `@Nullable Integer`; `SearchHit.kind` is `FileKind` |
+| `SavedSearch`, `SavedSearchesResponse`, `SavedSearchesUpdateRequest` | Same | `SavedSearch.sort` is a `String` (`relevance` or `mtime`); `SavedSearchesUpdateRequest.searches` is a `@Nullable JsonNode`, so every invalid field is reported by name |
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |
+| `TimelineFile`, `TimelineEntry`, `TimelineResponse`, `ChangesResponse`, `DeletedFile`, `DeletedFilesResponse` | Same | `TimelineFile.change` is `ChangeType` |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `BookmarksResponse`, `BookmarksUpdateRequest` | Same | `BookmarkItem` is not a record: items stay JSON objects (`ObjectNode`; `JsonNode` in the request), so fields from Obsidian or a newer build survive; `BookmarkCodec` checks the fields it knows (§21.2) |
 | `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
-| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
+| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 | `Task`, `TaskList`, `TaskSection`, `TaskRecurrence`, `TaskReminder`, `TaskFileProblem`, `TasksResponse`, `TaskListsResponse`, `TaskWriteResult`, `TaskListWriteResult`, `CompleteTaskRequest`, `ReorderTasksRequest`, `ReorderRequest`, `CreateTaskListRequest`, `SectionRequest` | Same | Enums `TaskStatus`, `TaskView` and `RecurrenceFrom` (for `TaskRecurrence.from`); `Task.priority` is an `int`. `CompleteTaskRequest.base` is a `JsonNode`. |
 | `CreateTaskRequest`, `UpdateTaskRequest`, `UpdateTaskListRequest`, `TaskFields`, `TaskListFields` | `POST /api/tasks` takes a `JsonNode`; both `PATCH`es take the record `UpdateTaskRequest(JsonNode changes, JsonNode base)` | Kept as JSON trees, because an omitted field (unchanged) and `null` (cleared) differ |

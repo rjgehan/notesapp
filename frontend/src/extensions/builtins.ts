@@ -12,6 +12,7 @@ import {
   FileImage,
   FilePlay,
   FilePlus,
+  GitCommitHorizontal,
   FileQuestionMark,
   FileSearch,
   FileText,
@@ -201,6 +202,10 @@ export function registerBuiltins(): void {
   registerPanel({ id: 'backlinks', side: 'right', title: 'Backlinks', icon: Link2, load: () => import('../components/panels/BacklinksPanel') });
   registerPanel({ id: 'outline', side: 'right', title: 'Outline', icon: ListTree, load: () => import('../components/panels/OutlinePanel') });
   registerPanel({ id: 'history', side: 'right', title: 'History', icon: History, load: () => import('../components/panels/HistoryPanel') });
+
+  // ---------- pages ----------
+  // The vault-wide history (ROADMAP item 28): timeline, changes over a period, deleted files.
+  registerPage({ route: 'history', title: 'Vault history', icon: GitCommitHorizontal, load: () => import('../components/pages/VaultHistoryPage') });
 
   // ---------- app ----------
   registerCommand({ id: 'app.quickSwitcher', name: 'Open quick switcher', hotkey: 'Mod-o', icon: FileSearch, run: () => useUi.getState().setOverlay('switcher') });

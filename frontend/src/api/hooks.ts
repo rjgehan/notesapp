@@ -2,7 +2,8 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { DEFAULT_SETTINGS } from '../features/settings';
 import { treePatchCount } from '../sync/treePatch';
-import { api } from './endpoints';
+import { ApiError } from './client';
+import { api, type TimelineFilter } from './endpoints';
 import { queryClient } from './queryClient';
 import { queryKeys, STALE } from './queryKeys';
 import type { NoteMeta, Settings, SettingsResponse, TagsResponse, TreeResponse } from './types';
@@ -96,14 +97,21 @@ export function useBacklinks(path: string | null, unlinked: boolean, enabled = t
   });
 }
 
-export function useSearch(q: string, sort: 'relevance' | 'mtime' = 'relevance') {
+export function useSearch(q: string, sort: 'relevance' | 'mtime' = 'relevance', fuzzy = true) {
   return useQuery({
-    queryKey: queryKeys.search(q, sort),
-    queryFn: () => api.search(q, { sort, prefix: true }),
+    queryKey: queryKeys.search(q, sort, fuzzy),
+    queryFn: () => api.search(q, { sort, prefix: true, fuzzy }),
     staleTime: STALE.search,
     enabled: q.trim() !== '',
     placeholderData: (prev) => prev,
+    // A bad regular expression is a 400: retrying cannot help.
+    retry: (count, error) => !(error instanceof ApiError) && count < 3,
   });
+}
+
+/** Saved searches (API.md §12.4), kept current by `searches.changed`. */
+export function useSavedSearches() {
+  return useQuery({ queryKey: queryKeys.savedSearches(), queryFn: () => api.getSavedSearches(), staleTime: STALE.savedSearches });
 }
 
 export function useTags() {
@@ -134,6 +142,42 @@ export function useHistoryContent(commit: string | null, path: string | null) {
     queryFn: () => api.getHistoryContent(path!, commit!),
     staleTime: STALE.historyContent,
     enabled: commit !== null && path !== null,
+  });
+}
+
+const TIMELINE_PAGE = 50;
+
+/** The vault-wide timeline (API.md §14.6), paged with "Load more". */
+export function useHistoryLog(filter: TimelineFilter, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.historyLog(filter),
+    queryFn: ({ pageParam }) => api.getHistoryLog(filter, { limit: TIMELINE_PAGE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => (last.hasMore ? pages.reduce((n, p) => n + p.entries.length, 0) : undefined),
+    staleTime: STALE.vaultHistory,
+    enabled,
+  });
+}
+
+/** What changed over a period (API.md §14.7). */
+export function useHistoryChanges(filter: TimelineFilter, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.historyChanges(filter),
+    queryFn: () => api.getHistoryChanges(filter),
+    staleTime: STALE.vaultHistory,
+    enabled,
+  });
+}
+
+/** Files deleted in history that do not exist now (API.md §14.8). */
+export function useDeletedFiles(q: string, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.historyDeleted(q),
+    queryFn: ({ pageParam }) => api.getDeletedFiles(q, { limit: TIMELINE_PAGE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => (last.hasMore ? pages.reduce((n, p) => n + p.entries.length, 0) : undefined),
+    staleTime: STALE.vaultHistory,
+    enabled,
   });
 }
 

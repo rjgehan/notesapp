@@ -115,6 +115,7 @@ export function applyEvent(t: SyncTarget, name: string, data: unknown): void {
       const { paths, truncated } = data as HistoryCommittedEvent;
       if (truncated) invalidate(qc, queryKeys.historyAll());
       else for (const p of paths) invalidate(qc, queryKeys.history(p));
+      invalidate(qc, queryKeys.vaultHistoryAll());
       invalidate(qc, queryKeys.status());
       return;
     }
@@ -123,6 +124,9 @@ export function applyEvent(t: SyncTarget, name: string, data: unknown): void {
       return;
     case 'bookmarks.changed':
       invalidate(qc, queryKeys.bookmarks());
+      return;
+    case 'searches.changed':
+      invalidate(qc, queryKeys.savedSearches());
       return;
     case 'status.changed':
       invalidate(qc, queryKeys.status());

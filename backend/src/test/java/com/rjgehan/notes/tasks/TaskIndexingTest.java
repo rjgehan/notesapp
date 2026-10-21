@@ -41,7 +41,7 @@ class TaskIndexingTest {
 		this.fx = TaskFixture.start(this.dir);
 		this.notes = new NoteService(this.fx.vault.paths, this.fx.vault.index, this.fx.vault.kinds,
 				this.fx.vault.settings);
-		this.search = new SearchService(this.fx.vault.index, this.fx.vault.settings);
+		this.search = new SearchService(this.fx.vault.index, this.fx.vault.settings, this.fx.vault.properties);
 		this.fx.vault.files.createText("Plumber.md", "# Plumber\n", OnConflict.FAIL, TestVault.ALICE, "c-notes-1");
 		this.fx.vault.files.createText("Projects/Plan.md", "# Plan\n", OnConflict.FAIL, TestVault.ALICE, "c-notes-1");
 		this.fx.vault.files.createText("Call.md", "Nothing\n", OnConflict.FAIL, TestVault.ALICE, "c-notes-1");
@@ -76,9 +76,9 @@ class TaskIndexingTest {
 	void tagsCountAndSearchFindsTasks() {
 		List<String> tags = this.fx.vault.index.tagStats().stream().map(TagIndex.TagStat::tag).toList();
 		assertThat(tags).contains("home", "errands");
-		SearchResponse found = this.search.search("leak", 10, "relevance", true);
+		SearchResponse found = this.search.search("leak", 10, "relevance", true, false);
 		assertThat(found.results()).extracting((hit) -> hit.path()).containsExactly("Tasks/Inbox.tasks");
-		assertThat(this.search.search("tag:errands", 10, "relevance", false).total()).isEqualTo(1);
+		assertThat(this.search.search("tag:errands", 10, "relevance", false, false).total()).isEqualTo(1);
 	}
 
 	@Test

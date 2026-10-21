@@ -1,5 +1,6 @@
 package com.rjgehan.notes.index;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -18,6 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import com.rjgehan.notes.api.dto.FileEntry;
 import com.rjgehan.notes.api.dto.FileKind;
@@ -53,6 +55,20 @@ public class VaultIndex {
 	public record RemovedTree(List<String> files, List<String> folders) {
 	}
 
+	/**
+	 * Told about files whose text is extracted for search outside the index (PDFs, DESIGN §5.5.10): called under the
+	 * index write lock, so implementations only queue work.
+	 */
+	public interface ExtractionListener {
+
+		/** A file was added or changed (size or mtime), or the whole index was rebuilt. */
+		void extractable(FileRecord record);
+
+		/** A file moved; its record (size and mtime) is unchanged. */
+		void moved(FileRecord from, FileRecord to);
+
+	}
+
 	private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
 	private final NavigableMap<String, FileRecord> files = new TreeMap<>();
@@ -66,6 +82,14 @@ public class VaultIndex {
 	private final Map<String, String> lowerFolders = new HashMap<>();
 
 	private final Map<String, NoteRecord> notes = new HashMap<>();
+
+	/**
+	 * Search documents of files whose text is extracted in the background (PDFs): only searched, never linked,
+	 * tagged or counted as notes. The record's {@code version} is empty.
+	 */
+	private final Map<String, NoteRecord> extracted = new HashMap<>();
+
+	private volatile @Nullable ExtractionListener extractionListener;
 
 	private final Map<String, String> diskNames = new HashMap<>();
 
@@ -444,124 +468,134 @@ public class VaultIndex {
 		});
 	}
 
-	/** One search result before snippets: the note, its score and its mtime. */
-	public record SearchHit(NoteRecord note, double score, Instant mtime) {
-	}
-
-	/** Every match of a query, sorted, and the word and phrase patterns to highlight. */
-	public record SearchOutcome(List<SearchHit> hits, List<TermPattern> patterns) {
+	/** One search result before snippets: the document (a note, or a file's extracted text), its kind and score. */
+	public record SearchHit(NoteRecord note, FileKind kind, double score, Instant mtime) {
 	}
 
 	/**
-	 * Evaluates a query (API.md §12.1): every positive clause must match and negated clauses exclude; a query with
-	 * nothing positive matches nothing. With {@code prefix}, a final bare word of two or more characters also matches
-	 * as a prefix. Notes for which {@code excluded} holds are never returned. Results are sorted by score (ties by
-	 * mtime, newest first) or, with {@code byMtime}, by mtime alone.
+	 * Every match of a query, sorted; the word and phrase patterns and the regular expressions to highlight; and the
+	 * typo corrections that were applied.
 	 */
+	public record SearchOutcome(List<SearchHit> hits, List<TermPattern> patterns, List<Pattern> regexes,
+			List<SearchEvaluation.Correction> corrections, SearchRegex.Budget budget) {
+	}
+
+	/** Search options (API.md §12.1). {@code budget} bounds regular expressions and scoped clauses. */
+	public record SearchOptions(boolean prefix, boolean fuzzy, Predicate<String> excluded, boolean byMtime,
+			Duration budget) {
+	}
+
+	/** {@link #search(SearchQuery, SearchOptions)} without typo tolerance and with a generous time budget. */
 	public SearchOutcome search(SearchQuery query, boolean prefix, Predicate<String> excluded, boolean byMtime) {
-		return read(() -> {
-			List<SearchQuery.Clause> clauses = query.clauses();
-			int last = clauses.size() - 1;
-			boolean prefixLast = prefix && last >= 0 && clauses.get(last).kind() == SearchQuery.Kind.WORD
-					&& !clauses.get(last).negated();
-			List<TermPattern> patterns = new ArrayList<>();
-			BitSet result = null;
-			List<Integer> negated = new ArrayList<>();
-			for (int i = 0; i < clauses.size(); i++) {
-				SearchQuery.Clause clause = clauses.get(i);
-				if (clause.negated()) {
-					negated.add(i);
-					continue;
-				}
-				TermPattern pattern = pattern(clause, prefixLast && i == last);
-				if (clause.isText() && pattern == null) {
-					continue;
-				}
-				BitSet matches = (pattern != null) ? this.search.candidates(pattern) : filterMatches(clause);
-				if (result == null) {
-					result = matches;
-				}
-				else {
-					result.and(matches);
-				}
-				if (pattern != null) {
-					patterns.add(pattern);
-				}
-			}
-			if (result == null) {
-				return new SearchOutcome(List.of(), List.of());
-			}
-			for (TermPattern pattern : patterns) {
-				if (pattern.isPhrase()) {
-					keepPhraseMatches(result, pattern);
-				}
-			}
-			for (int i : negated) {
-				SearchQuery.Clause clause = clauses.get(i);
-				TermPattern pattern = pattern(clause, false);
-				if (clause.isText() && pattern == null) {
-					continue;
-				}
-				BitSet matches = (pattern != null) ? this.search.candidates(pattern) : filterMatches(clause);
-				matches.and(result);
-				if (pattern != null && pattern.isPhrase()) {
-					keepPhraseMatches(matches, pattern);
-				}
-				result.andNot(matches);
-			}
-			List<SearchHit> hits = new ArrayList<>();
+		return search(query, new SearchOptions(prefix, false, excluded, byMtime, Duration.ofSeconds(30)));
+	}
+
+	/**
+	 * Evaluates a query (API.md §12.1, {@link SearchEvaluation}): a group made only of negated clauses matches
+	 * nothing. With {@code prefix}, a final bare word of two or more characters also matches as a prefix; with
+	 * {@code fuzzy}, a word that is not in the index matches similar words. Documents for which {@code excluded} holds
+	 * are never returned. Results are sorted by score (ties by mtime, newest first) or by mtime alone. Throws
+	 * {@link SearchRegex.InvalidException} for an invalid regular expression and {@link SearchRegex.TimeoutException}
+	 * when the evaluation runs out of time; the index lock is not held while regular expressions run.
+	 */
+	public SearchOutcome search(SearchQuery query, SearchOptions options) {
+		SearchEvaluation evaluation = new SearchEvaluation(query, new SearchEvaluation.Options(options.prefix(),
+				options.fuzzy(), options.excluded(), options.byMtime(), options.budget()));
+		if (query.matchesNothing()) {
+			return new SearchOutcome(List.of(), List.of(), List.of(), List.of(), evaluation.budget());
+		}
+		read(() -> {
+			evaluation.resolve(this.searchSource);
+			return null;
+		});
+		BitSet result = evaluation.evaluate();
+		List<TermPattern> patterns = evaluation.positivePatterns();
+		List<SearchHit> hits = read(() -> {
+			List<SearchHit> found = new ArrayList<>();
 			result.stream().forEach((docId) -> {
 				String path = this.search.path(docId);
-				NoteRecord note = (path != null) ? this.notes.get(path) : null;
+				NoteRecord note = (path != null) ? document(path) : null;
 				FileRecord record = (path != null) ? this.files.get(path) : null;
-				if (note != null && record != null && !excluded.test(path)) {
+				if (note != null && note.docId() == docId && record != null && !options.excluded().test(path)) {
 					double score = patterns.isEmpty() ? 0 : this.search.score(docId, patterns);
-					hits.add(new SearchHit(note, score, record.mtime()));
+					found.add(new SearchHit(note, record.kind(), score, record.mtime()));
 				}
 			});
-			Comparator<SearchHit> newest = Comparator.comparing(SearchHit::mtime).reversed();
-			Comparator<SearchHit> order = byMtime ? newest
-					: Comparator.comparingDouble(SearchHit::score).reversed().thenComparing(newest);
-			hits.sort(order.thenComparing((hit) -> hit.note().path()));
-			return new SearchOutcome(hits, patterns);
+			return found;
 		});
+		Comparator<SearchHit> newest = Comparator.comparing(SearchHit::mtime).reversed();
+		Comparator<SearchHit> order = options.byMtime() ? newest
+				: Comparator.comparingDouble(SearchHit::score).reversed().thenComparing(newest);
+		hits.sort(order.thenComparing((hit) -> hit.note().path()));
+		return new SearchOutcome(hits, patterns, evaluation.positiveRegexes(), evaluation.corrections(),
+				evaluation.budget());
 	}
 
-	/** The pattern of a word or phrase clause, or null when it has no tokens (or the clause is a filter). */
-	private static @Nullable TermPattern pattern(SearchQuery.Clause clause, boolean prefixLast) {
-		if (!clause.isText()) {
-			return null;
-		}
-		List<String> terms = Tokenizer.tokenize(clause.value()).stream().map(Tokenizer.Token::term).toList();
-		if (terms.isEmpty()) {
-			return null;
-		}
-		boolean prefix = prefixLast && terms.get(terms.size() - 1).length() >= 2;
-		return new TermPattern(terms, prefix);
+	/** A note, or a file's extracted text. */
+	private @Nullable NoteRecord document(String path) {
+		NoteRecord note = this.notes.get(path);
+		return (note != null) ? note : this.extracted.get(path);
 	}
 
-	private BitSet filterMatches(SearchQuery.Clause clause) {
-		BitSet matches = new BitSet();
-		if (clause.kind() == SearchQuery.Kind.TAG) {
-			String tag = clause.value().startsWith("#") ? clause.value().substring(1) : clause.value();
-			for (String path : this.tags.notesWithTag(tag, true)) {
-				NoteRecord note = this.notes.get(path);
+	/** The index as {@link SearchEvaluation} reads it; called under the read lock. */
+	private final SearchEvaluation.Source searchSource = new SearchEvaluation.Source() {
+
+		@Override
+		public SearchIndex search() {
+			return VaultIndex.this.search;
+		}
+
+		@Override
+		public BitSet all() {
+			return VaultIndex.this.search.all();
+		}
+
+		@Override
+		public BitSet tagged(String tag) {
+			BitSet matches = new BitSet();
+			for (String path : VaultIndex.this.tags.notesWithTag(tag, true)) {
+				NoteRecord note = VaultIndex.this.notes.get(path);
 				if (note != null) {
 					matches.set(note.docId());
 				}
 			}
 			return matches;
 		}
-		String needle = PathNames.lower(clause.value());
-		boolean nameOnly = clause.kind() == SearchQuery.Kind.FILE;
-		for (NoteRecord note : this.notes.values()) {
-			String haystack = PathNames.lower(nameOnly ? PathNames.nameOf(note.path()) : note.path());
-			if (haystack.contains(needle)) {
-				matches.set(note.docId());
+
+		@Override
+		public BitSet pathContains(String needle, boolean nameOnly) {
+			BitSet matches = new BitSet();
+			for (Map<String, NoteRecord> documents : List.of(VaultIndex.this.notes, VaultIndex.this.extracted)) {
+				for (NoteRecord note : documents.values()) {
+					String haystack = PathNames.lower(nameOnly ? PathNames.nameOf(note.path()) : note.path());
+					if (haystack.contains(needle)) {
+						matches.set(note.docId());
+					}
+				}
 			}
+			return matches;
 		}
-		return matches;
-	}
+
+		@Override
+		public void retainPhrase(BitSet docs, TermPattern pattern) {
+			keepPhraseMatches(docs, pattern);
+		}
+
+		@Override
+		public SearchEvaluation.@Nullable DocRef[] snapshot() {
+			SearchEvaluation.DocRef[] refs = new SearchEvaluation.DocRef[VaultIndex.this.nextDocId.get()];
+			for (Map<String, NoteRecord> documents : List.of(VaultIndex.this.notes, VaultIndex.this.extracted)) {
+				for (NoteRecord note : documents.values()) {
+					if (note.docId() < refs.length) {
+						refs[note.docId()] = new SearchEvaluation.DocRef(note.docId(), note,
+								VaultIndex.this.search.body(note.docId()));
+					}
+				}
+			}
+			return refs;
+		}
+
+	};
 
 	/**
 	 * Clears the documents in which the phrase does not occur as consecutive tokens of one field. The search index
@@ -570,7 +604,7 @@ public class VaultIndex {
 	private void keepPhraseMatches(BitSet docs, TermPattern pattern) {
 		this.search.retainPhrase(docs, pattern, (docId) -> {
 			String path = this.search.path(docId);
-			NoteRecord note = (path != null) ? this.notes.get(path) : null;
+			NoteRecord note = (path != null) ? document(path) : null;
 			if (note == null) {
 				return false;
 			}
@@ -613,6 +647,47 @@ public class VaultIndex {
 	/** Bumped on every mutation. */
 	public long generation() {
 		return this.generation.get();
+	}
+
+	// ---------------------------------------------------------------- extracted text (PDFs)
+
+	/** Registers the one listener for files whose text is extracted in the background. */
+	public void setExtractionListener(@Nullable ExtractionListener listener) {
+		this.extractionListener = listener;
+	}
+
+	/** True for the kinds whose text is extracted in the background. */
+	public static boolean isExtractable(FileRecord record) {
+		return record.kind() == FileKind.PDF;
+	}
+
+	/**
+	 * Swaps in the extracted text of a file, if it is still indexed with the size and mtime of {@code expected};
+	 * returns false when it changed or went away meanwhile (the listener has then been told again). {@code doc} is
+	 * the text tokenized by the caller, outside the lock.
+	 */
+	public boolean putExtracted(FileRecord expected, String text, NoteParse parse, SearchIndex.Doc doc) {
+		return write(() -> {
+			String path = expected.path();
+			FileRecord current = this.files.get(path);
+			if (current == null || !sameContent(current, expected)) {
+				return false;
+			}
+			NoteRecord existing = this.extracted.get(path);
+			int id = (existing != null) ? existing.docId() : this.nextDocId.getAndIncrement();
+			this.extracted.put(path, new NoteRecord(path, "", text, parse, id));
+			this.search.add(id, path, doc);
+			return true;
+		});
+	}
+
+	/** True when the file's extracted text is in the search index. */
+	public boolean hasExtracted(String path) {
+		return read(() -> this.extracted.containsKey(path));
+	}
+
+	private static boolean sameContent(FileRecord a, FileRecord b) {
+		return a.kind() == b.kind() && a.size() == b.size() && a.mtime().equals(b.mtime());
 	}
 
 	// ---------------------------------------------------------------- writes
@@ -734,6 +809,7 @@ public class VaultIndex {
 			this.folders.clear();
 			this.lowerFolders.clear();
 			this.notes.clear();
+			this.extracted.clear();
 			this.diskNames.clear();
 			this.links.clear();
 			this.tags.clear();
@@ -788,15 +864,24 @@ public class VaultIndex {
 			return;
 		}
 		NoteRecord note = this.notes.get(from);
+		NoteRecord text = this.extracted.get(from);
 		removeFileLocked(from, false);
 		addFolderLocked(PathNames.parentOf(to), PathNames.parentOf(toDisk));
 		// The search document moves with its id; only its title terms change, and only on a rename.
 		storeLocked(new IndexedFile(record.withPath(to), toDisk, (note != null) ? note.text() : null,
-				(note != null) ? note.parse() : null, null), (note != null) ? note.docId() : -1);
+				(note != null) ? note.parse() : null, null), (note != null) ? note.docId() : -1, false);
 		if (note != null) {
 			this.search.move(note.docId(), to);
 			this.links.setNote(to, note.parse().links(), this.lookup);
 			this.tags.setNote(to, note.parse().distinctTags());
+		}
+		if (text != null) {
+			this.extracted.put(to, new NoteRecord(to, text.version(), text.text(), text.parse(), text.docId()));
+			this.search.move(text.docId(), to);
+		}
+		ExtractionListener listener = this.extractionListener;
+		if (listener != null && isExtractable(record)) {
+			listener.moved(record, record.withPath(to));
 		}
 		keys.add(LinkResolver.fileNameKey(from));
 		keys.add(LinkResolver.fileNameKey(to));
@@ -814,16 +899,30 @@ public class VaultIndex {
 	}
 
 	private void storeLocked(IndexedFile file) {
-		storeLocked(file, -1);
+		storeLocked(file, -1, true);
 	}
 
 	/**
 	 * Stores records, lookup keys and the search document; link and tag indexing is the caller's job. A note keeps its
-	 * document id across updates; {@code docId} (or -1) assigns a known one to a re-keyed note.
+	 * document id across updates; {@code docId} (or -1) assigns a known one to a re-keyed note. A file whose text is
+	 * extracted in the background drops its stale text when its content changed, and the listener is told
+	 * ({@code notify} is false for a move, which keeps the text).
 	 */
-	private void storeLocked(IndexedFile file, int docId) {
+	private void storeLocked(IndexedFile file, int docId, boolean notify) {
 		String path = file.path();
 		FileRecord previous = this.files.put(path, file.record());
+		if (notify && isExtractable(file.record())) {
+			NoteRecord stale = this.extracted.get(path);
+			if (stale != null && (previous == null || !sameContent(previous, file.record()))) {
+				this.extracted.remove(path);
+				this.search.remove(stale.docId());
+				stale = null;
+			}
+			ExtractionListener listener = this.extractionListener;
+			if (listener != null && stale == null) {
+				listener.extractable(file.record());
+			}
+		}
 		if (previous != null) {
 			this.totalBytes -= previous.size();
 		}
@@ -875,6 +974,10 @@ public class VaultIndex {
 			if (dropSearch) {
 				this.search.remove(note.docId());
 			}
+		}
+		NoteRecord text = this.extracted.remove(path);
+		if (text != null && dropSearch) {
+			this.search.remove(text.docId());
 		}
 		this.generation.incrementAndGet();
 		return removed;

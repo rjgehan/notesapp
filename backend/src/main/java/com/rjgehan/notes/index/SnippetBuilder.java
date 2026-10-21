@@ -3,6 +3,8 @@ package com.rjgehan.notes.index;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.rjgehan.notes.api.dto.SearchMatch;
 import com.rjgehan.notes.api.dto.TextRange;
@@ -19,6 +21,9 @@ public final class SnippetBuilder {
 
 	public static final int MAX_LINES = 3;
 
+	/** At most this many regular expression matches are highlighted per line. */
+	private static final int MAX_REGEX_RANGES = 50;
+
 	static final String ELLIPSIS = "…";
 
 	private SnippetBuilder() {
@@ -32,17 +37,41 @@ public final class SnippetBuilder {
 	}
 
 	public static Snippets build(String basename, String text, NoteParse parse, List<TermPattern> patterns) {
+		return build(basename, text, parse, patterns, List.of(), SearchRegex.Budget.unlimited(), false);
+	}
+
+	/**
+	 * The snippets of a hit: lines where a pattern or a regular expression matches. Regular expressions run on the
+	 * query's {@code budget}; once it is spent, they stop adding ranges. With {@code paged} (text extracted from a
+	 * PDF, whose pages are separated by lines starting with a form feed), each match carries its 1-based page.
+	 */
+	public static Snippets build(String basename, String text, NoteParse parse, List<TermPattern> patterns,
+			List<Pattern> regexes, SearchRegex.Budget budget, boolean paged) {
 		List<TextRange> titleRanges = ranges(Tokenizer.tokenize(basename), patterns, 0);
 		List<SearchMatch> matches = new ArrayList<>();
 		int more = 0;
-		if (!patterns.isEmpty()) {
+		if (!patterns.isEmpty() || !regexes.isEmpty()) {
 			int[] lineStarts = parse.lineStarts();
 			Frontmatter frontmatter = parse.frontmatter();
 			int firstLine = (frontmatter != null) ? frontmatter.closingLine() + 1 : 0;
+			CharSequence budgeted = SearchRegex.text(text, budget);
+			boolean regexing = !regexes.isEmpty();
+			int page = 1;
 			for (int line = firstLine; line < lineStarts.length; line++) {
 				int start = lineStarts[line];
 				int end = MarkdownScanner.contentEnd(text, lineStarts, line);
+				if (paged && start < text.length() && text.charAt(start) == '\f') {
+					page++;
+				}
 				List<TextRange> found = ranges(Tokenizer.tokenize(text, start, end), patterns, start);
+				if (regexing) {
+					try {
+						found = merge(found, regexRanges(regexes, budgeted, start, end));
+					}
+					catch (SearchRegex.TimeoutException | StackOverflowError ex) {
+						regexing = false;
+					}
+				}
 				if (found.isEmpty()) {
 					continue;
 				}
@@ -51,10 +80,38 @@ public final class SnippetBuilder {
 					continue;
 				}
 				Clipped clipped = clip(text.substring(start, end), found, MATCH_WIDTH);
-				matches.add(new SearchMatch(line, clipped.text(), clipped.ranges()));
+				matches.add(new SearchMatch(line, clipped.text(), clipped.ranges(), paged ? page : null));
 			}
 		}
 		return new Snippets(titleRanges, matches, more);
+	}
+
+	/** Where the regular expressions match in {@code [start, end)}, relative to {@code start}; empty matches skipped. */
+	private static List<TextRange> regexRanges(List<Pattern> regexes, CharSequence text, int start, int end) {
+		List<TextRange> found = new ArrayList<>();
+		for (Pattern regex : regexes) {
+			Matcher matcher = regex.matcher(text);
+			matcher.region(start, end);
+			int count = 0;
+			while (matcher.find() && count++ < MAX_REGEX_RANGES) {
+				if (matcher.end() > matcher.start()) {
+					found.add(new TextRange(matcher.start() - start, matcher.end() - start));
+				}
+				else if (matcher.end() >= end) {
+					break;
+				}
+			}
+		}
+		return found;
+	}
+
+	private static List<TextRange> merge(List<TextRange> a, List<TextRange> b) {
+		if (b.isEmpty()) {
+			return a;
+		}
+		List<TextRange> all = new ArrayList<>(a);
+		all.addAll(b);
+		return mergeRanges(all);
 	}
 
 	/**
@@ -105,6 +162,11 @@ public final class SnippetBuilder {
 				found.add(new TextRange(range.from() - base, range.to() - base));
 			}
 		}
+		return mergeRanges(found);
+	}
+
+	/** The ranges sorted, with overlapping and touching ones merged. */
+	private static List<TextRange> mergeRanges(List<TextRange> found) {
 		if (found.size() < 2) {
 			return found;
 		}

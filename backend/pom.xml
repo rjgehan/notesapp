@@ -36,6 +36,7 @@
 		<jgit.version>7.8.0.202609011348-r</jgit.version>
 		<snakeyaml-engine.version>3.2</snakeyaml-engine.version>
 		<lib-recur.version>0.17.1</lib-recur.version>
+		<pdfbox.version>3.0.8</pdfbox.version>
 		<!-- Surefire skips the @Tag("perf") tests by default; -DexcludedGroups= (empty) runs them. Set as a property,
 		     because an explicit plugin configuration value would win over -D. -->
 		<excludedGroups>perf</excludedGroups>
@@ -68,6 +69,12 @@
 			<groupId>org.dmfs</groupId>
 			<artifactId>lib-recur</artifactId>
 			<version>${lib-recur.version}</version>
+		</dependency>
+		<!-- Text of PDF attachments for search (ROADMAP item 22); Apache-2.0 -->
+		<dependency>
+			<groupId>org.apache.pdfbox</groupId>
+			<artifactId>pdfbox</artifactId>
+			<version>${pdfbox.version}</version>
 		</dependency>
 
 		<dependency>

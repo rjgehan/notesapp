@@ -107,7 +107,14 @@ class SearchAndLinksIntegrationTest {
 		assertThat(tagged.get("results").get(0).get("score").asDouble()).isZero();
 		assertThat(search("ruminations").get("total").asInt()).isEqualTo(1);
 		assertThat(search("weekl").get("total").asInt()).isEqualTo(3);
-		assertThat(this.api.get("/api/search?q=weekl&prefix=false").ok(200).get("total").asInt()).isZero();
+		assertThat(this.api.get("/api/search?q=weekl&prefix=false&fuzzy=false").ok(200).get("total").asInt()).isZero();
+		// Typo tolerance: without the prefix, "weekl" is one edit away from "weekly".
+		JsonNode corrected = this.api.get("/api/search?q=weekl&prefix=false").ok(200);
+		assertThat(corrected.get("total").asInt()).isEqualTo(3);
+		assertThat(corrected.get("corrections").get(0).get("term").asString()).isEqualTo("weekl");
+		assertThat(corrected.get("corrections").get(0).get("replacements").get(0).asString()).isEqualTo("weekly");
+		assertThat(titled.get("corrections").isEmpty()).isTrue();
+		assertThat(titled.get("results").get(0).get("kind").asString()).isEqualTo("note");
 		assertThat(search("").get("total").asInt()).isZero();
 		assertThat(search("-weekly").get("total").asInt()).isZero();
 		assertThat(this.api.get("/api/search").ok(200).get("total").asInt()).isZero();

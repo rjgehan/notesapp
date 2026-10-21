@@ -77,7 +77,7 @@ class SheetIndexingTest {
 		write("Money/Broken.sheet", "{\"type\": \"notesapp-sheet\", \"sheets\": [ leak");
 		this.vault = TestVault.start(this.dir);
 		this.notes = new NoteService(this.vault.paths, this.vault.index, this.vault.kinds, this.vault.settings);
-		this.search = new SearchService(this.vault.index, this.vault.settings);
+		this.search = new SearchService(this.vault.index, this.vault.settings, this.vault.properties);
 	}
 
 	@AfterEach
@@ -108,7 +108,7 @@ class SheetIndexingTest {
 	}
 
 	private List<String> found(String query) {
-		return this.search.search(query, 20, "relevance", false).results().stream().map(SearchHit::path).toList();
+		return this.search.search(query, 20, "relevance", false, false).results().stream().map(SearchHit::path).toList();
 	}
 
 	@Test

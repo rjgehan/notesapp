@@ -2,6 +2,7 @@
 // can be built and exercised without the backend: version protocol (API.md §4), name rules,
 // case policy, trash, link rewriting on move, backlinks, search, tags, history and events.
 import { flattenItems as flattenBookmarkItems, rekeyBookmarks } from '../../features/bookmarks';
+import type { TimelineFilter } from '../endpoints';
 import { buildLinkIndex, createPath, encodeMdPath, linkText, linkTextRaw, resolve, type LinkIndex } from '../../features/links';
 import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, newPathError, pathSafetyError, rebasePath, stripMd } from '../../features/paths';
 import { splitWikiBody } from '../../features/syntax';
@@ -15,8 +16,11 @@ import type {
   BookmarksResponse,
   BookmarksUpdateRequest,
   ChangeType,
+  ChangesResponse,
   CommitResult,
   CreateFileRequest,
+  DeletedFile,
+  DeletedFilesResponse,
   FileEntry,
   FileKind,
   FolderResult,
@@ -36,7 +40,9 @@ import type {
   RestoreRequest,
   RestoreResult,
   SaveFileRequest,
-  SearchHit,
+  SavedSearch,
+  SavedSearchesResponse,
+  SavedSearchesUpdateRequest,
   SearchResponse,
   Settings,
   SettingsResponse,
@@ -46,6 +52,9 @@ import type {
   TagCount,
   TemplatesResponse,
   TextFile,
+  TimelineEntry,
+  TimelineFile,
+  TimelineResponse,
   TrashEntry,
   TreeResponse,
   WriteResult,
@@ -54,6 +63,7 @@ import { MockEventHub } from './events';
 import { numbered, sanitizeAttachmentName } from './names';
 import { fail } from './problems';
 import { lineAt, scanNote, type NoteScan, type ScannedLink } from './scan';
+import { mockSearch, type SearchDoc } from './search';
 import { seedFiles } from './seed';
 import { blobId } from './sha1';
 
@@ -146,10 +156,6 @@ function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-function foldAccents(s: string): string {
-  return s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
-}
-
 export class MockVault {
   readonly hub = new MockEventHub();
   private files = new Map<string, StoredFile>();
@@ -163,6 +169,8 @@ export class MockVault {
   private settingsVersion = '';
   private bookmarks: BookmarkItem[] = [];
   private bookmarksVersion = blobId(encoder.encode(JSON.stringify([])));
+  private savedSearches: SavedSearch[] = [];
+  private savedSearchesVersion: string | null = null;
   private readonly startedAt = Date.now();
 
   constructor(seed = true) {
@@ -1040,81 +1048,41 @@ export class MockVault {
   // ---------- search and tags ----------
 
   search(q: string, limit = 50, sort: 'relevance' | 'mtime' = 'relevance', prefix = true): SearchResponse {
-    const started = performance.now();
-    if (limit < 1 || limit > 200) fail('bad-request', 'limit out of range', { errors: [{ field: 'limit', message: '1 to 200' }] });
-    const clauses = parseQuery(q);
-    const positive = clauses.filter((c) => !c.negated);
-    if (positive.length === 0) return { query: q, total: 0, tookMs: 0, results: [] };
-    const lastWord = [...clauses].reverse().find((c) => c.kind === 'word' && !c.negated);
     const excluded = this.settings.files.excludedPaths.map((p) => p.toLowerCase());
-    const hits: SearchHit[] = [];
-    for (const note of this.notes()) {
-      if (excluded.some((p) => note.path.toLowerCase().startsWith(p))) continue;
-      const scan = this.scanOf(note);
-      const text = this.textOf(note);
-      const body = foldAccents(text);
-      const title = stripMd(lastSegment(note.path));
-      let ok = true;
-      let score = 0;
-      for (const c of clauses) {
-        const isPrefix = prefix && c === lastWord && c.value.length >= 2;
-        const matched = this.clauseMatches(c, note.path, title, body, scan, isPrefix);
-        if (matched === c.negated) {
-          ok = false;
-          break;
-        }
-        if (!c.negated && (c.kind === 'word' || c.kind === 'phrase')) {
-          const needle = foldAccents(c.value);
-          score += (foldAccents(title).includes(needle) ? 4 : 0) + Math.min(5, body.split(needle).length - 1);
-        }
-      }
-      if (!ok) continue;
-      const terms = positive.filter((c) => c.kind === 'word' || c.kind === 'phrase').map((c) => foldAccents(c.value));
-      const lines = text.split('\n');
-      const matches: SearchHit['matches'] = [];
-      let moreMatches = 0;
-      for (let i = lineAt(scan.lineStarts, scan.bodyStart); i < lines.length && terms.length; i++) {
-        const folded = foldAccents(lines[i]);
-        const ranges = terms.flatMap((t) => {
-          const at = folded.indexOf(t);
-          return at >= 0 ? [{ from: at, to: at + t.length }] : [];
-        });
-        if (ranges.length === 0) continue;
-        if (matches.length < 3) matches.push({ line: i, text: lines[i].replace(/\r$/, '').slice(0, 200), ranges: ranges.filter((r) => r.to <= 200) });
-        else moreMatches++;
-      }
-      const titleRanges = terms.flatMap((t) => {
-        const at = foldAccents(title).indexOf(t);
-        return at >= 0 ? [{ from: at, to: at + t.length }] : [];
-      });
-      hits.push({ path: note.path, basename: title, score, mtime: isoMs(note.mtime), titleRanges, matches, moreMatches });
-    }
-    hits.sort((a, b) => (sort === 'mtime' ? 0 : b.score - a.score) || Date.parse(b.mtime) - Date.parse(a.mtime));
-    return { query: q, total: hits.length, tookMs: Math.round(performance.now() - started), results: hits.slice(0, limit) };
+    const docs: SearchDoc[] = this.notes()
+      .filter((note) => !excluded.some((p) => note.path.toLowerCase().startsWith(p)))
+      .map((note) => ({ path: note.path, text: this.textOf(note), scan: this.scanOf(note), mtime: isoMs(note.mtime) }));
+    return mockSearch(docs, q, limit, sort, prefix);
   }
 
-  private clauseMatches(c: QueryClause, path: string, title: string, body: string, scan: NoteScan, isPrefix: boolean): boolean {
-    const v = foldAccents(c.value);
-    switch (c.kind) {
-      case 'tag': {
-        const tag = v.replace(/^#/, '');
-        return scan.tags.some((t) => {
-          const lt = t.toLowerCase();
-          return lt === tag || lt.startsWith(tag + '/');
-        });
-      }
-      case 'path':
-        return path.toLowerCase().includes(c.value.toLowerCase());
-      case 'file':
-        return lastSegment(path).toLowerCase().includes(c.value.toLowerCase());
-      case 'phrase':
-        return body.includes(v) || foldAccents(title).includes(v);
-      case 'word': {
-        const hay = `${foldAccents(title)} ${scan.aliases.map(foldAccents).join(' ')} ${body}`;
-        if (isPrefix) return new RegExp(`(?<![\\p{L}\\p{N}])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(hay);
-        return new RegExp(`(?<![\\p{L}\\p{N}])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'u').test(hay);
-      }
+  // ---------- saved searches (API.md §12.4) ----------
+
+  getSavedSearches(): SavedSearchesResponse {
+    return { searches: structuredClone(this.savedSearches), version: this.savedSearchesVersion };
+  }
+
+  putSavedSearches(req: SavedSearchesUpdateRequest, origin: string): SavedSearchesResponse {
+    const ids = new Set<string>();
+    req.searches.forEach((s, i) => {
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(s.id) || ids.has(s.id)) fail('bad-request', 'Invalid saved searches', { errors: [{ field: `searches[${i}].id`, message: 'invalid' }] });
+      if (!s.name.trim() || !s.query.trim()) fail('bad-request', 'Invalid saved searches', { errors: [{ field: `searches[${i}].name`, message: 'required' }] });
+      ids.add(s.id);
+    });
+    const version = blobId(encoder.encode(JSON.stringify(req.searches)));
+    if (version === this.savedSearchesVersion) return this.getSavedSearches();
+    if ((req.baseVersion || null) !== this.savedSearchesVersion) {
+      fail('version-conflict', 'The saved searches changed on the server', {
+        path: '.notesapp/searches.json',
+        currentVersion: this.savedSearchesVersion,
+        currentContent: JSON.stringify({ schemaVersion: 1, searches: this.savedSearches }),
+        currentMtime: null,
+        movedTo: null,
+      });
     }
+    this.savedSearches = structuredClone(req.searches);
+    this.savedSearchesVersion = version;
+    this.hub.publish('searches.changed', { version, origin }, origin);
+    return this.getSavedSearches();
   }
 
   getTags(): TagCount[] {
@@ -1229,6 +1197,94 @@ export class MockVault {
     return { file, created: !existing, createdFolders, commitId };
   }
 
+  // ---------- vault-wide history (API.md §14.6–14.8) ----------
+
+  private inPeriod(c: Commit, f: TimelineFilter): boolean {
+    return (!f.since || c.time >= Date.parse(f.since)) && (!f.until || c.time < Date.parse(f.until));
+  }
+
+  private underPath(path: string, prefix: string | undefined): boolean {
+    return !prefix || path === prefix || path.startsWith(prefix + '/');
+  }
+
+  getHistoryLog(f: TimelineFilter, limit = 50, offset = 0): TimelineResponse {
+    const author = f.author?.toLowerCase();
+    const matching = [...this.commits]
+      .reverse()
+      .filter((c) => this.inPeriod(c, f) && (!author || 'owner'.includes(author) || 'owner@notes'.includes(author)))
+      .filter((c) => !f.path || c.changes.some((x) => this.underPath(x.path, f.path) || (x.renamedFrom && this.underPath(x.renamedFrom, f.path))));
+    const entries: TimelineEntry[] = matching.slice(offset, offset + limit).map((c) => {
+      const files = c.changes
+        .filter((x) => !f.path || this.underPath(x.path, f.path) || (x.renamedFrom !== null && this.underPath(x.renamedFrom, f.path)))
+        .map((x) => ({ path: x.path, change: x.change, renamedFrom: x.renamedFrom }));
+      return {
+        commitId: c.commitId,
+        shortId: c.commitId.slice(0, 7),
+        parentCommitId: c.parentCommitId,
+        time: isoMs(c.time),
+        authorName: 'Owner',
+        authorLogin: 'owner@notes',
+        message: c.message,
+        files: files.slice(0, 100),
+        filesTotal: files.length,
+      };
+    });
+    return { entries, hasMore: matching.length > offset + limit };
+  }
+
+  getHistoryChanges(f: TimelineFilter): ChangesResponse {
+    const inRange = this.commits.filter((c) => this.inPeriod(c, f));
+    const before = this.commits.filter((c) => f.since && c.time < Date.parse(f.since));
+    const net = new Map<string, TimelineFile>();
+    for (const c of inRange) {
+      for (const x of c.changes) {
+        if (!this.underPath(x.path, f.path)) continue;
+        const prior = net.get(x.renamedFrom ?? x.path);
+        if (x.renamedFrom) net.delete(x.renamedFrom);
+        const change = prior?.change === 'added' && x.change !== 'deleted' ? 'added' : x.change;
+        if (prior?.change === 'added' && x.change === 'deleted') net.delete(x.path);
+        else net.set(x.path, { path: x.path, change, renamedFrom: x.renamedFrom ?? prior?.renamedFrom ?? null });
+      }
+    }
+    return {
+      since: f.since ?? null,
+      until: f.until ?? null,
+      fromCommitId: before.length ? before[before.length - 1].commitId : null,
+      toCommitId: inRange.length ? inRange[inRange.length - 1].commitId : null,
+      commits: inRange.length,
+      authors: inRange.length ? ['Owner'] : [],
+      files: [...net.values()].sort((a, b) => cmp(a.path.toLowerCase(), b.path.toLowerCase())),
+      truncated: false,
+    };
+  }
+
+  getDeletedFiles(q: string, limit = 50, offset = 0): DeletedFilesResponse {
+    const latest = new Map<string, DeletedFile>();
+    const decided = new Set<string>();
+    for (let i = this.commits.length - 1; i >= 0; i--) {
+      const c = this.commits[i];
+      for (const x of c.changes) {
+        if (x.renamedFrom) decided.add(x.renamedFrom);
+        if (decided.has(x.path)) continue;
+        decided.add(x.path);
+        if (x.change === 'deleted' && c.parentCommitId && !this.files.has(x.path)) {
+          latest.set(x.path, {
+            path: x.path,
+            deletedAt: isoMs(c.time),
+            commitId: c.commitId,
+            shortId: c.commitId.slice(0, 7),
+            parentCommitId: c.parentCommitId,
+            authorName: 'Owner',
+            authorLogin: 'owner@notes',
+            message: c.message,
+          });
+        }
+      }
+    }
+    const all = [...latest.values()].filter((d) => !q || d.path.toLowerCase().includes(q.toLowerCase()));
+    return { entries: all.slice(offset, offset + limit), total: all.length, hasMore: all.length > offset + limit };
+  }
+
   commitNow(): CommitResult {
     return { commitId: null };
   }
@@ -1258,49 +1314,6 @@ export class MockVault {
     this.hub.publish('file.deleted', { path, trashed: false, trashId: null, origin: null }, null);
     this.commit('External changes', [{ path, change: 'deleted', renamedFrom: null }]);
   }
-}
-
-// ---------- search query grammar (API.md §12.1) ----------
-
-interface QueryClause {
-  kind: 'word' | 'phrase' | 'tag' | 'path' | 'file';
-  value: string;
-  negated: boolean;
-}
-
-export function parseQuery(q: string): QueryClause[] {
-  const out: QueryClause[] = [];
-  let i = 0;
-  const readValue = (): { value: string; phrase: boolean } => {
-    if (q[i] === '"') {
-      const end = q.indexOf('"', i + 1);
-      const value = end < 0 ? q.slice(i + 1) : q.slice(i + 1, end);
-      i = end < 0 ? q.length : end + 1;
-      return { value, phrase: true };
-    }
-    const start = i;
-    while (i < q.length && !/\s/.test(q[i]) && q[i] !== '"') i++;
-    return { value: q.slice(start, i), phrase: false };
-  };
-  while (i < q.length) {
-    while (i < q.length && /\s/.test(q[i])) i++;
-    if (i >= q.length) break;
-    let negated = false;
-    if (q[i] === '-') {
-      negated = true;
-      i++;
-    }
-    const filter = /^(tag|path|file):/i.exec(q.slice(i));
-    if (filter) {
-      i += filter[0].length;
-      const { value } = readValue();
-      if (value) out.push({ kind: filter[1].toLowerCase() as 'tag' | 'path' | 'file', value, negated });
-      continue;
-    }
-    const { value, phrase } = readValue();
-    if (value) out.push({ kind: phrase ? 'phrase' : 'word', value, negated });
-  }
-  return out;
 }
 
 /** Where a link's subpath (after its first `#`) is in the text, or null (API.md §22). */
