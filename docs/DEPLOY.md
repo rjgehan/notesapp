@@ -293,7 +293,7 @@ Then from your devices:
 | What | Where |
 |---|---|
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
-| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts, uid 1000, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
+| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/claude-token` (Ask your vault, uid 1000, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts, uid 1000, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
 | Tailscale identity and certificates | volume `tailscale-state` |
 | Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
@@ -741,11 +741,30 @@ Files larger than **25 MB** stay in the vault, the trash and the nightly backups
 
 ### Ask your vault
 
-Optionally, NotesApp answers questions about your notes, summarizes a note, a folder, a selection or this week's daily notes, and suggests links, tags and tasks, with Claude (ROADMAP item 18, DESIGN §5.20). **When you use it, your question and the text of the notes it needs are sent to Anthropic's API**, outside the tailnet; notes in the folders you exclude (`Private` by default) never are, and nothing is sent until you ask. It is off until you give the server an API key **and** switch it on in Settings.
+Optionally, NotesApp answers questions about your notes, summarizes a note, a folder, a selection or this week's daily notes, and suggests links, tags and tasks, with Claude (ROADMAP item 18, DESIGN §5.20). **When you use it, your question and the text of the notes it needs are sent to Anthropic**, outside the tailnet; notes in the folders you exclude (`Private` by default) never are, and nothing is sent until you ask. It is off until the server has a credential **and** you switch it on in Settings. Two providers, chosen in **Settings › Ask and summaries › Provider**:
 
-**1. An API key.** At [console.anthropic.com](https://console.anthropic.com): create a workspace for NotesApp (so its spend and limits are separate), set a **monthly spend limit** on it (the hard limit; NotesApp's own budget is a second, estimated one), and create an API key in it.
+| Provider | How | Credential | Cost |
+|---|---|---|---|
+| **Claude Code** (default) | The image's Claude Code CLI (`/opt/claude/bin/claude`) runs once per answer, headless, with every tool off, a fresh empty home and no session, so it sees only the notes NotesApp hands it | A token from `claude setup-token`, in `/srv/notes/data/secrets/claude-token` (`/data/secrets/claude-token` in the container) | Your Claude Pro or Max subscription: usage counts against your plan's usage limits, like your own Claude use; for your personal use under its terms |
+| **Anthropic API** | The official Java SDK | An API key, as the `anthropic_key` compose secret | Billed per token |
 
-**2. The key file**, readable by uid 1000 (the app's user), never in `.env`:
+**Claude Code: the token.** On any computer where Claude Code is logged in to your Claude account (`claude`, then `/login`), run `claude setup-token`; it prints a long-lived OAuth token (`sk-ant-oat01-…`). On homeserver:
+
+```sh
+sudo install -d -o 1000 -g 1000 -m 700 /srv/notes/data/secrets
+sudo -u '#1000' sh -c 'umask 077 && cat > /srv/notes/data/secrets/claude-token'
+# paste the token, press Enter, then Ctrl-D
+```
+
+No restart: the app reads the file again when it changes. The token is passed to the CLI in its environment only, never on its command line, in a log or in an error text.
+
+**Switch it on.** **Settings › Ask and summaries**: read the notice, turn on **Use Claude**, check **Provider** (Claude Code), **Never send** (one folder or file per line), the model (Claude Sonnet 5.5 by default; Opus 5.5 for harder questions, Haiku 5.5 the lightest), the **context per request** (60,000 characters, about 15,000 tokens) and the **monthly budget** ($5). The section's status then says *Ready* and *Token found in claude-token*. Ask something in the **Ask** panel (the sparkles tab of the right sidebar; *Ask your vault* in the phone's drawer).
+
+**The monthly budget** counts what each answer would cost through the API (Claude Code reports it; the API provider bills it) in `.notesapp/cache/ai-usage.json` (in the volume, not in git) and refuses requests once the month reaches it: with Claude Code it is a guard against using up your plan, not a charge. The log has one line per request with counts and that estimate, never the question, the answer or note text: `docker compose logs notes | grep ' AI '`.
+
+**The image and Claude Code's licence.** The image contains Anthropic's Claude Code CLI (about 290 MB per architecture, 100 MB compressed; version pinned by `CLAUDE_CODE_VERSION` in the `Dockerfile`, downloaded from Anthropic's release bucket and checked against its SHA-256). Claude Code is proprietary ("all rights reserved"), so an image that contains it is for your own use: **keep the GHCR package private**. To build without it, set `--build-arg CLAUDE_CODE_VERSION=none`; you can then mount a Linux build of the CLI into the container and point `NOTES_AI_CLAUDE_COMMAND` at it (or use the API provider).
+
+**Anthropic API instead.** Create a workspace with a monthly spend limit and an API key at [console.anthropic.com](https://console.anthropic.com), then:
 
 ```sh
 cd ~/notesapp/deploy
@@ -753,17 +772,12 @@ install -d -m 700 secrets
 install -m 600 /dev/null secrets/anthropic-key
 nano secrets/anthropic-key                     # paste the key (sk-ant-...) on one line and save
 [ "$(id -u)" = 1000 ] || sudo chown 1000 secrets/anthropic-key
+grep -q '^NOTES_AI_KEY_SECRET=' .env || sed -n '/^# ---- Ask your vault/,/^NOTES_AI_KEY_SECRET=/p' .env.example >> .env
 ```
 
-**3. `.env`.** If your `.env` predates this, append the block from `.env.example` (`grep -q '^NOTES_AI_KEY_SECRET=' .env || sed -n '/^# ---- Ask your vault/,/^NOTES_AI_KEY_SECRET=/p' .env.example >> .env`), then set `NOTES_AI_KEY_SECRET=./secrets/anthropic-key` and run `docker compose up -d` (the secret is mounted when the container is created).
+Set `NOTES_AI_KEY_SECRET=./secrets/anthropic-key` in `.env`, run `docker compose up -d`, and choose **Provider: Anthropic API**.
 
-**4. Switch it on.** **Settings › Ask and summaries**: read the notice, turn on **Use Claude**, check **Never send** (one folder or file per line), the model (Claude Sonnet 5.5 by default; Opus 5.5 answers harder questions at twice the price, Haiku 5.5 is the cheapest), the **context per request** (60,000 characters, about 15,000 tokens) and the **monthly budget** ($5). The section's status then says *Ready* and *Found in anthropic_key*. Ask something in the **Ask** panel (the sparkles tab of the right sidebar; *Ask your vault* in the phone's drawer).
-
-What it costs: a question with a full context is about 15,000 input tokens, so roughly $0.03–0.05 with Sonnet 5.5; a follow-up within five minutes reads the earlier notes from Anthropic's cache at a tenth of that. The status line in Settings and the panel's footer show the month's estimated spend; requests stop once it reaches the budget (until the next month, or a higher budget). The estimate lives in the volume (`.notesapp/cache/ai-usage.json`, not in git). The log has one line per request with counts and cost, never the question, the answer or note text: `docker compose logs notes | grep ' AI '`.
-
-**Rotate the key:** create a new key, replace the content of `secrets/anthropic-key` (NotesApp reads it again when it changes; with a compose secret, run `docker compose up -d --force-recreate notes` if the change does not show), ask something, then delete the old key in the console.
-
-**Turn it off:** switch off **Use Claude** in Settings (nothing is sent from then on), or set `NOTES_AI_KEY_SECRET=` and run `docker compose up -d`; delete the key in the console. Conversations are kept only in each device's browser (the panel's *Conversations on this device* deletes them).
+**Rotate:** run `claude setup-token` again (or create a new API key) and replace the file's content; with the compose secret, `docker compose up -d --force-recreate notes` if the change does not show. **Turn it off:** switch off **Use Claude** in Settings (nothing is sent from then on) and delete the token or key. Conversations are kept only in each device's browser (the panel's *Conversations on this device* deletes them).
 
 ### Import an existing Obsidian vault later
 
@@ -952,10 +966,13 @@ The *Ask* panel and **Settings › Ask and summaries** say why:
 | Message | Fix |
 |---|---|
 | *Ask and summaries are off* | Switch on **Use Claude** in Settings. |
-| *no API key: anthropic_key is empty* (or *does not exist*) | `NOTES_AI_KEY_SECRET` is empty or the file is missing or empty (*Ask your vault*, steps 2 and 3); after setting it, `docker compose up -d`. |
-| *anthropic_key is not readable by the app's user (uid 1000)* | `sudo chown 1000 secrets/anthropic-key && chmod 600 secrets/anthropic-key`. |
-| *… must hold just the key, on one line* | The file has extra text or spaces inside the key; paste only the `sk-ant-…` key. |
-| *The Claude API refused the API key* (in an answer) | The key was deleted, disabled or mistyped: create a new one (*Rotate the key*). |
-| *rate-limiting this key, or its spend limit is reached* | The console's workspace limit (step 1) is reached; raise it or wait. |
+| *no Claude Code token: claude-token does not exist* (or *is empty*) | Save a token from `claude setup-token` in `/srv/notes/data/secrets/claude-token` (*Ask your vault*). |
+| *the Claude Code CLI (…) is not installed on the server* | The image was built with `CLAUDE_CODE_VERSION=none`, or `NOTES_AI_CLAUDE_COMMAND` points nowhere. Use the published image, or mount the CLI and point the variable at it. |
+| *Claude Code refused the token* (in an answer) | The token expired or was revoked: run `claude setup-token` again and replace the file. |
+| *Your Claude plan's usage limit is reached for now* | Your subscription's limit; it resets on its own (the message usually says when). |
+| *no API key: anthropic_key is empty* (Provider: Anthropic API) | `NOTES_AI_KEY_SECRET` is empty or the file is missing or empty; after setting it, `docker compose up -d`. |
+| *… is not readable by the app's user (uid 1000)* | `sudo chown 1000 <file> && sudo chmod 600 <file>`. |
+| *… must hold just the …, on one line* | The file has extra text; paste only the token or key. |
+| *The Claude API refused the API key* / *rate-limiting this key* | The API key was revoked, or the console's spend limit is reached. |
 | *This month's budget is used up* | NotesApp's own estimate reached **Monthly budget**: raise it in Settings, or wait for the next month. |
 | *That is in a folder excluded from Ask and summaries* | The note is under **Never send** or the excluded files of **Files and links**, which is the point; remove it from there to allow it. |
