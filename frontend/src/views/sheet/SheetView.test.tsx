@@ -193,6 +193,17 @@ describe('the spreadsheet view', () => {
     expect(screen.getByTestId('cell-A0')).toHaveTextContent('');
   });
 
+  it("opens Glide's editor with F2 on desktop, so the key never reaches Rename file", async () => {
+    await openGrid();
+    // Glide activates a cell on the keys it is given; F2 is one of them, and a matched key goes no further.
+    expect(String(gridProps().keybindings?.activateCell).split('|')).toEqual([' ', 'Enter', 'shift+Enter', 'F2']);
+    select(1, 1);
+    const e = { key: 'F2', ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, cancel: vi.fn(), preventDefault: vi.fn(), stopPropagation: vi.fn(), bounds: undefined, keyCode: 113, rawEvent: undefined, location: undefined };
+    act(() => gridProps().onKeyDown!(e));
+    // The view leaves it to Glide (it edits frozen cells and touch devices in the formula bar itself).
+    expect(e.cancel).not.toHaveBeenCalled();
+  });
+
   it('fills down with Mod-D and with the fill handle, shifting formulas', async () => {
     const path = await openGrid();
     // C2 (grid row 0) down to C3.

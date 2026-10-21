@@ -69,6 +69,12 @@ interface Props {
 
 const inRange = (col: number, row: number, r: CellRange) => col >= r.col && col < r.col + r.width && row >= r.row && row < r.row + r.height;
 
+/**
+ * Glide's keys. The clipboard, fills and clearing are the view's own. F2 opens the cell's editor, as in
+ * Excel and Google Sheets; Glide would otherwise let it reach the app's "Rename file" hotkey.
+ */
+const KEYBINDINGS = { copy: false, cut: false, paste: false, downFill: false, rightFill: false, search: false, clear: false, activateCell: ' |Enter|shift+Enter|F2' };
+
 const MOVES: Record<string, [number, number]> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
 
 export function SheetGrid({ sheet, layout, version, selection, editable, touch, theme, handlers, gridRef, portalRef }: Props) {
@@ -414,7 +420,7 @@ export function SheetGrid({ sheet, layout, version, selection, editable, touch, 
         allowedFillDirections="orthogonal"
         onFillPattern={onFillPattern}
         onKeyDown={onKeyDown}
-        keybindings={{ copy: false, cut: false, paste: false, downFill: false, rightFill: false, search: false, clear: false }}
+        keybindings={KEYBINDINGS}
         onColumnResize={editable ? onColumnResize : undefined}
         onColumnResizeEnd={editable ? onColumnResizeEnd : undefined}
         minColumnWidth={MIN_COLUMN_WIDTH}
