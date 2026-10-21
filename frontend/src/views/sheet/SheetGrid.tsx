@@ -137,6 +137,12 @@ export function SheetGrid({ sheet, layout, version, selection, marked, picked, e
     },
     [handlers],
   );
+  // Glide's cell editor is a lazy chunk: loaded now, the first edit's keystrokes are not lost while
+  // it downloads. (Touch devices edit in the formula bar.)
+  useEffect(() => {
+    if (editable && !touch) import('glide-overlay-editor').catch(() => undefined);
+  }, [editable, touch]);
+
   /** Widths while a column is being dragged; the model gets the final one. */
   const [sizing, setSizing] = useState<ReadonlyMap<number, number>>(new Map());
   const f = layout.frozenRows;
