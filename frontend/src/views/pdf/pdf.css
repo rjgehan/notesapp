@@ -1,0 +1,317 @@
+/* The PDF view and embed (DESIGN §6.8.2), loaded with their lazy chunks. PDF.js's own page, text and
+   annotation layer rules are in pdfjs-viewer.css. */
+
+/* The viewer scrolls the pages itself; the workspace does not scroll around it. */
+.workspace-scroll:has(> .pdf-view) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pdf-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pdf-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.pdf-toolbar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-toolbar-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.pdf-toolbar-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.pdf-toolbar .icon-button[aria-pressed='true'] {
+  background: var(--background-modifier-hover);
+  color: var(--interactive-accent);
+}
+
+.pdf-page-input {
+  width: 3.5em;
+  padding: 2px 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+  text-align: center;
+}
+
+.pdf-page-count {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pdf-zoom-select {
+  max-width: 9em;
+  padding: 2px 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+}
+
+.pdf-findbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 4px max(8px, env(safe-area-inset-right)) 4px max(8px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.pdf-find-input {
+  flex: 1 1 12em;
+  min-width: 0;
+  max-width: 24em;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+}
+
+.pdf-find-count {
+  min-width: 6em;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  white-space: nowrap;
+}
+
+.pdf-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.pdf-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* PDF.js requires an absolutely positioned scroll container. */
+.pdf-container {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--background-secondary);
+  /* Scrolling stays native; a pinch zooms the pages (pinch.ts), never the whole page. */
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+  outline: none;
+}
+
+.pdf-container .pdfViewer {
+  padding: 12px 0 24px;
+}
+
+.pdf-container .pdfViewer .page {
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+
+.pdf-container .pdfViewer .page.loadingIcon::after {
+  background: linear-gradient(90deg, transparent, rgb(127 127 127 / 0.12), transparent) center / 60% 4px no-repeat;
+}
+
+/* Dark pages: the rendered pages inverted, hues kept, as drawings are in the dark theme. The text and
+   annotation layers above stay as they are, so selection and find highlights keep their colours. */
+[data-pdf-dark] .pdfViewer {
+  --page-bg-color: #121212;
+}
+
+[data-pdf-dark] .pdfViewer .canvasWrapper {
+  filter: invert(93%) hue-rotate(180deg);
+}
+
+.pdf-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.pdf-thumbnails {
+  flex: none;
+  width: calc(var(--pdf-thumb-width) + 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.pdf-thumbnails ol {
+  margin: 0;
+  padding: 12px 0;
+  list-style: none;
+}
+
+.pdf-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pdf-thumb-image {
+  display: block;
+  width: var(--pdf-thumb-width);
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+
+.pdf-thumb-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+[data-pdf-dark] .pdf-thumb-image {
+  background: #121212;
+}
+
+[data-pdf-dark] .pdf-thumb-image img {
+  filter: invert(93%) hue-rotate(180deg);
+}
+
+.pdf-thumb.is-active .pdf-thumb-image {
+  border-color: var(--interactive-accent);
+}
+
+.pdf-thumb.is-active {
+  color: var(--text-normal);
+}
+
+@media (max-width: 767px) {
+  .pdf-page-input,
+  .pdf-zoom-select,
+  .pdf-find-input {
+    /* iOS zooms into focused fields under 16 px. */
+    font-size: 16px;
+  }
+
+  .pdf-toolbar {
+    gap: 2px;
+    /* Never wider than the phone, whatever the font size. */
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .pdf-zoom-select {
+    max-width: 6em;
+  }
+
+  /* Thumbnails cover the pages instead of narrowing them; picking one closes them. */
+  .pdf-thumbnails {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 2;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 4px 0 16px rgb(0 0 0 / 0.35);
+  }
+
+  .pdf-container .pdfViewer {
+    padding: 8px 0 calc(16px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------- embed ---------- */
+
+.pdf-embed-box {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--vvh, 100vh) - 120px);
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.pdf-embed-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.pdf-embed-header .internal-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-embed-page {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.pdf-embed-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.pdf-embed-stage .pdf-container {
+  touch-action: auto;
+}
+
+.pdf-embed-stage .pdfViewer {
+  padding: 8px 0;
+}

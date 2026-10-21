@@ -1,6 +1,6 @@
-// Embed hydration (DESIGN §6.7 #5), run after the rendered HTML is in the document. Media and PDF
-// embeds are plain elements; embeds whose view descriptor has `loadEmbed` (notes, drawings, and
-// later sheets) mount a React root. Images are built before insertion (render.ts).
+// Embed hydration (DESIGN §6.7 #5), run after the rendered HTML is in the document. Media embeds are
+// plain elements; embeds whose view descriptor has `loadEmbed` (notes, drawings, PDFs, and later
+// sheets) mount a React root. Images are built before insertion (render.ts).
 import { QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, type ComponentType } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -34,13 +34,6 @@ function lazyEmbed(d: FileViewDescriptor): ComponentType<EmbedProps> | null {
 function size(value: string | undefined): number | undefined {
   const n = Number(value);
   return value && Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-/** `page=3&height=400` style parameters of a PDF embed subpath. */
-function pdfParams(subpath: string | undefined): { page: string | null; height: number } {
-  const params = new URLSearchParams((subpath ?? '').replace(/^#/, ''));
-  const height = Number(params.get('height'));
-  return { page: params.get('page'), height: Number.isFinite(height) && height > 0 ? height : 600 };
 }
 
 function fileChip(el: HTMLElement, entry: FileEntry, ctx: EmbedContext): void {
@@ -93,20 +86,6 @@ export function hydrateEmbeds(container: Element, ctx: EmbedContext): void {
       video.src = ctx.rawUrl(entry);
       if (el.dataset.width) video.width = Number(el.dataset.width);
       el.appendChild(video);
-    } else if (kind === 'pdf') {
-      const { page, height } = pdfParams(subpath);
-      const frame = document.createElement('iframe');
-      frame.src = ctx.rawUrl(entry) + (page ? `#page=${encodeURIComponent(page)}` : '');
-      frame.loading = 'lazy';
-      frame.height = String(height);
-      frame.title = entry.name;
-      const open = document.createElement('a');
-      open.className = 'embed-open';
-      open.href = ctx.rawUrl(entry);
-      open.target = '_blank';
-      open.rel = 'noopener noreferrer';
-      open.textContent = 'Open';
-      el.append(frame, open);
     } else {
       const descriptor = viewFor(entry);
       const Embed = lazyEmbed(descriptor);

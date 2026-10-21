@@ -48,6 +48,7 @@ import { useUi } from '../state/ui';
 import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
 import { registerDrawingViews } from '../views/excalidraw/register';
+import { registerPdfView } from '../views/pdf/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
 
@@ -147,14 +148,7 @@ export function registerBuiltins(): void {
     modes: ['read'],
     load: () => import('../views/ImageView'),
   });
-  registerView({
-    id: 'pdf',
-    match: (e) => (e.kind === 'pdf' ? 2 : 0),
-    icon: FileText,
-    textual: false,
-    modes: ['read'],
-    load: () => import('../views/PdfView'),
-  });
+  registerPdfView();
   registerView({
     id: 'media',
     match: (e) => (e.kind === 'audio' || e.kind === 'video' ? 2 : 0),

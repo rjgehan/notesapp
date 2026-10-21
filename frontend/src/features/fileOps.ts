@@ -309,11 +309,11 @@ export async function createFolder(parent: string, name: string): Promise<string
 }
 
 /** A link to `path` in the configured style, as the note `fromPath` would write it. */
-export function linkTo(path: string, fromPath: string | null): string {
+export function linkTo(path: string, fromPath: string | null, subpath?: string | null): string {
   const settings = currentSettings().files;
   const style = settings.useWikilinks ? 'wiki' : 'markdown';
   const text = linkText(path, fromPath ?? path, settings.newLinkFormat, style, currentTree().links);
-  return assembleLink(text, style, path);
+  return assembleLink(text, style, path, { subpath });
 }
 
 export async function copyLink(path: string, fromPath: string | null): Promise<void> {

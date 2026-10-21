@@ -11,7 +11,7 @@ function entry(path: string, kind: FileEntry['kind']): FileEntry {
   return { path, name, basename: name, extension: name.slice(name.lastIndexOf('.') + 1), kind, size: 1, mtime: '2026-10-17T10:00:00.000Z', version: 'v', aliases: [] };
 }
 
-const FILES = [entry('Shapes/House.fake', 'text'), entry('Shapes/Map.fake.md', 'note'), entry('Plan.md', 'note')];
+const FILES = [entry('Shapes/House.fake', 'text'), entry('Shapes/Map.fake.md', 'note'), entry('Plan.md', 'note'), entry('Docs/Manual.pdf', 'pdf')];
 const byPath = new Map(FILES.map((f) => [f.path, f]));
 
 function Fake(props: EmbedProps) {
@@ -34,6 +34,12 @@ for (const [id, suffix, score] of [
     loadEmbed: async () => ({ default: Fake }),
   });
 }
+
+// PDFs embed through their view (PDF.js, ROADMAP item 32), not an iframe.
+function PdfFake(props: EmbedProps) {
+  return <span data-testid="pdf">{`${props.path} #${props.subpath ?? ''} ${props.height ?? '-'}`}</span>;
+}
+registerView({ id: 'pdf', match: (e) => (e.kind === 'pdf' ? 2 : 0), icon: Shapes, textual: false, modes: ['read'], load: async () => ({ default: () => null }), loadEmbed: async () => ({ default: PdfFake }) });
 
 function renderCtx(depth: number): RenderContext {
   return {
@@ -73,6 +79,20 @@ describe('embeds of files another view shows (drawings)', () => {
     container.appendChild(nested);
     act(() => hydrateEmbeds(container, embedCtx(1)));
     await waitFor(() => expect(container.querySelector('[data-testid="fake"]')?.textContent).toBe('Shapes/Map.fake.md -x- depth 2'));
+    act(() => unmountEmbeds(container));
+    container.remove();
+  });
+});
+
+describe('PDF embeds', () => {
+  it('mount the PDF view’s embed with the page and height of the subpath, at any depth', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    container.appendChild(renderNote('![[Manual.pdf#page=3]]\n\n![[Manual.pdf#height=300]]\n\n![[Manual.pdf|200]]', renderCtx(1)).fragment);
+    expect(container.querySelector('iframe')).toBeNull();
+    act(() => hydrateEmbeds(container, embedCtx(1)));
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="pdf"]')).toHaveLength(3));
+    expect([...container.querySelectorAll('[data-testid="pdf"]')].map((e) => e.textContent)).toEqual(['Docs/Manual.pdf #page=3 -', 'Docs/Manual.pdf #height=300 -', 'Docs/Manual.pdf # -']);
     act(() => unmountEmbeds(container));
     container.remove();
   });

@@ -7,6 +7,8 @@ interface ImportMetaEnv {
   readonly VITE_MOCK_API?: string;
   /** Where the build serves Excalidraw's fonts, `/assets/excalidraw-<version>/` (vite.config.ts). */
   readonly VITE_EXCALIDRAW_ASSETS: string;
+  /** Where the build serves PDF.js's CMaps, fonts and decoders, `/assets/pdfjs-<version>/` (vite.config.ts). */
+  readonly VITE_PDFJS_ASSETS: string;
 }
 
 interface Window {
