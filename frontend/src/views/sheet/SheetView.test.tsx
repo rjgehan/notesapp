@@ -13,6 +13,7 @@ import { Dialogs } from '../../components/overlays/Dialogs';
 import { Toasts } from '../../components/overlays/Toasts';
 import { runCommand } from '../../features/commands';
 import { activeSheet } from '../../sheets/activeSheet';
+import { loadSheetEngine } from '../../sheets/loadEngine';
 import { parseSheet, type SheetFile } from '../../sheets/format';
 import { useToasts } from '../../state/toasts';
 import { documents } from '../../sync/instance';
@@ -57,6 +58,11 @@ const BUDGET = {
 
 const vault = new MockVault(false);
 let count = 0;
+
+// The engine chunk loads once for the file, not inside the first test's time limit.
+beforeAll(async () => {
+  await loadSheetEngine();
+}, 30_000);
 
 beforeAll(() => {
   const fake = fakeApi(vault);

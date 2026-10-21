@@ -53,6 +53,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Glide's cell editor is not loaded ahead in tests (src/test/glideOverlayEditor.ts).
+    alias: { 'glide-overlay-editor': fileURLToPath(new URL('./src/test/glideOverlayEditor.ts', import.meta.url)) },
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
   },
