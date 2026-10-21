@@ -2,8 +2,15 @@
 import { dayjs } from '../features/dates';
 import type { Habit, Schedule } from './model';
 
+const DAY_MS = 86_400_000;
+
+/** A day as UTC milliseconds: date arithmetic without time zones or DST, and without parsing. */
+function utc(day: string): number {
+  return Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+}
+
 export function addDays(day: string, n: number): string {
-  return dayjs(day, 'YYYY-MM-DD').add(n, 'day').format('YYYY-MM-DD');
+  return new Date(utc(day) + n * DAY_MS).toISOString().slice(0, 10);
 }
 
 export function todayString(now: number = Date.now()): string {
@@ -12,12 +19,12 @@ export function todayString(now: number = Date.now()): string {
 
 /** 0 = Sunday … 6 = Saturday. */
 export function weekdayOf(day: string): number {
-  return dayjs(day, 'YYYY-MM-DD').day();
+  return new Date(utc(day)).getUTCDay();
 }
 
 /** The Monday of the week `day` is in. */
 export function weekStart(day: string): string {
-  return dayjs(day, 'YYYY-MM-DD').isoWeekday(1).format('YYYY-MM-DD');
+  return addDays(day, -((weekdayOf(day) + 6) % 7));
 }
 
 /** True when the schedule asks for the habit on `day` (every day counts for an N-a-week habit). */

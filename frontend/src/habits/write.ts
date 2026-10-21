@@ -31,7 +31,7 @@ async function apply(path: string, edit: (text: string) => string): Promise<void
   const session = documents.get(path);
   if (session && session.currentStatus !== 'loading' && session.currentStatus !== 'error') {
     if (session.currentStatus === 'conflict' || session.currentStatus === 'deleted' || !session.isEditable()) {
-      throw new NoteBusyError(`${path} has a conflict to resolve first`);
+      throw new NoteBusyError(session.currentStatus === 'conflict' ? `${path} has a conflict to resolve first` : `${path} cannot be changed here right now`);
     }
     const text = session.getText();
     const out = edit(text);
