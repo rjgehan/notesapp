@@ -10,7 +10,8 @@
 //   `remoteChangeCount` says when there is any.
 // - Images are vault attachments (files.ts). A Markdown drawing's text elements get 8-character
 //   ids in the file (the Obsidian plugin's block ids); the scene keeps Excalidraw's own ids, and
-//   the controller maps between them, so undo history and selection never see a rename.
+//   the controller maps between them, so undo history and selection never see a rename. An edited
+//   text keeps the links of its Markdown source (textLinks.ts).
 // - Excalidraw is given only what is safe to show: no generated HTML of `iframe` elements, no
 //   images by URL; the file keeps both.
 import type { DocumentSession } from '../../sync/DocumentSession';
@@ -31,6 +32,7 @@ import {
   type SceneElement,
   type StoredFile,
 } from './format';
+import { droppedLinks, editRaw } from './textLinks';
 
 /** The parts of Excalidraw's AppState the controller reads. */
 export interface AppStateLike {
@@ -151,6 +153,8 @@ export class DrawingController {
   private inverse = new Map<string, string>();
   /** Markdown source and original text of each text element as last loaded. */
   private rawTexts = new Map<string, { raw: string; originalText: unknown }>();
+  /** Texts whose links could not stay in place after an edit, reported once (id and links). */
+  private reported = new Set<string>();
   /** The generated HTML of `iframe` elements, by id: kept in the file, never shown. */
   private iframeData = new Map<string, unknown>();
   private readonly listeners = new Set<() => void>();
@@ -302,14 +306,40 @@ export class DrawingController {
       appState: { ...drawing.scene.appState, ...exportedAppState(latest.appState) },
       files,
     };
+    const raws = new Map<string, string | undefined>();
     return writeDrawing(drawing, scene, {
       rawText: (e) => {
-        const loaded = this.rawTexts.get(e.id);
-        return loaded && loaded.originalText === (e.originalText ?? e.text) ? loaded.raw : undefined;
+        if (!raws.has(e.id)) raws.set(e.id, this.rawTextOf(e));
+        return raws.get(e.id);
       },
       addEmbedded: attachments.map((a) => ({ id: a.id, value: `[[${this.env.linkText(a.path, this.session.path)}]]` })),
     });
   };
+
+  /**
+   * The Markdown source of a text the file had (undefined for a new one): as loaded while its text
+   * is unchanged, else with the edit carried over so that its links stay (textLinks.ts). An edit
+   * that cannot be carried over keeps the links the text would lose after it, and says so.
+   */
+  private rawTextOf(e: SceneElement): string | undefined {
+    const loaded = this.rawTexts.get(e.id);
+    if (!loaded) return undefined;
+    const shown = e.originalText ?? e.text;
+    if (loaded.originalText === shown) return loaded.raw;
+    if (typeof shown !== 'string' || typeof loaded.originalText !== 'string') return undefined;
+    const edited = editRaw(loaded.raw, loaded.originalText, shown);
+    if (edited !== null) return edited;
+    const lost = droppedLinks(loaded.raw, shown);
+    if (lost.length === 0) return undefined;
+    // Once per text and links: Excalidraw reports every keystroke while a text is being typed, and
+    // each draft serializes it again.
+    const key = `${e.id}\u0000${lost.join('\u0000')}`;
+    if (!this.reported.has(key)) {
+      this.reported.add(key);
+      this.env.reportError(`The links of an edited text could not stay in place, so they follow it now: ${lost.join(' ')}`);
+    }
+    return `${shown} ${lost.join(' ')}`;
+  }
 
   /** Markdown drawings: text elements carry the plugin's 8-character ids in the file. */
   private withMarkdownIds(elements: SceneElement[], all: readonly SceneElement[]): SceneElement[] {

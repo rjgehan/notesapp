@@ -11,6 +11,7 @@
 import { compressToBase64 } from 'lz-string';
 import { parseWikiBody } from '../../features/syntax';
 import { decompressFromBase64 } from './lzString';
+import { firstLink, shownFor } from './textLinks';
 
 export type DrawingFormat = 'excalidraw' | 'markdown';
 
@@ -246,6 +247,8 @@ const ANY_HEADING = /^#{1,6} /;
 /** ` ^id` closing a text entry (the plugin's ids are 8 characters). */
 const TEXT_ID = /[ \t\n]\^([A-Za-z0-9_-]{8})[ \t]*(?:\n+|$)/g;
 const PLUGIN_FRONTMATTER = /^---\n(?:[^\n]*\n)*?excalidraw-plugin[ \t]*:/;
+/** The plugin's raw mode shows each text's Markdown source as it is (the default, parsed, shows links as their text). */
+const RAW_MODE_FRONTMATTER = /^---\n(?:[^\n]*\n)*?excalidraw-plugin[ \t]*:[ \t]*raw[ \t]*\n/;
 
 function lineEnd(text: string, line: Line): number {
   return line.to < text.length ? line.to + 1 : line.to;
@@ -414,7 +417,37 @@ export function parseDrawing(format: DrawingFormat, text: string): ParseResult {
   if (json.trim() === '') return { ok: true, drawing: { format, scene: emptyScene(), markdown: parts } };
   const scene = parseSceneJson(json);
   if (typeof scene === 'string') return { ok: false, reason: 'malformed', message: scene };
-  return { ok: true, drawing: { format, scene: withSectionLinks(scene, parts), markdown: parts } };
+  return { ok: true, drawing: { format, scene: withSectionLinks(withSectionTexts(scene, parts), parts), markdown: parts } };
+}
+
+/**
+ * The Text Elements section takes priority over the JSON too: a text whose entry differs from its
+ * `rawText` (a rename rewrote a link in the section, §5.6) takes the entry as its source, as the
+ * plugin does when it loads the file. The element link that came from the old source follows it,
+ * and so does the shown text when it can be derived (by the rules the old source was shown with).
+ */
+function withSectionTexts(scene: Scene, parts: MarkdownParts): Scene {
+  if (parts.texts.length === 0) return scene;
+  const entries = new Map(parts.texts.map((t) => [t.id, t.raw]));
+  const mode = RAW_MODE_FRONTMATTER.test(parts.text) ? 'raw' : 'parsed';
+  let changed = false;
+  const elements = scene.elements.map((e) => {
+    const raw = entries.get(e.id);
+    if (!isLiveText(e) || raw === undefined || typeof e.rawText !== 'string' || e.rawText === raw) return e;
+    changed = true;
+    const next: SceneElement = { ...e, rawText: raw };
+    const link = firstLink(raw);
+    if (link !== null && (!e.link || e.link === firstLink(e.rawText))) next.link = link;
+    const shown = typeof e.originalText === 'string' ? e.originalText : typeof e.text === 'string' ? e.text : null;
+    const derived = shown === null ? null : shownFor(raw, e.rawText, shown, mode);
+    if (derived !== null && derived !== shown) {
+      next.originalText = derived;
+      // A wrapped text (in a container) keeps its lines until it is next edited.
+      if (e.text === shown) next.text = derived;
+    }
+    return next;
+  });
+  return changed ? { ...scene, elements } : scene;
 }
 
 /**

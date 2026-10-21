@@ -212,6 +212,32 @@ describe('.excalidraw.md (Obsidian Excalidraw)', () => {
     expect(performance.now() - started).toBeLessThan(2000);
   });
 
+  it('takes a text’s source from the section when a rename rewrote it there, with the link and the text shown', () => {
+    const renamed = markdownDrawing({
+      texts: [
+        ['Ab12Cd34', 'See [[Plumber Bob]]'],
+        ['Cc33Dd44', 'Call [[Plumber Bob|him]]'],
+        ['Ee55Ff66', 'Boxed [[Plumber Bob]]'],
+      ],
+      scene: scene([
+        text('Ab12Cd34', 'See Plumber', { rawText: 'See [[Plumber]]', link: '[[Plumber]]' }),
+        text('Cc33Dd44', 'Call him', { rawText: 'Call [[Plumber|him]]', link: '[[Plumber]]' }),
+        text('Ee55Ff66', 'Boxed\nPlumber', { originalText: 'Boxed Plumber', rawText: 'Boxed [[Plumber]]', link: '[[Plumber]]', containerId: 'box' }),
+      ]),
+    });
+    const [see, call, boxed] = parsed('markdown', renamed).scene.elements;
+    expect(see).toMatchObject({ rawText: 'See [[Plumber Bob]]', link: '[[Plumber Bob]]', text: 'See Plumber Bob', originalText: 'See Plumber Bob' });
+    expect(call).toMatchObject({ rawText: 'Call [[Plumber Bob|him]]', link: '[[Plumber Bob]]', text: 'Call him', originalText: 'Call him' });
+    // A wrapped text keeps its lines until it is next edited.
+    expect(boxed).toMatchObject({ link: '[[Plumber Bob]]', text: 'Boxed\nPlumber', originalText: 'Boxed Plumber Bob' });
+    // The plugin's raw mode shows the source itself.
+    const raw = renamed.replace('excalidraw-plugin: parsed', 'excalidraw-plugin: raw');
+    expect(parsed('markdown', raw).scene.elements[0]).toMatchObject({ text: 'See [[Plumber Bob]]', link: '[[Plumber Bob]]' });
+    // A link set by hand on the element is not the text's to change.
+    const own = renamed.replace('"link": "[[Plumber]]"', '"link": "https://example.com"');
+    expect(parsed('markdown', own).scene.elements[0].link).toBe('https://example.com');
+  });
+
   it('parses text entries like the plugin, with multi-line texts', () => {
     expect(parseTextEntries('One ^aaaaaaaa\n\nTwo\nlines ^bbbbbbbb\n\nLast ^cccccccc')).toEqual([
       { id: 'aaaaaaaa', raw: 'One' },

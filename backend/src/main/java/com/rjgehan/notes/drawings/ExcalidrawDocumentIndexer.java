@@ -105,14 +105,39 @@ public class ExcalidrawDocumentIndexer implements DocumentIndexer {
 			}
 			String link = element.link();
 			// Covered: an Element Links line, a link entry of the plugin's older layout (a non-text element under
-			// Text Elements), or a text whose Markdown holds the link (the plugin derives a text's link from it).
+			// Text Elements), or a text whose Markdown holds the link (the plugin derives a text's link from it). A
+			// rename rewrites only the entry, so a JSON link that came from the text's old source (its rawText) is
+			// covered too while the entry holds a link: the editor shows the entry's link instead (DESIGN §6.8.1).
 			boolean covered = drawing.linkIds().contains(element.id())
-					|| (entry != null && (!element.isText() || (link != null && entry.contains(link.strip()))));
+					|| (entry != null && (!element.isText() || (link != null && (entry.contains(link.strip())
+							|| (holdsLink(entry) && derivedFrom(element.text(), link))))));
 			if (!covered) {
 				addLink(blocks, link);
 			}
 		}
 		return new Document(List.copyOf(blocks));
+	}
+
+	/** True when {@code text} holds a {@code [[link]]} or a {@code [Markdown](link)}; no pattern, so crafted text stays linear. */
+	static boolean holdsLink(String text) {
+		int open = text.indexOf("[[");
+		return (open >= 0 && text.indexOf("]]", open + 2) >= 0) || text.contains("](");
+	}
+
+	/**
+	 * True when {@code link} is one the plugin derives from {@code source}, a text's Markdown: {@code [[target]]} from
+	 * {@code [[target]]} or {@code [[target|alias]]}, a URL from {@code [text](url)}.
+	 */
+	static boolean derivedFrom(@Nullable String source, String link) {
+		if (source == null) {
+			return false;
+		}
+		String l = link.strip();
+		if (l.length() > 4 && l.startsWith("[[") && l.endsWith("]]")) {
+			String target = l.substring(2, l.length() - 2);
+			return source.contains("[[" + target + "]]") || source.contains("[[" + target + "|");
+		}
+		return !l.isEmpty() && source.contains("](" + l + ")");
 	}
 
 	private static void addText(List<String> blocks, DrawingScene.Element element) {

@@ -3,7 +3,7 @@ import { MockVault } from '../../api/mock/vault';
 import type { SaveFileRequest } from '../../api/types';
 import { el, markdownDrawing, scene, text } from '../../test/drawings';
 import { fakeApi, sessionDeps } from '../../test/fakes';
-import { DocumentSession, type Notice, type SessionDeps } from '../../sync/DocumentSession';
+import { DocumentSession, DRAFT_INTERVAL_MS, type Notice, type SessionDeps } from '../../sync/DocumentSession';
 import { DrawingController, type AppStateLike, type DrawingEnv, type SceneApi, type SceneLib } from './controller';
 import type { LiveFile } from './files';
 import { drawingFormat, markdownParts, markdownRest, parseDrawing, type Scene, type SceneElement } from './format';
@@ -399,6 +399,50 @@ describe('Obsidian Excalidraw (.excalidraw.md)', () => {
     canvas.change('Ab12Cd34', { text: 'Goodbye', originalText: 'Goodbye' });
     await vi.advanceTimersByTimeAsync(1000);
     expect(markdownParts(vault.readFile(path).content).texts).toEqual([{ id: 'Ab12Cd34', raw: 'Goodbye' }]);
+  });
+
+  it('an edit of a linked text keeps the links of its Markdown source', async () => {
+    const source = 'Owner: [[Project Plan|plan]] and [[Alice]]';
+    const linked = markdownDrawing({
+      texts: [['Ab12Cd34', source]],
+      scene: scene([text('Ab12Cd34', 'Owner: plan and Alice', { rawText: source, link: '[[Project Plan]]' })]),
+    });
+    const { canvas, vault, env } = await setup(path, linked);
+    canvas.change('Ab12Cd34', { text: 'Owner: plan and Alice (lead)', originalText: 'Owner: plan and Alice (lead)' });
+    await vi.advanceTimersByTimeAsync(1000);
+    let out = vault.readFile(path).content;
+    expect(markdownParts(out).texts).toEqual([{ id: 'Ab12Cd34', raw: 'Owner: [[Project Plan|plan]] and [[Alice]] (lead)' }]);
+    expect(parseDrawing('markdown', out)).toMatchObject({ ok: true, drawing: { scene: { elements: [{ rawText: 'Owner: [[Project Plan|plan]] and [[Alice]] (lead)', link: '[[Project Plan]]' }] } } });
+    // A word inside a link's text: the link keeps its target and shows the new word.
+    canvas.change('Ab12Cd34', { text: 'Owner: plot and Alice (lead)', originalText: 'Owner: plot and Alice (lead)' });
+    await vi.advanceTimersByTimeAsync(1000);
+    out = vault.readFile(path).content;
+    expect(markdownParts(out).texts[0].raw).toBe('Owner: [[Project Plan|plot]] and [[Alice]] (lead)');
+    expect(env.errors).toEqual([]);
+  });
+
+  it('an edit that cannot keep a link in place keeps it after the text, and says so once', async () => {
+    const source = 'Quote: ![[Notes#^abc1]]';
+    const quoted = markdownDrawing({ texts: [['Ab12Cd34', source]], scene: scene([text('Ab12Cd34', 'Quote: the quoted words', { rawText: source })]) });
+    const { canvas, vault, env } = await setup(path, quoted);
+    // Inside the text a transclusion shows: that text belongs to another note.
+    canvas.change('Ab12Cd34', { text: 'Quote: the changed words', originalText: 'Quote: the changed words' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(markdownParts(vault.readFile(path).content).texts[0].raw).toBe('Quote: the changed words ![[Notes#^abc1]]');
+    // Moving the text later saves the same source, without a second notice.
+    canvas.change('Ab12Cd34', { x: 4 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(markdownParts(vault.readFile(path).content).texts[0].raw).toBe('Quote: the changed words ![[Notes#^abc1]]');
+    expect(env.errors).toHaveLength(1);
+    expect(env.errors[0]).toContain('![[Notes#^abc1]]');
+    // Typing on in it (Excalidraw reports each keystroke, drafts and saves serialize it): no new notice.
+    for (const typed of ['Quote: the changed words!', 'Quote: the changed words!!', 'Quote: the changed words!!!']) {
+      canvas.change('Ab12Cd34', { text: typed, originalText: typed });
+      await vi.advanceTimersByTimeAsync(DRAFT_INTERVAL_MS + 10);
+    }
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(markdownParts(vault.readFile(path).content).texts[0].raw).toBe('Quote: the changed words!!! ![[Notes#^abc1]]');
+    expect(env.errors).toHaveLength(1);
   });
 
   it('shows Embedded Files images through the vault, and Obsidian-only extras as static placeholders', async () => {

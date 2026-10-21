@@ -109,6 +109,28 @@ class ExcalidrawDocumentIndexerTest {
 	}
 
 	@Test
+	void aTextsLinkThatARenameLeftStaleInTheJsonIsCoveredByItsRewrittenEntry() {
+		// The rename rewrote [[Plumber]] in the Text Elements entry; the JSON keeps the old link until Obsidian saves.
+		String json = excalidraw("{}",
+				element("Ab12Cd34", "text", "\"text\": \"See Plumber\", \"rawText\": \"See [[Plumber]]\", \"link\": \"[[Plumber]]\""),
+				element("Bb22Cc33", "text", "\"text\": \"Call him\", \"rawText\": \"Call [[Plumber|him]]\", \"link\": \"[[Plumber]]\""),
+				element("Cc33Dd44", "text", "\"text\": \"Plain words\", \"link\": \"[[Set by hand]]\""),
+				// A link set on the element by hand, not derived from its text: the editor keeps it, so does the index.
+				element("Dd44Ee55", "text", "\"text\": \"Ask Carol\", \"rawText\": \"Ask [[Carol]]\", \"link\": \"[[Contacts]]\""));
+		String file = PLUGIN_HEAD + "## Text Elements\nSee [[Plumber Bob]] ^Ab12Cd34\n\nCall [[Plumber Bob|him]] ^Bb22Cc33\n\n"
+				+ "Plain words ^Cc33Dd44\n\nAsk [[Carol]] ^Dd44Ee55\n\n%%\n## Drawing\n```json\n" + json + "```\n%%\n";
+		assertThat(blocks("A.excalidraw.md", file)).containsExactly("[[Set by hand]]", "[[Contacts]]");
+		assertThat(ExcalidrawDocumentIndexer.derivedFrom("Call [[Plumber|him]]", "[[Plumber]]")).isTrue();
+		assertThat(ExcalidrawDocumentIndexer.derivedFrom("Read [this](https://example.com)", "https://example.com")).isTrue();
+		assertThat(ExcalidrawDocumentIndexer.derivedFrom("Ask [[Carol]]", "[[Contacts]]")).isFalse();
+		assertThat(ExcalidrawDocumentIndexer.derivedFrom(null, "[[Plumber]]")).isFalse();
+		assertThat(ExcalidrawDocumentIndexer.holdsLink("See [[Plumber Bob]]")).isTrue();
+		assertThat(ExcalidrawDocumentIndexer.holdsLink("Read [this](https://example.com)")).isTrue();
+		assertThat(ExcalidrawDocumentIndexer.holdsLink("]] before [[")).isFalse();
+		assertThat(ExcalidrawDocumentIndexer.holdsLink("Plain words")).isFalse();
+	}
+
+	@Test
 	void aCraftedFileOfUnclosedBlocksIsScannedInLinearTime() {
 		String crafted = PLUGIN_HEAD + "## Drawing\n```json\n".repeat(60_000);
 		assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
