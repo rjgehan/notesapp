@@ -477,7 +477,8 @@
   user-select: text;
   -webkit-user-select: text;
   -webkit-touch-callout: default;
-  touch-action: auto;
+  /* Scrolling and text selection work in the card; pinching stays with the board. */
+  touch-action: pan-y;
   cursor: text;
 }
 
