@@ -193,6 +193,34 @@ describe('Workbook round trip', () => {
     wb.setCell('s1', 'A1', { f: '=SEQUENCE(2)' });
     expect(wb.file.sheets[0].cells).toEqual({ A1: { f: '=SEQUENCE(2)', c: 1 }, A2: { c: 2 } });
   });
+  it('caches two-dimensional and neighbouring arrays', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { f: '=SEQUENCE(2,2)' }, C1: { f: '=SEQUENCE(1,2,10)' }, A3: { f: '=SEQUENCE(1,1,7)' } } }]);
+    expect(wb.file.sheets[0].cells).toEqual({
+      A1: { f: '=SEQUENCE(2,2)', c: 1 },
+      B1: { c: 2 },
+      C1: { f: '=SEQUENCE(1,2,10)', c: 10 },
+      D1: { c: 11 },
+      A2: { c: 3 },
+      B2: { c: 4 },
+      A3: { f: '=SEQUENCE(1,1,7)', c: 7 },
+    });
+  });
+
+  it('opens a small file with a far-away cell quickly, arrays included', () => {
+    const started = performance.now();
+    const far = workbook([{ name: 'S', cells: { A1: { f: '=SEQUENCE(2)' }, B1: { f: '=SUM(A:A)' }, XFD1048576: { v: 1 } } }]);
+    expect(far.file.sheets[0].cells).toEqual({ A1: { f: '=SEQUENCE(2)', c: 1 }, A2: { c: 2 }, B1: { f: '=SUM(A:A)', c: 3 }, XFD1048576: { v: 1 } });
+    // A column of values far to the right, next to values on the left.
+    const cells: Record<string, unknown> = { A1: { f: '=SEQUENCE(3)' }, B1: { f: '=SUM(XFD1:XFD300)' } };
+    for (let r = 1; r <= 300; r++) cells[`XFD${r}`] = { v: r };
+    const wide = workbook([{ name: 'S', cells }]);
+    expect(value(wide, 'B1')).toBe(45150);
+    expect(value(wide, 'A3')).toBe(3);
+    expect(performance.now() - started).toBeLessThan(5000);
+    // Edits and a rebuild still work on such a sheet.
+    wide.setCell('s1', 'XFD2', { v: 1000 });
+    expect(value(wide, 'B1')).toBe(46148);
+  });
 });
 
 describe('engine changes', () => {

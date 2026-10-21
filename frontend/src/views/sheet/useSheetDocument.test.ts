@@ -164,6 +164,23 @@ describe('the spreadsheet binding', () => {
     expect(binding.getSnapshot().kind).toBe('ready');
   });
 
+  it('shows a file the engine cannot open as refused, untouched', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { Workbook } = await import('../../sheets/engine');
+    vi.spyOn(Workbook, 'open').mockImplementationOnce(() => {
+      throw new Error('out of cells');
+    });
+    const { binding, fake } = setup();
+    await settle();
+    const doc = binding.getSnapshot();
+    expect(doc.kind === 'refused' && doc.message).toContain('engine could not open it (out of cells)');
+    expect(errors).toHaveBeenCalled();
+    binding.retry();
+    expect(binding.getSnapshot().kind).toBe('ready');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fake.api.saveFile).not.toHaveBeenCalled();
+  });
+
   it('shows a file that became unreadable as refused', async () => {
     const { binding, session, vault } = setup();
     await settle();

@@ -137,7 +137,15 @@ export class SheetBinding {
       this.set({ kind: 'refused', message: parsed.error });
       return;
     }
-    const wb = e.Workbook.open(parsed.file);
+    let wb: Workbook;
+    try {
+      wb = e.Workbook.open(parsed.file);
+    } catch (err) {
+      // The engine could not calculate the file: shown like a refused file, untouched.
+      console.error('[notesapp] the sheet engine could not open the file', err);
+      this.set({ kind: 'refused', message: `The spreadsheet engine could not open it (${err instanceof Error ? err.message : String(err)}).` });
+      return;
+    }
     this.workbook = wb;
     this.offWorkbook = wb.subscribe((change) => {
       // Text from the session is already in the buffer; everything else is a local edit.

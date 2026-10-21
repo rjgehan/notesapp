@@ -753,7 +753,10 @@ export class Workbook {
     const engineId = hf.getSheetId(hf.addSheet(sheet.name)) as number;
     this.engineIds.set(sheet.id, engineId);
     this.sheetIds.set(engineId, sheet.id);
-    // Rows go in blocks (gaps of up to 16 empty rows bridged): far fewer engine calls than one per cell.
+    // Rows go in blocks (gaps of up to 16 empty rows bridged): far fewer engine calls than one per
+    // cell. A block starts at its first used column, and a sparse one (a value far to the right of
+    // the others) goes in row by row as runs of nearby cells, so the engine is never handed a
+    // rectangle of empty cells much larger than the cells themselves.
     const rows = new Map<number, Array<[number, RawCellContent]>>();
     for (const [ref, cell] of Object.entries(sheet.cells)) {
       const at = parseA1(ref);
@@ -763,20 +766,42 @@ export class Workbook {
       row.push([at.col, input]);
       rows.set(at.row, row);
     }
+    for (const line of rows.values()) line.sort((a, b) => a[0] - b[0]);
+    const put = (row: number, col: number, block: RawCellContent[][]) => hf.setCellContents({ sheet: engineId, col, row }, block);
     const sorted = [...rows.keys()].sort((a, b) => a - b);
     for (let i = 0; i < sorted.length; ) {
       let j = i;
       while (j + 1 < sorted.length && sorted[j + 1] - sorted[j] <= 16) j++;
-      const block: RawCellContent[][] = [];
-      for (let r = sorted[i]; r <= sorted[j]; r++) {
-        const line: RawCellContent[] = [];
-        for (const [col, input] of rows.get(r) ?? []) {
-          while (line.length < col) line.push(null);
-          line[col] = input;
-        }
-        block.push(line);
+      let first = Infinity;
+      let last = -1;
+      let count = 0;
+      for (let k = i; k <= j; k++) {
+        const line = rows.get(sorted[k]) as Array<[number, RawCellContent]>;
+        first = Math.min(first, line[0][0]);
+        last = Math.max(last, line[line.length - 1][0]);
+        count += line.length;
       }
-      hf.setCellContents({ sheet: engineId, col: 0, row: sorted[i] }, block);
+      if ((sorted[j] - sorted[i] + 1) * (last - first + 1) <= count * 4 + 256) {
+        const block: RawCellContent[][] = [];
+        for (let r = sorted[i]; r <= sorted[j]; r++) {
+          const line: RawCellContent[] = [];
+          for (const [col, input] of rows.get(r) ?? []) line[col - first] = input;
+          block.push(Array.from(line, (x) => x ?? null));
+        }
+        put(sorted[i], first, block);
+      } else {
+        for (let k = i; k <= j; k++) {
+          const line = rows.get(sorted[k]) as Array<[number, RawCellContent]>;
+          for (let a = 0; a < line.length; ) {
+            let b = a;
+            while (b + 1 < line.length && line[b + 1][0] - line[b][0] <= 16) b++;
+            const run: RawCellContent[] = new Array<RawCellContent>(line[b][0] - line[a][0] + 1).fill(null);
+            for (let x = a; x <= b; x++) run[line[x][0] - line[a][0]] = line[x][1];
+            put(sorted[k], line[a][0], [run]);
+            a = b + 1;
+          }
+        }
+      }
       i = j + 1;
     }
   }
@@ -807,12 +832,12 @@ export class Workbook {
   /** Every cached value of a sheet the engine has just loaded. */
   private recomputeSheet(sheet: Sheet): void {
     const hf = this.engine;
-    let arrays = false;
+    const arrays: SimpleCellAddress[] = [];
     for (const [ref, cell] of Object.entries(sheet.cells)) {
       if (cell.f !== undefined) {
         const at = this.address(sheet.id, ref) as SimpleCellAddress;
         this.cache(sheet.id, ref, cell, hf.getCellValue(at));
-        if (hf.getCellType(at) === CellType.ARRAYFORMULA) arrays = true;
+        if (hf.getCellType(at) === CellType.ARRAYFORMULA) arrays.push(at);
       } else if (cell.v !== undefined) {
         delete cell.c;
       } else if (cell.c !== undefined) {
@@ -821,15 +846,24 @@ export class Workbook {
         if (isEmptyCell(cell)) delete sheet.cells[ref];
       }
     }
-    if (!arrays) return;
-    // Values in cells without content can only come from array formulas spilling into them.
-    hf.getSheetValues(this.engineIds.get(sheet.id) as number).forEach((line, row) =>
-      line.forEach((value, col) => {
-        const ref = toA1(col, row);
-        const cell = sheet.cells[ref];
-        if (value !== null && cell?.v === undefined && cell?.f === undefined) sheet.cells[ref] = { ...cell, c: fromEngine(value) };
-      }),
-    );
+    // Values in cells without content can only come from array formulas spilling into them. Each
+    // array is read where it spills, from its formula's cell along the engine's array cells; never
+    // the whole sheet, which one far-away value would make a matrix of billions of cells.
+    const spilled = (at: SimpleCellAddress) => at.col < MAX_COLUMNS && at.row < MAX_ROWS && hf.getCellType(at) === CellType.ARRAY;
+    for (const at of arrays) {
+      let width = 1;
+      while (spilled({ ...at, col: at.col + width })) width++;
+      let height = 1;
+      while (spilled({ ...at, row: at.row + height })) height++;
+      if (width === 1 && height === 1) continue;
+      hf.getRangeValues({ start: at, end: { ...at, col: at.col + width - 1, row: at.row + height - 1 } }).forEach((line, r) =>
+        line.forEach((value, c) => {
+          const ref = toA1(at.col + c, at.row + r);
+          const cell = sheet.cells[ref];
+          if (value !== null && cell?.v === undefined && cell?.f === undefined) sheet.cells[ref] = { ...cell, c: fromEngine(value) };
+        }),
+      );
+    }
   }
 
   private cache(id: string, ref: string, cell: SheetCell, value: EngineValue): void {
