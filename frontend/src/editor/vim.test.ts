@@ -108,7 +108,8 @@ describe('vim keys', () => {
   it(':w saves now; :q, :wq and :x leave the editor', async () => {
     const save = vi.fn();
     const view = editor({ vim: true, save });
-    const cm = getCM(view)!;
+    // A vim editor's adapter (its vim state is set once vim is on).
+    const cm = getCM(view) as Parameters<typeof Vim.handleEx>[0];
     Vim.handleEx(cm, 'w');
     expect(save).toHaveBeenCalledTimes(1);
     view.focus();

@@ -1000,6 +1000,8 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
 
 ### 36. Vim mode
 
+**Status:** built (on `feat/vim`): DESIGN §6.36. Settings › This device › **Vim key bindings**, off by default, adds vim keys to the note and plain-text editors through `@replit/codemirror-vim` 6.4.0 (MIT), a lazy chunk (122 kB, 39 kB gzip) loaded only once an editor mounts with it on. Disabled with a coarse pointer (phones, tablets), so touch typing is never affected. The status bar shows the mode (NORMAL, INSERT, VISUAL…). `:w` saves now, `:q` leaves the editor (no tabs or panes to close; notes autosave), `:wq` and `:x` do both. Key order: the global hotkeys (switcher, palette, search, quick add, every key chosen on this device) still run first, then the editor's command keys (`Mod-B/I/K/L/E/S/F/Enter`), then vim, then CodeMirror's keymaps; normal-mode keys carry no `Mod` or `Alt`, so they can never be app hotkeys. A command given another key under Settings › Hotkeys hands its old key to vim (removing Find's key gives `Ctrl-F` back for paging). `Esc` also closes the completion list and keeps `Esc` then `Tab` leaving the editor. Not built: a `jk` escape mapping or a vimrc (not asked for; vim's own `:imap jk <Esc>` works for the page's life); small editors (inline title, properties, task editor, sheet cells) are plain fields and have no vim.
+
 **One line:** a desktop-only, per-device toggle using `@replit/codemirror-vim` 6.4.0 (MIT).
 
 | Value | Effort | Depends on |

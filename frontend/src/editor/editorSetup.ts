@@ -160,7 +160,7 @@ const clickNavigation: Extension = [
   }),
 ];
 
-/** The Markdown note editor (DESIGN §6.6 #1–16). */
+/** The Markdown note editor (DESIGN §6.6 #1–17). */
 export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[] {
   return [
     noteContext.of(ctx),
