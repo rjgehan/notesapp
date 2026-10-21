@@ -51,7 +51,11 @@ export function CanvasTitle({ path, editable }: { path: string; editable: boolea
     if (e.nativeEvent.isComposing) return;
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (!error) e.currentTarget.blur();
+      if (error) return;
+      // On to the board, as Enter in a note's title moves on to its text.
+      const board = e.currentTarget.closest('.canvas-view')?.querySelector<HTMLElement>('.canvas-stage');
+      e.currentTarget.blur();
+      board?.focus({ preventScroll: true });
     } else if (e.key === 'Escape') {
       e.preventDefault();
       reverting.current = true;

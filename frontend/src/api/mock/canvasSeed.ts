@@ -60,9 +60,7 @@ export function bigBoard(): string {
   return obsidianLayout(nodes, edges);
 }
 
-export const CANVAS_NOTE = `# Canvas notes
-
-Boards are \`.canvas\` files in Obsidian's JSON Canvas format. The project board, embedded:
+export const CANVAS_NOTE = `Boards are \`.canvas\` files in Obsidian's JSON Canvas format. The project board, embedded:
 
 ![[Project board.canvas]]
 

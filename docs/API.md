@@ -757,6 +757,7 @@ Request `MoveRequest`:
 - A case-only rename (`plan.md` to `Plan.md`) is allowed.
 - **Clients must flush all unsaved edits before calling** (DESIGN §6.9), because other notes may be rewritten.
 - The server makes **two** commits: a pure rename (so per-note history follows the file), then, if any note was rewritten, the link updates.
+- Links are rewritten in notes only. A canvas that links to the moved file (a file node, a link in a card) keeps its text and is not listed in `linkUpdates` or `failed`; the canvas view follows moves its tab saw (DESIGN §5.5.12, §6.8.1).
 
 `200 MoveResult`:
 
@@ -828,7 +829,7 @@ Events to other clients, in this order: `folder.created` for new target parents,
 | Errors |
 |---|
 | `400`, `403`, `404` |
-| `409 type-mismatch` (`expected: "note"`) for non-`.md` files |
+| `409 type-mismatch` (`expected: "note"`) for non-`.md` files, canvases included |
 
 ### 11.2 `GET /api/notes/backlinks?path={path}[&unlinked=false]`
 
@@ -850,10 +851,10 @@ Events to other clients, in this order: `folder.created` for new target parents,
 
 | Item | Meaning |
 |---|---|
-| `linked` | Notes with a link or embed (including frontmatter `"[[...]]"`) resolving to `path`, sorted by source mtime, newest first. `matched` is the raw link text. |
-| `unlinked` | `null` unless `unlinked=true`. Then it lists plain-text, whole-word, case-insensitive occurrences of the note's basename or aliases (3 or more characters) outside code, links, frontmatter and URLs, in notes not matching `excludedPaths`. `matched` is the text found. At most 200 groups. It is `[]` for non-notes. |
+| `linked` | Notes with a link or embed (including frontmatter `"[[...]]"`) resolving to `path`, and canvases with a card link or a file node pointing at it (DESIGN §5.5.12), sorted by source mtime, newest first. `matched` is the raw link text; for a file node it is the node's path (and subpath), which is also the `context`. |
+| `unlinked` | `null` unless `unlinked=true`. Then it lists plain-text, whole-word, case-insensitive occurrences of the note's basename or aliases (3 or more characters) outside code, links, frontmatter and URLs, in notes (never canvases) not matching `excludedPaths`. `matched` is the text found. At most 200 groups. It is `[]` for non-notes. |
 | `context` | The source line, clipped to at most 240 characters around the match. A leading or trailing `…` marks clipping. `contextRange` is relative to `context`. |
-| `from`, `to` | Absolute offsets in the source file at `sourceVersion` (used by §15.5) |
+| `from`, `to` | Absolute offsets in the source file at `sourceVersion` (used by §15.5). For a canvas source, `line`, `from` and `to` refer to the canvas's searchable text (DESIGN §5.5.12), not to its JSON. |
 
 | Errors |
 |---|
@@ -906,7 +907,7 @@ Request `ResolveRequest`:
 
 ### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true]`
 
-This is full-text search over notes. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes and canvases. A canvas is searched by its cards, group names, web addresses, edge labels and file paths (its searchable text, DESIGN §5.5.12); its `basename` is the file name without `.canvas`, and `matches[].line` refers to that text (the canvas view selects the first card containing the query instead). Files whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
@@ -975,7 +976,7 @@ All clauses must match (AND). `OR`, parentheses and regular expressions are not 
 ] }
 ```
 
-- `count` is the number of notes with exactly this tag.
+- `count` is the number of notes with exactly this tag. Tags in canvas cards count too, the canvas as one note.
 - `total` is the number of distinct notes with this tag or any descendant.
 - A parent that only exists through nesting has `count: 0`.
 - Display casing is the first one seen.

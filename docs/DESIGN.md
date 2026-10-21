@@ -193,7 +193,7 @@ NotesApp/                              (monorepo; branch main)
 | Path in vault | Meaning | Tree/index/search | Git |
 |---|---|---|---|
 | `**/*.md` | Notes | yes | committed |
-| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes are content-indexed | committed |
+| any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, `.canvas`, ...) | in tree; notes are content-indexed, and canvases through a document indexer (§5.5.12) | committed |
 | any file larger than `notes.git.large-file-threshold` (25 MiB), hidden or not, outside the folders ignored below | Large attachments: videos, scans, archives; a large plugin cache under `.obsidian/`; a partial download (`*.part`) | in tree like any file when visible | **excluded** through the managed section of `info/exclude` (§4.6, §5.8 *Large files*); kept in backups |
 | `.notesapp/settings.json` | App settings (§5.12) | hidden | committed, so settings have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
@@ -563,7 +563,7 @@ Map<String, List<String>> byLowerPath;   // lower(NFC path) → paths (usually 1
 Map<String, List<String>> byLowerName;   // lower(last segment) → paths (for suffix resolution)
 NavigableSet<String>     folders;        // NFC folder paths, sorted ("" = root not stored)
 Map<String, String>      lowerFolders;   // lower(folder) → folder (case-collision checks)
-Map<String, NoteRecord>  notes;          // .md only
+Map<String, NoteRecord>  notes;          // .md, plus documents indexed like notes (canvases, §5.5.12)
 LinkGraph links; TagIndex tags; SearchIndex search;
 AtomicLong generation;                   // bumped on every mutation
 Map<String, String>      diskNames;      // NFC path → repo-relative on-disk path when they differ (NFD names)
@@ -582,7 +582,7 @@ record LinkOcc(String raw, String target, @Nullable String subpath, @Nullable St
                boolean rewritable /* false for frontmatter links whose source span differs from the parsed value */) {}
 ```
 
-- `NoteRecord` exists only for `.md` files within their size limit. Larger text files get a `FileRecord` with `version: null` and no content in memory.
+- `NoteRecord` exists only for `.md` files within their size limit, and for other text files that a `DocumentIndexer` reads (§5.5.12), whose `text` is then their searchable text. Larger text files get a `FileRecord` with `version: null` and no content in memory.
 - **Resolution happens at swap time.** A writer parses a note outside the lock, but `LinkGraph` resolves its links inside the index write lock while swapping it in, so a target created concurrently is always seen.
 
 **Memory budget.** 10k notes at about 5 KB of text each is 50 MB of strings, plus parse data and postings of roughly 60 MB, for about 120 MB of heap. The container gets `mem_limit: 1g` and the JVM uses `MaxRAMPercentage=75`.
@@ -696,7 +696,7 @@ linkText(P, S, format, style):
 
 #### 5.5.8 Backlinks
 
-- `LinkGraph.incoming[lower(targetPath)]` gives the set of source notes.
+- `LinkGraph.incoming[lower(targetPath)]` gives the set of source notes (and canvases, §5.5.12).
 - `GET /api/notes/backlinks` groups the `LinkOcc` entries per source note and returns each one with a context line: the full line clipped to 240 characters around the match.
 - Sources are sorted by `mtime` descending.
 - Embeds count as links.
@@ -713,7 +713,7 @@ These are computed on demand, only when the panel section is expanded.
 
 #### 5.5.10 Full-text search
 
-**Scope.** Notes only, minus any path matching `settings.files.excludedPaths` (case-insensitive prefix match, applied at query time), as in Obsidian. Attachments are found by name through the quick switcher, which works client-side over the tree.
+**Scope.** Notes, and canvases through their searchable text (§5.5.12), minus any path matching `settings.files.excludedPaths` (case-insensitive prefix match, applied at query time), as in Obsidian. Attachments are found by name through the quick switcher, which works client-side over the tree.
 
 **Tokenizer.** Normalization steps:
 
@@ -767,6 +767,26 @@ Tokens are maximal runs of `[\p{L}\p{N}]`, except that each Han, Hiragana or Kat
   - `count` is the number of notes with exactly this tag.
   - `total` is the number of distinct notes with this tag or any descendant.
 - Sorted case-insensitively.
+
+#### 5.5.12 Documents indexed like notes: `DocumentIndexer` (canvases, ROADMAP item 25)
+
+A `DocumentIndexer` (`supports(path)`, `index(path, text) → Indexed(searchText, parse)`, in `index/`) lets a text kind other than notes feed search, backlinks and tags without touching `MarkdownScanner`. `FileIndexer` hands every text file within its size limit that an indexer supports to it. When the indexer returns a result, the file gets a `NoteRecord` whose `text` is the searchable text and whose `parse` refers to it (no frontmatter, no aliases, no rewritable links); `null` (an invalid document) leaves the file listed by name only. `indexesAlike` also compares the indexer, so renaming a file between `.json` and `.canvas` reads it again.
+
+`CanvasIndexer` reads JSON Canvas files (a Jackson tree; unknown fields are ignored). The searchable text has one block per item, in file order, separated by blank lines:
+
+| Item | Block | Links and tags |
+|---|---|---|
+| text card | its Markdown as written | scanned on its own by `MarkdownScanner`, behind a leading newline (so `---` is never frontmatter, and an unclosed fence cannot hide the next card's links); offsets and lines shifted into the searchable text |
+| group | its label | as Markdown |
+| link node | its URL | as Markdown (a bare URL links nothing) |
+| edge | its label | as Markdown |
+| file node | its path, followed by its subpath | one embed link to the path, spanning the block, with the subpath without `#`; it resolves from the vault root, as a full path does |
+
+What this gives, and what it does not:
+
+- Search finds a canvas by its cards (its title is the canvas's basename), `tag:` and the tag counts include card tags, and the backlinks of a file list a canvas once per card link and file node pointing at it, with the block's line as the context.
+- A canvas is not a note: `GET /api/notes/meta` answers `409 type-mismatch`; unlinked mentions never come from canvases (a mention in the searchable text has no place in the file to become a link); `/api/status` does not count canvases as notes.
+- **Moves rewrite notes only** (`MoveService.plan` keeps note targets), so a canvas keeps its file nodes' paths. The canvas view follows moves its tab saw and offers to relink a missing file (§6.8.1). Rewriting `.canvas` files on the server is a possible follow-up.
 
 ### 5.6 Rename and move with link rewriting
 
@@ -1437,6 +1457,7 @@ frontend/src/
 │   ├── FileView.tsx          route target: picks descriptor, lazy-loads it, error boundary
 │   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, mode toggle, save status), PropertiesTable.tsx
 │   ├── ImageView.tsx, PdfView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
+│   ├── canvas/               JSON Canvas boards (§6.8.1): register.ts in the main bundle, the rest a lazy chunk
 ├── editor/
 │   ├── obsidianSyntax.ts     Lezer inline extension (WikiLink, Embed, Hashtag, Highlight ==x==, Comment %%x%%)
 │   ├── completion.ts         [[ / [[Note# / [[# / # completion sources
@@ -1715,6 +1736,7 @@ All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and buil
 | `pdf` | `kind:"pdf"` (2) | no | `<iframe>` plus an "Open in new tab" link |
 | `media` | audio and video (2) | no | Native controls |
 | `unsupported` | everything (1) | no | File info and a Download button |
+| `canvas` | `.canvas` (7) | yes | JSON Canvas boards with a node-level `merge` and a `![[x.canvas]]` preview (ROADMAP item 25, §6.8.1) |
 
 **How the big three plug in later** (ROADMAP items 4–6), through the extension points above:
 
@@ -1727,7 +1749,58 @@ All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and buil
 - `markDirty(serialize: () => string)` makes serialization **lazy**: the session calls `serialize` only when it saves or writes a draft. Excalidraw fires `onChange` on every pointer move and sheets can be large, so `setText` on every change would serialize far too often.
 - The session keeps `baseText` (the content at `baseVersion`) and passes it to `merge(base, mine, theirs)`; drafts persist it when they fit (§6.9). Without it, a 3-way merge after a reload would have no base: no API returns content by blob version, and the base may never have been committed, because commits are batched.
 
-**Backend counterpart.** Text kinds are already readable and writable through the generic API (`notes.text-extensions` lists `sheet`, `tasks`, `excalidraw` and `canvas` from day one), and `notes.limits.text-size-overrides` raises the 5 MiB limit per extension where a format needs it. A future `DocumentIndexer` SPI (`supports(path)`, `index(path, text) → {searchText, links, tags}`) will let these types feed search and backlinks without touching `MarkdownScanner`.
+**Backend counterpart.** Text kinds are already readable and writable through the generic API (`notes.text-extensions` lists `sheet`, `tasks`, `excalidraw` and `canvas` from day one), and `notes.limits.text-size-overrides` raises the 5 MiB limit per extension where a format needs it. The `DocumentIndexer` SPI (`supports(path)`, `index(path, text)` giving the searchable text with its links and tags, §5.5.12) lets these types feed search and backlinks without touching `MarkdownScanner`; canvases are the first.
+
+### 6.8.1 Canvas (ROADMAP item 25)
+
+`.canvas` files are [JSON Canvas 1.0](https://jsoncanvas.org/spec/1.0/) boards, the format Obsidian writes, so a board edited here opens unchanged in Obsidian and the reverse. `views/canvas/register.ts` is in the main bundle (the descriptor, the palette commands and the new-canvas text); the view, its embed, the card editor and the JSON Canvas code are lazy chunks.
+
+**Model and format** (`model.ts`, `format.ts`).
+
+- Nodes and edges are the plain objects read from the file; every field the app does not know (`styleAttributes`, a plugin's keys, top-level `metadata`) rides along inside them. Documents are immutable: an edit builds new objects for what it changes and keeps the identity of the rest.
+- **Byte-stable writes.** An unchanged document is written back as exactly the text it came from. A changed one is written in the layout it was read in: Obsidian's (tabs, one node or edge per line, no spaces, no final newline; the default for new boards), `JSON.stringify(…, null, indent)`, or one line. Every node, edge and top-level member the edit did not touch keeps its exact original text (a scanner over the parsed text records each element's span), so a diff shows only the changed lines and escapes such as `é` survive. Undoing back to the loaded document writes the original bytes.
+- An empty file is an empty board (Obsidian creates new canvases that way). Text that is not a JSON Canvas object shows "This canvas could not be read" with **Edit as text** (the `text` view on the same session). A node without a usable id gets a deterministic one, written only when the board changes. New nodes get 16-hex-digit ids and Obsidian's field order; positions and sizes are whole pixels.
+
+**Session.** The controller (`controller.ts`) holds the document, selection, viewport, the gesture in progress and undo/redo, outside React. The session's text stays the source of truth (§6.8): every finished operation (a drop after a drag, a resize, a deletion, a paste; typing after a 250 ms pause, on blur, `Mod-S`, route change and `pagehide`) serializes the board and calls `setText`, so autosave, drafts, history, conflicts and Take theirs work exactly as for notes. Gestures change only a transient `gesture`, so a drag serializes once, on release, and `markDirty(serialize)` is not needed. Any change of the session's text that the controller did not write (load, a remote update applied while clean, Take theirs, a restored draft, a merge) is adopted as the new board, keeping the selection where its ids still exist and clearing undo: another device's change is not this device's to undo.
+
+**Merging** (`merge.ts`, also the descriptor's `merge`, which Compare offers first). When the session enters conflict with a known base, the controller merges node by node and saves the result at once with `saveMerged` (`flushHistory`, §6.10), with the toast "Merged changes from another device". The banner appears only when the merge fails.
+
+- Nodes and edges merge by id, and their fields one by one. Added on either side: kept. Deleted on one side and untouched on the other: deleted. Deleted on one side but edited on the other: kept with the edit.
+- Both sides changed the same field: for geometry, colour and other layout fields, this device's value wins (it is what the user here last saw and did); for content (`text`, `label`, `file`, `subpath`, `url`, `background`, `type`, an edge's ends) and unknown top-level data, the merge fails.
+- Stacking order follows the side that changed it (this device when both did); nodes new on the other side go in after their neighbour there. Edges left without a node by the merge are dropped; edges that already dangled stay.
+- The result is written in this device's layout, reusing the original text of every untouched object.
+
+**Rendering** (`CanvasView.tsx`, `NodeView.tsx`, `EdgeView.tsx`).
+
+- One world layer carries the transform (`translate(x, y) scale(zoom)`); pan and zoom change nothing else. Nodes are absolutely positioned, memoized components: a node re-renders only when its object, rectangle, selection or editing state changes (rectangles are cached per node object, and a drag offsets only the moved ones). Nodes are culled to the visible area plus half a screen around it, and below 45 % zoom they draw as plain boxes with their first lines in large type (`is-low-detail`), so 600-card boards pan at a few milliseconds per frame.
+- Edges are cubic Béziers from side to side (the side facing the other node when a side is missing), with arrowheads per `fromEnd` and `toEnd` (default none and arrow) and labels as HTML at the midpoint. Sizes that should look the same at every zoom use `--inv-zoom`.
+- **Text cards** use the reading view's pipeline (`renderNote`, `patchChildren`, `hydrateEmbeds`), resolving links from the canvas's folder, as Obsidian does. Links, tags and task checkboxes in cards act on a tap (a checkbox toggles that line of the card).
+- **File nodes**: a note renders like a transclusion (its own note embeds become links; `subpath` shows one section), an image fills the node, audio and video get native controls, a nested canvas its preview, anything else a file chip. The file's name labels the node and opens it. A missing file says so and, when a file of that name exists elsewhere, offers **Use <path>**. File nodes and group backgrounds follow moves this tab saw (the client move map), because moves rewrite notes only (§5.5.12).
+- **Link nodes** show the address and an **Open** button. Obsidian embeds the page; the app's CSP (`frame-src 'self'`) does not allow other sites.
+- **Groups** draw a box with their label above it and their `background` image (`cover`, `ratio` or `repeat`). Moving a group moves the nodes lying entirely inside it.
+- Colours: presets `"1"`–`"6"` use Obsidian's palette, hex values are used as written; cards are tinted with `color-mix`.
+
+**Editing.**
+
+| Input | On a node | On an edge | On empty space |
+|---|---|---|---|
+| press and drag | move the selection (snapped to a 20 px grid; Alt: free) | (nothing) | mouse: selection box; touch: pan |
+| tap / click | select (Shift or Mod toggles) | select | clear the selection |
+| double tap / click | edit a card, open a file or link, rename a group | edit the label | new card |
+| long press (touch) / right click | menu | menu | menu |
+| two fingers | pinch to zoom and pan | | |
+| wheel | pan; with Ctrl or Cmd, and for a trackpad pinch (also Safari's gesture events): zoom | | |
+
+- Middle-drag or Space-drag pans with a mouse. Eight handles resize the single selected node; four side dots draw an edge (dropped on a node: connected to the side facing the pointer; dropped on empty space: a new card there, connected and being edited). Handles appear only on nodes big enough on screen, since 30 px touch handles would cover a small card.
+- A floating bar above the selection: colour (presets, none, custom), edit, open, rename, an edge's label and arrow direction, group, zoom to selection, delete. The node menus add **Convert to note…** (the card's text becomes a new note in the new-note folder, and the card a file node showing it), copy, cut, duplicate, bring to front and send to back; the board menu adds cards, notes and files (a picker), images and media (uploaded as attachments of the canvas), web pages, paste, select all and zoom to fit. The bottom toolbar has add card, add note or file, add media, add web page, undo, redo and zoom; phones keep only zoom to fit, since they pinch.
+- Keys on the board: Delete, Escape, Enter (edit or open), `Mod-Z`, `Mod-Shift-Z` and `Mod-Y`, `Mod-A`, `Mod-D`, `Mod-G`, `Mod-=`, `Mod--` and `Mod-0`, `Shift-1` (fit), `Shift-2` (selection); arrows nudge (Shift: 20 px), one undo step per run. Copy, cut and paste use the clipboard events, and the clipboard holds JSON Canvas (`{"nodes":[…],"edges":[…]}`, which Obsidian pastes too); pasted text becomes a card, a URL a link node, images uploaded file nodes. Drops from the explorer add file nodes; OS files are uploaded.
+- **Card editor** (`CardEditor.tsx`): a small CodeMirror with the note language, highlighting, `[[`, `[[Note#` and `#` completion (tooltips on the page body, unscaled and unclipped), closing brackets, `Mod-B/I/K/L` and `Mod-Enter`; pasted or dropped images become attachments of the canvas, embedded in the card. It mounts inside the tap (`flushSync`), so iOS opens the keyboard; on touch screens the board first zooms to 100 % with the card near the top, and the canvas toolbar gives way to the editing toolbar (§6.16), whose image button inserts through the card's context. Esc or a tap outside ends editing; a whole typing session is one undo step.
+- The viewport is remembered per canvas and device (the world point at the middle of the stage, and the zoom, so it survives another screen size; a resize keeps the centre). A first visit fits the board; `?q=` from a search hit selects and shows the first card containing the terms. The name above the board renames the file and takes over a title typed while a new canvas was being created; `create` gives "New canvas here" in folder menus and "Create new canvas" in the palette, with Obsidian's empty board as the content. On phones the name is hidden (the top bar shows it) until it has the focus.
+- Palette commands while a canvas is open: add card, note or file, media and web page; group selection; zoom to fit and to the selection; undo and redo.
+
+**`![[Board.canvas]]`** (`CanvasEmbed.tsx`, the descriptor's `loadEmbed`) draws a static, scaled picture of the board (groups, cards with their first lines, images, edges), the full width and 400 px high by default; `|W` or `|WxH` sets the size. Clicking it opens the canvas. A file node showing a canvas uses the same picture.
+
+**Not built.** The server does not rewrite canvases on moves (§5.5.12); web pages are not embedded; card editing is CodeMirror source, not Live Preview (item 10).
 
 ### 6.9 Autosave policy
 
@@ -2624,6 +2697,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 | `LinkTextGeneratorTest` | The vectors of API.md §15.3, plus a property test: on a random 300-file vault, `resolve(linkText(P, S, f), S) == P` for every format. |
 | `TokenizerTest` / `SearchQueryParserTest` / `SearchIndexTest` | Diacritics, CJK, offsets; the grammar, including negation and quoted filters; title outranks body; prefix on the last term; phrases; `tag:` matches nested tags; `path:`, `file:`; snippet ranges point at the original text; `excludedPaths` are not returned. |
 | `MentionFinderTest` | Whole-word, case-insensitive matching; aliases; skips links, code and frontmatter; names under 3 characters ignored. |
+| `CanvasIndexerTest` | One block per card, group label, link address, file path and edge label, in file order; card and label links and file nodes become links whose offsets and lines point into the searchable text, none rewritable; each card scanned on its own (an unclosed fence hides links in its own card only; `---` is never frontmatter); tags and headings; empty, bare and broken files. |
 | `FileServiceTest` | **Idempotent retry:** a save whose bytes equal the disk returns `200` even with a stale `baseVersion`, and writes, publishes and commits nothing. **External edit then stale save:** after an external write that the watcher has not reconciled, a stale save returns `409` and `git log` contains the external content. **flushHistory:** theirs and mine saved within one quiet period both appear in `git log`; with git failing, the `flushHistory` save returns `503 history-unavailable` and writes nothing. `PUT` with `baseVersion: null` creates a missing file (no new-name rules) and returns `409` for an existing one. A BOM file keeps its BOM after a save. Two creates of `Untitled.md` in rename mode racing a fail-mode create of `Untitled 1.md` never replace each other. `Idempotency-Key` replays return the first result. A raw overwrite of a `.md` is refused. |
 | `MoveServiceTest` | Every rewritten form (§5.6); occurrences in code blocks untouched; folder move; relative links inside the moved note fixed; collateral protection; `dryRun` writes nothing; case-only rename; `move-into-self`; collisions; **two commits** (a pure rename, then the link updates) and `--follow` crosses the move for a short note whose own links were rewritten; a source note with an unreconciled external edit keeps that edit; a lossy source note is skipped with `not-utf8`; a non-rewritable frontmatter link gives `not-rewritable`; a BOM survives a rewrite; `MoveLog` gives `movedTo`; `createdFolders` lists new target parents. |
 | `TrashServiceTest` | Delete and restore a file and a folder; the **flat** layout (`Projects/Plan.md` lands at `.trash/Plan.md`); deleting `A/B.md` after folder `A` was trashed gives a separate top-level entry; two concurrent deletes of `X/Plan.md` and `Y/Plan.md` give `Plan.md` and `Plan 1.md` and both `trash.json` entries; restore conflict and the rename option; restore to an original name with `#` works; purge and empty never follow a symlink placed in `.trash`; a `trash.json` entry whose `trashPath` is `../x` or `a/b` is ignored; externally added `.trash` items listed 1:1. |
@@ -2648,7 +2722,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 6. Move with link updates end to end, including both commits and their messages.
 7. Delete to trash, restore, links resolve again, and the expected commits.
 8. History list, content and restore.
-9. Search, tags, backlinks (linked and unlinked) and `links/resolve`, including `createPath`.
+9. Search, tags, backlinks (linked and unlinked) and `links/resolve`, including `createPath`. A canvas is found by its cards, gives backlinks for card links and file nodes (never unlinked mentions), counts its tags, is indexed again on save, answers `409` for note metadata, and is left untouched by a move.
 10. SPA: `GET /n/Some%20Note.md` gives `index.html` with the CSP header; `/assets/x.js` is immutable; `/api/nope` gives a 404 problem+json; `GET /api/tree` has `Cache-Control: no-store` and `X-Notes-Build`.
 11. SSE: `asyncExchange` on `/api/events` starts and the first frame is `hello` with `replayed` and `buildSha`. Replay and suppression are covered by the `EventHub` unit tests.
 12. Startup: a fresh vault gets `Welcome.md` and, after readiness, `Initial commit`; a pre-populated vault gets the import commit and no welcome note; a vault whose files were all deleted gets no welcome note on restart; a dirty tree at startup gets the External commit.
@@ -2670,6 +2744,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - `drafts.ts` (with `fake-indexeddb`): write, restore, re-key, ownership by live tabs over a mocked `BroadcastChannel`, the quota-failure warning.
 - `applyEvents`: each event's cache patch, including `removeQueries(['file', …])` and the own-mutation invalidations. `events.ts`: `lastEventId` tracking; **an idle stream that receives only pings for 2 minutes stays Live and never reconnects**; `onerror` with `readyState` `CLOSED` recreates the stream with backoff; the `replayed` countdown sets `caughtUp`; resync buffering drops buffered events with `seq` at or below the tree's `eventId`; a `buildSha` mismatch reloads when all sessions are clean and shows the banner when one is dirty.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
+- Canvas (ROADMAP item 25): `format.ts` writes Obsidian, pretty-printed and one-line files back byte for byte, an edit rewrites only its lines and keeps unknown fields, new files use Obsidian's layout; `merge.ts` follows every rule of §6.8.1 and keeps untouched lines; `ops.ts` (moves, group contents, deletion with edges, groups, copy and paste with new ids, stacking); the controller against a real `DocumentSession` (each operation autosaves, undo restores the exact bytes, typing is one step, remote updates are adopted, a conflict is merged and saved automatically, a real conflict is left to the banner and Take theirs, broken files, move following); the pointer state machine with synthetic pointer events (select, drag with snapping and group contents, selection box, touch pan, pinch, long press, double taps, link taps, resize, connect); the view and the embed in jsdom.
 - Mirror and large files (ROADMAP items 2 and 23): `features/mirror.ts` (the warning texts for `failing` and `diverged`, none while `ready` or `disabled`, the About summary, the push command shown only with a configured mirror, its toasts); `features/largeFiles.ts` (the threshold format, strictly-larger rule, policy off); `HistoryPanel` (the note replaces "No history" for an excluded file and older versions are still listed); `StatusBar` (the warning button with the error as its tooltip, and a click that calls `POST /api/mirror/push`).
 
 ### 8.3 Browser smoke checklist
@@ -2702,6 +2777,7 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 24. Open the app from a tagged device or a non-allowed login: it gets 403. `docker compose config` shows both volumes as `external: true`.
 25. Mirror (ROADMAP item 2), when configured: 10 minutes after an edit, the commit is on github.com; with the token file emptied (then `docker compose up -d --force-recreate notes`), the status bar shows "Mirror is not being updated" and clicking it reports the error again; a commit pushed to the GitHub repository from elsewhere makes the next push stop with "Mirror stopped", and the GitHub repository keeps that commit. `docker compose logs notes | grep -c <first characters of the token>` prints 0.
 26. Large files (ROADMAP item 23): drop a file over 25 MB onto a folder: it opens and downloads, its History panel shows the note, Settings › About counts it, `git -C /srv/notes/data/vault check-ignore -v <path>` names the `info/exclude` line, and replacing it with another upload puts the old one in the trash.
+27. Canvas (ROADMAP item 25): open a board made in Obsidian, look around and close it: `git status` shows no change. Add, connect, colour, group, resize and delete cards; edit a card with `[[` completion; undo and redo. On the iPhone: pinch, pan, double-tap a card and type (the keyboard opens), long-press for the menu. Move one card on each device at the same time: both moves survive without a banner. `![[Board.canvas]]` shows the preview, search finds a card, and the note on a file node lists the canvas among its backlinks.
 
 ---
 
