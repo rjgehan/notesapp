@@ -27,6 +27,9 @@ const TABLE: Record<ErrorCode, [number, string]> = {
   busy: [503, 'Busy, retry'],
   'history-unavailable': [503, 'History unavailable'],
   'insufficient-storage': [507, 'Insufficient storage'],
+  'ai-unavailable': [409, 'Ask and summaries are unavailable'],
+  'ai-excluded': [403, 'Excluded from Ask and summaries'],
+  'ai-budget-exceeded': [429, 'Monthly AI budget reached'],
 };
 
 /** Builds and throws the server's problem document for `code` (API.md §3). */

@@ -21,7 +21,8 @@ export type ErrorCode =
   | 'already-exists' | 'case-collision' | 'type-mismatch' | 'version-conflict' | 'settings-read-only'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
-  | 'busy' | 'history-unavailable' | 'insufficient-storage';
+  | 'busy' | 'history-unavailable' | 'insufficient-storage'
+  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded';
 
 export interface FieldError { field: string; message: string }
 
@@ -37,6 +38,7 @@ export interface Problem {
   expected?: 'file' | 'folder' | 'note';
   kind?: FileKind;
   limit?: number;
+  spent?: number;                 // ai-budget-exceeded: this month's estimated spend in USD
   from?: VaultPath;
   to?: VaultPath;
   reason?: string;
@@ -147,12 +149,21 @@ export interface FilesSettings {
 export interface DailyNotesSettings { format: string; folder: VaultPath; template: VaultPath; openOnStartup: boolean }
 export interface TemplatesSettings { folder: VaultPath; dateFormat: string; timeFormat: string }
 export interface EditorSettings { defaultMode: 'edit' | 'read'; readableLineLength: boolean; strictLineBreaks: boolean }
+/** Ask your vault and summaries (§20). Optional in a request: a body without it keeps the current values. */
+export interface AiSettings {
+  enabled: boolean;               // off by default: nothing is sent to Anthropic until this is on
+  model: AiModelId;               // 'claude-sonnet-5-5' (default), 'claude-opus-5-5' or 'claude-haiku-5-5'
+  excludedPaths: VaultPath[];     // never sent; files.excludedPaths are never sent either. Default ['Private']
+  maxContextChars: number;        // note text one request may carry, 4,000 to 400,000; default 60,000
+  monthlyBudgetUsd: number;       // requests are refused once this month's estimated spend reaches it; default 5
+}
 export interface Settings {
   schemaVersion: 1;
   files: FilesSettings;
   dailyNotes: DailyNotesSettings;
   templates: TemplatesSettings;
   editor: EditorSettings;
+  ai: AiSettings;
 }
 export interface SettingsResponse { settings: Settings; version: Version; readOnly: boolean }
 export interface SettingsUpdateRequest { settings: Settings; baseVersion: Version }
@@ -328,6 +339,78 @@ export interface CommitResult { commitId: string | null }
 // ---------- templates (§15.4) ----------
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
+
+// ---------- Ask your vault and summaries (§20) ----------
+export type AiModelId = string;
+export type AiAction = 'ask' | 'summarize' | 'suggest';
+export type AiScope = 'note' | 'folder' | 'notes' | 'selection';
+/** What a turn asked: a question, or the fields of a summary request. */
+export interface AiPrompt {
+  action: AiAction;
+  question?: string | null;       // ask
+  scope?: AiScope | null;         // summarize, suggest
+  path?: VaultPath | null;
+  paths?: VaultPath[] | null;
+  text?: string | null;
+  label?: string | null;
+}
+/** An earlier turn of the conversation, as this device keeps it. */
+export interface AiTurn { prompt: AiPrompt; answer: string; sources: VaultPath[] }
+export interface AiAskRequest {
+  question: string;               // 1 to 4,000 characters
+  activePath?: VaultPath | null;  // the open note: sent first when it is not excluded
+  history?: AiTurn[];             // oldest first, at most 50; the last 12 are used
+}
+export interface AiSummarizeRequest {
+  action?: 'summarize' | 'suggest';   // suggest: links, tags and tasks for a note
+  scope: AiScope;
+  path?: VaultPath | null;        // the note, the folder, or the note a selection comes from
+  paths?: VaultPath[];            // scope 'notes', at most 100
+  text?: string | null;           // scope 'selection', at most 200,000 characters
+  label?: string | null;          // what 'notes' are, e.g. "this week's daily notes"
+  history?: AiTurn[];
+}
+export interface AiModelInfo { id: AiModelId; label: string; inputUsdPerMTok: number; outputUsdPerMTok: number }
+export interface AiStatus {
+  state: 'off' | 'not-configured' | 'over-budget' | 'ready';
+  reason: string | null;
+  model: AiModelId;
+  models: AiModelInfo[];
+  keyFile: string;                // the key file's name, never its content
+  keyPresent: boolean;
+  month: string;                  // "2026-10", in the server's time zone
+  monthCostUsd: number;           // estimated
+  monthRequests: number;
+  monthlyBudgetUsd: number;
+  maxContextChars: number;
+  fake: boolean;                  // a development server that answers without Anthropic
+}
+export interface AiSource { path: VaultPath; chars: number; truncated: boolean }
+/** Events of the answer stream (`text/event-stream` on POST /api/ai/ask and /api/ai/summarize). */
+export interface AiStartEvent { model: AiModelId; sources: AiSource[]; omitted: number; excluded: number }
+export interface AiDeltaEvent { text: string }
+export interface AiRestartEvent { model: AiModelId }   // a fallback model answers from the start
+export interface AiUsage { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }
+export interface AiDoneEvent {
+  model: AiModelId;
+  stopReason: string;             // 'end_turn', 'max_tokens', 'refusal', ...
+  refusalCategory: string | null;
+  fellBack: boolean;
+  usage: AiUsage;
+  costUsd: number;                // estimated, this request
+  monthCostUsd: number;           // estimated, this month so far
+}
+export interface AiErrorEvent {
+  code: 'auth' | 'rate-limited' | 'overloaded' | 'bad-request' | 'unavailable' | 'busy' | 'internal-error';
+  message: string;
+}
+export interface AiStreamEventMap {
+  start: AiStartEvent;
+  delta: AiDeltaEvent;
+  restart: AiRestartEvent;
+  done: AiDoneEvent;
+  error: AiErrorEvent;
+}
 
 // ---------- SSE (§16) ----------
 export interface HelloEvent {
