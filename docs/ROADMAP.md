@@ -58,8 +58,8 @@ DESIGN.md has the details.
 | 4 | **Structured to-do tracking, not Markdown** *(big three c)* | H | L | (9 for reminders) |
 | 5 | **Excalidraw drawings** *(big three b)* | H | M | |
 | 6 | **Spreadsheets with Google-Sheets-style formulas** *(big three a)* | H | L | |
-| 7 | Quick capture inbox and the iPhone Share Sheet | H | M | |
-| 8 | Installable PWA and offline mode *(declined for v1)* | H | L | |
+| 7 | Quick capture inbox and the iPhone Share Sheet *(built 2026-10-21, `feat/pwa-capture`)* | H | M | |
+| 8 | Installable PWA and offline mode *(declined for v1; built 2026-10-21, `feat/pwa-capture`)* | H | L | |
 | 9 | Reminders and push notifications | H | M | 4; 8 for Web Push |
 | 11 | Tabs and split panes *(declined for v1)* | M | M | |
 | 12 | Bookmarks (starred) and a recent-files pane | M | S | |
@@ -634,6 +634,8 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 - An iOS Shortcut ("Add to Notes") in the Share Sheet calls the endpoint over the tailnet, with an `X-Client-Id` header, whenever Tailscale is connected. The phone is a user-owned device, so it passes the identity allowlist.
 - There is also an in-app capture box (palette and mobile "+").
 
+**Status: built 2026-10-21** on `feat/pwa-capture` (DESIGN §6.27, API.md §8.5–8.6). `POST /api/capture` and `POST /api/capture/file` (photos), a capture dialog (`Mod-Shift-Space`, ribbon, palette, drawer, the phone's **+**) and a `/capture` page, an offline capture queue with idempotency keys, a Web Share Target for the installed app (Android, desktop Chrome and Edge), and for the iPhone a Shortcut spelled out in Settings › Quick capture (iOS has no share target for web apps). The inbox is `Inbox.md` at the vault root (a setting can come later).
+
 ### 8. Installable PWA and offline mode *(declined for v1)*
 
 **One line:** add it to the iPhone Home Screen as an app; read and edit recently used notes offline and sync on reconnect.
@@ -645,6 +647,8 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 - `vite-plugin-pwa` 2.0.0 (MIT): manifest, icons, a Workbox service worker for the app shell, `display: standalone`.
 - The tree and recently opened notes are cached in IndexedDB.
 - Offline edits are queued with their `baseVersion`. The existing conflict protocol handles them on reconnect; iOS has no background sync, so syncing happens when the app opens.
+
+**Status: built 2026-10-21** on `feat/pwa-capture` (DESIGN §6.26). Manifest, icons (maskable included) and iOS standalone tags; a hand-written service worker instead of vite-plugin-pwa (the update flow is tied to the build check and unsaved edits; DESIGN §6.21 has the reasons) that precaches the shell and every lazy chunk, serves navigations network-first with the cached shell offline, and never caches the API; offline copies of the last 100 opened notes and of the tree in IndexedDB, with a per-device switch; offline edits saved through the ordinary version check (drafts of closed tabs replayed, stale ones shown as the conflict banner); and a deploy hand-over that cannot leave a tab on an old bundle or worker.
 
 ### 9. Reminders and push notifications
 

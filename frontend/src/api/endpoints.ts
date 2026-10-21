@@ -7,6 +7,9 @@ import type {
   BacklinksResponse,
   BookmarksResponse,
   BookmarksUpdateRequest,
+  CaptureRequest,
+  CaptureResult,
+  CaptureTarget,
   CommitResult,
   CreateFileRequest,
   FileEntry,
@@ -60,6 +63,15 @@ export interface SaveOptions {
   keepalive?: boolean;
 }
 
+/** Query parameters of POST /api/capture/file (API.md §8.6). */
+export interface CaptureFileParams {
+  text?: string | null;
+  target?: CaptureTarget;
+  date?: string;
+  time?: string;
+  tz?: string;
+}
+
 export type RawConflict = 'fail' | 'rename' | 'overwrite';
 
 export interface SearchOptions {
@@ -83,6 +95,8 @@ export interface Endpoints {
   uploadRaw(path: string, body: Blob, onConflict: RawConflict, opts?: WriteOptions): Promise<WriteResult>;
   uploadAttachment(name: string, source: string | null, body: Blob, opts?: WriteOptions): Promise<AttachmentResult>;
   createFolder(path: string): Promise<FolderResult>;
+  capture(req: CaptureRequest, opts?: WriteOptions): Promise<CaptureResult>;
+  captureFile(name: string, body: Blob, params: CaptureFileParams, opts?: WriteOptions): Promise<CaptureResult>;
   deleteFolder(path: string): Promise<TrashEntry>;
   move(req: MoveRequest): Promise<MoveResult>;
   getNoteMeta(path: string): Promise<NoteMeta>;
@@ -140,6 +154,14 @@ export const httpEndpoints: Endpoints = {
       idempotencyKey: opts?.idempotencyKey,
     }),
   createFolder: (path) => apiFetch('/api/folders', { method: 'POST', json: { path } }),
+  capture: (req, opts) => apiFetch('/api/capture', { method: 'POST', json: req, idempotencyKey: opts?.idempotencyKey }),
+  captureFile: (name, body, params, opts) =>
+    apiFetch('/api/capture/file' + query({ name, text: params.text, target: params.target, date: params.date, time: params.time, tz: params.tz }), {
+      method: 'POST',
+      body,
+      contentType: body.type || 'application/octet-stream',
+      idempotencyKey: opts?.idempotencyKey,
+    }),
   deleteFolder: (path) => apiFetch('/api/folders' + query(p(path)), { method: 'DELETE' }),
   move: (req) => apiFetch('/api/move', { method: 'POST', json: req }),
   getNoteMeta: (path) => apiFetch('/api/notes/meta' + query(p(path))),

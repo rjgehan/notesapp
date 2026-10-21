@@ -3,6 +3,7 @@ import { api } from '../api/endpoints';
 import { currentTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
 import { activePath, openPath } from '../features/navigation';
+import { noteWritten, openNote } from '../offline/offlineStore';
 import { renameRecent } from '../features/recent';
 import { setUnsavedProbe } from '../state/buildCheck';
 import { clientId } from '../state/clientId';
@@ -42,6 +43,9 @@ export const tabs = new TabCoordinator(clientId, (path) => registry?.ownsDraft(p
 
 registry = new DocumentRegistry({
   api,
+  // Offline mode (DESIGN §6.26): a note opens from the device's copy when the server is unreachable.
+  loadFile: openNote,
+  onSaved: noteWritten,
   drafts: draftStore,
   moves: moveMap,
   clientId,

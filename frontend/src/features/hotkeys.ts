@@ -20,7 +20,8 @@ export function eventSpec(e: KeyboardEvent): string | null {
   if (e.shiftKey) parts.push('Shift');
   // With Alt held, macOS produces composed characters in `key`; use the physical key instead.
   let key = e.key;
-  if (e.altKey && /^Key[A-Z]$/.test(e.code)) key = e.code.slice(3).toLowerCase();
+  if (key === ' ') key = 'Space';
+  else if (e.altKey && /^Key[A-Z]$/.test(e.code)) key = e.code.slice(3).toLowerCase();
   else if (e.altKey && /^Digit\d$/.test(e.code)) key = e.code.slice(5);
   if (parts.length === 0 && !/^F\d+$/.test(key)) return null;
   // A modifier on its own is not a key yet.

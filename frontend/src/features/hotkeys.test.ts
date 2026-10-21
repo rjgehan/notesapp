@@ -152,3 +152,26 @@ describe('customized hotkeys (DESIGN §6.25)', () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe('quick capture hotkey', () => {
+  it('Mod-Shift-Space opens capture anywhere, the editor and text fields included', () => {
+    const run = vi.fn();
+    // As builtins.ts registers it: a capture command whose key works while typing (globalHotkey).
+    registerCommand({ id: 'capture.quick', name: 'Quick capture', hotkey: 'Mod-Shift-Space', globalHotkey: true, run });
+    const editor = document.createElement('div');
+    editor.className = 'cm-editor';
+    const content = document.createElement('div');
+    editor.appendChild(content);
+    document.body.appendChild(editor);
+    const ev = press(content, { key: ' ', code: 'Space', shiftKey: true, ...mod });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(ev.defaultPrevented).toBe(true);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    press(input, { key: ' ', code: 'Space', shiftKey: true, ...mod });
+    expect(run).toHaveBeenCalledTimes(2);
+    // A plain space is typing, never a hotkey.
+    press(input, { key: ' ', code: 'Space' });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+});

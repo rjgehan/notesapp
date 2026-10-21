@@ -121,6 +121,23 @@ a {
   grid-template-columns: var(--ribbon-width) var(--left-width) minmax(0, 1fr) var(--right-width);
 }
 
+/*
+ * Installed on an iPad (black-translucent status bar), the desktop layout runs under the status
+ * bar and above the home indicator; elsewhere the insets are 0.
+ */
+.app-shell.is-desktop > .ribbon {
+  padding-top: max(8px, env(safe-area-inset-top));
+}
+
+.app-shell.is-desktop > .sidebar,
+.app-shell.is-desktop > .workspace {
+  padding-top: env(safe-area-inset-top);
+}
+
+.app-shell.is-desktop > .status-bar {
+  bottom: env(safe-area-inset-bottom);
+}
+
 /* The tablet rail also covers the left safe area (landscape iPhone, notch on the left). */
 .app-shell.is-tablet {
   grid-template-columns: calc(var(--ribbon-width) + env(safe-area-inset-left)) minmax(0, 1fr);

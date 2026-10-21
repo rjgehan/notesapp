@@ -27,6 +27,12 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 
 	public static final String BUILD_HEADER = "X-Notes-Build";
 
+	/** The service worker script (DESIGN §6.26), built into the static root by the frontend build. */
+	static final String SERVICE_WORKER = "/sw.js";
+
+	/** The web app manifest (DESIGN §6.26). */
+	static final String MANIFEST = "/manifest.webmanifest";
+
 	static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; "
 			+ "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; "
 			+ "font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; "
@@ -55,6 +61,15 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		String path = RequestPaths.of(request);
 		if (path.startsWith("/api/") && !setsOwnCaching(path)) {
 			response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+		}
+		else if (path.equals(SERVICE_WORKER)) {
+			// Always revalidated, so a deploy's new worker is found on the next update check; it may control the
+			// whole origin (it lives at the root anyway; the header states it).
+			response.setHeader(HttpHeaders.CACHE_CONTROL, "no-cache");
+			response.setHeader("Service-Worker-Allowed", "/");
+		}
+		else if (path.equals(MANIFEST)) {
+			response.setHeader(HttpHeaders.CACHE_CONTROL, "no-cache");
 		}
 		chain.doFilter(request, new OverridingHeadersResponse(response));
 	}

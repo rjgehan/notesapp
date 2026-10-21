@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import { createReadStream, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
+import { serviceWorker } from './vite-plugin-sw.ts'
 
 // The Dockerfile sets VITE_BUILD_SHA; everywhere else the build is "dev", which the
 // backend also reports outside the image, so the version check never fires (DESIGN §6.18).
@@ -52,7 +53,8 @@ function excalidrawFontsPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), excalidrawFontsPlugin()],
+  // The service worker is built after the app, from the files the build wrote (DESIGN §6.26).
+  plugins: [react(), excalidrawFontsPlugin(), serviceWorker({ entry: 'src/sw/sw.ts', buildSha })],
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(buildSha),
     'import.meta.env.VITE_EXCALIDRAW_ASSETS': JSON.stringify('/' + excalidrawAssets),

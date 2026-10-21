@@ -33,7 +33,7 @@ NotesApp is a self-hosted, single-user notes web app modelled closely on Obsidia
 
 ### 1.2 Non-goals for v1 (moved to the roadmap)
 
-- Installable PWA and offline editing.
+- Installable PWA and offline editing. *(Built since: ROADMAP item 8, §6.26.)*
 - Graph view.
 - Tabs and split panes.
 - Rich Markdown: Mermaid, math, callouts, code syntax highlighting in reading view. (`==highlight==` and `%%comments%%` are core Obsidian syntax and are in v1, §6.7.) *Built after v1 as ROADMAP item 3: §6.7.1.*
@@ -1136,6 +1136,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` |
 | `Cache-Control` | `no-store` for every `/api/**` response, except the raw endpoints (item 6 sets their own) and `/api/events` (`no-cache, no-transform`). Note text then never persists in the disk cache of `mac` or `beach`, and back/forward navigation never shows stale JSON. |
 | `X-Notes-Build` | The running `buildSha`. The client compares it with the build it loaded (§6.18). |
+| `Service-Worker-Allowed` | `/`, on `/sw.js` only. `/sw.js` and `/manifest.webmanifest` also get `Cache-Control: no-cache`, so a deploy's new worker is found at the next update check (§6.26). |
 
 - `'unsafe-inline'` for styles is required by CodeMirror's runtime style injection and by React `style` props. Scripts stay `'self'`-only.
 - `https:` images and media are allowed because Obsidian notes commonly embed remote images. `no-referrer` keeps the vault URL from leaking. A per-device preference can turn remote images into click-to-load placeholders (§6.7).
@@ -1143,7 +1144,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 
 **2. `HostAndIdentityFilter`**: the Host and identity allowlists of §5.13 (`421`, `403`).
 
-**3. `RequestSizeFilter`** on JSON endpoints: a `Content-Length` above `notes.limits.max-json-body` (16 MiB) is rejected with `413 too-large` before the body is read; chunked bodies are counted while reading and cut off at the same limit. Without it, one buggy client or a pasted multi-hundred-MB string would be deserialized in full before the text size check, exhaust the heap, and, through `ExitOnOutOfMemoryError`, kill in-flight saves. The limit must stay above the largest text size limit plus JSON escaping overhead; the app checks this at startup.
+**3. `RequestSizeFilter`** on JSON endpoints (every `/api/**` path except the raw uploads `/api/files/raw`, `/api/attachments` and `/api/capture/file`): a `Content-Length` above `notes.limits.max-json-body` (16 MiB) is rejected with `413 too-large` before the body is read; chunked bodies are counted while reading and cut off at the same limit. Without it, one buggy client or a pasted multi-hundred-MB string would be deserialized in full before the text size check, exhaust the heap, and, through `ExitOnOutOfMemoryError`, kill in-flight saves. The limit must stay above the largest text size limit plus JSON escaping overhead; the app checks this at startup.
 
 **4. `ApiGuardInterceptor`** on `/api/**`:
 
@@ -1271,6 +1272,8 @@ management.health.diskspace.path=${notes.vault-dir}
 management.health.diskspace.threshold=1GB
 logging.level.org.eclipse.jgit=INFO
 notes.vault-dir=/data/vault
+# The web app manifest (§6.26); Tomcat does not know the extension.
+server.mime-mappings.webmanifest=application/manifest+json
 ```
 
 Notes on these settings:
@@ -1507,6 +1510,7 @@ The `package.json` dependency set is exactly the research list plus `"yaml": "^2
 - `<html lang="en" data-theme="dark">`: the default theme is set statically, so the first paint is already themed.
 - Viewport meta: `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`. Do not add `interactive-widget`.
 - `<meta name="theme-color" content="#1e1e1e">` and `<meta name="color-scheme" content="dark light">`.
+- The installable app (§6.26): `<link rel="manifest" href="/manifest.webmanifest">`, `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style: black-translucent`, `apple-mobile-web-app-title`, `mobile-web-app-capable`, and `apple-touch-icon.png`.
 - `<script src="/theme-boot.js"></script>` in `<head>`: a tiny **classic, non-deferred** script from `public/` (allowed by `script-src 'self'`). It runs before first paint, applies the stored or system theme, and updates `theme-color` and `color-scheme` (§6.17). A module script would be deferred, so the browser could paint before `data-theme` is set.
 
 ### 6.2 Folder structure
@@ -1531,6 +1535,10 @@ frontend/src/
 │   ├── drafts.ts             IndexedDB drafts and discarded-drafts stores; BroadcastChannel tab coordination
 │   ├── moves.ts              client move map (from → to) fed by entry.moved and MoveResult
 │   └── applyEvents.ts        SSE event → cache patches / invalidations (§6.3)
+├── offline/                  offline mode (§6.26): noteCache (copies, tree snapshot), offlineStore, offlineSync,
+│                             draftReplay (closed tabs' drafts), captureQueue (§6.27); IndexedDB `notesapp-offline`
+├── pwa/serviceWorker.ts      registration, update checks, prepareReload (§6.26)
+├── sw/                       the service worker: core.ts (pure decisions), sw.ts (built to dist/sw.js by vite-plugin-sw.ts)
 ├── state/
 │   ├── ui.ts                 zustand: sidebars, active panel tabs, overlays, drawer, sheet, widths, desktop search query
 │   ├── prefs.ts              per-device preferences (theme, spellcheck, autocorrect, loadRemoteImages) in localStorage
@@ -1597,7 +1605,8 @@ frontend/src/
 │   ├── explorer/             FileExplorer, TreeRow (long-press menu), RowMenu, MoveDialog (dry-run preview)
 │   ├── panels/               SearchPanel, TagsPanel, BookmarksPanel, RecentPanel, BacklinksPanel, OutlinePanel, HistoryPanel (lazy)
 │   ├── overlays/             QuickSwitcher, CommandPalette, PromptDialog, ConfirmDialog, TemplatePicker, Toasts
-│   ├── ConflictBanner.tsx, ConnectionIndicator.tsx, SaveStatus.tsx, ErrorBoundary.tsx
+│   ├── capture/              CaptureForm, CaptureDialog, CapturePage (/capture), CaptureSettings (§6.27)
+│   ├── ConflictBanner.tsx, ConnectionIndicator.tsx, SaveStatus.tsx, ErrorBoundary.tsx, OfflineBanners.tsx
 │   └── pages/                HomePage, SearchPage (mobile), TrashPage, SettingsPage (lazy), NotFoundPage
 ├── styles/                   tokens.css (themes), app.css, editor.css, reading.css, mobile.css; rich.css (loaded with the reading-view chunk)
 └── test/setup.ts
@@ -1676,6 +1685,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 1. `GET /api/tree` returns `eventId` (read by the server before its snapshot, §5.10).
 2. Open `EventSource('/api/events?clientId=…&lastEventId=' + eventId)`.
 3. The server replays anything that happened in between. `hello.replayed` tells the client how many replayed events follow; `caughtUp` becomes true after that many (at once when it is 0). Queued offline saves are retried only after `caughtUp`, so a replayed `entry.moved` or `file.changed` is applied first.
+4. Offline (§6.26): when the tree has not answered after 2.5 s, the device's snapshot stands in and the stream starts without an id (so `hello` resyncs). After `caughtUp`: offline-opened sessions revalidate, offline copies follow the tree, closed tabs' drafts are replayed, and queued captures are sent (§6.27).
 
 ### 6.4 Routing and URL scheme
 
@@ -2040,6 +2050,7 @@ Autosave is implemented by `DocumentSession`.
   - Key `[path, clientId]`; value `{baseVersion, baseText?, text, eol, at}`. `baseText` is stored when the draft stays under 1 MB in total, for 3-way merges.
   - Written at most every 500 ms, from `requestIdleCallback` (with a `setTimeout` fallback on Safari).
   - On any write failure (quota or otherwise), a persistent warning appears: "Unsaved changes are not protected on this device." Errors are never silently ignored.
+  - Drafts are also the offline save queue: drafts of closed tabs are replayed through the version check when the connection returns (§6.26).
   - A tab removes **its own** draft after a processed `200`. Drafts are re-keyed on `entry.moved` and on the tab's own `MoveResult`, so a draft is never orphaned or restored onto a different note created later at the old path. A draft already stored under the destination key is moved to `discarded`, never overwritten.
   - A note renamed, moved or deleted while **no** tab of this browser was open leaves its drafts under a path that no longer exists. After the tree loads, such drafts (owned by no live tab) are found and announced with a toast; Settings, "This device", lists them with **Copy**, **Recreate as a note**, **Forget** (to `discarded`) and, when exactly one file has the draft's base version (a move keeps the blob id), **Restore into** that note. The "File not found" page of their path offers **Recreate with my text**.
   - A draft written while a conflict is unresolved, or while a Keep mine or Recreate save is pending, is marked `conflict: true`; on open it re-enters the conflict banner even when its base equals the server version, so the server copy is never overwritten without `flushHistory`. Keepalive saves carry `flushHistory` while it is pending.
@@ -2229,6 +2240,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 | `settings.open` | Open settings | `Mod-,` |
 | `theme.toggle` | Toggle dark/light theme | |
 | `app.resync` | Reload vault from server | |
+| `capture.quick` | Quick capture (§6.27) | `Mod-Shift-Space` (works in the editor too) |
 
 `Mod` is `Cmd` on Apple platforms and `Ctrl` elsewhere. Browser-reserved combinations (`Mod-N`, `Mod-T`, `Mod-W`, `Mod-Shift-N`) cannot be intercepted, which is why "new note" is `Mod-Alt-N`. Every key can be changed, removed or given to a command without one, per device, under Settings, "Hotkeys" (§6.25).
 
@@ -2264,7 +2276,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 
 | Breakpoint | Layout |
 |---|---|
-| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, and ⋯ (Command palette, Backlinks, Outline, History, Bookmark, Rename, Move, Delete, Template, Today, Reload). **Drawer:** full-height, 88 % width, slides in from the left; Files, Search, Bookmarks, Tags and Recent files tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
+| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, **+** (quick capture, §6.27), a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, and ⋯ (Command palette, Backlinks, Outline, History, Bookmark, Rename, Move, Delete, Template, Today, Reload). **Drawer:** full-height, 88 % width, slides in from the left; Files, Search, Bookmarks, Tags and Recent files tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
 | **Tablet** `768–1199 px` | The ribbon is a collapsed icon rail (48 px) that is always visible, so every desktop entry point (switcher, search, Today, template, new note, palette, Trash, Settings) stays one tap away on an iPad. Both sidebars are overlays over the editor, toggled from the rail or the TopBar. |
 | **Desktop** `≥ 1200 px` | Ribbon (48 px), left sidebar (default 280 px, resizable 200–480), workspace (readable width 598 px, 46 em of the 13 px UI size, when `readableLineLength`), right sidebar (300 px, resizable). Status bar at the bottom. |
 
@@ -2332,6 +2344,7 @@ On recovery, any `resync` is processed, the replay countdown reaches `caughtUp` 
 - On a mismatch, the page reloads itself when no session is dirty or saving (drafts would survive a reload anyway). Otherwise it shows "A new version is available. Reload", and blocks settings writes until the reload, so an old tab cannot write an old-shaped settings file.
 - A `vite:preloadError` event (a lazy chunk of the old build is gone) takes the same path.
 - In development both values are `dev`, so the check never fires.
+- With the service worker (§6.26) the reload first lets the new worker take over (at most 10 s), and a page never reloads itself twice within a minute for the same server build: the banner shows instead.
 
 #### 6.18.1 Status page (ROADMAP item 38)
 
@@ -2791,6 +2804,64 @@ Every command's key can be changed per device: a laptop and a desktop keyboard d
 - **Settings, "Hotkeys"** (`components/pages/HotkeysSection.tsx`, route `/settings/hotkeys`): every command, sorted by name, with its key (a customized one is outlined, with its default named), a filter by name or key, and per row **Change** (the next key combination is recorded; `Esc` cancels; the global handler ignores keys aimed at the recorder), **Remove** and **Reset**, plus **Reset all**. A key needs `Mod`, `Alt` or a function key. A key another command uses shows "Ctrl+Alt+1 is used by “…”" with **Use it here instead** (that command loses its key) and **Cancel**. Keys the browser keeps (`Mod-N`, `Mod-T`, `Mod-W`, `Mod-Shift-N/T/W`, `Mod-Q`, `Mod-R`) and editing keys (`Mod-Z`, `Mod-Y`, `Mod-Shift-Z`, `Mod-C`, `Mod-V`, `Mod-X`, `Mod-A`) are refused with the reason.
 - The editor's own built-in keys (undo, indent, completion, search panel navigation) are not commands and keep their keys.
 
+### 6.26 Installable app and offline mode (ROADMAP item 8, 2026-10-21)
+
+The app installs to the iPhone Home Screen (Safari, Share › Add to Home Screen) and as a desktop app (Chrome or Edge), opens without a connection, shows recently opened notes, and lets them be edited offline. Edits sync through the ordinary version check when the server is reachable again, so an offline edit can produce a conflict banner but never an overwrite.
+
+**Manifest and icons.** `public/manifest.webmanifest`: `display: standalone`, `start_url` and `scope` `/`, dark `theme_color`/`background_color`, icons `icon-192.png`, `icon-512.png`, a maskable `icon-maskable-512.png` (glyph inside the 80 % safe zone) and `favicon.svg`; all are rasterized from `favicon.svg`'s geometry. `index.html` links the manifest and keeps the iOS tags (`apple-mobile-web-app-capable`, `black-translucent` status bar, `apple-mobile-web-app-title`, `apple-touch-icon.png`). The status bar overlaps the page, so every top-level surface pads by `env(safe-area-inset-*)` (§6.16); the desktop layout does too, for an installed iPad.
+
+**Service worker: hand-written** (`src/sw/sw.ts`, decisions as pure functions in `src/sw/core.ts`), built after the app by `vite-plugin-sw.ts`, which lists the build output and compiles the precache list and a version (a hash of the build SHA and every precached file) into one classic script, `dist/sw.js`. ROADMAP item 8 named vite-plugin-pwa 2.0.0; it was not used because the worker's update flow is tied to the app's own build check and unsaved-edit state, which neither of its registration modes fits (`autoUpdate` reloads pages on `controllerchange`, dirty or not; `prompt` duplicates the "new version" banner), and its Workbox build tooling adds a second bundler (Rollup, Babel) to a Vite 8/Rolldown build for about 200 lines of worker.
+
+| Request | Answer |
+|---|---|
+| Navigation to a client route (the `SpaController` list, plus `/capture`) | Network first. The cached `index.html` when the network fails, takes more than 4 s, or answers 502/503/504 (serve during a deploy). |
+| Other navigations (a raw file opened in a tab, downloads) | Not touched |
+| A precached file (exact URL, no query) | From the shell cache, else the network |
+| `/api/files/raw?…&v=` as an image (content-addressed, no `Range`) | Cache first in `notesapp-media`, at most 300 entries; off when the device's offline copies are off |
+| `POST /capture/share` navigation (share target, §6.27) | Kept in Cache Storage; `303` to `/capture?share=<id>` |
+| Everything else, the whole API included | Not touched: API responses stay `no-store` and never come from a cache |
+
+- **Install** precaches every built file except source maps, `robots.txt` and Excalidraw's fonts: the shell and every lazy chunk, CodeMirror's language modes included, so nothing the app may load is missing offline. With drawings, spreadsheets, tasks and rich Markdown merged that is about 560 files and 16 MB (about 5 MB compressed; it was 165 files and 2.6 MB on its own branch), downloaded once per device and then only as files change. Excalidraw's self-hosted fonts (§6.8.1; about 230 files and 12 MB, mostly CJK subsets loaded for the characters a drawing shows) are left out (`isExcalidrawFont`): the browser's HTTP cache keeps the ones a drawing used (immutable, versioned path), and a drawing offline falls back to a system font for characters never shown before. Hashed bundles still in the previous shell cache are copied, not downloaded again. Any failure fails the install and the previous worker stays in charge. Then `skipWaiting()`.
+- **Activate** deletes older `notesapp-shell-*` caches and claims the open pages.
+- Registration (`src/pwa/serviceWorker.ts`) only in production builds, with `updateViaCache: 'none'`; the server sends `sw.js` with `no-cache` and `Service-Worker-Allowed: /`, and the manifest as `application/manifest+json` with `no-cache` (§5.14). An installed app can stay open for weeks without navigating, so it also checks for a new worker when it comes back to the foreground, at most hourly. A development page unregisters any worker a preview left behind.
+
+**Deploys** (with §6.18). A page that sees a new `buildSha` first asks for the new worker and waits up to 10 s for it to take over (`prepareReload`), then reloads; navigations are network-first anyway, so the reload gets the new `index.html` even while the old worker is active. If the page still comes back on the old bundle (the network was too slow and the cached shell answered), it does not reload again for the same server build within a minute: it shows the "new version" banner, whose Reload does the same hand-over, so a reload can never loop. An old tab whose lazy chunk is gone takes the existing `vite:preloadError` path. Verified with a deploy simulated under a running page: it reloaded once onto the new bundle and the new worker, and the old shell cache was gone.
+
+**Offline reading** (`src/offline/`, IndexedDB database `notesapp-offline`, separate from the drafts database so neither schema moves with the other).
+
+- `notes`: a copy of each note opened on this device (as read, and as saved by this tab), at most 100 notes and about 20 MB of text, least recently opened first out. While the server is reachable, copies follow the tree: deleted notes' copies go, moved ones follow the client move map, outdated ones are re-read.
+- `meta.tree`: the last tree from the server (written 15 s after changes, and when the page is hidden).
+- A session opens its note through `loadFile` (`offlineStore.openNote`): the server, or the copy when the request fails transiently. **The copy's version stays the session's base**, so an edit made offline is saved with it (API.md §4): equal on the server, it saves; changed there, the 409 is the ordinary conflict banner. A note without a copy shows "Can't reach the server, and this device has no offline copy of this note".
+- At startup, when `GET /api/tree` has not answered after 2.5 s (at once when the browser says it is offline), the snapshot stands in, with a banner saying from when. The event stream then starts without an id, so its `hello` asks for a resync, which fetches the real tree and revalidates every open note.
+- Once the stream has caught up, sessions opened from a copy revalidate against the tree (a stale copy, clean, catches up silently).
+- Settings › This device: **Keep recent notes for offline reading** (on by default; it also controls the image cache). Off removes the copies; drafts and queued captures are unsaved data and stay. This is the device-level answer to §5.14's wish that note text not persist in the disk cache of shared computers.
+
+**Offline editing: the save queue is the drafts.** A draft (§6.9) already holds the text and the version it was based on, in IndexedDB, and survives the page. An open tab retries its own sessions' saves once the stream has caught up (§6.3). iOS kills an installed app in the background often, though, leaving its edits only in drafts that no live tab owns. When the stream catches up, `offline/draftReplay.ts` takes the newest such draft per note in the tree (one tab at a time, Web Locks):
+
+| Draft | Action |
+|---|---|
+| Based on the note's current version, no pending Keep mine | `PUT {content, baseVersion: draft's}`; 200 removes it (older drafts of the note go to the discarded store) |
+| Based on an older version, or a Keep mine was pending | Nothing is written. If the server's text equals the draft's, the draft is dropped; otherwise the note is listed in a **Review** banner. Opening it restores the draft into the ordinary conflict banner (Keep mine, Take theirs, Compare) |
+| `PUT` answered 409 (changed between the tree and the save) | Listed for review, the draft stays |
+| Transient failure | Stops; the next catch-up tries again |
+
+Sessions of this tab in conflict but not on screen are listed in the same banner. Verified in the browser: edits made with the server stopped synced on restart; an edit to a note changed on disk meanwhile came back as the conflict banner, with the other version committed to history; a closed tab's edit was replayed by the next page load.
+
+**Indicators.** The offline banner (§6.18) also counts waiting captures; the snapshot banner; the Review banner; the save pill shows Offline on each note with unsaved edits.
+
+### 6.27 Quick capture (ROADMAP item 7, 2026-10-21)
+
+Capture a thought, a link or a photo into `Inbox.md` (vault root) or today's daily note, in one tap on the phone and one key on the desktop, with or without a connection. The server's part is API.md §8.5–8.6 (`POST /api/capture`, `POST /api/capture/file`): it appends one list item with the device's time and creates the note when needed.
+
+- **Entry points.** The command `capture.quick` ("Quick capture", `Mod-Shift-Space`, registered with `globalHotkey` like quick add, §6.8, so it works inside the editor and text fields), the ribbon's inbox button, the drawer's **Capture** button, and a **+** in the phone's TopBar. All open the eager capture dialog, whose text field takes the focus inside the opening tap (§6.13). The same form is the `/capture` page, rendered outside the shell: the share target, the manifest's "Quick capture" shortcut, links with `?text=&url=&title=&target=`, and the desktop app's capture window (ROADMAP item 41, which registers `Ctrl+Shift+Space` system-wide).
+- **The form.** Text, **Inbox / Today** (remembered per device), a shared link shown as a removable chip, photos (one entry each, the text as the first one's caption), Save (`Mod-Enter`). "Today" is decided on the device: the request carries the local date, time and IANA zone.
+- **Offline queue** (`offline/captureQueue.ts`, store `captures` in `notesapp-offline`). Every capture is stored first, files included, then sent, so one made offline, or whose tab dies mid-request, is not lost. Each keeps the `Idempotency-Key`, date and time it was made with; the queue is sent in order when the stream catches up, when the browser goes online and at startup (one tab at a time). A transient failure leaves the rest waiting; a refusal (for example `too-large`) is kept aside and listed in Settings › Quick capture with Copy, Try again and Discard. A refusal of the capture just submitted stays in the form with its text instead.
+- **The capturing tab's own note.** The server appended, so the response carries no text, and the tab's own events are not echoed (API.md §16.4). Before sending, the queue flushes dirty sessions (at most 3 s), so the target note is clean here; `applyCaptureResult` then treats the response like another device's change: the session re-reads the note quietly.
+- **Web Share Target** (Android, and installed desktop Chrome or Edge). The manifest's `share_target` posts `title`, `text`, `url` and image `files` (multipart) to `/capture/share`. The service worker answers that navigation itself: it keeps the share in the Cache Storage cache `notesapp-share` and redirects to `/capture?share=<id>`, which pre-fills the form (a link found inside the text becomes the URL; a title that only repeats the text or the link is dropped) and forgets the share once captured. Nothing is posted to the server, so the CSRF rule is never bypassed; without a worker the server answers that post with `303` to `/capture?share=lost`.
+- **iPhone Share Sheet.** iOS Safari does not support `share_target` for Home Screen apps, so an iOS Shortcut ("Add to Notes", Show in Share Sheet) calls `POST /api/capture` over the tailnet with the header `X-Client-Id: ios-shortcut-capture` (the CSRF rule: every mutation needs a client id; a Shortcut sends no `Origin`) and a JSON body of `text` (the Shortcut Input), `target`, and `date`/`time` from two *Format Date* actions (`yyyy-MM-dd`, `HH:mm`). A second Shortcut posts photos to `/api/capture/file`. Signed `.shortcut` files cannot be generated outside macOS, so Settings › Quick capture spells out the steps with copyable values instead; the request passes the Host and identity allowlists like the browser does (the phone is a user-owned device of the allowed login).
+
+**Risk.** The server remembers idempotency keys for an hour within one run; a capture whose response was lost just before a restart could, when retried, be appended twice. It is a visible duplicate line, never a loss.
+
 ---
 
 ## 7. Infrastructure
@@ -2882,7 +2953,7 @@ ENTRYPOINT ["java", "-XX:AOTCache=/app/notesapp.aot", "-jar", "application.jar"]
   - **Memory.** Training runs with the image's `JAVA_TOOL_OPTIONS` on the build machine, whose ergonomics may pick another garbage collector than the 1 GB container; the cache's class data works with either, and the JVM simply skips what does not fit.
 - **curl.** The JDK 25 Temurin images no longer install curl, which the `HEALTHCHECK` and DEPLOY.md's restore drill use, so the runtime stage installs it (`--no-install-recommends`, apt lists removed).
 - **Why `node:24-bookworm-slim`.** It uses glibc, like the CI runner, so the Rolldown and Oxc native bindings that CI tests (`linux-x64-gnu`) are the ones the image build installs. An Alpine (musl) stage would need a different binding that a lockfile written on Windows may not contain.
-- **Why `GIT_SHA` reaches the frontend stage.** The bundle embeds `VITE_BUILD_SHA` for the version check (§6.18). The `ARG` is declared after `npm ci`, so the dependency layer stays cached.
+- **Why `GIT_SHA` reaches the frontend stage.** The bundle embeds `VITE_BUILD_SHA` for the version check (§6.18). The `ARG` is declared after `npm ci`, so the dependency layer stays cached. `npm run build` also writes `dist/sw.js`, the manifest and the icons (§6.26), which reach `static/` with the rest; the build SHA is part of the worker's version, so every deploy ships a new worker.
 - **Why copy the jar to `application.jar` first.** `extract --layers` names the application jar after its input. The Boot docs' Dockerfile does this copy so the entrypoint is stable.
 - **Tests.** They run in CI (`mvnw verify`, on JDK 21 and on JDK 25), not in the image build. Pull requests also build the image (amd64 only, not pushed), so the Dockerfile, the curl step and a native training run are exercised before anything reaches `main` (§7.5); the arm64 image, with its emulated training run, is first built by the publish job.
 - **`.dockerignore`:**
@@ -3379,6 +3450,8 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 17. Tasks (`TasksIntegrationTest`): every field of a task and a list on the wire; views with `date` and `tz`; CSRF on `POST` and `PATCH`; an `Idempotency-Key` retry creating one task; `task-conflict` and `malformed-file` problems (the file untouched); another client receives `file.changed` then `task.*`, the origin client none; the list file through the text API; lists and sections; backlinks from a task title.
 18. Bookmarks (`BookmarksIntegrationTest`): `GET` and `PUT` with the version protocol, `no-store`, validation and `client-id-required`; `bookmarks.changed` reaches another client but not the saving one; a folder move through `/api/move` re-keys a file and a folder bookmark (the heading subpath kept) and the mover receives `bookmarks.changed` with `origin: null`.
 19. Heading links (`HeadingLinksIntegrationTest`): a dry run of `POST /api/notes/rename-heading` previews without writing; the real call rewrites the link, makes its own commit (pending edits are committed before it) and sends `file.changed` to other clients; a heading the note does not have gives `400`, a reserved path `403`.
+20. Quick capture (`CaptureIntegrationTest`, items 7 and 8): the first capture creates `Inbox.md` and later ones append; "today" is the device's day; a new daily note starts from its template, an existing one is found ignoring case; appends keep the file's bytes and line endings; other clients see the change and retries are idempotent; a Shortcut needs its own client id; invalid captures are `400`; a captured file is stored as an attachment and embedded; `/capture` is a client route and a lost share lands there.
+21. Installable app (`PwaIntegrationTest`): `sw.js` is always revalidated and may control the origin, the manifest has its media type and is revalidated, and API responses stay `no-store`.
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
