@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2 and §12.1. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -908,8 +908,8 @@ All clauses must match (AND). `OR`, parentheses and regular expressions are not 
 ] }
 ```
 
-- `count` is the number of notes with exactly this tag.
-- `total` is the number of distinct notes with this tag or any descendant.
+- `count` is the number of notes with exactly this tag. Drawings count as notes here: an `.excalidraw` drawing whose texts hold the tag, and an `.excalidraw.md` drawing through its Markdown or the texts only its JSON holds (DESIGN §6.8.1).
+- `total` is the number of distinct notes (drawings included) with this tag or any descendant.
 - A parent that only exists through nesting has `count: 0`.
 - Display casing is the first one seen.
 

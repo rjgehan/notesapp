@@ -389,6 +389,8 @@ interface Task {
 - **`.excalidraw.md` is indexed as the note it is** (as in Obsidian), with the JSON decompressed on the server (a Java port of lz-string, tested against its output) only to add what the Markdown sections lack. To allow that, the `DocumentIndexer` of item 4 also supplements notes.
 - **Links inside drawings are not rewritten** by a rename (only those in an `.excalidraw.md`'s Markdown sections are); the move reports the drawing as `not-rewritable`, and the editor still finds a moved image by name.
 - "New drawing" opens once its pending title is committed (Enter or blur), because drawings have no inline title to take the typing over. Large data URLs in imported excalidraw.com files are kept, never moved out on open.
+- **A linked text of an `.excalidraw.md` is edited as the canvas shows it** ("plan" for `[[Project Plan|plan]]`), not as its Markdown source as in the plugin, whose Excalidraw fork has a hook for that; the edit is carried over to the source word by word, keeping its links (DESIGN §6.8.1). An edit that cannot be carried over keeps the links after the text and says so.
+- **Drafts of a `compressed-json` drawing are not compressed**: compressing a large handwritten page on every draft stalled drawing. Saves keep the file's encoding; only a draft restored after a crash is saved as `json`, once.
 
 **One line:** hand-drawn diagrams as vault files, editable on PC and iPhone (touch and pencil) and embeddable in notes.
 
