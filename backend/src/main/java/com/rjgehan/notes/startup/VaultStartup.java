@@ -30,7 +30,7 @@ import org.springframework.stereotype.Component;
  * <li>load the settings;</li>
  * <li>open or initialize the git repository;</li>
  * <li>write {@code Welcome.md} on a first run;</li>
- * <li>build the index.</li>
+ * <li>build the index, then write the large-file section of {@code info/exclude} from it.</li>
  * </ol>
  * The watcher and the commit batcher then start as lifecycle beans, and the git bootstrap commit runs after readiness.
  */
@@ -84,6 +84,7 @@ public class VaultStartup implements SmartInitializingSingleton {
 				writeWelcome();
 			}
 			this.indexBuilder.build();
+			this.git.syncLargeFiles();
 			this.gitBootstrap.setFreshVault(noVisibleFiles);
 		}
 		catch (IOException ex) {

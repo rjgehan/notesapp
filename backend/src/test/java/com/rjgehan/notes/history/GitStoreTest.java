@@ -6,6 +6,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 
+import com.rjgehan.notes.index.VaultIndex;
 import com.rjgehan.notes.support.TestProperties;
 import com.rjgehan.notes.vault.ApiPath;
 import com.rjgehan.notes.vault.VaultFs;
@@ -22,7 +23,8 @@ class GitStoreTest {
 
 	private GitStore store(Map<String, String> overrides) {
 		var properties = TestProperties.forVault(this.vault, overrides);
-		return new GitStore(new VaultFs(properties), properties, Clock.systemUTC());
+		return new GitStore(new VaultFs(properties), properties, Clock.systemUTC(),
+				new LargeFiles(new VaultIndex(), properties));
 	}
 
 	private static GitStore.Commit commitFile(GitStore git, Path vault, String name, String content) throws Exception {
@@ -48,6 +50,23 @@ class GitStoreTest {
 			assertThat(Files.isDirectory(this.vault.resolve(".git/notesapp-no-hooks"))).isTrue();
 			assertThat(Files.readString(this.vault.resolve(".git/info/exclude"))).contains(".trash/")
 				.contains(".notesapp/tmp/");
+		}
+		finally {
+			git.close();
+		}
+	}
+
+	@Test
+	void commitsAreCountedFromHead() throws Exception {
+		GitStore git = store(Map.of());
+		git.openOrInit();
+		try {
+			String first = commitFile(git, this.vault, "a.md", "a").id();
+			commitFile(git, this.vault, "b.md", "b");
+			String third = commitFile(git, this.vault, "a.md", "a2").id();
+			assertThat(git.commitCount(third)).isEqualTo(3);
+			assertThat(git.commitCount(first)).isEqualTo(1);
+			assertThat(git.head()).isEqualTo(third);
 		}
 		finally {
 			git.close();

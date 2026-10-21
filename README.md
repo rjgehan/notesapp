@@ -12,18 +12,23 @@ A self-hosted, single-user notes web app modelled closely on Obsidian. The vault
 - **Organise.** Rename and move with automatic link updates (and undo), trash with restore, attachments by paste, drop or upload, daily notes and templates.
 - **Phone-first.** A responsive layout tuned for iPhone Safari (keyboard-aware editor, toolbar, drawer, 44 px targets), dark and light themes.
 - **Zero-touch deploys.** A push to `main` is tested, built for amd64 and arm64, and running on the server within about five minutes.
+- **Nightly backups.** Optional, encrypted restic snapshots of the vault, its history and the Tailscale identity to a second disk and to Backblaze B2 or Amazon S3 (7 daily, 4 weekly, 12 monthly), consistent because the app is stopped for the seconds the snapshot takes, with ntfy alerts (naming the failed steps, never your files) and a documented restore drill.
+- **History mirror on GitHub.** Optionally, the vault's git history is pushed to a private GitHub repository about 10 minutes after you stop editing, with a token from a compose secret; fast-forward only, so a mirror that has diverged is reported, never overwritten. Failures, and a mirror whose settings cannot be used, show in the status bar; failures are retried with backoff.
+- **Small history, large files kept.** Files over 25 MB (configurable), hidden ones included, stay in the vault and in backups but out of git history; the History panel says why, and replacing such a file keeps the old one in the trash.
+- **Status page and app alerts.** `/x/status` shows the server at a glance: problems first, then version and uptime, history (commits, failures, mirror, files kept out of it), the vault and index, disk space, the last backup, live-sync connections and the alerts. The app pushes its own problems (history not saved, mirror failing, disk full, …) to ntfy, deduplicated and rate-limited, without note content; the ntfy settings live outside the vault in `/data/secrets/ntfy.json`.
+- **Fast restarts.** The image runs on JDK 25 with an AOT cache made at build time, so a deploy or a nightly backup restart is back up sooner.
 
 ## Architecture
 
-A Spring Boot 4 backend (Java 21) serves the REST and SSE API ([docs/API.md](docs/API.md)) and the React 19 + Vite single-page app from one Docker image. The vault is a directory of Markdown files on a Docker volume: an in-memory index (links, tags, full-text search) is built at startup and kept current by a file watcher, and JGit commits every change into the vault's own `.git`. There is no database and no app login. In production the app listens only on `127.0.0.1:8080` inside the network namespace of a kernel-mode Tailscale container, whose `tailscale serve` terminates HTTPS and passes the caller's Tailscale identity; the tailnet plus host and identity allowlists are the security boundary. Watchtower on the server pulls each new image from GHCR and restarts the app. The full design is in [docs/DESIGN.md](docs/DESIGN.md).
+A Spring Boot 4 backend (Java 21 bytecode, run on JDK 25) serves the REST and SSE API ([docs/API.md](docs/API.md)) and the React 19 + Vite single-page app from one Docker image. The vault is a directory of Markdown files on a Docker volume: an in-memory index (links, tags, full-text search) is built at startup and kept current by a file watcher, and JGit commits every change into the vault's own `.git`. There is no database and no app login. In production the app listens only on `127.0.0.1:8080` inside the network namespace of a kernel-mode Tailscale container, whose `tailscale serve` terminates HTTPS and passes the caller's Tailscale identity; the tailnet plus host and identity allowlists are the security boundary. Watchtower on the server pulls each new image from GHCR and restarts the app. The full design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 | Path | What |
 |---|---|
 | `backend/` | Spring Boot app (`com.rjgehan.notes`), Maven wrapper |
 | `frontend/` | React + TypeScript + Vite SPA |
-| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower), Tailscale serve config, `.env.example`, and `casaos-compose.yml` for CasaOS |
+| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, the empty mirror-token placeholder in `mirror/`, Tailscale serve config, `.env.example`, and for CasaOS `casaos-compose.yml` plus the optional `casaos-backup-compose.yml` |
 | `.github/` | CI, image publishing, Dependabot |
-| `Dockerfile` | Three stages: frontend build, backend build, JRE runtime |
+| `Dockerfile` | Three stages: frontend build, backend build (JDK 21), JDK 25 runtime with an AOT cache |
 | `docs/` | Design, API contract, deployment runbook, roadmap |
 
 ## Local development (Windows)
@@ -72,5 +77,5 @@ Rolling back, pausing updates, backups and everything else on the server side ar
 - [docs/DESIGN.md](docs/DESIGN.md): technical design (decisive)
 - [docs/API.md](docs/API.md): the REST and SSE contract between backend and frontend
 - [docs/DEPLOY.md](docs/DEPLOY.md): homeserver runbook (first deploy, operations, troubleshooting)
-- [docs/CASAOS.md](docs/CASAOS.md): installing on CasaOS by pasting one compose file
+- [docs/CASAOS.md](docs/CASAOS.md): installing on CasaOS by pasting one compose file, and its optional alerts, mirror and backups
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes after v1

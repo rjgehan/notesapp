@@ -10,7 +10,8 @@ public record StatusChangedEvent(Reason reason) implements VaultEvent {
 		@JsonProperty("git") GIT,
 		@JsonProperty("watcher") WATCHER,
 		@JsonProperty("settings") SETTINGS,
-		@JsonProperty("disk") DISK
+		@JsonProperty("disk") DISK,
+		@JsonProperty("mirror") MIRROR
 
 	}
 

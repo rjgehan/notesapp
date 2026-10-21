@@ -73,11 +73,64 @@ export interface StatusResponse {
   index: { builtInMs: number; lastRescanAt: IsoInstant | null };
   git: { enabled: boolean; state: 'ready' | 'importing' | 'failing' | 'disabled'; reason: string | null;
          head: string | null; pendingPaths: number; nextCommitAt: IsoInstant | null;
-         lastCommitAt: IsoInstant | null; lastError: string | null; failingSince: IsoInstant | null };
+         lastCommitAt: IsoInstant | null; lastError: string | null; failingSince: IsoInstant | null;
+         largeFiles: { limitBytes: number | null; files: number; bytes: number } };   // kept out of history (§14.1)
   watcher: { mode: 'inotify' | 'polling' | 'disabled' };
   disk: { freeBytes: number; repoBytes: number | null };
   settings: { readOnly: boolean; reason: string | null };
+  mirror: MirrorStatus;
 }
+
+export interface MirrorStatus {
+  state: 'disabled' | 'ready' | 'failing' | 'diverged';
+  reason: string | null;          // why it is disabled: "not configured", "history is disabled" or a configuration error
+  remote: string | null;          // the mirror's URL; never contains credentials
+  branch: string | null;          // the branch pushed, e.g. "main"
+  pushing: boolean;
+  pushedCommit: string | null;    // the last commit the mirror is known to have (this server run)
+  lastPushAt: IsoInstant | null;  // the last successful push (this server run)
+  nextPushAt: IsoInstant | null;  // null when up to date, disabled or diverged
+  lastError: string | null;
+  failingSince: IsoInstant | null;
+}
+
+// ---------- status page (§6.5) ----------
+export interface StatusDetails {
+  runtime: { javaVersion: string; javaVendor: string; aotCache: 'in-use' | 'not-used' | 'off' | 'unknown';
+             heapUsedBytes: number; heapMaxBytes: number; processors: number };
+  events: { clients: number };    // open live-sync (SSE) connections: browser tabs and app windows
+  git: { commits: number | null;  // in the history; null when history is off
+         commitsThisRun: number; failedCommitsThisRun: number;
+         largeFiles: Array<{ path: VaultPath; bytes: number }>;   // kept out of history, largest first, at most 100
+         largeFilesTruncated: boolean };
+  disk: { totalBytes: number | null };
+  backup: BackupStatus;
+  alerts: AlertsStatus;
+}
+
+export interface BackupStatus {
+  state: 'unknown' | 'ok' | 'failed' | 'stale';
+  reason: string | null;          // why it is unknown
+  lastRun: IsoInstant | null;
+  lastSuccess: IsoInstant | null;
+  snapshot: string | null;        // the restic snapshot id of the last run
+  offsite: string | null;         // 'ok', 'off' or 'failed'
+  failures: string | null;        // the failed steps of the last run
+}
+
+export interface AlertsStatus {
+  state: 'off' | 'on' | 'error';
+  reason: string | null;          // why it is off, or what is wrong with ntfy.json
+  server: string | null;          // the ntfy server; never the topic or the token
+  sent: number;                   // this server run
+  dropped: number;                // held back by the rate limit, this server run
+  lastSentAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+  recent: Array<{ marker: string; count: number; lastAt: IsoInstant }>;   // logged since the server started
+}
+
+export interface AlertTestResult { sent: boolean; error: string | null }   // POST /api/alerts/test (§6.6)
 
 // ---------- settings (§5) ----------
 export interface FilesSettings {
@@ -251,7 +304,14 @@ export interface HistoryEntry {
   change: ChangeType;
   renamedFrom: VaultPath | null;
 }
-export interface HistoryResponse { path: VaultPath; pending: boolean; hasMore: boolean; entries: HistoryEntry[] }
+export interface HistoryResponse {
+  path: VaultPath;
+  pending: boolean;
+  hasMore: boolean;
+  entries: HistoryEntry[];
+  excluded: HistoryExclusion | null;  // set when new versions of the file are not kept in history
+}
+export interface HistoryExclusion { reason: 'large-file'; size: number; limitBytes: number }
 export interface HistoryContent {
   commitId: string;
   path: VaultPath;
@@ -294,7 +354,7 @@ export interface HistoryCommittedEvent {
   truncated: boolean;
 }
 export interface SettingsChangedEvent { version: Version; origin: string | null }
-export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' }
+export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' | 'mirror' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
 
 export interface VaultEventMap {

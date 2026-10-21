@@ -29,6 +29,22 @@ jobs:
           cache-dependency-path: backend/pom.xml
       - run: sh ./mvnw -B -ntp verify
 
+  backend-jdk25:                             # the jar is built for Java 21 but runs on JDK 25 in the image (DESIGN §7.1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - run: sh ./mvnw -B -ntp verify
+
   frontend:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -49,6 +65,34 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  deploy-scripts:                            # deploy/backup runs only on homeserver: test it here, in its own images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ShellCheck
+        run: |
+          command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --shell=sh --severity=warning deploy/backup/*.sh deploy/backup/test/*.sh deploy/backup/test/fake-bin/*
+      - name: CasaOS composes (valid, and pinned to the images Dependabot keeps current in docker-compose.yml)
+        run: |
+          for f in deploy/casaos-compose.yml deploy/casaos-backup-compose.yml; do docker compose -f "$f" config --quiet; done
+          for image in $(sed -n 's/^ *image: \([^ ]*@sha256:[0-9a-f]*\).*/\1/p' deploy/casaos-*compose.yml); do
+            grep -qF "image: $image" deploy/docker-compose.yml || { echo "::error::$image differs from deploy/docker-compose.yml"; exit 1; }
+          done
+      - name: nightly.sh and scheduler.sh (dash)
+        run: sh deploy/backup/test/run-tests.sh sh
+      - name: nightly.sh and scheduler.sh (BusyBox, in the backup-scheduler image)
+        run: |
+          image=$(sed -n 's/^ *image: \(docker:[^ ]*\).*/\1/p' deploy/docker-compose.yml)
+          docker run --rm -v "$PWD/deploy/backup:/backup:ro" --entrypoint sh "$image" /backup/test/run-tests.sh sh
+      - name: restic-job.sh against restic (in the backup image)
+        run: |
+          image=$(sed -n 's/^ *image: \(restic\/restic:[^ ]*\).*/\1/p' deploy/docker-compose.yml)
+          docker run --rm -v "$PWD/deploy/backup:/backup:ro" --entrypoint sh "$image" /backup/test/restic-job-test.sh
+
   docker-build:                              # the Dockerfile is tested before anything reaches main
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
@@ -66,7 +110,7 @@ jobs:
           cache-from: type=gha
 
   publish:
-    needs: [backend, frontend]
+    needs: [backend, backend-jdk25, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'   # push, weekly schedule, manual
     uses: ./.github/workflows/publish.yml
     permissions:

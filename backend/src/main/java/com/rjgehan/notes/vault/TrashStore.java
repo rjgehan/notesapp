@@ -161,6 +161,19 @@ public class TrashStore {
 	 */
 	public Item trash(String fromDisk, String originalPath, EntryType type, String deletedBy, long size,
 			int fileCount) throws IOException {
+		return place(fromDisk, originalPath, type, deletedBy, size, fileCount, false);
+	}
+
+	/**
+	 * Puts a copy of the file at {@code fromDisk} in the trash and records it, leaving the file in place: the version
+	 * of a file kept out of history that an overwrite or a restore is about to replace (DESIGN §5.8).
+	 */
+	public Item keepCopy(String fromDisk, String originalPath, String deletedBy, long size) throws IOException {
+		return place(fromDisk, originalPath, EntryType.FILE, deletedBy, size, 1, true);
+	}
+
+	private Item place(String fromDisk, String originalPath, EntryType type, String deletedBy, long size,
+			int fileCount, boolean copy) throws IOException {
 		requireLock();
 		Path trash = this.fs.resolve(TRASH_DIR);
 		BasicFileAttributes trashAttributes = VaultFs.attributes(trash);
@@ -182,7 +195,10 @@ public class TrashStore {
 				continue;
 			}
 			try {
-				if (type == EntryType.FILE) {
+				if (copy) {
+					this.fs.copyExclusive(fromDisk, TRASH_DIR + "/" + candidate);
+				}
+				else if (type == EntryType.FILE) {
 					this.fs.moveExclusive(fromDisk, TRASH_DIR + "/" + candidate);
 				}
 				else {

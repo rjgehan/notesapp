@@ -1,7 +1,9 @@
 // Every v1 view, panel and command, registered through the public extension points (DESIGN §6.8).
 import { openSearchPanel } from '@codemirror/search';
 import {
+  Activity,
   CalendarDays,
+  CloudUpload,
   Command as CommandIcon,
   FileBraces,
   FileImage,
@@ -36,6 +38,7 @@ import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../feat
 import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
 import { navigateTo, openSearch } from '../features/navigation';
+import { mirrorConfigured, pushMirrorNow } from '../features/mirror';
 import { toggleNoteMode } from '../features/noteMode';
 import { basenameOf, folderOf, isNotePath } from '../features/paths';
 import { promptText } from '../state/dialogs';
@@ -45,7 +48,7 @@ import { useUi } from '../state/ui';
 import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
 import { onViewsChanged, registeredViews, viewFor } from '../views/registry';
-import { registerCommand, registerPanel, registerView } from './index';
+import { registerCommand, registerPage, registerPanel, registerView } from './index';
 
 let registered = false;
 
@@ -291,9 +294,12 @@ export function registerBuiltins(): void {
       }
     },
   });
+  registerCommand({ id: 'mirror.push', name: 'Push history to the mirror now', icon: CloudUpload, when: () => mirrorConfigured(), run: pushMirrorNow });
   registerCommand({ id: 'nav.back', name: 'Navigate back', hotkey: 'Mod-Alt-ArrowLeft', run: () => window.history.back() });
   registerCommand({ id: 'nav.forward', name: 'Navigate forward', hotkey: 'Mod-Alt-ArrowRight', run: () => window.history.forward() });
   registerCommand({ id: 'trash.open', name: 'Open trash', icon: Trash, run: () => goTo('/trash') });
+  // The server at a glance (ROADMAP item 38, DESIGN §6.18.1): /x/status, a ribbon and drawer entry, and "Open Status".
+  registerPage({ route: 'status', title: 'Status', icon: Activity, load: () => import('../components/pages/StatusPage') });
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

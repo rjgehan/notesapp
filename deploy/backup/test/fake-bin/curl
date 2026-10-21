@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fake curl for run-tests.sh: logs the call (one line, newlines in the message turned into '|').
+printf 'curl %s\n' "$*" | tr '\n' '|' | sed 's/|$//' >>"$FAKE_DIR/calls"
+echo >>"$FAKE_DIR/calls"
+exit "${FAKE_HTTP_FAIL:-0}"

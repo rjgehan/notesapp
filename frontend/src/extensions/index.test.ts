@@ -2,6 +2,7 @@ import { FileText } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 import { getCommand, runCommand } from '../features/commands';
 import { registerBuiltins } from './builtins';
+import { useUi } from '../state/ui';
 import { pageRoute, registerPage, registeredPages, registerView } from './index';
 
 describe('registerView create (DESIGN §6.8)', () => {
@@ -30,5 +31,14 @@ describe('registerPage (DESIGN §6.8)', () => {
     expect(getCommand('page.tasks/today')?.name).toBe('Open Today’s tasks');
     runCommand('page.tasks/today', { activePath: null });
     expect(location.pathname).toBe('/x/tasks/today');
+  });
+
+  it('closes the phone drawer when its entry opens the page', () => {
+    const page = { route: 'status-test', title: 'Status test', icon: FileText, load: () => Promise.resolve({ default: () => null }) };
+    registerPage(page);
+    useUi.getState().setDrawerOpen(true);
+    runCommand('page.status-test', { activePath: null });
+    expect(useUi.getState().drawerOpen).toBe(false);
+    expect(location.pathname).toBe('/x/status-test');
   });
 });

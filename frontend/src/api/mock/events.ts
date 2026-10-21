@@ -27,6 +27,11 @@ export class MockEventHub {
     return `${this.bootId}.${this.seq}`;
   }
 
+  /** Open streams, for the status page. */
+  clientCount(): number {
+    return this.streams.size;
+  }
+
   publish(name: VaultEventName | string, data: unknown, origin: string | null, suppressible = true): void {
     const ev: StoredEvent = { id: `${this.bootId}.${++this.seq}`, seq: this.seq, name, data, origin, suppressible };
     this.ring.push(ev);

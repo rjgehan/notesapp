@@ -28,18 +28,60 @@ public record NotesProperties(
 		@DefaultValue Identity identity,
 		@DefaultValue Security security,
 		@DefaultValue TailscaleWatchdog tailscaleWatchdog,
+		@DefaultValue Mirror mirror,
+		@DefaultValue Alerts alerts,
+		@DefaultValue Backup backup,
+		@DefaultValue("/data/secrets") Path secretsDir,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
 				"yml" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
 		@DefaultValue("dev") String buildSha) {
 
+	/**
+	 * {@code largeFileThreshold}: files larger than this stay in the vault but out of git history (DESIGN §5.8,
+	 * ROADMAP item 23); {@code 0} versions every file.
+	 */
 	public record Git(
 			@DefaultValue("true") boolean enabled,
 			@DefaultValue("30s") Duration commitQuietPeriod,
 			@DefaultValue("5m") Duration commitMaxDelay,
 			@DefaultValue("NotesApp") String committerName,
 			@DefaultValue("notesapp@notes") String committerEmail,
-			@DefaultValue("0 30 3 * * *") String gcCron) {
+			@DefaultValue("0 30 3 * * *") String gcCron,
+			@DefaultValue("25MB") DataSize largeFileThreshold) {
+	}
+
+	/**
+	 * The optional push mirror of the vault's history (DESIGN §5.8, ROADMAP item 2). Off while {@code url} is empty.
+	 * {@code tokenFile} holds the access token (a compose secret); the token itself is never configured directly.
+	 */
+	public record Mirror(
+			@DefaultValue("") String url,
+			@DefaultValue("") String tokenFile,
+			@DefaultValue("x-access-token") String username,
+			@DefaultValue("10m") Duration delay,
+			@DefaultValue("1h") Duration maxDelay,
+			@DefaultValue("60s") Duration timeout) {
+	}
+
+	/**
+	 * App-error alerts (DESIGN §5.18, ROADMAP item 38): the stable log markers pushed to ntfy when
+	 * {@code <secrets-dir>/ntfy.json} configures it. A marker is sent at most once per {@code repeatAfter} (repeats are
+	 * summed up in one follow-up), and at most {@code maxPerHour} alerts are sent in any hour.
+	 */
+	public record Alerts(
+			@DefaultValue("1h") Duration repeatAfter,
+			@DefaultValue("10") int maxPerHour) {
+	}
+
+	/**
+	 * The nightly backups as the status page shows them (ROADMAP items 1 and 38): {@code statusFile} is the backup
+	 * run's {@code status.json}, mounted read-only from the {@code backup-state} volume; a last success older than
+	 * {@code staleAfter} is shown as stale.
+	 */
+	public record Backup(
+			@DefaultValue("/backup-state/status.json") Path statusFile,
+			@DefaultValue("36h") Duration staleAfter) {
 	}
 
 	public record Watcher(

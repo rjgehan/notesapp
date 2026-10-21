@@ -181,6 +181,24 @@ public class VaultIndex {
 		});
 	}
 
+	/** An indexed file with its on-disk path and size. */
+	public record SizedFile(String path, String disk, long size) {
+	}
+
+	/** Every indexed file larger than {@code bytes}, in path order (the large-file policy, DESIGN §5.8). */
+	public List<SizedFile> filesLargerThan(long bytes) {
+		return read(() -> {
+			List<SizedFile> found = new ArrayList<>();
+			for (FileRecord record : this.files.values()) {
+				if (record.size() > bytes) {
+					found.add(new SizedFile(record.path(), this.diskNames.getOrDefault(record.path(), record.path()),
+							record.size()));
+				}
+			}
+			return found;
+		});
+	}
+
 	/** Every indexed folder at any depth under {@code folder}, outermost first. */
 	public List<String> foldersUnder(String folder) {
 		return read(() -> {

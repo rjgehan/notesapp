@@ -88,10 +88,36 @@ public class TailscaleWatchdog implements SmartLifecycle {
 		this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
 	}
 
-	private static Path exitsFile(Path vaultDir) {
+	/** Where exits are recorded: {@code .watchdog-exits} next to the vault ({@code /data/.watchdog-exits}). */
+	public static Path exitsFile(Path vaultDir) {
 		Path vault = vaultDir.toAbsolutePath().normalize();
 		Path parent = vault.getParent();
 		return ((parent != null) ? parent : vault).resolve(EXITS_FILE);
+	}
+
+	/** The last recorded exit, or null when there is none (or the file cannot be read). */
+	public static @Nullable Instant lastExit(Path exitsFile) {
+		Instant last = null;
+		try {
+			if (!Files.isRegularFile(exitsFile)) {
+				return null;
+			}
+			for (String line : Files.readAllLines(exitsFile, StandardCharsets.UTF_8)) {
+				try {
+					Instant at = Instant.parse(line.strip());
+					if (last == null || at.isAfter(last)) {
+						last = at;
+					}
+				}
+				catch (DateTimeParseException ex) {
+					// A damaged line counts as no exit.
+				}
+			}
+		}
+		catch (IOException ex) {
+			return null;
+		}
+		return last;
 	}
 
 	@Override

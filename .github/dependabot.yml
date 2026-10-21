@@ -1,6 +1,6 @@
 # Weekly and grouped, so it produces about one PR per ecosystem per week.
 # Major versions arrive as their own PRs (npm, maven) or are ignored where the design pins a
-# major line (Node 24, Java 21), so one incompatible major never blocks the routine updates.
+# major line (Node 24; Java 21 to build, 25 to run), so one incompatible major never blocks the routine updates.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -15,10 +15,10 @@ updates:
     ignore:
       - dependency-name: node              # Node 24 here and in ci.yml; move both together, by hand
         update-types: ['version-update:semver-major']
-      - dependency-name: eclipse-temurin   # Java 21 is the baseline (--release 21)
+      - dependency-name: eclipse-temurin   # JDK 21 builds (--release 21), JDK 25 runs (DESIGN §7.1); majors by hand
         update-types: ['version-update:semver-major']
 
-  - package-ecosystem: docker-compose      # watchtower image (tag + digest pin); tailscale follows :stable
+  - package-ecosystem: docker-compose      # watchtower, restic and docker:cli images (tag + digest pins); tailscale follows :stable
     directory: /deploy
     schedule: { interval: weekly }
     groups: { compose: { patterns: ['*'] } }

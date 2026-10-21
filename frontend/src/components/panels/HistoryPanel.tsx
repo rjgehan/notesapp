@@ -1,14 +1,16 @@
 // History panel (DESIGN §6.11), a lazy chunk: the file's commits (following renames), the pending
-// batch with "Commit now", and the version view with diff, full text and restore.
-import { GitCommitHorizontal, History } from 'lucide-react';
+// batch with "Commit now", the version view with diff, full text and restore, and why a file over
+// the large-file threshold has no new versions (ROADMAP item 23).
+import { GitCommitHorizontal, HardDrive, History } from 'lucide-react';
 import { lazy, Suspense, useState } from 'react';
 import { errorMessage } from '../../api/client';
 import { api } from '../../api/endpoints';
 import { useHistory } from '../../api/hooks';
 import { queryClient } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
-import type { HistoryEntry } from '../../api/types';
-import { formatDateTime, formatRelative } from '../../features/format';
+import type { HistoryEntry, HistoryExclusion } from '../../api/types';
+import { formatBytes, formatDateTime, formatRelative } from '../../features/format';
+import { formatLimit } from '../../features/largeFiles';
 import { displayName } from '../../features/paths';
 import { toastError } from '../../features/errors';
 
@@ -52,6 +54,19 @@ function PendingRow() {
   );
 }
 
+/** Why a file over the large-file threshold has no new versions in history (DESIGN §6.11). */
+function ExcludedNote({ excluded }: { excluded: HistoryExclusion }) {
+  return (
+    <div className="history-excluded" role="note">
+      <HardDrive size={16} aria-hidden />
+      <p>
+        This file is {formatBytes(excluded.size)}, larger than the {formatLimit(excluded.limitBytes)} limit for history, so its versions are not
+        kept in git. The file itself stays in the vault and in backups, and replacing it in NotesApp moves the old one to the trash.
+      </p>
+    </div>
+  );
+}
+
 function HistoryList({ path }: { path: string }) {
   const history = useHistory(path);
   const [selected, setSelected] = useState<HistoryEntry | null>(null);
@@ -60,13 +75,17 @@ function HistoryList({ path }: { path: string }) {
   const pages = history.data.pages;
   const entries = pages.flatMap((p) => p.entries);
   const pending = pages[0]?.pending ?? false;
+  const excluded = pages[0]?.excluded ?? null;
   return (
     <div className="history">
+      {excluded && <ExcludedNote excluded={excluded} />}
       {entries.length === 0 && !pending ? (
-        <div className="panel-empty">
-          <History size={28} aria-hidden />
-          <p>No history for this file yet.</p>
-        </div>
+        !excluded && (
+          <div className="panel-empty">
+            <History size={28} aria-hidden />
+            <p>No history for this file yet.</p>
+          </div>
+        )
       ) : (
         <ul className="history-list" aria-label={`History of ${displayName(path)}`}>
           {pending && <PendingRow />}

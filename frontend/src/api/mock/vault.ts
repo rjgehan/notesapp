@@ -6,6 +6,7 @@ import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, newPathError,
 import { splitWikiBody } from '../../features/syntax';
 import { DEFAULT_SETTINGS } from '../../features/settings';
 import type {
+  AlertTestResult,
   AttachmentResult,
   BacklinkGroup,
   BacklinksResponse,
@@ -18,6 +19,7 @@ import type {
   HistoryContent,
   HistoryEntry,
   HistoryResponse,
+  MirrorStatus,
   HistoryRestoreRequest,
   HistoryRestoreResult,
   Mention,
@@ -33,6 +35,7 @@ import type {
   Settings,
   SettingsResponse,
   SettingsUpdateRequest,
+  StatusDetails,
   StatusResponse,
   TagCount,
   TemplatesResponse,
@@ -49,6 +52,8 @@ import { seedFiles } from './seed';
 import { blobId } from './sha1';
 
 const TEXT_LIMIT = 5 * 1024 * 1024;
+/** The server's default large-file threshold (DESIGN §5.8): larger files are kept out of history. */
+const LARGE_FILE_LIMIT = 25 * 1024 * 1024;
 const TEXT_EXTENSIONS = new Set('txt markdown json canvas excalidraw sheet tasks csv tsv yaml yml'.split(' '));
 const KIND_BY_EXT: Record<string, FileKind> = {};
 for (const e of 'png jpg jpeg gif webp avif bmp svg'.split(' ')) KIND_BY_EXT[e] = 'image';
@@ -330,6 +335,7 @@ export class MockVault {
   getStatus(): StatusResponse {
     const files = [...this.files.values()];
     const last = this.commits[this.commits.length - 1];
+    const large = files.filter((f) => f.bytes.length > LARGE_FILE_LIMIT);
     return {
       appVersion: '0.0.1-mock',
       buildSha: this.hub.buildSha,
@@ -355,11 +361,63 @@ export class MockVault {
         lastCommitAt: last ? isoMs(last.time) : null,
         lastError: null,
         failingSince: null,
+        largeFiles: {
+          limitBytes: LARGE_FILE_LIMIT,
+          files: large.length,
+          bytes: large.reduce((n, f) => n + f.bytes.length, 0),
+        },
       },
       watcher: { mode: 'disabled' },
       disk: { freeBytes: 50 * 1024 ** 3, repoBytes: null },
       settings: { readOnly: false, reason: null },
+      mirror: this.mirrorStatus(),
     };
+  }
+
+  /** What a server without backups or ntfy reports (API.md §6.5). */
+  getStatusDetails(): StatusDetails {
+    const large = [...this.files.values()]
+      .filter((f) => f.bytes.length > LARGE_FILE_LIMIT)
+      .sort((a, b) => b.bytes.length - a.bytes.length);
+    return {
+      runtime: { javaVersion: 'mock', javaVendor: 'in-memory', aotCache: 'off', heapUsedBytes: 0, heapMaxBytes: 0, processors: 1 },
+      events: { clients: this.hub.clientCount() },
+      git: {
+        commits: this.commits.length,
+        commitsThisRun: this.commits.length,
+        failedCommitsThisRun: 0,
+        largeFiles: large.slice(0, 100).map((f) => ({ path: f.path, bytes: f.bytes.length })),
+        largeFilesTruncated: large.length > 100,
+      },
+      disk: { totalBytes: 100 * 1024 ** 3 },
+      backup: { state: 'unknown', reason: 'The mock has no backups', lastRun: null, lastSuccess: null, snapshot: null, offsite: null, failures: null },
+      alerts: { state: 'off', reason: 'not configured', server: null, sent: 0, dropped: 0, lastSentAt: null, lastError: null, lastErrorAt: null, recent: [] },
+    };
+  }
+
+  /** The mock has no ntfy.json, like a server without alerts (API.md §6.6). */
+  sendTestAlert(): AlertTestResult {
+    return fail('bad-request', 'App alerts are off: not configured');
+  }
+
+  /** The mock has no mirror: it reports what an unconfigured server does. */
+  private mirrorStatus(): MirrorStatus {
+    return {
+      state: 'disabled',
+      reason: 'not configured',
+      remote: null,
+      branch: null,
+      pushing: false,
+      pushedCommit: null,
+      lastPushAt: null,
+      nextPushAt: null,
+      lastError: null,
+      failingSince: null,
+    };
+  }
+
+  pushMirror(): MirrorStatus {
+    return fail('bad-request', 'The mirror is off: not configured');
   }
 
   // ---------- tree and text files ----------
@@ -986,7 +1044,9 @@ export class MockVault {
       });
       if (change.renamedFrom) current = change.renamedFrom;
     }
-    return { path, pending: false, hasMore: entries.length > offset + limit, entries: entries.slice(offset, offset + limit) };
+    const size = this.files.get(path)?.bytes.length ?? 0;
+    const excluded = size > LARGE_FILE_LIMIT ? { reason: 'large-file' as const, size, limitBytes: LARGE_FILE_LIMIT } : null;
+    return { path, pending: false, hasMore: entries.length > offset + limit, entries: entries.slice(offset, offset + limit), excluded };
   }
 
   private bytesAt(path: string, commit: string): Uint8Array {

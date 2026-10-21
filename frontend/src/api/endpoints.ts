@@ -2,6 +2,7 @@
 // dev-only in-memory mock replaced it at startup (VITE_MOCK_API=1).
 import { apiFetch, query } from './client';
 import type {
+  AlertTestResult,
   AttachmentResult,
   BacklinksResponse,
   CommitResult,
@@ -13,6 +14,7 @@ import type {
   HistoryRestoreRequest,
   HistoryRestoreResult,
   MeResponse,
+  MirrorStatus,
   MoveRequest,
   MoveResult,
   NoteMeta,
@@ -25,6 +27,7 @@ import type {
   SearchResponse,
   SettingsResponse,
   SettingsUpdateRequest,
+  StatusDetails,
   StatusResponse,
   TagsResponse,
   TemplatesResponse,
@@ -64,6 +67,8 @@ export interface SearchOptions {
 export interface Endpoints {
   getMe(): Promise<MeResponse>;
   getStatus(): Promise<StatusResponse>;
+  getStatusDetails(): Promise<StatusDetails>;
+  sendTestAlert(): Promise<AlertTestResult>;
   getSettings(): Promise<SettingsResponse>;
   putSettings(req: SettingsUpdateRequest): Promise<SettingsResponse>;
   getTree(): Promise<TreeResponse>;
@@ -89,6 +94,7 @@ export interface Endpoints {
   getHistoryContent(path: string, commit: string): Promise<HistoryContent>;
   restoreHistory(req: HistoryRestoreRequest): Promise<HistoryRestoreResult>;
   commitHistory(): Promise<CommitResult>;
+  pushMirror(): Promise<MirrorStatus>;
   getTemplates(): Promise<TemplatesResponse>;
   /** Content-addressed raw URL (API.md §9.1). */
   rawUrl(entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>, opts?: { download?: boolean }): string;
@@ -102,6 +108,8 @@ const p = (path: string) => ({ path });
 export const httpEndpoints: Endpoints = {
   getMe: () => apiFetch('/api/me'),
   getStatus: () => apiFetch('/api/status'),
+  getStatusDetails: () => apiFetch('/api/status/details'),
+  sendTestAlert: () => apiFetch('/api/alerts/test', { method: 'POST' }),
   getSettings: () => apiFetch('/api/settings'),
   putSettings: (req) => apiFetch('/api/settings', { method: 'PUT', json: req }),
   getTree: () => apiFetch('/api/tree'),
@@ -140,6 +148,7 @@ export const httpEndpoints: Endpoints = {
   getHistoryContent: (path, commit) => apiFetch('/api/history/content' + query({ path, commit })),
   restoreHistory: (req) => apiFetch('/api/history/restore', { method: 'POST', json: req }),
   commitHistory: () => apiFetch('/api/history/commit', { method: 'POST' }),
+  pushMirror: () => apiFetch('/api/mirror/push', { method: 'POST' }),
   getTemplates: () => apiFetch('/api/templates'),
   rawUrl: (entry, opts) =>
     '/api/files/raw?path=' +

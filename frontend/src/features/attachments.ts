@@ -15,6 +15,7 @@ import { applyWriteResult } from '../sync/treePatch';
 import { dayjs } from './dates';
 import { extensionOf, joinPath, lastSegment } from './paths';
 import { toastError } from './errors';
+import { formatLimit, isLargeFile, largeFileLimit } from './largeFiles';
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -117,9 +118,15 @@ export async function uploadToFolder(folder: string, files: readonly File[]): Pr
       continue;
     }
     const textual = existing.kind === 'note' || existing.kind === 'text';
+    const limit = largeFileLimit();
+    const note = textual
+      ? ' Notes and text files cannot be replaced by an upload.'
+      : limit !== null && isLargeFile(existing.size)
+        ? ` It is larger than ${formatLimit(limit)}, so it is not in history: replacing it moves it to the trash.`
+        : '';
     const choice = await chooseAction({
       title: 'File already exists',
-      message: `“${existing.path}” already exists.${textual ? ' Notes and text files cannot be replaced by an upload.' : ''}`,
+      message: `“${existing.path}” already exists.${note}`,
       choices: [
         { id: 'skip', label: 'Skip' },
         { id: 'rename', label: 'Keep both', primary: textual },

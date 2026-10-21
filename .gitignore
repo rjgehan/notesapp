@@ -4,6 +4,7 @@ dev-vault/
 # Secrets and per-host overrides on homeserver (docs/DEPLOY.md)
 deploy/.env
 deploy/docker-compose.override.yml
+deploy/secrets/
 deploy/*.local.yml
 
 # Build output and dependencies

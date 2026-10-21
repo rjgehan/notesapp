@@ -275,6 +275,9 @@ class CommitBatcherTest {
 		assertThat(this.batcher.status().lastError()).isNull();
 		assertThat(this.vault.hub.published).filteredOn(StatusChangedEvent.class::isInstance).hasSize(2);
 		assertThat(commits("x.md")).hasSize(1);
+		// The status page's counters for this run: two failed attempts, then one commit.
+		assertThat(this.batcher.status().failedCommitsThisRun()).isEqualTo(2);
+		assertThat(this.batcher.status().commitsThisRun()).isEqualTo(1);
 	}
 
 	@Test

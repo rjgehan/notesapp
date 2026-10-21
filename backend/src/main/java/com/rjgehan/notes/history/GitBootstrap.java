@@ -14,8 +14,9 @@ import org.springframework.stereotype.Component;
 /**
  * The startup commit, run asynchronously after readiness so a large import never delays the health check (DESIGN
  * §5.17 step 8): {@code Initial commit} for a fresh vault, {@code Import existing vault (N files)} for an existing
- * folder of notes, or {@code Changes made while NotesApp was stopped} when the tree is dirty against {@code HEAD}.
- * While it runs, history reports {@code importing} and the batcher holds its commits.
+ * folder of notes, or {@code Changes made while NotesApp was stopped} when the tree is dirty against {@code HEAD}
+ * (or git still tracks a file over the large-file threshold, which stops being tracked). While it runs, history
+ * reports {@code importing} and the batcher holds its commits.
  */
 @Component
 public class GitBootstrap {
@@ -62,7 +63,9 @@ public class GitBootstrap {
 						fresh ? "Initial commit" : "Import existing vault (" + changes.size() + " files)", null),
 						this.app));
 			}
-			else if (this.git.isDirty()) {
+			else if (this.git.isDirty() || this.git.tracksLargeFiles()) {
+				// A tracked file over the large-file threshold (an imported repository, or a lowered threshold) stops
+				// being tracked here; commitAll describes it in the message.
 				publish(this.git.commitAll(
 						(changes) -> new GitStore.Message("Changes made while NotesApp was stopped",
 								CommitBatcher.batchMessage(changes, Author.EXTERNAL).body()),

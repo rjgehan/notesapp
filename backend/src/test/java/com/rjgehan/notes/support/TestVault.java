@@ -24,6 +24,7 @@ import com.rjgehan.notes.history.Author;
 import com.rjgehan.notes.history.CommitBatcher;
 import com.rjgehan.notes.history.GitStore;
 import com.rjgehan.notes.history.HistoryService;
+import com.rjgehan.notes.history.LargeFiles;
 import com.rjgehan.notes.identity.Identity;
 import com.rjgehan.notes.index.FileIndexer;
 import com.rjgehan.notes.index.IndexBuilder;
@@ -102,6 +103,8 @@ public final class TestVault implements AutoCloseable {
 
 	public final TrashStore trashStore;
 
+	public final LargeFiles largeFiles;
+
 	public final TrashService trash;
 
 	public final MoveService moves;
@@ -120,19 +123,21 @@ public final class TestVault implements AutoCloseable {
 		this.paths = new VaultPaths(this.index, this.fs);
 		this.indexer = new FileIndexer(this.fs, this.kinds);
 		this.hub = new RecordingEventHub(this.properties, this.clock);
-		this.git = new FailingGitStore(this.fs, this.properties, this.clock);
+		this.largeFiles = new LargeFiles(this.index, this.properties);
+		this.git = new FailingGitStore(this.fs, this.properties, this.clock, this.largeFiles);
+		this.trashStore = new TrashStore(this.fs, JSON, this.clock);
 		this.batcher = new CommitBatcher(this.git, this.index, this.fs, this.hub, this.clock, this.properties);
 		this.reconciler = new VaultReconciler(this.locks, this.fs, this.index, this.indexer, this.batcher, this.hub,
 				this.clock);
 		this.files = new FileService(this.paths, this.fs, this.locks, this.index, this.kinds, this.indexer,
-				this.reconciler, this.batcher, this.hub, this.moveLog, this.properties);
+				this.reconciler, this.batcher, this.hub, this.moveLog, this.trashStore, this.largeFiles,
+				this.properties);
 		this.folders = new FolderService(this.paths, this.locks, this.index, this.files, this.hub);
 		this.history = new HistoryService(this.git, this.batcher, this.paths, this.index, this.locks, this.fs,
-				this.kinds, this.files, this.moveLog, this.hub);
+				this.kinds, this.files, this.moveLog, this.hub, this.largeFiles);
 		this.builder = new IndexBuilder(this.fs, this.indexer, this.index);
 		this.nameRules = new NameRules(this.kinds);
 		this.settings = new SettingsService(this.fs, this.batcher, this.hub, this.clock, JSON);
-		this.trashStore = new TrashStore(this.fs, JSON, this.clock);
 		this.trash = new TrashService(this.paths, this.fs, this.locks, this.index, this.files, this.trashStore,
 				this.reconciler, this.batcher, this.hub);
 		this.moves = new MoveService(this.paths, this.fs, this.locks, this.index, this.files, this.indexer,
@@ -166,6 +171,7 @@ public final class TestVault implements AutoCloseable {
 		vault.fs.prepareTmp();
 		vault.git.openOrInit();
 		vault.builder.build();
+		vault.git.syncLargeFiles();
 		return vault;
 	}
 
@@ -253,8 +259,8 @@ public final class TestVault implements AutoCloseable {
 
 		public final AtomicLong largestBlobRead = new AtomicLong();
 
-		FailingGitStore(VaultFs fs, NotesProperties properties, Clock clock) {
-			super(fs, properties, clock);
+		FailingGitStore(VaultFs fs, NotesProperties properties, Clock clock, LargeFiles largeFiles) {
+			super(fs, properties, clock, largeFiles);
 		}
 
 		@Override

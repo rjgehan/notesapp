@@ -64,6 +64,16 @@ export function useStatus() {
   return useQuery({ queryKey: queryKeys.status(), queryFn: () => api.getStatus(), staleTime: STALE.status });
 }
 
+/** The status page's extra data (API.md §6.5), refreshed every 30 s while the page is open. */
+export function useStatusDetails() {
+  return useQuery({
+    queryKey: queryKeys.statusDetails(),
+    queryFn: () => api.getStatusDetails(),
+    staleTime: STALE.statusDetails,
+    refetchInterval: 30_000,
+  });
+}
+
 export function useNoteMeta(path: string | null) {
   return useQuery({
     queryKey: queryKeys.meta(path ?? ''),

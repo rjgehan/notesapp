@@ -1,0 +1,109 @@
+# NotesApp Backup for CasaOS (optional): nightly restic snapshots of NotesApp to a second disk and,
+# optionally, off site (ROADMAP item 1, DESIGN §7.10). A SECOND custom app next to NotesApp
+# (casaos-compose.yml): paste it into App Store → Custom Install → Import only after the setup in
+# docs/CASAOS.md "Nightly backups" (a second disk, the scripts, the password file). It refuses to
+# install while the repository directory or the scripts are missing.
+#
+# Every night at NOTES_BACKUP_TIME it stops the notesapp container for the local snapshot (seconds),
+# starts it again, then copies the snapshot off site. Its files, under /DATA/AppData/notesapp/backup:
+#   scripts/         nightly.sh, restic-job.sh and scheduler.sh from the repository's deploy/backup/
+#   secrets/         restic-password (keep a copy in your password manager) and
+#                    backup-offsite-credentials (S3 API keys; may be empty)
+#   state/           status.json, which NotesApp's status page shows
+#   cache/           restic's cache; disposable
+# Replace the CHANGE-ME path (the repository on the second disk) before installing.
+name: notesapp-backup
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  backup:                                       # restic; idles, and runs restic-job.sh steps via docker exec
+    image: restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510
+    container_name: notesapp-backup
+    entrypoint: ["/bin/sh", "/backup/restic-job.sh"]
+    command: ["idle"]
+    environment:
+      TZ: America/New_York
+      RESTIC_REPOSITORY: /repo
+      RESTIC_PASSWORD_FILE: /run/secrets/restic-password
+      RESTIC_CACHE_DIR: /cache
+      AWS_SHARED_CREDENTIALS_FILE: /run/secrets/backup-offsite-credentials
+      # Off-site copy through the S3 API, e.g. s3:https://s3.us-west-004.backblazeb2.com/<bucket>/notes
+      # (Backblaze B2) or s3:https://s3.<region>.amazonaws.com/<bucket>/notes. Empty = second disk only.
+      NOTES_BACKUP_OFFSITE_REPO: ""
+    volumes:
+      - /DATA/AppData/notesapp/data:/source/notes-data:ro         # vault + .git; read-only
+      - /DATA/AppData/notesapp/tailscale:/source/tailscale-state:ro
+      - type: bind                              # the local repository, on a SECOND disk
+        source: /media/CHANGE-ME/notes-restic
+        target: /repo
+        bind:
+          create_host_path: false               # an unmounted disk fails loudly instead of filling the system disk
+      - type: bind
+        source: /DATA/AppData/notesapp/backup/scripts
+        target: /backup
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /DATA/AppData/notesapp/backup/secrets
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      - /DATA/AppData/notesapp/backup/cache:/cache
+    mem_limit: 1g
+    logging: *logging
+    restart: unless-stopped
+
+  backup-scheduler:                             # runs nightly.sh daily: stops notesapp around the snapshot
+    image: docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32
+    container_name: notesapp-backup-scheduler
+    depends_on: [backup]
+    entrypoint: ["/bin/sh", "/backup/scheduler.sh"]
+    environment:
+      TZ: America/New_York
+      NOTES_BACKUP_TIME: "04:00"                # local time; clear of the app's 03:30 git housekeeping
+      NOTES_BACKUP_NTFY_URL: ""                 # e.g. https://ntfy.sh/notes-<hex>: failures and a weekly OK
+      NOTES_BACKUP_HEARTBEAT_URL: ""            # optional dead man's switch (healthchecks.io), pinged after each good run
+      NOTES_BACKUP_STATE_DIR: /state
+      NOTES_BACKUP_APP_CONTAINER: notesapp      # the container names of casaos-compose.yml
+      NOTES_BACKUP_CONTAINER: notesapp-backup
+      NOTES_BACKUP_UP_HINT: docker start notesapp-tailscale notesapp   # or restart NotesApp in CasaOS
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # docker stop/start notesapp, docker exec into notesapp-backup
+      - type: bind
+        source: /DATA/AppData/notesapp/backup/scripts
+        target: /backup
+        read_only: true
+        bind:
+          create_host_path: false
+      - /DATA/AppData/notesapp/backup/state:/state   # status.json, and the marker that brings notesapp back after a crash
+      - type: bind                              # time zones for TZ (the image has none)
+        source: /usr/share/zoneinfo
+        target: /usr/share/zoneinfo
+        read_only: true
+        bind:
+          create_host_path: false
+    stop_grace_period: 2m                       # time to start notesapp again if stopped mid-snapshot
+    logging: *logging
+    restart: unless-stopped
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: backup-scheduler
+  author: rjgehan
+  category: Backup
+  title:
+    en_us: NotesApp Backup
+  tagline:
+    en_us: Nightly encrypted backups of NotesApp
+  description:
+    en_us: restic snapshots of the NotesApp vault, its history and its Tailscale identity to a second disk and off site, with ntfy alerts. Needs the setup in docs/CASAOS.md first.
+  icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/obsidian.png

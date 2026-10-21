@@ -23,9 +23,11 @@ import com.rjgehan.notes.config.NotesProperties;
 import com.rjgehan.notes.events.EventHub;
 import com.rjgehan.notes.events.FileEvent;
 import com.rjgehan.notes.events.FolderEvent;
+import com.rjgehan.notes.events.TrashChangedEvent;
 import com.rjgehan.notes.history.Author;
 import com.rjgehan.notes.history.CommitBatcher;
 import com.rjgehan.notes.history.CommitFailedException;
+import com.rjgehan.notes.history.LargeFiles;
 import com.rjgehan.notes.identity.Identity;
 import com.rjgehan.notes.index.FileIndexer;
 import com.rjgehan.notes.index.FileRecord;
@@ -101,13 +103,17 @@ public class FileService {
 
 	private final MoveLog moveLog;
 
+	private final TrashStore trashStore;
+
+	private final LargeFiles largeFiles;
+
 	private final long maxUploadSize;
 
 	private final long minFreeSpace;
 
 	public FileService(VaultPaths paths, VaultFs fs, VaultLocks locks, VaultIndex index, FileKinds kinds,
 			FileIndexer indexer, VaultReconciler reconciler, CommitBatcher batcher, EventHub hub, MoveLog moveLog,
-			NotesProperties properties) {
+			TrashStore trashStore, LargeFiles largeFiles, NotesProperties properties) {
 		this.paths = paths;
 		this.fs = fs;
 		this.locks = locks;
@@ -118,6 +124,8 @@ public class FileService {
 		this.batcher = batcher;
 		this.hub = hub;
 		this.moveLog = moveLog;
+		this.trashStore = trashStore;
+		this.largeFiles = largeFiles;
 		this.maxUploadSize = properties.limits().maxUploadSize().toBytes();
 		this.minFreeSpace = properties.limits().minFreeSpace().toBytes();
 	}
@@ -323,11 +331,15 @@ public class FileService {
 			throw NotesException.badRequest("Text files are saved with PUT /api/files, which detects conflicts");
 		}
 		preserve(path);
+		boolean kept = keepReplacedVersion(path, author.email());
 		this.batcher.prepareWrite(author);
 		this.fs.replaceFrom(tmp, path.disk());
 		FileEntry entry = indexFromDisk(path);
 		this.batcher.markDirty(path, author);
 		this.hub.publish(FileEvent.changed(entry, origin));
+		if (kept) {
+			this.hub.publish(new TrashChangedEvent());
+		}
 		logger.info("UPLOAD (overwrite) {} client={}", entry.path(), origin);
 		return new WriteResult(entry, false, List.of());
 	}
@@ -365,6 +377,28 @@ public class FileService {
 			throw NotesException.historyUnavailable("commit-failed",
 					"The current version could not be saved to history, so nothing was overwritten");
 		}
+	}
+
+	/**
+	 * Keeps the version an overwrite or a history restore is about to replace when git cannot bring it back: a file
+	 * larger than the large-file threshold is not in history (DESIGN §5.8), so a copy of it goes to the trash first.
+	 * Called under the caller's locks, after {@link #preserve}. Returns true when a copy was kept; the caller then
+	 * publishes {@code trash.changed} after its content event.
+	 */
+	public boolean keepReplacedVersion(ApiPath path, String login) throws IOException {
+		LargeFiles.Entry large = this.largeFiles.entry(path.nfc());
+		if (large == null) {
+			return false;
+		}
+		BasicFileAttributes attributes = this.fs.attributes(path.disk());
+		if (attributes == null || !attributes.isRegularFile()) {
+			return false;
+		}
+		TrashStore.Item item = this.trashStore.locked(
+				() -> this.trashStore.keepCopy(path.disk(), path.nfc(), login, attributes.size()));
+		logger.info("KEEP {} in the trash as {} before it is replaced (larger than {}, not in history)", path.nfc(),
+				item.trashPath(), this.largeFiles.describeLimit());
+		return true;
 	}
 
 	/** Like {@link #preserve}, but a commit failure is only logged (stale saves, deletes). */

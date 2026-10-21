@@ -10,6 +10,7 @@ import type { HistoryEntry } from '../../api/types';
 import { createHistoryDiffView, createReadOnlyView, type DiffViewHandle } from '../../editor/historyDiff';
 import { toLf } from '../../features/eol';
 import { formatDateTime } from '../../features/format';
+import { formatLimit, isLargeFile, largeFileLimit } from '../../features/largeFiles';
 import { displayName, isNotePath } from '../../features/paths';
 import { confirmAction } from '../../state/dialogs';
 import { toast } from '../../state/toasts';
@@ -103,9 +104,14 @@ export default function HistoryVersion({ entry, currentPath, onClose }: Props) {
 
   const restore = async () => {
     if (!commit) return;
+    // A file over the large-file threshold is not in history: the server keeps it in the trash instead.
+    const limit = largeFileLimit();
+    const large = currentEntry !== undefined && limit !== null && isLargeFile(currentEntry.size);
     const ok = await confirmAction({
       title: 'Restore this version?',
-      message: `“${displayName(currentPath)}” will be replaced with the version from ${formatDateTime(entry.time)}. The current version stays in history.`,
+      message: large
+        ? `“${displayName(currentPath)}” will be replaced with the version from ${formatDateTime(entry.time)}. The current version is larger than ${formatLimit(limit)}, so it is not in history: it is moved to the trash instead.`
+        : `“${displayName(currentPath)}” will be replaced with the version from ${formatDateTime(entry.time)}. The current version stays in history.`,
       confirmLabel: 'Restore',
     });
     if (!ok) return;

@@ -1,0 +1,102 @@
+#!/bin/sh
+# A fake docker CLI for run-tests.sh. Logs every call to $FAKE_DIR/calls and keeps the app container's state
+# in $FAKE_DIR (app: running or stopped, absent = no such container; app-id; app-started). FAKE_* variables
+# script the behaviour; run-tests.sh documents them where it uses them.
+set -u
+echo "docker $*" >>"$FAKE_DIR/calls"
+APP=${NOTES_BACKUP_APP_CONTAINER:-notes-notes-1}
+BACKUP=${NOTES_BACKUP_CONTAINER:-notes-backup-1}
+
+app_exists() { [ -f "$FAKE_DIR/app" ]; }
+app_running() { [ "$(cat "$FAKE_DIR/app" 2>/dev/null)" = running ]; }
+app_id() { cat "$FAKE_DIR/app-id" 2>/dev/null || echo app1; }
+app_started() { cat "$FAKE_DIR/app-started" 2>/dev/null || echo 1; }
+set_running() {
+	if ! app_running; then
+		echo $(($(app_started) + 1)) >"$FAKE_DIR/app-started"
+	fi
+	echo running >"$FAKE_DIR/app"
+}
+
+cmd=$1
+shift
+case "$cmd" in
+inspect)
+	[ "$1" = -f ] || exit 64
+	template=$2
+	name=$3
+	if [ "$name" = "$BACKUP" ]; then
+		echo "${FAKE_BACKUP_RUNNING:-true}"
+		exit 0
+	fi
+	[ "$name" = "$APP" ] && app_exists || {
+		echo "Error: No such object: $name" >&2
+		exit 1
+	}
+	running=false
+	app_running && running=true
+	case "$template" in
+	*Health*)
+		if app_running; then echo "${FAKE_HEALTH:-healthy}"; else echo exited; fi
+		;;
+	*.Id*) echo "$(app_id) $running $(app_started)" ;;
+	*) echo "$running" ;;
+	esac
+	;;
+stop)
+	if [ -n "${FAKE_STOP_FAIL:-}" ]; then
+		echo "Error response from daemon: cannot stop" >&2
+		exit 1
+	fi
+	echo stopped >"$FAKE_DIR/app"
+	[ -z "${FAKE_STOP_RESTARTS:-}" ] || set_running # something starts it again at once
+	echo "$APP"
+	;;
+start)
+	failures=$(cat "$FAKE_DIR/start-failures" 2>/dev/null || echo "${FAKE_START_FAIL:-0}")
+	if [ "$failures" -gt 0 ]; then
+		echo $((failures - 1)) >"$FAKE_DIR/start-failures"
+		echo "Error response from daemon: cannot start" >&2
+		exit 1
+	fi
+	set_running
+	echo "$APP"
+	;;
+exec)
+	while [ "$1" = -e ]; do shift 2; done
+	shift # the container
+	case "$1" in
+	pkill) [ -n "${FAKE_RESTIC_RUNNING:-}" ] ;;
+	pgrep) exit 1 ;;
+	sh)
+		step=$3
+		shift 3
+		code=0
+		eval "code=\${FAKE_FAIL_$step:-0}"
+		case "$step" in
+		snapshot)
+			[ -z "${FAKE_SNAPSHOT_SLEEP:-}" ] || sleep "$FAKE_SNAPSHOT_SLEEP"
+			case "${FAKE_DURING_SNAPSHOT:-}" in
+			restart) set_running ;;
+			replace)
+				echo app2 >"$FAKE_DIR/app-id"
+				set_running
+				;;
+			esac
+			echo "restic: snapshot output" >&2
+			[ -n "${FAKE_SNAPSHOT_NOID:-}" ] || echo "snapshot=${FAKE_SNAPSHOT_ID:-0123abcd}"
+			;;
+		offsite) [ "$code" -ne 0 ] || echo "offsite=${FAKE_OFFSITE_RESULT:-ok}" ;;
+		esac
+		if [ "$code" -ne 0 ] && [ -n "${FAKE_STDERR:-}" ]; then
+			printf '%s\n' "$FAKE_STDERR" >&2 # what restic printed instead of the usual line
+		elif [ "$code" -ne 0 ]; then
+			echo "Fatal: \"$step\" went wrong \\ (code $code)" >&2
+		fi
+		exit "$code"
+		;;
+	*) exit 64 ;;
+	esac
+	;;
+*) exit 64 ;;
+esac

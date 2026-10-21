@@ -51,6 +51,8 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
   return {
     getMe: () => call(() => ({ login: 'owner@notes', name: 'Owner', profilePicUrl: null, source: 'default' as const })),
     getStatus: () => call(() => vault.getStatus()),
+    getStatusDetails: () => call(() => vault.getStatusDetails()),
+    sendTestAlert: () => call(() => vault.sendTestAlert()),
     getSettings: () => call(() => vault.getSettings()),
     putSettings: (req) => call(() => vault.putSettings(req, clientId)),
     getTree: () => call(() => vault.getTree()),
@@ -77,6 +79,7 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     getHistoryContent: (path, commit) => call(() => vault.getHistoryContent(path, commit)),
     restoreHistory: (req) => call(() => vault.restoreHistory(req, clientId)),
     commitHistory: () => call(() => vault.commitNow()),
+    pushMirror: () => call(() => vault.pushMirror()),
     getTemplates: () => call(() => vault.getTemplates()),
     rawUrl: (entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>) =>
       blobUrl(`file:${entry.path}:${entry.size}:${entry.mtime}`, vault.rawBytes(entry.path), entry.path),
