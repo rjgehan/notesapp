@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { httpEndpoints } from '../api/endpoints';
 import type { FileEntry } from '../api/types';
+import { registerBuiltins } from '../extensions/builtins';
 import { buildLinkIndex, resolve } from '../features/links';
 import { basenameOf, extensionOf, lastSegment } from '../features/paths';
 import { patchChildren } from './patch';
@@ -270,6 +271,27 @@ describe('patch', () => {
     expect(container.firstElementChild?.textContent).toBe('Intro changed');
   });
 
+  it('keeps a block whose only change is a task state, and syncs the checkbox (an opened callout stays open)', () => {
+    const container = document.createElement('div');
+    patchChildren(container, renderNote('> [!todo]- Tasks\n> - [ ] one\n> - [ ] two', ctx()).fragment);
+    const callout = container.firstElementChild as HTMLDetailsElement;
+    callout.open = true;
+    const stats = patchChildren(container, renderNote('> [!todo]- Tasks\n> - [x] one\n> - [ ] two', ctx()).fragment);
+    expect(stats).toEqual({ kept: 1, inserted: 0, removed: 0 });
+    expect(container.firstElementChild).toBe(callout);
+    expect(callout.open).toBe(true);
+    const boxes = callout.querySelectorAll<HTMLInputElement>('input.task-list-item-checkbox');
+    expect([...boxes].map((b) => b.checked)).toEqual([true, false]);
+    expect(boxes[0].getAttribute('data-hash')).toBe(lineHash('> - [x] one'));
+  });
+
+  it('never ignores attribute-like text when keying blocks', () => {
+    const container = document.createElement('div');
+    patchChildren(container, renderNote('a checked="x" data-line="3" b', ctx()).fragment);
+    patchChildren(container, renderNote('a b', ctx()).fragment);
+    expect(container.textContent).toBe('a b');
+  });
+
   it('updates data-line on kept blocks when lines shift', () => {
     const container = document.createElement('div');
     patchChildren(container, renderNote('A\n\nB', ctx()).fragment);
@@ -286,5 +308,34 @@ describe('extractSection', () => {
     expect(extractSection(text, 'Risks')).toBe('## Risks\n- one\n### Detail\nx');
     expect(extractSection(text, 'A#risks')).toBe('## Risks\n- one\n### Detail\nx');
     expect(extractSection(text, 'Missing')).toBeNull();
+  });
+});
+
+describe('rich Markdown around drawings and task lists (items 3, 4 and 5)', () => {
+  it('keeps the embeds of a drawing and a task list inside a callout, for their views to hydrate', () => {
+    registerBuiltins();
+    const docs = new Map(
+      ['Sketches/Plan.excalidraw', 'Sketches/Map.excalidraw.md', 'Tasks/Home.tasks'].map((p) => {
+        const e = entry(p);
+        return [p, { ...e, kind: p.endsWith('.md') ? ('note' as const) : ('text' as const) }];
+      }),
+    );
+    const docIndex = buildLinkIndex(docs.keys());
+    const el = dom('> [!todo] This week\n> ![[Home.tasks]]\n> ![[Plan.excalidraw|300]]\n> ![[Map.excalidraw]]\n\n$x^2$', ctx({
+      resolve: (t) => {
+        const p = resolve(t, 'Welcome.md', docIndex);
+        return p ? (docs.get(p) ?? null) : null;
+      },
+    }));
+    const callout = el.querySelector('.callout');
+    expect(callout).not.toBeNull();
+    const embeds = [...callout!.querySelectorAll('[data-embed-kind]')];
+    expect(embeds.map((e) => [e.getAttribute('data-embed-kind'), e.getAttribute('data-embed-path')])).toEqual([
+      ['file', 'Tasks/Home.tasks'],
+      ['file', 'Sketches/Plan.excalidraw'],
+      ['file', 'Sketches/Map.excalidraw.md'],
+    ]);
+    expect(embeds[1].getAttribute('data-width')).toBe('300');
+    expect(el.querySelector('[data-math]')).not.toBeNull();
   });
 });

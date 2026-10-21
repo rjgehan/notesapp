@@ -11,6 +11,7 @@ import { makeEmbedContext, makeRenderContext } from './context';
 import { hydrateEmbeds, unmountEmbeds } from './embeds';
 import { patchChildren } from './patch';
 import { extractSection, renderNote } from './render';
+import { hydrateRich } from './rich';
 
 export default function NoteEmbed({ path, subpath, sourcePath, depth }: EmbedProps) {
   const file = useTextFile(path);
@@ -29,6 +30,7 @@ export default function NoteEmbed({ path, subpath, sourcePath, depth }: EmbedPro
     const { fragment } = renderNote(section, makeRenderContext(path, tree, settings, loadRemoteImages, depth));
     patchChildren(el, fragment, unmountEmbeds);
     hydrateEmbeds(el, makeEmbedContext(path, tree, depth));
+    hydrateRich(el);
   }, [section, tree, settings, loadRemoteImages, path, depth]);
 
   return (

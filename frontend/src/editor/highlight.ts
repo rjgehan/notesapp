@@ -1,10 +1,16 @@
 // Styled source mode (DESIGN §6.6 #7): token colours plus per-line classes for headings, code
-// blocks, quotes, comments and frontmatter. Nothing is hidden; marks are only faded.
+// blocks, math blocks, quotes, callout titles, comments and frontmatter. Nothing is hidden; marks
+// are only faded.
 import { HighlightStyle, syntaxTree } from '@codemirror/language';
 import { RangeSetBuilder, type Extension } from '@codemirror/state';
 import { Decoration, ViewPlugin, type DecorationSet, type EditorView, type ViewUpdate } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
+import { CODE_TOKEN_STYLES } from '../features/codeTokens';
+import { mathTags } from './mathSyntax';
 import { obsidianTags } from './obsidianSyntax';
+
+/** `> [!type]` at the start of a blockquote (any nesting depth): a callout's title line. */
+const CALLOUT_TITLE = /^\s*(?:>\s*)+\[![^\]\s]+\]/;
 
 export const obsidianHighlight = HighlightStyle.define([
   { tag: t.heading1, class: 'cm-h cm-h1' },
@@ -28,18 +34,10 @@ export const obsidianHighlight = HighlightStyle.define([
   { tag: t.quote, class: 'cm-quote' },
   { tag: t.contentSeparator, class: 'cm-hr' },
   { tag: t.meta, class: 'cm-meta' },
-  // YAML (frontmatter) and fenced code tokens.
-  { tag: [t.propertyName, t.definition(t.propertyName)], class: 'cm-tok-property' },
-  { tag: [t.keyword, t.operatorKeyword, t.modifier], class: 'cm-tok-keyword' },
-  { tag: [t.string, t.special(t.string), t.regexp], class: 'cm-tok-string' },
-  { tag: [t.number, t.bool, t.null, t.atom], class: 'cm-tok-number' },
-  { tag: [t.lineComment, t.blockComment], class: 'cm-tok-comment' },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], class: 'cm-tok-function' },
-  { tag: [t.typeName, t.className, t.namespace], class: 'cm-tok-type' },
-  { tag: [t.variableName, t.labelName], class: 'cm-tok-variable' },
-  { tag: [t.tagName, t.angleBracket], class: 'cm-tok-tag' },
-  { tag: t.attributeName, class: 'cm-tok-attribute' },
-  { tag: t.invalid, class: 'cm-tok-invalid' },
+  { tag: mathTags.math, class: 'cm-math' },
+  { tag: mathTags.mark, class: 'cm-formatting cm-math-mark' },
+  // YAML (frontmatter) and fenced code tokens, shared with the reading view.
+  ...CODE_TOKEN_STYLES,
 ]);
 
 const HEADING = /^(?:ATXHeading|SetextHeading)([1-6])$/;
@@ -74,7 +72,14 @@ function lineClasses(view: EditorView): DecorationSet {
           add(node.to, node.to, 'cm-codeblock-end');
           return false;
         }
-        if (name === 'Blockquote') add(node.from, node.to, 'cm-quote-line');
+        if (name === 'BlockMath') {
+          add(node.from, node.to, 'cm-math-line');
+          return false;
+        }
+        if (name === 'Blockquote') {
+          add(node.from, node.to, 'cm-quote-line');
+          if (CALLOUT_TITLE.test(doc.lineAt(node.from).text)) add(node.from, node.from, 'cm-callout-title-line');
+        }
         if (name === 'CommentBlock') {
           add(node.from, node.to, 'cm-comment-line');
           return false;

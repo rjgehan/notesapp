@@ -54,7 +54,7 @@ DESIGN.md has the details.
 | 39 | **Formulas in notes: spreadsheet math in tables and text** *(new)* | H | M | 10a; item 6's engine decision |
 | 40 | **Scripts in notes: blocks that run and show their result** *(new)* | H | L | 10; 39 for formula functions |
 | 2 | Mirror the vault's git history to a private GitHub repo | M | S | |
-| 3 | Rich Markdown pack: callouts, code highlighting, math, Mermaid *(declined for v1)* | H | M | |
+| 3 | Rich Markdown pack: callouts, code highlighting, math, Mermaid *(declined for v1; **built 2026-10-21**)* | H | M | |
 | 4 | **Structured to-do tracking, not Markdown** *(big three c)* | H | L | (9 for reminders) |
 | 5 | **Excalidraw drawings** *(big three b)* | H | M | |
 | 6 | **Spreadsheets with Google-Sheets-style formulas** *(big three a)* | H | L | |
@@ -572,7 +572,7 @@ Clicking an embed opens the full editor.
 
 JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped to that one repository and read from a compose `secrets:` file (`NOTES_MIRROR_TOKEN_FILE`). Note that your notes then leave the tailnet; it is opt-in. Nothing secret is ever in the vault (DESIGN §4.1), so the mirror cannot leak a key.
 
-### 3. Rich Markdown pack *(declined for v1)*
+### 3. Rich Markdown pack *(declined for v1; built 2026-10-21)*
 
 **One line:** Obsidian callouts, syntax-highlighted code blocks, KaTeX math and Mermaid diagrams in the reading view, plus editor styling for them.
 
@@ -588,6 +588,16 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 | Mermaid | Mermaid 12.2.0, lazy-loaded, `securityLevel: 'strict'`, SVG sanitized |
 
 (`==highlights==` and hidden `%%comments%%` moved into v1, because they are core Obsidian syntax.)
+
+**Status: built (2026-10-21, branch `feat/rich-markdown`), as designed above.** DESIGN §6.7.1 has the details. What it adds or decides beyond the table:
+
+- **Callouts:** every Obsidian type and alias, `+`/`-` folding (native `<details>`), custom Markdown titles, `[!type|metadata]`, nesting, unknown types in the note style. Obsidian's class names, so CSS snippets carry over.
+- **Code:** the editor and the reading view share one token-class table, so code looks the same in both; a Copy button on every fenced block.
+- **Math:** `@mdit/plugin-tex` parses (so `$5 and $10` stays text), `$$…$$` inside a paragraph is display math as in Obsidian, and `mhchem` (`\ce{}`) is included. KaTeX `trust` is off.
+- **Mermaid:** follows the app theme, shows errors inline, and wide diagrams scroll sideways on the phone. **The ELK layout is left out:** Mermaid 12 defaults to it, but `elkjs` is EPL-2.0 (not GPL-compatible) and 1.4 MB, so diagrams use the dagre layout (as in Obsidian) and `layout: elk` in a diagram is ignored.
+- **Editor:** `$math$` and `$$` blocks are styled in source mode, and a callout's title line is bold.
+- **No CSP change**, and the initial load grows by only 1.5 kB gzip; KaTeX and Mermaid are chunks loaded on first use.
+- **Reuse:** `render/rich/index.ts` exports `parseCalloutHeader`, `renderCallout`, `renderMath`, `renderMermaid` and `highlightCode` for Live Preview (item 10).
 
 ### 7. Quick capture inbox and the iPhone Share Sheet
 
