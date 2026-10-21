@@ -106,7 +106,7 @@ describe('AiChat (ROADMAP item 18)', () => {
   it('explains a missing key without showing one', async () => {
     setup(status({ state: 'not-configured', reason: 'no API key: anthropic-key does not exist', keyPresent: false }));
     expect(await screen.findByText(/The server has no Anthropic API key/)).toBeInTheDocument();
-    expect(screen.getByText('/data/secrets/anthropic-key')).toBeInTheDocument();
+    expect(screen.getByText('anthropic-key', { selector: 'code' })).toBeInTheDocument();
   });
 
   it('warns once that notes are sent to Anthropic', async () => {

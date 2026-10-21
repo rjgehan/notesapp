@@ -63,7 +63,7 @@ function Unavailable({ status }: { status: AiStatus }) {
     return (
       <div className="ai-unavailable">
         <p>
-          <strong>The server has no Anthropic API key.</strong> {status.reason}. Put a key in <code>/data/secrets/{status.keyFile}</code> on the server (DEPLOY.md, “Ask your vault”).
+          <strong>The server has no Anthropic API key.</strong> {status.reason}. Put a key in the server’s key file, <code>{status.keyFile}</code> (CASAOS.md or DEPLOY.md, “Ask your vault”).
         </p>
       </div>
     );

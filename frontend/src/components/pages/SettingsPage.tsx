@@ -453,7 +453,7 @@ function AiSection({ settings: s, set, disabled, errors }: VaultSectionProps) {
           <>
             <div className="about-row">
               <dt>API key</dt>
-              <dd>{st.keyPresent ? `Found in ${st.keyFile}` : st.fake ? 'Not needed: this development server gives fake answers' : `Missing: /data/secrets/${st.keyFile}`}</dd>
+              <dd>{st.keyPresent ? `Found in ${st.keyFile}` : st.fake ? 'Not needed: this development server gives fake answers' : `Missing: put one in the server’s ${st.keyFile} file (CASAOS.md or DEPLOY.md, “Ask your vault”)`}</dd>
             </div>
             <div className="about-row">
               <dt>This month ({st.month})</dt>
