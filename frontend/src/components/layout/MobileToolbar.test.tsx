@@ -8,6 +8,14 @@ import { noteContext, type NoteContext } from '../../editor/context';
 import { useUi } from '../../state/ui';
 import { MobileToolbar } from './MobileToolbar';
 import { registerBuiltins } from '../../extensions/builtins';
+import { startVoiceNote } from '../../features/voice/voiceNotes';
+import type { DocumentSession } from '../../sync/DocumentSession';
+import { documents } from '../../sync/instance';
+
+vi.mock('../../features/voice/voiceNotes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../features/voice/voiceNotes')>()),
+  startVoiceNote: vi.fn(),
+}));
 
 let view: EditorView;
 
@@ -103,6 +111,18 @@ describe('MobileToolbar', () => {
     render(<MobileToolbar />);
     act(() => view.focus());
     expect(screen.queryByRole('button', { name: 'Insert tag', hidden: true })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Record voice note', hidden: true })).toBeNull();
     expect(button('Indent')).toBeInTheDocument();
+  });
+
+  it('records a voice note into the note, and puts the keyboard away for the recording panel', () => {
+    const session = { path: 'Note.md' } as DocumentSession;
+    vi.spyOn(documents, 'get').mockImplementation((path) => (path === 'Note.md' ? session : undefined));
+    view = mountEditor('Some text');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    fireEvent.click(button('Record voice note'));
+    expect(startVoiceNote).toHaveBeenCalledWith(session);
+    expect(document.activeElement).not.toBe(view.contentDOM);
   });
 });

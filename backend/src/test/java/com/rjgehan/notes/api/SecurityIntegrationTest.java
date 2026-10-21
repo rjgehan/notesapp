@@ -38,7 +38,7 @@ import static org.awaitility.Awaitility.await;
 @NotesIntegrationTest
 class SecurityIntegrationTest {
 
-	private static final String APP_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+	private static final String APP_CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
 			+ "img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; "
 			+ "connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; "
 			+ "form-action 'self'; frame-ancestors 'none'; manifest-src 'self'";
@@ -160,7 +160,8 @@ class SecurityIntegrationTest {
 		assertThat(tree.header("X-Frame-Options")).isEqualTo("DENY");
 		assertThat(tree.header("Cross-Origin-Opener-Policy")).isEqualTo("same-origin");
 		assertThat(tree.header("Cross-Origin-Resource-Policy")).isEqualTo("same-origin");
-		assertThat(tree.header("Permissions-Policy")).isEqualTo("camera=(), microphone=(), geolocation=(), payment=()");
+		// The microphone is the app's own, for voice notes (ROADMAP item 33); nothing it embeds gets it.
+		assertThat(tree.header("Permissions-Policy")).isEqualTo("camera=(), microphone=(self), geolocation=(), payment=()");
 		assertThat(tree.headers().get("Cache-Control")).hasSize(1);
 
 		Reply problem = this.api.get("/api/files?path=nope.md");
@@ -268,6 +269,22 @@ class SecurityIntegrationTest {
 		assertThat(font.header("X-Content-Type-Options")).isEqualTo("nosniff");
 		assertThat(font.header("Cross-Origin-Resource-Policy")).isEqualTo("same-origin");
 		assertThat(font.header("Content-Security-Policy")).isEqualTo(APP_CSP);
+	}
+
+	@Test
+	void selfHostedPdfJsFilesAreServedWithTheTypesModuleWorkersAndWebAssemblyNeed() {
+		// ROADMAP item 32: the PDF.js worker is a module script (nosniff refuses one served as anything but
+		// JavaScript), and its WebAssembly decoders live under /assets/pdfjs-<version>/wasm/.
+		Reply worker = this.api.get("/assets/pdf.worker.min-test.mjs");
+		assertThat(worker.status()).isEqualTo(200);
+		assertThat(worker.header("Content-Type")).startsWith("text/javascript");
+		assertThat(worker.header("Cache-Control")).isEqualTo("max-age=31536000, public, immutable");
+		// A worker's own CSP comes from this response: it lets the decoders compile.
+		assertThat(worker.header("Content-Security-Policy")).isEqualTo(APP_CSP).contains("'wasm-unsafe-eval'");
+		Reply wasm = this.api.get("/assets/pdfjs-0.0.0/wasm/test.wasm");
+		assertThat(wasm.status()).isEqualTo(200);
+		assertThat(wasm.header("Content-Type")).isEqualTo("application/wasm");
+		assertThat(wasm.header("Cache-Control")).isEqualTo("max-age=31536000, public, immutable");
 	}
 
 	@Test

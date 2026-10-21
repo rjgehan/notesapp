@@ -13,6 +13,8 @@ export interface PromptRequest {
   selection?: [number, number];
   /** Inline validation shown before sending; a message, or null when valid. */
   validate?(value: string): string | null;
+  /** A password field: the value is masked and never autocapitalized. */
+  secret?: boolean;
   resolve(value: string | null): void;
 }
 

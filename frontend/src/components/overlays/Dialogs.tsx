@@ -39,6 +39,7 @@ function PromptDialog({ request }: { request: PromptRequest }) {
           <input
             ref={input}
             className="text-input"
+            type={request.secret ? 'password' : 'text'}
             value={value}
             placeholder={request.placeholder}
             aria-invalid={!!error && (touched || value !== request.value)}
@@ -47,7 +48,7 @@ function PromptDialog({ request }: { request: PromptRequest }) {
               setTouched(true);
             }}
             autoComplete="off"
-            autoCapitalize="sentences"
+            autoCapitalize={request.secret ? 'off' : 'sentences'}
             spellCheck={false}
             enterKeyHint="done"
           />

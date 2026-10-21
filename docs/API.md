@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. 2026-10-21: the PDF viewer (item 32) in §9.1; voice notes and transcription (item 33) in §3, §17, §18, §19 and §23. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -188,6 +188,9 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `busy` | 503 | Busy, retry | A lock timed out (5 s) | Header `Retry-After: 1` |
 | `history-unavailable` | 503 | History unavailable | Git is disabled, the repo is unusable (detached `HEAD`, merge in progress, git-lfs), the startup import is still running, or a commit that must happen before an overwrite failed (§4) | `reason`: `"disabled"`, `"unusable: <detail>"`, `"importing"` or `"commit-failed"` |
 | `insufficient-storage` | 507 | Insufficient storage | An upload would leave less than 1 GiB free | `limit` (bytes that must stay free) |
+| `not-audio` | 415 | Not an audio or video file | A transcription of a file that is not `audio` or `video` (§23.2) | `path` |
+| `transcription-off` | 409 | Transcription is off | No transcription service is configured (§23) | |
+| `transcription-failed` | 503 | Transcription failed | The transcription service failed, could not be reached, took longer than its timeout, or was busy with other recordings for that long (§23.2). Never 502, which clients take for the proxy during a deploy | |
 
 ```ts
 export interface FieldError { field: string; message: string }   // e.g. {"field":"settings.files.newNoteFolder","message":"invalid path"}
@@ -688,7 +691,7 @@ The query parameters mean what the §8.5 fields mean. The response is a `Capture
 
 ### 9.1 `GET /api/files/raw?path={path}[&v={size}-{mtimeMillis}][&download=true]`
 
-This returns the raw bytes of any visible file. It supports `Range` (206) and conditional requests (304). It is used for `<img>`, `<audio>`, `<video>` and `<iframe>` sources and for downloads. Symlinks are never served (`404`).
+This returns the raw bytes of any visible file. It supports `Range` (206) and conditional requests (304). It is used for `<img>`, `<audio>` and `<video>` sources, by the PDF viewer (PDF.js reads a PDF in `Range` requests of 64 KiB, DESIGN §6.8.3) and for downloads. Symlinks are never served (`404`).
 
 - `v` makes the URL content-addressed. Clients build it from the tree entry's `size` and `mtime` (epoch milliseconds). When it matches the file, the response is cacheable forever; otherwise it is served like a request without `v`.
 - `download=true` forces `Content-Disposition: attachment`.
@@ -1867,7 +1870,8 @@ export type ErrorCode =
   | 'task-conflict' | 'malformed-file'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
-  | 'busy' | 'history-unavailable' | 'insufficient-storage';
+  | 'busy' | 'history-unavailable' | 'insufficient-storage'
+  | 'not-audio' | 'transcription-off' | 'transcription-failed';
 
 export interface FieldError { field: string; message: string }
 
@@ -2345,6 +2349,20 @@ export interface BookmarkItem {
 export interface BookmarksResponse { version: Version; items: BookmarkItem[] }
 export interface BookmarksUpdateRequest { items: BookmarkItem[]; baseVersion: Version }
 
+// ---------- voice notes (§23) ----------
+export interface TranscriptionStatus {
+  enabled: boolean;
+  service: string | null;   // "whisper-asr at http://notesapp-whisper:9000"; never credentials
+  language: string | null;  // the configured language; null = detected per recording
+  maxBytes: number;         // larger recordings are not sent
+}
+export interface TranscriptionResult {
+  path: VaultPath;
+  text: string;             // "" when no speech was recognized
+  language: string | null;
+  millis: number;           // the service's time; 0 for a transcript the server had kept
+}
+
 // ---------- SSE (§16) ----------
 export interface HelloEvent {
   bootId: string;
@@ -2656,6 +2674,8 @@ export interface HabitsResponse {
 | GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
 | PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
 | POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
+| GET | `/api/transcription` | | 200 `TranscriptionStatus` | 23.1 |
+| POST | `/api/transcriptions` | `TranscribeRequest` | 200 `TranscriptionResult` | 23.2 |
 | GET | `/api/flashcards` | | 200 `FlashcardsResponse` | 34.3 |
 | GET | `/api/flashcards/notes` | | 200 `FlashcardNotesResponse` | 34.2 |
 | POST | `/api/flashcards/reviews` | `FlashcardReviewRequest` | 200 `FlashcardWriteResult` | 34.4 |
@@ -2701,6 +2721,7 @@ export interface HabitsResponse {
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `BookmarksResponse`, `BookmarksUpdateRequest` | Same | `BookmarkItem` is not a record: items stay JSON objects (`ObjectNode`; `JsonNode` in the request), so fields from Obsidian or a newer build survive; `BookmarkCodec` checks the fields it knows (§21.2) |
 | `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
+| `TranscriptionStatus`, `TranscriptionResult` | Same; the request is `TranscribeRequest(String path)` | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 | `Task`, `TaskList`, `TaskSection`, `TaskRecurrence`, `TaskReminder`, `TaskFileProblem`, `TasksResponse`, `TaskListsResponse`, `TaskWriteResult`, `TaskListWriteResult`, `CompleteTaskRequest`, `ReorderTasksRequest`, `ReorderRequest`, `CreateTaskListRequest`, `SectionRequest` | Same | Enums `TaskStatus`, `TaskView` and `RecurrenceFrom` (for `TaskRecurrence.from`); `Task.priority` is an `int`. `CompleteTaskRequest.base` is a `JsonNode`. |
@@ -3016,6 +3037,57 @@ The client renames the heading in the note and **saves the note first**; the ser
 | `409 type-mismatch` (`expected: "note"`) for a file that is not a note |
 
 Events to other clients: `file.changed` for each rewritten note, then `bookmarks.changed` (`origin: null`) when heading bookmarks changed, then `history.committed`.
+
+---
+
+## 23. Voice notes (ROADMAP items 32 and 33)
+
+Recording happens in the browser; the recording is uploaded like any attachment (§9.3) and embedded in the note by the client (DESIGN §6.30). Transcription (ROADMAP item 33) is optional: the server forwards a recording to the speech-to-text service it is configured with (`notes.transcription.*`, DESIGN §5.24) and returns the text, which the client adds to the note under the recording's embed. The server writes nothing and keeps no audio or text beyond a small in-memory cache.
+
+### 23.1 `GET /api/transcription`
+
+Whether transcription is available. Side-effect free.
+
+```json
+{ "enabled": true, "service": "whisper-asr at http://notesapp-whisper:9000", "language": null, "maxBytes": 26214400 }
+```
+
+| Field | Meaning |
+|---|---|
+| `enabled` | False while `notes.transcription.url` (`NOTES_TRANSCRIPTION_URL`) is empty, the default |
+| `service` | The protocol and the service's scheme, host and port; never credentials, a path or a query. `null` when off |
+| `language` | The configured language (`NOTES_TRANSCRIPTION_LANGUAGE`); `null` when the service detects it per recording |
+| `maxBytes` | Recordings larger than this are not sent (`notes.transcription.max-size`, 25 MiB) |
+
+### 23.2 `POST /api/transcriptions`
+
+Transcribes a recording in the vault. The request can take minutes (the service's time, up to `notes.transcription.timeout`, 10 minutes, plus waiting for other recordings: one is transcribed at a time). It needs `X-Client-Id` like every non-GET request (§2); it changes nothing, so it takes no `Idempotency-Key`.
+
+```json
+{ "path": "Attachments/Recording 20261021143005.m4a" }
+```
+
+`200 TranscriptionResult`:
+
+```json
+{ "path": "Attachments/Recording 20261021143005.m4a", "text": "Call the plumber about the leak.", "language": "en", "millis": 4210 }
+```
+
+- `text` is trimmed; `""` when no speech was recognized.
+- `language` is the service's detected (or the configured) language, when it reports one.
+- A second request for the same version of a file (same path, size and mtime) while the first runs waits for it; a later one is answered from the server's memory of the last 32 transcripts with `millis: 0`. A changed file is transcribed again.
+- The service gets the bytes as `recording.<ext>`, never the vault's file name.
+
+| Errors |
+|---|
+| `400 bad-request` (missing or blank `path`), `400 invalid-path`, `403 reserved-path` |
+| `404 not-found` |
+| `409 transcription-off` |
+| `413 too-large` (`limit`: `maxBytes`) |
+| `415 not-audio` (`path`): only `audio` and `video` kinds (DESIGN §4.2) |
+| `503 transcription-failed`: `detail` says why, e.g. `The transcription service failed: cannot connect to http://notesapp-whisper:9000`, `… the service answered HTTP 500 (Model base could not be loaded)` or `… no answer within 600 s` |
+
+No events: the client's edit of the note is an ordinary save (§8.3).
 
 ---
 

@@ -31,6 +31,7 @@ public record NotesProperties(
 		@DefaultValue Mirror mirror,
 		@DefaultValue Alerts alerts,
 		@DefaultValue Backup backup,
+		@DefaultValue Transcription transcription,
 		@DefaultValue("/data/secrets") Path secretsDir,
 		@DefaultValue Tasks tasks,
 		@DefaultValue Search search,
@@ -84,6 +85,40 @@ public record NotesProperties(
 	public record Backup(
 			@DefaultValue("/backup-state/status.json") Path statusFile,
 			@DefaultValue("36h") Duration staleAfter) {
+	}
+
+	/**
+	 * Transcription of voice notes (DESIGN §5.24, ROADMAP item 33) by an optional speech-to-text service, off while
+	 * {@code url} is empty. {@code api} is the service's protocol: {@code whisper-asr} (the whisper-asr-webservice
+	 * sidecar of DEPLOY.md, {@code POST <url>/asr}) or {@code openai} ({@code POST <url>/v1/audio/transcriptions}:
+	 * whisper.cpp's server, speaches, LocalAI or OpenAI itself), which sends {@code model} and, when
+	 * {@code apiKeyFile} names one, the key in that file (a compose secret, never configured directly). An empty
+	 * {@code language} lets the service detect it. Recordings larger than {@code maxSize} are not sent.
+	 */
+	public record Transcription(
+			@DefaultValue("") String url,
+			@DefaultValue("whisper-asr") TranscriptionApi api,
+			@DefaultValue("whisper-1") String model,
+			@DefaultValue("") String language,
+			@DefaultValue("") String apiKeyFile,
+			@DefaultValue("10m") Duration timeout,
+			@DefaultValue("25MB") DataSize maxSize) {
+
+		public boolean enabled() {
+			return !this.url.isBlank();
+		}
+
+	}
+
+	/** The protocol of the transcription service. */
+	public enum TranscriptionApi {
+
+		/** whisper-asr-webservice: {@code POST /asr?output=json}, the file in {@code audio_file}. */
+		WHISPER_ASR,
+
+		/** OpenAI's {@code POST /v1/audio/transcriptions}, the file in {@code file}. */
+		OPENAI
+
 	}
 
 	public record Watcher(

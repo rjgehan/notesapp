@@ -22,7 +22,8 @@ export type ErrorCode =
   | 'task-conflict' | 'malformed-file'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
-  | 'busy' | 'history-unavailable' | 'insufficient-storage';
+  | 'busy' | 'history-unavailable' | 'insufficient-storage'
+  | 'not-audio' | 'transcription-off' | 'transcription-failed';
 
 export interface FieldError { field: string; message: string }
 
@@ -499,6 +500,20 @@ export interface BookmarkItem {
 }
 export interface BookmarksResponse { version: Version; items: BookmarkItem[] }
 export interface BookmarksUpdateRequest { items: BookmarkItem[]; baseVersion: Version }
+
+// ---------- voice notes (§23) ----------
+export interface TranscriptionStatus {
+  enabled: boolean;
+  service: string | null;   // "whisper-asr at http://notesapp-whisper:9000"; never credentials
+  language: string | null;  // the configured language; null = detected per recording
+  maxBytes: number;         // larger recordings are not sent
+}
+export interface TranscriptionResult {
+  path: VaultPath;
+  text: string;             // "" when no speech was recognized
+  language: string | null;
+  millis: number;           // the service's time; 0 for a transcript the server had kept
+}
 
 // ---------- SSE (§16) ----------
 export interface HelloEvent {

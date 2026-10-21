@@ -15,38 +15,77 @@ const buildSha = process.env.VITE_BUILD_SHA || 'dev'
 // list the Vite origin's host:port.
 const backendUrl = process.env.NOTES_DEV_BACKEND || 'http://127.0.0.1:8080'
 
-// Excalidraw's fonts are self-hosted (DESIGN §6.8.1): the CSP blocks its CDN fallback. They go into a
-// folder named after the package version under /assets/, which the server caches as immutable.
-const excalidrawPackage = resolve('node_modules/@excalidraw/excalidraw')
-const excalidrawVersion = (JSON.parse(readFileSync(join(excalidrawPackage, 'package.json'), 'utf8')) as { version: string }).version
-const excalidrawAssets = `assets/excalidraw-${excalidrawVersion}/`
-const excalidrawFonts = join(excalidrawPackage, 'dist', 'prod', 'fonts')
+// Package assets are self-hosted (DESIGN §6.8.1, §6.8.3): the CSP blocks CDNs. Each package's go into a
+// folder named after its version under /assets/, which the server caches as immutable.
+function packageDir(name: string): { dir: string; version: string } {
+  const dir = resolve('node_modules', name)
+  return { dir, version: (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version: string }).version }
+}
+
+const excalidraw = packageDir('@excalidraw/excalidraw')
+const excalidrawAssets = `assets/excalidraw-${excalidraw.version}/`
+const pdfjs = packageDir('pdfjs-dist')
+const pdfjsAssets = `assets/pdfjs-${pdfjs.version}/`
+
+interface AssetMount {
+  /** Folder under the build root, ending in `/`. */
+  target: string
+  /** Absolute source folder. */
+  source: string
+  /** Which of its files to serve and copy (the name relative to `source`, with `/`); all by default. */
+  include?: (name: string) => boolean
+}
+
+const assetMounts: AssetMount[] = [
+  // Excalidraw's fonts (DESIGN §6.8.1).
+  { target: `${excalidrawAssets}fonts/`, source: join(excalidraw.dir, 'dist', 'prod', 'fonts') },
+  // PDF.js (DESIGN §6.8.3): CMaps for CJK text, the standard fonts for PDFs that do not embed theirs, the
+  // WebAssembly image decoders with their JavaScript fallbacks, the CMYK profile and the annotation icons.
+  // quickjs-eval runs a PDF's own JavaScript, which the viewer never does.
+  { target: `${pdfjsAssets}cmaps/`, source: join(pdfjs.dir, 'cmaps') },
+  { target: `${pdfjsAssets}standard_fonts/`, source: join(pdfjs.dir, 'standard_fonts') },
+  { target: `${pdfjsAssets}wasm/`, source: join(pdfjs.dir, 'wasm'), include: (name) => !name.startsWith('quickjs') },
+  { target: `${pdfjsAssets}iccs/`, source: join(pdfjs.dir, 'iccs') },
+  { target: `${pdfjsAssets}images/`, source: join(pdfjs.dir, 'web', 'images'), include: (name) => name.startsWith('annotation-') },
+]
+
+const devContentTypes: Record<string, string> = {
+  woff2: 'font/woff2',
+  ttf: 'font/ttf',
+  wasm: 'application/wasm',
+  js: 'text/javascript',
+  svg: 'image/svg+xml',
+}
 
 function filesUnder(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? filesUnder(join(dir, d.name)) : [join(dir, d.name)]))
 }
 
-function excalidrawFontsPlugin(): Plugin {
-  const prefix = `/${excalidrawAssets}fonts/`
+function mountedName(mount: AssetMount, file: string): string | null {
+  const name = relative(mount.source, file).split(sep).join('/')
+  return !mount.include || mount.include(name) ? name : null
+}
+
+function packageAssetsPlugin(): Plugin {
   return {
-    name: 'notesapp-excalidraw-fonts',
+    name: 'notesapp-package-assets',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url?.split('?')[0] ?? ''
-        if (!url.startsWith(prefix)) return next()
-        const file = resolve(excalidrawFonts, decodeURIComponent(url.slice(prefix.length)))
-        if (!file.startsWith(excalidrawFonts + sep) || !statSync(file, { throwIfNoEntry: false })?.isFile()) return next()
-        res.setHeader('Content-Type', 'font/woff2')
+        const mount = assetMounts.find((m) => url.startsWith(`/${m.target}`))
+        if (!mount) return next()
+        const file = resolve(mount.source, decodeURIComponent(url.slice(mount.target.length + 1)))
+        if (!file.startsWith(mount.source + sep) || !statSync(file, { throwIfNoEntry: false })?.isFile() || !mountedName(mount, file)) return next()
+        res.setHeader('Content-Type', devContentTypes[file.slice(file.lastIndexOf('.') + 1)] ?? 'application/octet-stream')
         createReadStream(file).pipe(res)
       })
     },
     generateBundle() {
-      for (const file of filesUnder(excalidrawFonts)) {
-        this.emitFile({
-          type: 'asset',
-          fileName: `${excalidrawAssets}fonts/${relative(excalidrawFonts, file).split(sep).join('/')}`,
-          source: readFileSync(file),
-        })
+      for (const mount of assetMounts) {
+        for (const file of filesUnder(mount.source)) {
+          const name = mountedName(mount, file)
+          if (name) this.emitFile({ type: 'asset', fileName: mount.target + name, source: readFileSync(file) })
+        }
       }
     },
   }
@@ -54,10 +93,11 @@ function excalidrawFontsPlugin(): Plugin {
 
 export default defineConfig({
   // The service worker is built after the app, from the files the build wrote (DESIGN §6.26).
-  plugins: [react(), excalidrawFontsPlugin(), serviceWorker({ entry: 'src/sw/sw.ts', buildSha })],
+  plugins: [react(), packageAssetsPlugin(), serviceWorker({ entry: 'src/sw/sw.ts', buildSha })],
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(buildSha),
     'import.meta.env.VITE_EXCALIDRAW_ASSETS': JSON.stringify('/' + excalidrawAssets),
+    'import.meta.env.VITE_PDFJS_ASSETS': JSON.stringify('/' + pdfjsAssets),
   },
   resolve: {
     alias: [

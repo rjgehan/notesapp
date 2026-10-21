@@ -5,7 +5,7 @@
 // the editor keeps the focus and the keyboard stays open while they dispatch to the EditorView.
 import { indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import type { EditorView } from '@codemirror/view';
-import { Brackets, Code, Command as CommandIcon, Hash, ImagePlus, KeyboardOff, ListIndentDecrease, ListIndentIncrease, Minus, Redo2, SquareArrowOutUpRight, SquareCheck, Undo2, type LucideIcon } from 'lucide-react';
+import { Brackets, Code, Command as CommandIcon, Hash, ImagePlus, KeyboardOff, ListIndentDecrease, ListIndentIncrease, Mic, Minus, Redo2, SquareArrowOutUpRight, SquareCheck, Undo2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { activeEditor } from '../../editor/activeEditor';
 import { insertWikilink } from '../../editor/completion';
@@ -13,6 +13,7 @@ import { noteContext } from '../../editor/context';
 import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox, toggleInlineCode } from '../../editor/editorCommands';
 import { revealCaret } from '../../editor/mobileViewport';
 import { pickAndInsertAttachments, pickFiles } from '../../features/attachments';
+import { startVoiceNote } from '../../features/voice/voiceNotes';
 import { runCommand } from '../../features/commands';
 import { activePath } from '../../features/navigation';
 import { isNotePath } from '../../features/paths';
@@ -67,6 +68,21 @@ const TOOLS: Tool[] = [
       // A Markdown editor that is not a note's (a canvas card) inserts through its own context.
       const { from, to } = v.state.selection.main;
       void pickFiles({ accept: 'image/*', multiple: true }).then((files) => ctx.insertFiles(files, { from, to }, false));
+    },
+  },
+  {
+    id: 'voice',
+    label: 'Record voice note',
+    icon: Mic,
+    markdown: true,
+    run: (v) => {
+      const ctx = v.state.facet(noteContext);
+      // Only into a note: a canvas card editor has no note session of its own.
+      const session = ctx && isNotePath(ctx.path()) ? documents.get(ctx.path()) : undefined;
+      if (!session) return;
+      // The session remembers the cursor; the keyboard goes, so the recording panel has the room.
+      startVoiceNote(session);
+      v.contentDOM.blur();
     },
   },
   { id: 'hide', label: 'Hide keyboard', icon: KeyboardOff, run: (v) => v.contentDOM.blur() },

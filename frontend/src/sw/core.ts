@@ -104,13 +104,22 @@ export function isExcalidrawFont(url: string): boolean {
 }
 
 /**
- * The files the worker precaches: everything the build wrote except source maps, the worker itself
- * and Excalidraw's fonts.
+ * PDF.js's self-hosted assets (DESIGN §6.8.3): CMaps, standard fonts, WebAssembly decoders, colour
+ * profiles and annotation icons, a few hundred files that a PDF loads only when it needs them. Like
+ * Excalidraw's fonts they are left to the HTTP cache (immutable, versioned path).
+ */
+export function isPdfjsAsset(url: string): boolean {
+  return /^\/assets\/pdfjs-[^/]+\//.test(url);
+}
+
+/**
+ * The files the worker precaches: everything the build wrote except source maps, the worker itself,
+ * Excalidraw's fonts and PDF.js's assets.
  */
 export function precacheUrls(files: readonly string[]): string[] {
   return files
     .map((f) => '/' + f.replace(/\\/g, '/').replace(/^\/+/, ''))
-    .filter((u) => !u.endsWith('.map') && u !== '/sw.js' && !u.startsWith('/.') && u !== '/robots.txt' && !isExcalidrawFont(u))
+    .filter((u) => !u.endsWith('.map') && u !== '/sw.js' && !u.startsWith('/.') && u !== '/robots.txt' && !isExcalidrawFont(u) && !isPdfjsAsset(u))
     .sort();
 }
 

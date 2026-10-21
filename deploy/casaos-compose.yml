@@ -87,6 +87,9 @@ services:
       NOTES_MIRROR_URL: ""
       NOTES_MIRROR_TOKEN_FILE: /data/secrets/mirror-token
       # App alerts are on once /DATA/AppData/notesapp/data/secrets/ntfy.json exists (docs/CASAOS.md).
+      # Optional transcription of voice notes (docs/CASAOS.md "Voice note transcription"): with the NotesApp
+      # Whisper app (casaos-whisper-compose.yml) installed, http://notesapp-whisper:9000. Empty = off.
+      NOTES_TRANSCRIPTION_URL: ""
     volumes:
       - /DATA/AppData/notesapp/data:/data
       # The last nightly backup's status for the status page, read-only. Written by the optional

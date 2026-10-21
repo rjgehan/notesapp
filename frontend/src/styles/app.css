@@ -734,16 +734,6 @@ body.is-resizing {
   justify-content: flex-start;
 }
 
-.pdf-frame {
-  width: 100%;
-  height: calc(var(--vvh, 100vh) - 190px);
-  min-height: 400px;
-  margin: 8px 0 24px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  background: var(--background-secondary);
-}
-
 .media-player {
   display: block;
   width: 100%;

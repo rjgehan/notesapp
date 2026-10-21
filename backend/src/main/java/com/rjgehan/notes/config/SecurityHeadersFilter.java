@@ -33,7 +33,12 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 	/** The web app manifest (DESIGN §6.26). */
 	static final String MANIFEST = "/manifest.webmanifest";
 
-	static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; "
+	/**
+	 * {@code 'wasm-unsafe-eval'} lets the app compile its own WebAssembly (PDF.js's JPEG 2000, JBIG2 and colour
+	 * decoders, DESIGN §6.8.3); it allows no JavaScript {@code eval}, and the modules can only come from
+	 * {@code 'self'}.
+	 */
+	static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; "
 			+ "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; "
 			+ "font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; "
 			+ "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'";
@@ -56,7 +61,7 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		response.setHeader("X-Frame-Options", "DENY");
 		response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 		response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-		response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+		response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=()");
 		response.setHeader(BUILD_HEADER, this.buildSha);
 		String path = RequestPaths.of(request);
 		if (path.startsWith("/api/") && !setsOwnCaching(path)) {

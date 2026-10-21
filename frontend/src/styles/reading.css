@@ -296,20 +296,6 @@
   margin: 0.5em 0;
 }
 
-.markdown-rendered .pdf-embed iframe {
-  display: block;
-  width: 100%;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  background: var(--background-secondary);
-}
-
-.markdown-rendered .embed-open {
-  display: inline-block;
-  margin-top: 4px;
-  font-size: var(--font-ui-small);
-}
-
 .markdown-rendered video,
 .markdown-rendered audio {
   max-width: 100%;

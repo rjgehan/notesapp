@@ -1,6 +1,6 @@
 # Installing NotesApp on CasaOS
 
-This is the short path for a CasaOS server: one compose file pasted into the CasaOS UI, no `.env` and no SSH required. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); everything it says about Tailscale, Watchtower and the app applies here too. The optional extras at the end (app alerts, the GitHub mirror, nightly backups) need a shell on the server, over SSH or in CasaOS's terminal; a fresh install needs none of them.
+This is the short path for a CasaOS server: one compose file pasted into the CasaOS UI, no `.env` and no SSH required. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); everything it says about Tailscale, Watchtower and the app applies here too. The optional extras at the end (app alerts, the GitHub mirror, voice note transcription, nightly backups) are off until you set them up; most need a shell on the server, over SSH or in CasaOS's terminal, and a fresh install needs none of them.
 
 The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs three containers:
 
@@ -10,7 +10,7 @@ The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs
 | `notesapp` | The app. It shares the Tailscale container's network, so it has **no LAN port** and is reachable only over the tailnet |
 | `notesapp-watchtower` | Checks GHCR every 5 minutes and restarts `notesapp` when a new image is pushed to `main` |
 
-Data lives in `/DATA/AppData/notesapp/`: `data/vault` holds your notes, and `tailscale/` holds the node identity and certificates (never delete it). `data/secrets/` (the alert and mirror settings) and `backup/` appear only if you set up the extras below.
+Data lives in `/DATA/AppData/notesapp/`: `data/vault` holds your notes, and `tailscale/` holds the node identity and certificates (never delete it). `data/secrets/` (the alert and mirror settings), `whisper/` (the transcription model) and `backup/` appear only if you set up the extras below.
 
 ## 1. One-time Tailscale setup (admin console)
 
@@ -100,6 +100,22 @@ Then set `NOTES_MIRROR_URL` to `https://github.com/<you>/<repo>.git` in the app'
 
 Files over 25 MB stay in the vault and in backups but out of git history (DEPLOY.md *Large files*). To change that, set `NOTES_GIT_LARGE_FILE_THRESHOLD` in the app's settings (for example `50MB`; `0` versions every file). It must be `0` or at least `5MB`, otherwise the app refuses to start and its log says why.
 
+### Voice note transcription
+
+Voice notes record without any setup (**Record voice note** in the command palette, or the microphone on the iPhone's editing toolbar); the audio is saved as an attachment and embedded in the note. To also get the **text** under each recording, install a local speech-to-text service as a second CasaOS app, [`deploy/casaos-whisper-compose.yml`](../deploy/casaos-whisper-compose.yml) (DEPLOY.md *Voice notes* has the background). It adds one container:
+
+| Container | Job |
+|---|---|
+| `notesapp-whisper` | [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice) with faster-whisper on the CPU. It joins NotesApp's network and publishes no port, so only NotesApp reaches it, and it keeps no audio |
+
+1. NotesApp must be installed first (the Whisper app joins its network, `notesapp_default`).
+2. Optionally change `ASR_MODEL` in the file: `base` for a slow or arm64 CPU, `small` (the default), `medium` for better text with a strong CPU and about 2 GB of RAM.
+3. CasaOS → **App Store → Custom Install → Import**, paste, **Submit**, **Install**. The image is large (about 2.7 GB); on its first start it downloads the model into `/DATA/AppData/notesapp/whisper` (about 0.5 GB for `small`). Its log (CasaOS → NotesApp Whisper → **Logs**) shows when it is ready.
+4. In NotesApp's settings (the `notes` container, as above), set `NOTES_TRANSCRIPTION_URL` to `http://notesapp-whisper:9000` and save. Optionally add `NOTES_TRANSCRIPTION_LANGUAGE` (for example `en`; empty detects the language of each recording).
+5. In the app, **Settings › This device** now says *New recordings are transcribed by whisper-asr at http://notesapp-whisper:9000*. Record a few words to try it.
+
+To turn it off, empty `NOTES_TRANSCRIPTION_URL`, then uninstall the NotesApp Whisper app if you like. NotesApp runs the same with or without it. Other engines (whisper.cpp's server, speaches, an API) are in DEPLOY.md *Voice notes*; an API key goes in `/DATA/AppData/notesapp/data/secrets/transcription-key`, never in an environment variable.
+
 ### Nightly backups
 
 A second CasaOS app, [`deploy/casaos-backup-compose.yml`](../deploy/casaos-backup-compose.yml), takes encrypted [restic](https://restic.net) snapshots of the vault, its history and the Tailscale identity every night, to a second disk and optionally to Backblaze B2 or Amazon S3 (DEPLOY.md *Backups* explains the design: NotesApp is stopped for the seconds the local snapshot takes). It adds two containers:
@@ -178,3 +194,7 @@ Use `offsite` instead of `local` when the second disk is gone. Check the result 
 | *NotesApp backup failed* | The status page's *Backups* card has restic's message; DEPLOY.md *"NotesApp backup failed"* explains each one. `not initialized`: run `init` (step 4). |
 | *NotesApp is down after the backup* | Restart NotesApp in CasaOS (or `docker start notesapp-tailscale notesapp`), then read its log. |
 | Status page: "No backup has reported here yet" | NotesApp Backup is not installed, or has not run yet (step 4). |
+| NotesApp Whisper does not install: `network notesapp_default not found` | Install NotesApp first; the Whisper app joins its network (*Voice note transcription*). |
+| *Transcribing … failed: cannot connect to http://notesapp-whisper:9000* | The NotesApp Whisper app is stopped or still downloading its model (its **Logs**). After reinstalling NotesApp, restart NotesApp Whisper so it joins the new network. |
+| *Transcription is off* | `NOTES_TRANSCRIPTION_URL` is empty in NotesApp's settings (*Voice note transcription*, step 4). |
+| *Microphone access was refused* | Safari's **aA** menu › Website Settings › Microphone › Allow (iPhone), or the site settings in the browser. |

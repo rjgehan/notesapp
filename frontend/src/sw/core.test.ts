@@ -76,6 +76,12 @@ describe('service worker caches', () => {
     ]);
   });
 
+  it("leaves PDF.js's assets to the HTTP cache too", () => {
+    expect(precacheUrls(['assets/pdfjs-6.4.299/cmaps/UniJIS-UCS2-H.bcmap', 'assets/pdfjs-6.4.299/wasm/openjpeg.wasm', 'assets/pdfLib-abc.js'])).toEqual([
+      '/assets/pdfLib-abc.js',
+    ]);
+  });
+
   it('deletes only older shell caches on activation', () => {
     const current = shellCacheName('v2');
     expect(staleShellCaches([shellCacheName('v1'), current, 'notesapp-media', 'other'], current)).toEqual([shellCacheName('v1')]);

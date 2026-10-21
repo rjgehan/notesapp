@@ -24,6 +24,7 @@ import {
   LayoutTemplate,
   Link2,
   ListTree,
+  Mic,
   Search,
   Settings as SettingsIcon,
   Tags,
@@ -64,6 +65,8 @@ import { registerFlashcards } from '../flashcards/register';
 import { registerHabits } from '../habits/register';
 import { registerCanvasView } from '../views/canvas/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
+import { registerPdfView } from '../views/pdf/register';
+import { startVoiceNote, transcribeAtCursor } from '../features/voice/voiceNotes';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerSheetView } from '../views/sheet/register';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
@@ -165,14 +168,7 @@ export function registerBuiltins(): void {
     modes: ['read'],
     load: () => import('../views/ImageView'),
   });
-  registerView({
-    id: 'pdf',
-    match: (e) => (e.kind === 'pdf' ? 2 : 0),
-    icon: FileText,
-    textual: false,
-    modes: ['read'],
-    load: () => import('../views/PdfView'),
-  });
+  registerPdfView();
   registerView({
     id: 'media',
     match: (e) => (e.kind === 'audio' || e.kind === 'video' ? 2 : 0),
@@ -271,6 +267,26 @@ export function registerBuiltins(): void {
   editorCommand('editor.insertLink', 'Insert Markdown link', insertMarkdownLink, 'Mod-k');
   editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
   editorCommand('editor.find', 'Find/replace in current note', openSearchPanel, 'Mod-f');
+  // Voice notes (ROADMAP item 33, DESIGN §6.30): recorded into the open note at its cursor.
+  registerCommand({
+    id: 'voice.record',
+    name: 'Record voice note',
+    icon: Mic,
+    when: hasNote,
+    run: (c) => {
+      const session = documents.get(c.activePath!);
+      if (session) startVoiceNote(session);
+    },
+  });
+  registerCommand({
+    id: 'voice.transcribe',
+    name: 'Transcribe recording on this line',
+    when: hasNote,
+    run: async (c) => {
+      const session = documents.get(c.activePath!);
+      if (session) await transcribeAtCursor(session);
+    },
+  });
   registerCommand({
     id: 'editor.insertAttachment',
     name: 'Insert attachment…',

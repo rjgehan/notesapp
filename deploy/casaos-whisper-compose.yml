@@ -1,0 +1,53 @@
+# NotesApp Whisper for CasaOS (optional): transcribes the voice notes recorded in NotesApp (ROADMAP item 33,
+# DESIGN §5.24). A SECOND custom app next to NotesApp (casaos-compose.yml): install NotesApp first, then paste this
+# into App Store → Custom Install → Import, and finally set NOTES_TRANSCRIPTION_URL to http://notesapp-whisper:9000
+# in NotesApp's settings (docs/CASAOS.md "Voice note transcription"). Recording works without it; this adds the text.
+#
+# whisper-asr-webservice (MIT) with faster-whisper on the CPU. It joins NotesApp's network and publishes no port, so
+# only NotesApp reaches it; it keeps no audio. The model is downloaded on the first start (about 0.5 GB for small)
+# into /DATA/AppData/notesapp/whisper. The image itself is large (about 2.7 GB on amd64).
+#   ASR_MODEL    base: fast on a small CPU · small (default): better · medium: best here, slow without a strong CPU
+name: notesapp-whisper
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:v1.10.0@sha256:0616c3d5fc6924e9d59aa8a7a3a944fbe8f3a5d701e5fc1fa2ce5b933dfecb73
+    container_name: notesapp-whisper
+    environment:
+      ASR_ENGINE: faster_whisper
+      ASR_MODEL: small
+      ASR_MODEL_PATH: /data/whisper
+      MODEL_IDLE_TIMEOUT: "900"                 # frees the model's memory after 15 idle minutes
+    volumes:
+      - /DATA/AppData/notesapp/whisper:/data/whisper
+    networks:
+      - notesapp                                # NotesApp's network: the app reaches http://notesapp-whisper:9000
+    mem_limit: 3g
+    logging: *logging
+    restart: unless-stopped
+
+networks:
+  notesapp:
+    external: true
+    name: notesapp_default                      # created by NotesApp (casaos-compose.yml, name: notesapp)
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: whisper
+  author: rjgehan
+  category: Utilities
+  title:
+    en_us: NotesApp Whisper
+  tagline:
+    en_us: Transcription of NotesApp voice notes
+  description:
+    en_us: A local Whisper speech-to-text service for NotesApp's voice notes. Reachable only by NotesApp. Set NOTES_TRANSCRIPTION_URL in NotesApp's settings after installing (docs/CASAOS.md).
+  icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/obsidian.png

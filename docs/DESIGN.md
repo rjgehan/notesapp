@@ -212,7 +212,7 @@ NotesApp/                              (monorepo; branch main)
 | `.obsidian/` | Obsidian's settings, from an imported vault or if the vault is ever opened in Obsidian. Read for the import and the compatibility report (§5.23), never written. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
-**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties.
+**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), an optional transcription API key (item 33, §5.24), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties.
 
 ### 4.2 File kinds
 
@@ -1191,20 +1191,22 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 
 | Header | Value |
 |---|---|
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'` |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'` |
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `no-referrer` |
 | `X-Frame-Options` | `DENY` |
 | `Cross-Origin-Opener-Policy` | `same-origin` |
 | `Cross-Origin-Resource-Policy` | `same-origin` |
-| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` |
+| `Permissions-Policy` | `camera=(), microphone=(self), geolocation=(), payment=()`. The microphone is the app's own, for voice notes (ROADMAP item 33, §6.30); no frame it shows gets it |
 | `Cache-Control` | `no-store` for every `/api/**` response, except the raw endpoints (item 6 sets their own) and `/api/events` (`no-cache, no-transform`). Note text then never persists in the disk cache of `mac` or `beach`, and back/forward navigation never shows stale JSON. |
 | `X-Notes-Build` | The running `buildSha`. The client compares it with the build it loaded (§6.18). |
 | `Service-Worker-Allowed` | `/`, on `/sw.js` only. `/sw.js` and `/manifest.webmanifest` also get `Cache-Control: no-cache`, so a deploy's new worker is found at the next update check (§6.26). |
 
 - `'unsafe-inline'` for styles is required by CodeMirror's runtime style injection and by React `style` props. Scripts stay `'self'`-only.
 - `https:` images and media are allowed because Obsidian notes commonly embed remote images. `no-referrer` keeps the vault URL from leaking. A per-device preference can turn remote images into click-to-load placeholders (§6.7).
-- Excalidraw drawings (ROADMAP item 5) work under this policy unchanged: fonts are self-hosted, its worker is same-origin, and SVG export falls back to whole fonts instead of needing `'unsafe-eval'` (§6.8.1).
+- Excalidraw drawings (ROADMAP item 5) needed no change: fonts are self-hosted and its worker is same-origin (§6.8.1).
+- **`'wasm-unsafe-eval'`** (added with ROADMAP item 32) lets the app compile WebAssembly: PDF.js's JPEG 2000, JBIG2 and ICC colour decoders and its PostScript-function compiler (§6.8.3), and Excalidraw's font subsetting. It allows no JavaScript `eval` or `new Function`; injected script still cannot run (`script-src 'self'`), and the WebAssembly the app compiles is fetched from `'self'` (`connect-src 'self'`). A worker's policy comes from its own script's response, which carries the same header. Without it PDF.js falls back to slower JavaScript decoders, which on a 300-page scan on the iPhone is the difference that matters.
+- **PDF.js** (§6.8.3) works under the rest of the policy as it is: its worker is a same-origin module script (`worker-src 'self'`, served as `text/javascript`, which `nosniff` requires); CMaps, standard fonts and decoders are fetched from `/assets/pdfjs-<version>/`; fonts embedded in a PDF become `FontFace`s from bytes (or `data:` URLs, `font-src data:`); the document's own JavaScript never runs (no scripting manager, and `quickjs-eval` is not shipped).
 
 **2. `HostAndIdentityFilter`**: the Host and identity allowlists of §5.13 (`421`, `403`).
 
@@ -1229,7 +1231,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 - **Inline allowlist:** raster images, `image/svg+xml`, `application/pdf`, audio, video and `text/plain`. Everything else is served with `Content-Disposition: attachment; filename*=UTF-8''...`, and `?download=true` forces attachment for any type.
 - **Never rendered:** `text/html`, `application/xhtml+xml`, `text/xml`, `application/xml` and JavaScript types are sent as `application/octet-stream` with `attachment`.
 - **CSP for raw responses:** `sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'`. Script inside an SVG therefore cannot run, even when it is opened directly. The exception is PDF, which gets `default-src 'none'; frame-ancestors 'self'` without `sandbox`, because Chrome's PDF viewer refuses sandboxed documents.
-- `X-Frame-Options: SAMEORIGIN` on raw responses, so the app can embed PDFs in an iframe.
+- `X-Frame-Options: SAMEORIGIN` on raw responses, so the app can embed PDFs in an iframe. Since ROADMAP item 32 the app renders PDFs with PDF.js, which reads the bytes with `Range` requests; the PDF exception remains for the browser's own viewer ("Open in the browser's viewer", downloads opened in a tab).
 - **Caching.** `ETag: W/"<size>-<mtimeMillis>"` and `Last-Modified` always. When the request carries `v=<size>-<mtimeMillis>` and it matches the file, the response is `Cache-Control: private, max-age=31536000, immutable`: the URL is content-addressed, so the reading view can re-render without a conditional request per image. Without `v`, or with a stale one, it is `no-cache`.
 
 **7.** Reading view HTML is sanitized on the client with DOMPurify (§6.7): `FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select']`, `input` elements other than task checkboxes removed, and a hook that strips `position: fixed|sticky` and `z-index` from inline styles. The reading-view and transclusion containers use `contain: paint; position: relative`, so even surviving fixed-position content is clipped to the note and cannot draw a fake app UI over the page. The CSP is the second layer.
@@ -1267,6 +1269,7 @@ public record NotesProperties(
     @DefaultValue TailscaleWatchdog tailscaleWatchdog,
     @DefaultValue Mirror mirror /* ROADMAP item 2, §5.8 "Mirror" */,
     @DefaultValue Alerts alerts /* ROADMAP item 38, §5.18.1 */, @DefaultValue Backup backup /* the status page, §7.10 */,
+    @DefaultValue Transcription transcription /* voice notes, ROADMAP item 33, §5.24 */,
     @DefaultValue("/data/secrets") Path secretsDir /* NOTES_SECRETS_DIR: ntfy.json and other secrets the app holds (§4.1) */,
     @DefaultValue Tasks tasks /* ROADMAP item 4: the archive rollover, §5.20 */,
     @DefaultValue Search search /* notes.search.*, §5.5.10 */,
@@ -1289,6 +1292,12 @@ public record NotesProperties(
                        @DefaultValue("10") int maxPerHour) {}
   public record Backup(@DefaultValue("/backup-state/status.json") Path statusFile /* mounted read-only (§7.2) */,
                        @DefaultValue("36h") Duration staleAfter) {}
+  public record Transcription(@DefaultValue("") String url /* NOTES_TRANSCRIPTION_URL; empty = off */,
+                              @DefaultValue("whisper-asr") TranscriptionApi api /* or openai */,
+                              @DefaultValue("whisper-1") String model /* openai only */,
+                              @DefaultValue("") String language /* empty = detected */,
+                              @DefaultValue("") String apiKeyFile /* openai only; a file outside the vault */,
+                              @DefaultValue("10m") Duration timeout, @DefaultValue("25MB") DataSize maxSize) {}
   public record Watcher(@DefaultValue("true") boolean enabled,
                         @DefaultValue("400ms") Duration debounce,
                         @DefaultValue("5m") Duration rescanInterval) {}
@@ -1334,7 +1343,7 @@ spring.web.resources.cache.cachecontrol.no-cache=true
 spring.servlet.multipart.enabled=false
 server.tomcat.max-swallow-size=110MB
 server.compression.enabled=true
-server.compression.mime-types=text/html,text/css,text/javascript,application/javascript,application/json,application/problem+json,text/markdown,text/plain,image/svg+xml
+server.compression.mime-types=text/html,text/css,text/javascript,application/javascript,application/json,application/problem+json,text/markdown,text/plain,image/svg+xml,application/wasm
 management.endpoints.web.exposure.include=health
 management.endpoint.health.show-details=never
 management.endpoint.health.probes.add-additional-paths=true
@@ -1572,6 +1581,30 @@ An existing Obsidian vault is imported by copying it into the vault directory be
   Callouts, Mermaid and math render since ROADMAP item 3 (§6.7.1), and `.excalidraw`/`.excalidraw.md` drawings open in the drawing editor (item 5), so they are not findings; the plugin table likewise reports bookmarks, Excalidraw, the Tasks plugin and QuickAdd by what items 12, 5, 4 and 7 built.
   Fenced code and code spans are skipped, so a note that *shows* such syntax is not reported. Each finding has a severity (`error`: data NotesApp cannot use; `warning`: shown wrong or not at all; `info`: works differently), the roadmap item that will handle it, an exact count, and at most 200 occurrences (path, 0-based line, text). The rules for rendering that a roadmap item adds (callouts, Mermaid and math with item 3) are removed when it lands.
 
+### 5.24 Transcription (ROADMAP item 33)
+
+Voice notes are recorded in the browser and saved as attachments (§6.30); the server's only part is the optional transcription, `POST /api/transcriptions` (API.md §20), in the `transcribe` package. It is **off by default**: nothing is configured, and nothing runs, until `notes.transcription.url` (`NOTES_TRANSCRIPTION_URL`) names a speech-to-text service. DEPLOY.md *Voice notes* and CASAOS.md *Voice note transcription* set up the sidecar.
+
+**The service** is a separate container, never part of the image: [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice) (MIT; faster-whisper on the CPU, ffmpeg for any input format) as the optional `whisper` service of `deploy/docker-compose.yml` (profile `transcription`) and the second CasaOS app `deploy/casaos-whisper-compose.yml` (which joins NotesApp's network). Neither publishes a port: only the app reaches it, from the Tailscale container's network namespace, by its service or container name. It keeps no audio. A different engine works through the second protocol.
+
+**`HttpTranscriptionEngine`** (the `TranscriptionEngine` bean; tests replace it) sends the file as `multipart/form-data`, streamed from disk, named `recording.<ext>` (the service needs the format, not the vault's name), over HTTP/1.1, with no redirects followed:
+
+| `notes.transcription.api` | Request | Answer |
+|---|---|---|
+| `whisper-asr` (default) | `POST <url>/asr?task=transcribe&output=json&encode=true&vad_filter=true[&language=…]`, the file in `audio_file` | `{"text", "language", "segments"}` |
+| `openai` | `POST <url>/v1/audio/transcriptions` (the URL is used as is when it already ends in `/audio/transcriptions`) with `model`, `response_format=json`, `[language]` and `file`; `Authorization: Bearer <key>` when `api-key-file` names a file | `{"text"}` |
+
+The `openai` protocol covers whisper.cpp's `whisper-server` (`--convert --inference-path /v1/audio/transcriptions`), speaches, LocalAI and OpenAI's own API. A key is read from its file (in `/data/secrets/`, outside the vault, §4.1) before every request, so it can be rotated without a restart, and never appears in logs, the status or errors. `vad_filter` drops silence before decoding, where Whisper would otherwise invent text. A non-2xx answer becomes an error naming the status and a one-line excerpt of the service's message (FastAPI's `detail`, OpenAI's `error.message`).
+
+**`TranscriptionService`**:
+
+- **Checks.** The path is opened like a raw read (`FileService.openRaw`: path rules, reserved paths, symlinks, `404`); only `audio` and `video` kinds (§4.2) are sent (`415 not-audio`), up to `max-size`, 25 MiB by default, about 50 minutes at the app's 64 kbit/s (`413 too-large`).
+- **One at a time.** The service is a CPU on the same small server, so a fair semaphore lets one recording through; others wait up to the timeout.
+- **Retries are cheap.** A request for the version (path, size, mtime) of a file that is being transcribed joins that run; the last 32 transcripts stay in memory, so the phone retrying after it slept through the answer gets the text at once (`millis: 0`). A changed file is transcribed again; failures are not kept. Nothing is stored on disk: the client puts the text into the note (§6.30), which makes it searchable like anything typed, versioned and synced.
+- **Errors** are `503 transcription-failed` with the reason (`cannot connect to http://whisper:9000`, `no answer within 600 s`, the service's own message), and `409 transcription-off` without a URL. Never `502` or `503 busy`: clients take those for the proxy during a deploy (API.md §3) and would show the app as offline. A failure is logged as `TRANSCRIBE_FAILED` (not an app-error alert marker, §5.18.1: the user sees it at once); a success as `TRANSCRIBE <path> <bytes> in <ms>`, never the text.
+
+`GET /api/transcription` reports `enabled`, the service (protocol, scheme, host and port only), the configured language and `maxBytes`; the client shows it in Settings › This device and uses it to decide whether a new recording is transcribed.
+
 ### 5.34 Flashcard review records (ROADMAP item 34)
 
 Sections 5.34 and 6.34 (and 5.35 and 6.35) are numbered after their ROADMAP items, so branches built in parallel do not collide.
@@ -1698,9 +1731,12 @@ frontend/src/
 │   ├── excalidraw/           drawings (§6.8.1): register.ts (descriptors, eager), format.ts and merge.ts (pure, eager),
 │   │                         files.ts, controller.ts, env.ts, fonts.ts, ExcalidrawView.tsx (the editor, lazy),
 │   │                         DrawingEmbed.tsx (![[drawing]], lazy), svg.ts, images.ts, statics.ts, theme.ts
+│   ├── pdf/                  PDFs (§6.8.3): register.ts (descriptor and commands, eager), subpath.ts, active.ts,
+│   │                         pdfLib.ts (loads PDF.js), controller.ts, pinch.ts, thumbnails.ts, prefs.ts, PdfView.tsx and
+│   │                         PdfEmbed.tsx (lazy), pdfjs-viewer.css (PDF.js's layer rules), pdf.css
 │   ├── FileView.tsx          route target: picks descriptor, lazy-loads it, error boundary
 │   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, mode toggle, save status), PropertiesTable.tsx
-│   ├── ImageView.tsx, PdfView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
+│   ├── ImageView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
 │   ├── sheet/                register.ts (the descriptor, main bundle); SheetView, SheetEditor, SheetGrid, FormulaBar,
 │   │                         SheetTabs, SheetDialogs, ChartsPane, importExport, gridModel, theme, useSheetDocument
 │   │                         (lazy chunk, §6.21.5); SheetEmbed (loadEmbed, §6.21.7) and SheetChart (§6.21.9)
@@ -1722,7 +1758,7 @@ frontend/src/
 │   ├── rich/                 rich Markdown pack (§6.7.1): callouts, math, Mermaid, code; index.ts is the public API
 │   ├── patch.ts              per-block keyed DOM patching (keeps embeds alive across re-renders)
 │   ├── ReadingView.tsx       delegated click/change handlers
-│   └── embeds.tsx            note transclusion, media, pdf
+│   └── embeds.tsx            media elements; everything else through the view's loadEmbed (notes, drawings, PDFs, sheets, canvases)
 ├── sheets/                   .sheet files (§6.21): a1.ts, format.ts (parse, serialize), merge.ts (3-way merge),
 │                             engine.ts (HyperFormula Workbook, lazy chunk), loadEngine.ts, refs.ts (moving formulas),
 │                             tsv.ts, display.ts, edits.ts (fill, copy, paste), activeSheet.ts (palette commands),
@@ -1741,6 +1777,8 @@ frontend/src/
 │   ├── bookmarks.ts          bookmark item helpers (Obsidian format) and BookmarkWriter (§6.23)
 │   ├── bookmarkStore.ts      the page's bookmarks: query + unsaved edits, useBookmarks(), toggle actions
 │   ├── mirror.ts, largeFiles.ts  the mirror's warning, summary and "push now"; the large-file threshold (§6.11, §6.18)
+│   ├── voice/                voice notes (§6.30): recorder.ts (MediaRecorder, formats, level, wake lock), voiceNotes.ts
+│   │                         (the panel's state, saving, transcripts)
 │   └── paths.ts              join, folderOf, basename, extension, encodeRoutePath, decodeRoutePath
 ├── tasks/                    structured tasks (ROADMAP item 4, §6.22): register.ts (the extension points), api.ts, store.ts,
 │                             queries.ts, mutations.ts, sync.ts, model.ts, recurrence.ts (lazy), convert.ts, quickadd/
@@ -1953,8 +1991,8 @@ The pipeline is `render/render.ts` from the research, verified:
    | Embed target | Rendering |
    |---|---|
    | image | `<img src="/api/files/raw?path=…&v=<size>-<mtimeMillis>" loading="lazy">`, built from the tree entry, so the URL is content-addressed and the server marks it immutable (§5.14). `\|W` or `\|WxH` sets the size; otherwise the box reserves space (a minimum height, then the image's `aspect-ratio` once known) so later images never make the page jump. Remote `https:` images become click-to-load placeholders when the per-device `loadRemoteImages` preference is off. |
-   | audio or video | `<audio controls>` / `<video controls playsinline>` |
-   | pdf | `<iframe src="raw#page=N" loading="lazy">`, `height` from `#height=` or 600 px, plus an "Open" link |
+   | audio or video | `<audio controls>` / `<video controls playsinline>`; a video file without a picture (a voice note recorded as WebM, §6.30) becomes an `<audio>` once its metadata says so |
+   | pdf | The PDF view's `loadEmbed` (PDF.js, §6.8.3): the pages in a box of the note at page width, scrolled to `#page=N`; the height from `#height=` (or a `WxH` size), otherwise 600 px; a header names the file and opens it at the page shown. v1 used an `<iframe>`, which iOS shows as the first page only. |
    | note (`![[Note]]`, `![[Note#Heading]]`) | Transclusion box showing the rendered note or just that heading's section, **one level deep**. Nested embeds render as links. A cycle guard prevents loops. Header links to the note. |
    | `![[Note#^block]]` | A link (block transclusion is roadmap item 20) |
    | other files | A file chip with a download link |
@@ -2057,7 +2095,7 @@ All v1 views, panels (Files, Search, Bookmarks, Tags, Recent files, Backlinks, O
 | `markdown` | `.md` (3) | yes | Editor and reading view |
 | `text` | other `kind:"text"` (2) | yes | Plain CodeMirror editor (JSON language for `.json`) with the same autosave and conflict handling |
 | `image` | `kind:"image"` (2) | no | Zoomable `<img>` |
-| `pdf` | `kind:"pdf"` (2) | no | `<iframe>` plus an "Open in new tab" link |
+| `pdf` | `kind:"pdf"` (2) | no | PDF.js since ROADMAP item 32 (§6.8.3); v1 had an `<iframe>` plus an "Open in new tab" link |
 | `media` | audio and video (2) | no | Native controls |
 | `unsupported` | everything (1) | no | File info and a Download button |
 | `sheet` | `.sheet` (6) | yes | Spreadsheet grid with formulas, a cell-level `merge`, "New spreadsheet", and `loadEmbed` for `![[x.sheet]]` (ROADMAP item 6, §6.21.5, §6.21.7) |
@@ -2173,11 +2211,11 @@ Excalidraw drawings are textual views over the file's `DocumentSession`, so auto
 - Embedded data URLs of excalidraw.com files are kept as they are, whatever their size (`notes.limits.text-size-overrides.excalidraw` covers large imports). One pasted later from another app's Excalidraw clipboard stays embedded up to 256 KB; a larger one is uploaded as an attachment, and the file stores its path from then on.
 - A test asserts that five 3 MB photos keep a drawing under 1 MB of JSON.
 
-**Fonts and the CSP.** The build copies the package's `dist/prod/fonts` to `/assets/excalidraw-<version>/fonts/` (`vite.config.ts`, which also serves them in dev), and `register.ts` sets `window.EXCALIDRAW_ASSET_PATH` there. The existing `/assets/**` handler serves them as `font/woff2` with immutable caching, which the version in the path makes safe. The CSP is unchanged:
+**Fonts and the CSP.** The build copies the package's `dist/prod/fonts` to `/assets/excalidraw-<version>/fonts/` (`vite.config.ts`, which also serves them in dev), and `register.ts` sets `window.EXCALIDRAW_ASSET_PATH` there. The existing `/assets/**` handler serves them as `font/woff2` with immutable caching, which the version in the path makes safe. The CSP needed no change for drawings:
 
 - fonts load from `'self'`; Excalidraw's font-subsetting worker is a same-origin module (`worker-src 'self'`); images are `data:` URLs, exports `blob:`;
 - Excalidraw lists its CDN (esm.sh) as a fallback in every `FontFace`. The CSP never lets it load, but Chromium reports a violation for each such source when the face is created (a couple of hundred console errors per drawing), so `fonts.ts` drops cross-origin sources from `FontFace` source lists;
-- SVG export (Export image, Copy to clipboard as SVG) subsets fonts with WebAssembly glue that needs `'unsafe-eval'`. Excalidraw falls back to embedding whole fonts and logs "Skipped glyph subsetting": exported SVGs are larger, and nothing else changes. Allowing `eval` for that is not worth it. Embeds do not use that path (below).
+- SVG export (Export image, Copy to clipboard as SVG) subsets fonts with WebAssembly (HarfBuzz and WOFF2, compiled from bytes; no JavaScript `eval`). Under the original policy Excalidraw fell back to embedding whole fonts and logged "Skipped glyph subsetting". Since ROADMAP item 32 the policy has `'wasm-unsafe-eval'` for PDF.js's decoders (§5.14, §6.8.3), which also lets this subsetting run, so exported SVGs are smaller. Embeds do not use that path (below).
 
 **Embeds** (`DrawingEmbed.tsx`, `svg.ts`). `![[Diagram.excalidraw]]` and `![[Diagram.excalidraw|400]]` (an `.excalidraw.md` drawing is linked as `Diagram.excalidraw`, as in Obsidian) mount the view's `loadEmbed` in the reading view (§6.7), and in any view that hydrates embeds.
 
@@ -2245,6 +2283,30 @@ Excalidraw drawings are textual views over the file's `DocumentSession`, so auto
 **`![[Board.canvas]]`** (`CanvasEmbed.tsx`, the descriptor's `loadEmbed`) draws a static, scaled picture of the board (groups, cards with their first lines, images, edges), the full width and 400 px high by default; `|W` or `|WxH` sets the size. Clicking it opens the canvas. A file node showing a canvas uses the same picture.
 
 **Not built.** Web pages are not embedded; card editing is CodeMirror source, not Live Preview (item 10).
+
+#### 6.8.3 PDFs (ROADMAP item 32)
+
+PDFs are rendered by PDF.js (`pdfjs-dist` 6.4.299, Apache-2.0) inside the app, so the iPhone shows every page (Safari's iframe showed only the first) and every device gets the same thumbnails, find, zoom and page links. The code is in `views/pdf/`: `register.ts` (the descriptor and its commands), `subpath.ts`, `active.ts` and `prefs.ts` are small and eager; `PdfView.tsx` and `PdfEmbed.tsx` are lazy chunks, which share PDF.js through `pdfLib.ts`. Nothing changes on the server except the CSP (§5.14): PDFs stay `kind:"pdf"` files read through `GET /api/files/raw`.
+
+**Loading** (`pdfLib.ts`). PDF.js is imported on first use (the library, then its viewer module, which reads the library from `globalThis.pdfjsLib`); a PDF never opened costs nothing. One `PDFWorker` serves every document, the view's and the embeds'. The worker is a bundled asset (`pdf.worker.min-<hash>.mjs`); `vite.config.ts` copies PDF.js's CMaps (CJK text), standard fonts (PDFs that do not embed theirs), WebAssembly decoders with their JavaScript fallbacks (JPEG 2000, JBIG2, ICC colour; not `quickjs-eval`, which runs a PDF's own JavaScript), CMYK profile and annotation icons to `/assets/pdfjs-<version>/`, served immutable like Excalidraw's fonts (and by the dev server). Documents open by their content-addressed raw URL with `disableAutoFetch` and `disableStream`: PDF.js reads the ranges the shown pages need (`Range`, 64 KiB chunks) instead of the whole file, and the server already answers ranges (§5.14 item 6). A new version of the file has a new URL, so the view reopens it.
+
+**The viewer** (`controller.ts`, outside React). A `PdfController` wraps PDF.js's `PDFViewer` with its `EventBus`, `PDFLinkService` and `PDFFindController` over an absolutely positioned scroll container, and exposes the state the toolbar shows (status, pages, page, scale, find counts) through `subscribe`/`getState`. It can be mounted again after an unmount (StrictMode); each mount opens the document anew, and an unmount destroys it in the worker.
+
+- **Rendering** is PDF.js's: only the pages near the viewport are drawn (a buffer of about ten), with the text layer (selection, copy, find) and the annotation layer (links; comments as popups; form fields drawn but never inputs, as a form could not be saved). Page borders are off; the app adds the gap and shadow. On iOS and Android PDF.js caps a page canvas at 5 megapixels and draws the visible part sharper at high zoom (its detail canvas), which keeps a 300-page file within Safari's canvas memory. Its localization is replaced by a stub (no locale files are fetched); the controller labels the page landmarks itself.
+- **Links.** A PDF's internal links scroll the viewer (the route's hash stays); web links open in a new tab with `noopener noreferrer nofollow`. A document's JavaScript never runs (no scripting manager).
+- **Page.** The first page shown is the link's `#page=N` (`[[file.pdf#page=3]]` routes to `/n/file.pdf#page=3`, §6.4), otherwise the page this device read last (`prefs.ts`: up to 100 PDFs in localStorage, the least recently read forgotten first), otherwise page 1. A link to another page of the PDF already open scrolls it there; the view is not remounted.
+- **Zoom.** `auto` (the page width, up to 125 %) by default; the toolbar has zoom out, a preset menu (Automatic, Page width, Whole page, 50–400 %) and zoom in. A preset follows the container's width (rotating the phone, resizing a sidebar). **Pinch** (`pinch.ts`): two fingers on the container (`touch-action: pan-x pan-y`, so one finger scrolls natively and Safari's own page zoom is off; `gesturestart` is cancelled as well) and Ctrl/⌘ + wheel (a trackpad pinch) zoom around the fingers or pointer and pan with the midpoint, through `PDFViewer.updateScale` with a 400 ms drawing delay: the pages are stretched by CSS while the fingers move and drawn at the final scale once they rest. Steps under one percent are accumulated (PDF.js keeps whole percents), and the scale stays between 25 % and 1000 %.
+- **Find** (Mod-F while a PDF is shown, or the toolbar's search button): PDF.js's find controller, case- and accent-insensitive, every match highlighted; Enter and Shift+Enter (or the arrows) go to the next and previous match; the bar shows "3 of 12", "Searching…" or "No results"; Escape closes it and clears the highlights. The bar opens and focuses synchronously (`flushSync`), so the iPhone keyboard opens with the tap.
+- **Thumbnails** (`thumbnails.ts`, `PdfThumbnails.tsx`): a sidebar of page buttons (an overlay on phones, closed by picking a page). A thumbnail is drawn when it scrolls near the list's viewport (one `IntersectionObserver`), two at a time with the most recently requested first, at 120 CSS px (up to 2× pixel density), into a JPEG object URL; the canvas is released at once, and PDF.js frees the page unless the viewer shows it (`thumbnailrendered`). URLs are revoked with the list.
+- **Dark theme.** The toolbar and the space around the pages follow the theme. In the dark theme the pages themselves are inverted with their hues kept (`invert(93%) hue-rotate(180deg)` on the canvas layer, as drawings), so a white page is not a lamp at night; the text and annotation layers above stay as they are, so selection and find highlights keep their colours. The moon button (or "Toggle dark PDF pages") turns this off on this device, for photo-heavy PDFs; thumbnails and embeds follow.
+- **Password-protected PDFs** ask for the password in a masked prompt (`promptText` with `secret`), again after a wrong one; Cancel shows "This PDF is protected by a password." An unreadable file says so, with a Download button.
+- **Layout.** The view fills the workspace below its toolbar like a drawing (the workspace does not scroll around it). Phones show the page field (16 px, so iOS does not zoom into it), the zoom menu, find and dark pages; Download and "Open in the browser's viewer" are in the palette there (Download current file) and in the toolbar elsewhere. The container takes the keyboard focus when the PDF was opened from the keyboard, so the arrow keys, Page Down and Space scroll at once.
+
+**Commands** (the descriptor's `commands`, active while the PDF view shows the open file, §6.8): Find in PDF (Mod-F), Go to page…, Copy link to current PDF page (`[[file.pdf#page=N]]` in the configured link style, `linkTo` with a subpath), Zoom in, Zoom out, Zoom to page width, Zoom to whole page, Toggle page thumbnails, Toggle dark PDF pages.
+
+**Embeds** (`PdfEmbed.tsx`, through the reading view's `loadEmbed`, §6.7). `![[file.pdf]]`, `![[file.pdf#page=3]]`, `![[file.pdf#height=400]]` and both together (`#page=3&height=400`), as in Obsidian, show the same viewer in a box of the note: page width, scrolled to the page, 600 px high unless `#height=` or a `WxH` size says otherwise, capped at the screen's height. PDF.js loads only when the box comes within 600 px of the screen, so a note with many PDFs costs nothing until it is read. The header names the file and links to it at the page the embed shows (`a.internal-link`, so the reading view opens it). Embeds leave pinch to the page and remember no page.
+
+**Not built:** annotations and highlights (ROADMAP item 32 leaves them for later), printing from the app (the browser's viewer prints). The text of PDFs is searched on the server (§5.5.10); a hit opens the PDF at its page (`?page=N`, read like a link's `#page=N`).
 
 ### 6.9 Autosave policy
 
@@ -2514,7 +2576,7 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 - **MobileToolbar.** The last grid row, so it sits right above the keyboard, on `(pointer: coarse)`.
   - It is **always mounted**; a CSS class shows it from a debounced (150 ms) "editor focused or toolbar in use" state. Unmounting it on blur would remove a button before its click is delivered.
   - Every button has `tabIndex={-1}` and `onPointerDown={e => e.preventDefault()}`, so tapping it never moves focus: the editor keeps focus, the keyboard stays open, and the button dispatches straight to the `EditorView`.
-  - Buttons: `[[ ]]`, `#`, checkbox, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, and hide keyboard (`blur`).
+  - Buttons: `[[ ]]`, `#`, checkbox, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, **Record voice note** (§6.30; it puts the keyboard away for the recording panel), and hide keyboard (`blur`).
   - The image button triggers the **app-level** hidden `<input type=file accept="image/*" multiple>` hosted by `AppShell`. The selection to insert at is remembered before the picker opens, because opening the picker blurs the editor; an input inside the toolbar would be lost with its `change` event.
 - **Typography and targets.** Editor and input font size is at least **16 px**, so iOS does not zoom on focus. Every tap target is at least **44×44 px**. `touch-action: manipulation` removes the tap delay.
 - **No hover-only UI.** Tree rows open their menu with long-press or `⋯` (§6.15).
@@ -3116,6 +3178,26 @@ Two views over the same data, both lazy chunks registered in `extensions/builtin
 - **Graph view**: when `graph.json` has options, **Use them on this device** turns them into graph options (`optionsFromObsidian`: colors `{a, rgb}` become `#rrggbb`, unknown keys are dropped) for this device (§6.28).
 - **Plugins**: the enabled core and community plugins, with *Supported*, *Partly*, *Planned* (and the roadmap item), *Not supported* or *Unknown*, and a one-line note.
 - **Findings** in three sections (syntax and plugins in notes, links, files), each a collapsed card with its severity icon, count, file count and roadmap item; expanded, it explains the finding and lists the occurrences, each opening the note at its line (`/n/<path>?line=N`, §6.4). Under 768 px the settings table stacks each row; occurrences are 44 px tall on touch screens.
+
+### 6.30 Voice notes (ROADMAP item 33)
+
+Record in the app, save the audio as an attachment, embed it where the cursor was, and, when the server has a transcription service (§5.24), put the transcript under the embed. The code is in `features/voice/` (`recorder.ts`, `voiceNotes.ts`) and `components/overlays/VoiceRecorderPanel.tsx`.
+
+**Starting.** **Record voice note** (command palette, `when` a Markdown note is open) and the microphone of the phone's editing toolbar (§6.16, which then puts the keyboard away so the panel has the room) call `startVoiceNote(session)` inside the tap: iOS lets the level meter's `AudioContext` run only when it is created in the gesture. A note can have one recording at a time. Without `MediaRecorder` or `getUserMedia` (an insecure origin), the toast says why; a refused microphone says where to allow it.
+
+**Recording** (`VoiceRecorder`). `getUserMedia({audio})` with echo cancellation, noise suppression and automatic gain; `MediaRecorder` at 64 kbit/s with a 1-second timeslice, so a recording cut short by the phone keeps what it had. The format is the first the browser supports of AAC in MP4 (iOS Safari, and Chrome where it can: plays on every device), Opus in WebM, Opus in Ogg, then the browser's default. The file is `Recording YYYYMMDDHHmmss.<ext>` in local time, as Obsidian's audio recorder names it: `.m4a` for MP4, `.webm`, `.ogg`. A screen wake lock keeps the phone awake while recording (where the browser has the API). When the microphone goes away by itself (another app takes it, the phone locks), the recording ends and what was recorded is saved, with a toast.
+
+**The place.** At the start, an upload widget (§6.6 #10, verb "Recording") marks the cursor (after a selection, which stays). It is a position in the editor state, never text, so it follows every edit made while recording, on this device or another; a note never shown in an editor during this page load gets the recording at its end. The note's session is held until the recording and its transcript are in, so autosave, drafts and conflicts work whatever the user opens meanwhile, and a recording in progress counts as unsaved work (the `beforeunload` prompt).
+
+**The panel** floats above the workspace and the phone's toolbar: the time (pauses excluded), a level meter, *Into <note>*, a **Transcribe** checkbox (shown when the server can; per device, also in Settings › This device), and **Discard** (asks first after 10 seconds), **Pause**/**Resume** and **Done**. Toasts move above it.
+
+**Saving.** **Done** stops the recorder; the mark's position becomes two widgets, "Uploading Recording …" and, when transcribing, "Transcribing Recording …". The audio goes up as an attachment (`POST /api/attachments`, source = the note); its `markdown` replaces the first widget on a line of its own, and the second widget moves after it (the batch order of §6.6 #10). A failed upload keeps the recording in memory: the toast's **Retry** sends it again, at the cursor.
+
+**Transcribing.** `POST /api/transcriptions` with the attachment's path. The text replaces its widget as a quote, `> ` on every line, starting on a new line and ending a block: a blank line follows unless the next line already is one (Markdown would otherwise draw the next line into the quote). The quote is ordinary note text, so search finds the recording by its words, the outline and history see it, and Obsidian shows it too. No speech recognized: a toast, nothing inserted. A failure (`503 transcription-failed`, the server unreachable) shows the server's reason with **Retry**, which finds the recording's embed in the note again wherever the text moved it. **Transcribe recording on this line** (palette) transcribes any audio or video embed on the cursor's line, for recordings made before the service existed or synced from elsewhere.
+
+**Playback** is the reading view's (§6.7): `<audio controls>` for `.m4a` and `.ogg`; a `.webm` (a `video` kind, §4.2) starts as `<video>` and becomes `<audio>` once its metadata shows no picture, in embeds and in the media view.
+
+**Server side** is §5.24; the `Permissions-Policy` allows the microphone for the app's own origin (§5.14).
 
 ### 6.34 Flashcards (ROADMAP item 34)
 
@@ -3771,6 +3853,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 21. Installable app (`PwaIntegrationTest`): `sw.js` is always revalidated and may control the origin, the manifest has its media type and is revalidated, and API responses stay `no-store`.
 22. `GET /api/graph` (ROADMAP item 16): nodes, edges and tags over HTTP; `?since=` answers `unchanged` until a save adds a link; excluded paths leave the graph.
 23. Obsidian import (ROADMAP item 24, `ObsidianImportIntegrationTest`): the fixture vault started once takes its settings from `.obsidian/`, keeps `.obsidian/` byte-for-byte, out of the tree and its `workspace.json` out of git; `GET /api/compat` reports every setting in effect, the plugins and the findings, and a changed setting as `different`; a second start keeps the changed settings.
+24. Voice-note transcription (ROADMAP item 33, the engine replaced by a fake through `@TestBean`): `GET /api/transcription` without the URL's credentials; recordings uploaded as attachments are transcribed, a retry gets the kept transcript (`millis` 0), a changed file is sent again; `.webm` counts as audio; notes (`415 not-audio`), missing files, traversal, reserved paths, a blank path and recordings over `max-size` (`413`) are never sent; a failing or unreachable service is `503 transcription-failed` with the reason and nothing is kept; a second request for a running recording joins it; the client id is required. Off by default (`TranscriptionOffIntegrationTest`: `409 transcription-off`). `HttpTranscriptionEngineTest` drives both protocols against an in-process HTTP server: the exact multipart body (`recording.m4a`, streamed bytes), the query or fields, the key read from its file for every request, base URLs with or without their path, the status's URL without credentials, error excerpts, non-JSON answers, and the timeout. `SecurityIntegrationTest`: `microphone=(self)`, `'wasm-unsafe-eval'`, and the PDF.js worker and `.wasm` served with their types (item 32).
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
@@ -3796,6 +3879,8 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - Bookmarks and recent files: the item helpers (labels, insert, move into and out of groups, shift, find ignoring case and Unicode form, the server's re-keying for the mock) and `BookmarkWriter` (optimistic view, one request in flight with later edits batched, re-applying edits after a `409`, dropping refused edits); `features/recent.ts` (times, the 50 cap, the move from the first format, renames, deletes, subscribers); `BookmarksPanel` (kinds, missing targets and their Remove toast, opening files, headings and searches, collapsing groups, the menu's Remove and Move to group, a dropped explorer row) and `RecentPanel`; `applyEvents` for `bookmarks.changed`; the mock's bookmarks.
 - Heading renames: `detectHeadingRename` (one changed heading, ignoring case and spacing; not an added, removed or re-levelled heading), the summary text, saving before the update and applying its result, the dry-run preview, editing a heading at the cursor (ATX with closing `#`s, setext) and the Rename heading prompt; `useHeadingRenameOffers` with fake timers (an offer after a typed rename, the update on request, a silent accept when nothing links, no offer for a server change or in reading mode); the mock's rewrite.
 - Hotkeys: `hotkeyPrefs` (spec normalization, defaults, customizing, removing and resetting keys, invalid stored data, conflicts, reserved keys, subscribers); the global handler with customized keys (in the editor too, the old key inert, an editor-bound command global only once customized, the recorder left alone); an editor default key stepping aside once rebound; `HotkeysSection` (listing and filtering, recording, taking a key over from another command, refusing a reserved key, Escape, removing and resetting).
+- PDFs (item 32, `views/pdf/*.test.ts*`, with a fake PDF.js in `test/pdf.ts`): the controller (the initial and remembered page, page and scale state, find through the event bus with its counts, pinch and Ctrl+wheel steps of at least one percent around the fingers, no pinch in embeds, the password prompt, error messages, unmount destroying the document and a late document never reaching a new viewer, presets refitted on resize); subpath parsing (encoded route hashes too); the pinch tracker, wheel factors and the scale accumulator's limits; remembered pages (the 100-file limit, garbage ignored) and dark pages; the thumbnail queue (two at a time, newest waiting first, cancel, URLs revoked); the view (link page, typed page, zoom menu, find bar with Escape, thumbnails, dark pages per theme, errors, PDF.js failing to load) and its commands (copy page link in the link style); the embed (page, heights, lazy loading near the screen, errors, dark theme). `render/embeds.test.tsx`: PDF embeds go through the view's `loadEmbed` with their subpath, never an iframe.
+- Voice notes (item 33, `features/voice/*.test.ts`, `VoiceRecorderPanel.test.tsx`): the recorder against a fake `MediaRecorder` (format preference, `.m4a`/`.webm`/`.ogg` names, the 1-second timeslice, pauses excluded from the time, audio of the recorded type, cancel and a microphone granted after cancelling released, a microphone that goes away keeping the audio, the level meter, refusals); the embed and transcript insertions (a quote ending its block); finding an audio embed on the cursor's line; the whole flow with a fake recorder (a mark that follows edits, the upload and transcript widgets in order, retries that find the embed again, empty recordings, one recording at a time, transcripts off per device); the panel's controls and the discard confirmation; the toolbar's microphone; Settings › This device; a picture-less WebM played as audio in embeds and the media view.
 
 ### 8.3 Browser smoke checklist
 
@@ -3835,6 +3920,8 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 32. Graph view (ROADMAP item 16): `/x/graph` on a vault of a few hundred notes settles within seconds and stays responsive while it does; hover highlights neighbours, a click opens the note, the filters, a color group and the forces change the picture at once; on the iPhone, pinch zooms, one finger pans or drags a node, a tap opens it, and the settings open as a sheet. The local graph follows the open note and its depth slider; an edit that adds a link appears in both graphs within a second.
 33. Obsidian import (ROADMAP item 24): start on a copy of a real Obsidian vault; Settings shows its attachment folder, daily note and template settings; `/x/compat` lists them as in effect, its plugins and findings, and each finding opens its note at the line; `.obsidian/` is unchanged and the vault still opens in Obsidian.
 34. Canvas (ROADMAP item 25): open a board made in Obsidian, look around and close it: `git status` shows no change. Add, connect, colour, group, resize and delete cards; edit a card with `[[` completion; undo and redo. On the iPhone: pinch, pan, double-tap a card and type (the keyboard opens), long-press for the menu. Move one card on each device at the same time: both moves survive without a banner. `![[Board.canvas]]` shows the preview, search finds a card, and the note on a file node lists the canvas among its backlinks.
+35. PDFs (item 32): a 300-page PDF opens on the iPhone at once and scrolls smoothly to the end; pinch zooms around the fingers and the pages sharpen when the fingers rest, without Safari zooming the page; text can be selected and copied; find shows "n of m" and the keyboard opens with the tap; thumbnails jump to their page; `[[file.pdf#page=5]]` opens page 5; `![[file.pdf#page=3]]` shows page 3 in the note; a scanned PDF (JPEG 2000 or JBIG2) renders; dark pages invert in the dark theme and the moon turns them off; the console shows no CSP violations.
+36. Voice notes (item 33): on the iPhone, the toolbar's microphone asks for the microphone once, records with the screen on, and **Done** embeds `Recording <date>.m4a` at the cursor, even after typing elsewhere meanwhile; it plays inline in the reading view and on the PC; a PC recording (`.webm` or `.m4a`) plays on the iPhone. With the whisper service set up, *Transcribing…* turns into a quote under the embed within about the recording's length, and search finds its words; with the service stopped, the toast's Retry works once it is back. Lock the phone mid-recording: what was recorded is saved.
 
 ---
 

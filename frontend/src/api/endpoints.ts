@@ -48,6 +48,8 @@ import type {
   TextFile,
   TimelineResponse,
   TrashEntry,
+  TranscriptionResult,
+  TranscriptionStatus,
   TrashListResponse,
   TreeResponse,
   WriteResult,
@@ -142,6 +144,9 @@ export interface Endpoints {
   getBookmarks(): Promise<BookmarksResponse>;
   putBookmarks(req: BookmarksUpdateRequest): Promise<BookmarksResponse>;
   renameHeading(req: HeadingRenameRequest): Promise<HeadingRenameResult>;
+  getTranscriptionStatus(): Promise<TranscriptionStatus>;
+  /** The transcript of a recording in the vault (API.md §23.2); it can take minutes. */
+  transcribe(path: string): Promise<TranscriptionResult>;
   /** Content-addressed raw URL (API.md §9.1). */
   rawUrl(entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>, opts?: { download?: boolean }): string;
   trashRawUrl(id: string): string;
@@ -216,6 +221,8 @@ export const httpEndpoints: Endpoints = {
   getBookmarks: () => apiFetch('/api/bookmarks'),
   putBookmarks: (req) => apiFetch('/api/bookmarks', { method: 'PUT', json: req }),
   renameHeading: (req) => apiFetch('/api/notes/rename-heading', { method: 'POST', json: req }),
+  getTranscriptionStatus: () => apiFetch('/api/transcription'),
+  transcribe: (path) => apiFetch('/api/transcriptions', { method: 'POST', json: { path } }),
   rawUrl: (entry, opts) =>
     '/api/files/raw?path=' +
     encodeURIComponent(entry.path) +

@@ -9,6 +9,8 @@ export interface PendingUpload {
   id: number;
   pos: number;
   label: string;
+  /** What the widget says is happening; "Uploading" by default ("Transcribing" for a voice note's text). */
+  verb?: string;
 }
 
 /** Starts showing a pending upload at `pos`. */
@@ -25,9 +27,9 @@ export const endUpload = StateEffect.define<{ id: number; from?: number; end?: n
 
 class UploadWidget extends WidgetType {
   readonly label: string;
-  constructor(label: string) {
+  constructor(label: string, verb = 'Uploading') {
     super();
-    this.label = label;
+    this.label = `${verb} ${label}…`;
   }
   override eq(other: UploadWidget): boolean {
     return other.label === this.label;
@@ -36,7 +38,7 @@ class UploadWidget extends WidgetType {
     const el = document.createElement('span');
     el.className = 'cm-upload-placeholder';
     el.setAttribute('aria-live', 'polite');
-    el.textContent = `Uploading ${this.label}…`;
+    el.textContent = this.label;
     return el;
   }
   override ignoreEvent(): boolean {
@@ -61,7 +63,7 @@ export const uploadsField = StateField.define<readonly PendingUpload[]>({
   provide: (field) =>
     EditorView.decorations.from(field, (uploads): DecorationSet =>
       Decoration.set(
-        uploads.map((u) => Decoration.widget({ widget: new UploadWidget(u.label), side: -1 }).range(u.pos)),
+        uploads.map((u) => Decoration.widget({ widget: new UploadWidget(u.label, u.verb), side: -1 }).range(u.pos)),
         true,
       ),
     ),

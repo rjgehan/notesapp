@@ -52,7 +52,7 @@ final class ObsidianPlugins {
 			Map.entry("outline", k("Outline", Support.SUPPORTED, "The outline panel.")),
 			Map.entry("word-count", k("Word count", Support.SUPPORTED, "In the status bar.")),
 			Map.entry("slides", k("Slides", Support.UNSUPPORTED, "Not offered.")),
-			Map.entry("audio-recorder", k("Audio recorder", Support.PLANNED, "Voice notes are planned.", 33)),
+			Map.entry("audio-recorder", k("Audio recorder", Support.SUPPORTED, "Record voice note records into the open note and embeds the recording; an optional server transcribes it.")),
 			Map.entry("workspaces", k("Workspaces", Support.UNSUPPORTED, "Not offered.")),
 			Map.entry("file-recovery", k("File recovery", Support.SUPPORTED, "Version history keeps every saved version in git.")),
 			Map.entry("publish", k("Publish", Support.PLANNED, "Publishing a note through Tailscale Funnel is planned.", 26)),

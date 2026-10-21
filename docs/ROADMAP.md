@@ -394,7 +394,7 @@ interface Task {
 
 **Status:** built (wave 1). The editor for `.excalidraw` and Obsidian `.excalidraw.md` files, `![[drawing]]` embeds, and search and backlinks from drawings; design in DESIGN §6.8.1, the `DocumentIndexer` in §6.8. Deviations and additions:
 
-- **Fonts under `/assets/excalidraw-<version>/`**, not `/excalidraw-assets/`: the existing immutable `/assets/**` handler serves them, and the version in the path makes permanent caching safe. The CSP is unchanged; the editor's own SVG export embeds whole fonts because glyph subsetting needs `'unsafe-eval'`.
+- **Fonts under `/assets/excalidraw-<version>/`**, not `/excalidraw-assets/`: the existing immutable `/assets/**` handler serves them, and the version in the path makes permanent caching safe. The CSP is unchanged by drawings; the editor's own SVG export embedded whole fonts because glyph subsetting compiles WebAssembly, which the policy allows since item 32 (`'wasm-unsafe-eval'`), so exports subset fonts now.
 - **More than the drawing block and Text Elements is written** in an `.excalidraw.md`: images added here get `## Embedded Files` entries (Obsidian would not show them otherwise), and `## Element Links` is kept in step with the drawing (the plugin reads it before the JSON, so a stale entry would revert a link edited here). Both stay byte-identical while nothing in them changed. New text elements get 8-character ids in the file, the plugin's block ids.
 - **Automatic merge** is a generic `DocumentSession` extension (`SessionDeps.mergeFor`), not drawing code; a rename's rewritten link survives a concurrent edit of the same element.
 - **Embeds** are `<img>`s of the SVG (sandboxed, no id clashes) with the fonts inlined by the app, since Excalidraw's inlining fails under the CSP and its fallback can fail on Safari. Live Preview gets them when item 10 adds embeds (10b), through the same `loadEmbed`.
@@ -958,6 +958,16 @@ Plugs into the view registry. `.canvas` is already a text kind.
 
 ### 32. PDF viewer (PDF.js)
 
+**Status:** built (wave 3). PDF.js (`pdfjs-dist` 6.4.299, Apache-2.0) renders PDFs in the app: lazy chunks, the worker and its data files self-hosted under `/assets/pdfjs-<version>/`, page thumbnails, find (Mod-F) with every match highlighted, zoom presets, pinch zoom on the phone and Ctrl+wheel on the PC, selectable text, `[[file.pdf#page=N]]` links and "Copy link to current PDF page", and `![[file.pdf#page=3]]` embeds of the same viewer. Design in DESIGN §6.8.3. Deviations and additions:
+
+- **The CSP gained `'wasm-unsafe-eval'`** (DESIGN §5.14): PDF.js decodes JPEG 2000 and JBIG2 scans and ICC colours with WebAssembly, and falls back to much slower JavaScript without it. It allows no JavaScript `eval`. It also lets Excalidraw's SVG export subset its fonts (item 5).
+- **Dark pages.** In the dark theme the pages are inverted with their hues kept, as drawings are; one tap (or a palette command) turns it off on the device, for photo-heavy PDFs.
+- **The page is remembered** per device: reopening a PDF continues where it was read last, unless a link names a page.
+- **Ranges only.** A PDF is read in the 64 KiB ranges the shown pages need, not downloaded whole first, which matters for large scans on the phone.
+- **Password-protected PDFs** open after a masked password prompt.
+- **Embeds load lazily**, when they come near the screen, and keep Obsidian's `#page=` and `#height=` (600 px by default).
+- **Not built:** annotations (as planned). PDF text in vault search came with item 22; a hit opens this viewer at its page.
+
 **One line:** consistent in-app PDF rendering on iOS, where iframes show only the first page, with page links (`#page=N`) and search. Annotations come later.
 
 | Value | Effort | Depends on |
@@ -965,6 +975,15 @@ Plugs into the view registry. `.canvas` is already a text kind.
 | M | M | |
 
 ### 33. Voice notes with transcription
+
+**Status:** built (wave 3). **Record voice note** (palette, and the microphone on the phone's editing toolbar) records with MediaRecorder (AAC in MP4 on the iPhone and where Chrome can, else Opus in WebM or Ogg), saves `Recording <date>.<ext>` as an attachment and embeds it at the cursor; it plays inline. Transcription is an optional sidecar, off by default: whisper-asr-webservice (faster-whisper, MIT) as the `whisper` service of `deploy/docker-compose.yml` (profile `transcription`) or the second CasaOS app `deploy/casaos-whisper-compose.yml`, enabled with `NOTES_TRANSCRIPTION_URL`; the transcript goes under the embed as a quote, so search finds it. Design in DESIGN §5.24 and §6.30, API in API.md §23, setup in DEPLOY.md *Voice notes* and CASAOS.md *Voice note transcription*. Deviations and additions:
+
+- **Two protocols.** Besides the sidecar's, any OpenAI-compatible `/v1/audio/transcriptions` server works (`NOTES_TRANSCRIPTION_API=openai`: whisper.cpp's server, speaches, LocalAI, or OpenAI itself with a key in a file under `/data/secrets/`, never in the vault or an environment variable).
+- **The client writes the transcript**, not the server: the place is an upload widget that follows edits made while recording and transcribing, so the server never edits a note behind the user's back and no conflict arises. The server keeps the last transcripts in memory, so a phone that slept through the answer retries for free.
+- **Transcribe recording on this line** (palette) transcribes older recordings, or ones made before the service existed; a failed transcription has a Retry.
+- **Per-device switch** for transcripts (Settings › This device and the recording panel).
+- **A WebM recording plays as audio**: `.webm` is a video kind, so its embed switches to an audio player once it shows no picture.
+- **The microphone is allowed for the app only** (`Permissions-Policy: microphone=(self)`), as planned.
 
 **One line:** record audio in the app on the iPhone (MediaRecorder) as an attachment, and optionally transcribe it with a local Whisper service on homeserver. The transcript is appended under the embed.
 

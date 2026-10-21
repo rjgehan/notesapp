@@ -739,6 +739,22 @@ Files larger than **25 MB** stay in the vault, the trash and the nightly backups
 
 **Settings › About** shows the history size and how many files are kept out of it. To change the threshold, set `NOTES_GIT_LARGE_FILE_THRESHOLD` in `.env` (for example `50MB`; `0` versions every file) and run `docker compose up -d`. At the next start, files now over the threshold stop being versioned (`Stop versioning …` commits) and files now under it are committed. Lowering it does not shrink the history: versions already committed stay. Keep it below 100 MB while the mirror is on, and at 5 MB or more, the largest note NotesApp saves (`notes.limits.max-text-size`): a lower threshold would leave large notes without versions while every save overwrites them, so NotesApp refuses to start with it and says why in `docker compose logs notes`.
 
+### Voice notes
+
+Recording works out of the box: **Record voice note** in the command palette, or the microphone on the iPhone's editing toolbar, records in the browser and saves the audio as an attachment (`Recording <date>.m4a`, or `.webm` from some browsers) embedded where the cursor was (ROADMAP item 33, DESIGN §6.30). Safari asks for the microphone once; the app's `Permissions-Policy` allows it for the app's own pages only.
+
+**Transcription** is optional and off by default. With it, the transcript is added under the recording's embed as a quote, so search finds it like any other text. It runs on homeserver, in the `whisper` service ([whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice), MIT, with faster-whisper on the CPU), which only the app can reach and which keeps no audio:
+
+1. In `.env`, add `transcription` to `COMPOSE_PROFILES` (for example `COMPOSE_PROFILES=backup,transcription`) and set `NOTES_TRANSCRIPTION_URL=http://whisper:9000`. Optionally `NOTES_TRANSCRIPTION_LANGUAGE=en` (empty detects the language per recording) and `NOTES_WHISPER_MODEL` (`base` for a slow CPU, `small` by default, `medium` for better text with a strong CPU and about 2 GB of RAM).
+2. `docker compose up -d`. The image is large (about 2.7 GB on amd64); the model is downloaded into the `whisper-models` volume on the first start (about 0.5 GB for `small`): `docker compose logs -f whisper`.
+3. **Settings › This device** now says *New recordings are transcribed by whisper-asr at http://whisper:9000*. Record a few words: the embed appears, then *Transcribing…* in its place, then the text.
+
+A transcription takes a fraction of the recording's length on a modern CPU with `small`, longer with `medium` or on arm64; one runs at a time, and the others wait their turn. Recordings over 25 MB (about 50 minutes) are not sent (`NOTES_TRANSCRIPTION_MAX_SIZE`). A recording can be transcribed again, or later, with **Transcribe recording on this line** in the palette, the cursor on its embed's line. Each device can turn transcripts off in **Settings › This device** or in the recording panel.
+
+**Another engine.** `NOTES_TRANSCRIPTION_API=openai` talks to any server with OpenAI's `POST /v1/audio/transcriptions`: whisper.cpp's `whisper-server` (started with `--convert --inference-path /v1/audio/transcriptions`), speaches, LocalAI, or OpenAI itself. Set `NOTES_TRANSCRIPTION_URL` to its base URL and `NOTES_TRANSCRIPTION_MODEL` to its model name. A key goes in a file outside the vault, never in `.env`: `sudo -u '#1000' sh -c 'umask 077 && cat > /srv/notes/data/secrets/transcription-key'`, then `NOTES_TRANSCRIPTION_API_KEY_FILE=/data/secrets/transcription-key`; it is read for every request, so rotating it needs no restart. Sending recordings to a hosted API means your voice notes leave homeserver.
+
+To turn transcription off, empty `NOTES_TRANSCRIPTION_URL`, remove `transcription` from `COMPOSE_PROFILES` and run `docker compose up -d --remove-orphans`.
+
 ### Import an Obsidian vault
 
 NotesApp reads an Obsidian vault as it is (ROADMAP item 24): the same Markdown, wikilinks, embeds, tags, properties, daily notes and templates. `.obsidian/` is read but never written, so the vault keeps working in Obsidian; it stays hidden in NotesApp and is versioned except `workspace*.json`.
@@ -941,6 +957,14 @@ Open the status page; its *App alerts* card says what the app sees:
 - **"Last error: IOException: ntfy answered HTTP 403"** (or 401): the token, or the topic's access rules. **HTTP 429:** ntfy.sh's rate limit for your IP address. A connection error: homeserver cannot reach the server (`curl -sI https://ntfy.sh`).
 - **Sent, but nothing on the phone:** the phone subscribes to another topic (check `alerts.topic`), or a self-hosted server lacks `upstream-base-url` for iOS.
 - **"held back by the rate limit":** more than 10 alerts in an hour; the next alert says how many were skipped, and the status page lists every problem logged since the start.
+
+### Voice notes: no microphone, or no transcript
+
+- **"Microphone access was refused":** Safari › Settings for this website (the **aA** menu on the iPhone) › Microphone › Allow; in Chrome, the site settings icon left of the address. **"Recording needs the app's HTTPS address":** the app was opened over plain HTTP; use `https://notes.<tailnet>.ts.net`.
+- **"Transcription is off":** `NOTES_TRANSCRIPTION_URL` is empty in the running container: `docker compose exec notes printenv NOTES_TRANSCRIPTION_URL`, then `docker compose up -d`.
+- **"The transcription service failed: cannot connect to http://whisper:9000":** the `whisper` service is not running (`COMPOSE_PROFILES` lacks `transcription`) or is still downloading its model: `docker compose ps whisper` and `docker compose logs whisper`.
+- **"… answered HTTP 500 (…)"**, or **"no answer within 600 s":** the service's own error, or a recording too long for the CPU and model; `docker compose logs whisper` has the details. Choose a smaller `NOTES_WHISPER_MODEL`, or raise `NOTES_TRANSCRIPTION_TIMEOUT` (default `10m`). The toast's **Retry** sends the recording again.
+- **"No speech was recognized":** the recording is silent or too short; nothing is added.
 
 ### The status page says "AOT cache: not used"
 

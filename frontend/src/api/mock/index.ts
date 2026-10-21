@@ -99,6 +99,8 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     getBookmarks: () => call(() => vault.getBookmarks()),
     putBookmarks: (req) => call(() => vault.putBookmarks(req, clientId)),
     renameHeading: (req) => call(() => vault.renameHeading(req, clientId)),
+    getTranscriptionStatus: () => call(() => vault.getTranscriptionStatus()),
+    transcribe: (path) => call(() => vault.transcribe(path)),
     rawUrl: (entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>) =>
       blobUrl(`file:${entry.path}:${entry.size}:${entry.mtime}`, vault.rawBytes(entry.path), entry.path),
     trashRawUrl: (id) => {

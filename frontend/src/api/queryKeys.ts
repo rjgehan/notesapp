@@ -29,6 +29,7 @@ export const queryKeys = {
   graph: () => ['graph'] as const,
   /** The Obsidian compatibility report (API.md §11.5). */
   compat: () => ['compat'] as const,
+  transcription: () => ['transcription'] as const,
 };
 
 export const STALE = {
@@ -49,4 +50,5 @@ export const STALE = {
   statusDetails: 5_000,
   templates: 60_000,
   bookmarks: Infinity,
+  transcription: 300_000,
 } as const;
