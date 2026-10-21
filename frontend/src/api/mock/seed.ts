@@ -172,6 +172,152 @@ const DIAGRAM_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height=
 </svg>
 `;
 
+// Rich Markdown pack (ROADMAP item 3): callouts, code, math and Mermaid, plus a transclusion.
+const RICH = `---
+tags: [demo]
+---
+# Rich Markdown
+
+Callouts, highlighted code, math and diagrams. Edit any block: only that block renders again.
+
+## Callouts
+
+> [!note]
+> A plain note callout with **Markdown** inside and a [[Welcome|link]].
+
+> [!tip] Custom title with \`code\`
+> Tips, hints and *important* things.
+
+> [!faq]- Folded by default (click to open)
+> Hidden until opened.
+> - [ ] A task inside a callout
+
+> [!example]+ Foldable, open
+> > [!warning] Nested warning
+> > Callouts nest.
+> >
+> > > [!bug] Three levels deep
+
+> [!abstract]
+> Also \`summary\` and \`tldr\`.
+
+> [!info] Info
+
+> [!todo] Todo
+
+> [!success] Success
+
+> [!question] Question
+
+> [!failure] Failure
+
+> [!danger] Danger
+
+> [!quote] Quote
+> Simplicity is prerequisite for reliability.
+
+> [!recipe|wide] Unknown types use the note style
+
+## Code
+
+\`\`\`ts
+// TypeScript
+export function greet(name: string): string {
+  const now = new Date();
+  return \`Hello, \${name}! It is \${now.getHours()}h.\`;
+}
+\`\`\`
+
+\`\`\`python
+def fib(n: int) -> int:
+    """Return the n-th Fibonacci number."""
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+\`\`\`
+
+\`\`\`bash
+for f in *.md; do echo "$f"; done  # shell
+\`\`\`
+
+\`\`\`json
+{ "name": "notesapp", "rich": true, "version": 3 }
+\`\`\`
+
+\`\`\`sql
+SELECT title, COUNT(*) AS links FROM notes WHERE tag = 'demo' GROUP BY title;
+\`\`\`
+
+\`\`\`unknown-language
+Shown as plain text.
+\`\`\`
+
+## Math
+
+Inline: $e^{i\\pi} + 1 = 0$, and the price stays text: $5 and $10. Chemistry: $\\ce{H2O}$.
+
+$$
+\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}
+$$
+
+$$
+\\begin{aligned}
+\\nabla \\cdot \\mathbf{E} &= \\frac{\\rho}{\\varepsilon_0} \\\\
+\\nabla \\times \\mathbf{B} &= \\mu_0 \\mathbf{J} + \\mu_0 \\varepsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}
+\\end{aligned}
+$$
+
+A typo shows inline: $\\frac{1}{$.
+
+## Diagrams
+
+\`\`\`mermaid
+graph LR
+  A[Browser] -->|HTTPS| B(Tailscale)
+  B --> C{Spring Boot}
+  C -->|vault| D[(Files)]
+  C -->|history| E[(Git)]
+\`\`\`
+
+\`\`\`mermaid
+sequenceDiagram
+  participant P as Phone
+  participant S as Server
+  P->>S: PUT /api/files
+  S-->>P: 200 version
+  S-)P: SSE file.changed
+\`\`\`
+
+\`\`\`mermaid
+pie title Notes by folder
+  "Projects" : 5
+  "Daily" : 45
+  "Ideas" : 2
+\`\`\`
+
+\`\`\`mermaid
+graph TD
+  A -->
+\`\`\`
+
+## Embedded note
+
+![[Formulas]]
+`;
+
+const FORMULAS = `# Formulas
+
+Transcluded notes render math and diagrams too: $a^2 + b^2 = c^2$.
+
+> [!info] From another note
+> $$\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}$$
+
+\`\`\`mermaid
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Saved: autosave
+  Saved --> [*]
+\`\`\`
+`;
+
 const DATA_JSON = `{
   "name": "notesapp",
   "kind": "text file",
@@ -211,6 +357,8 @@ export function seedFiles(): SeedFile[] {
     { path: 'Archive/Spec.md', content: ARCHIVE_SPEC, age: 60 * 24 * 90 },
     { path: 'Archive/2025/Old.md', content: OLD, age: 60 * 24 * 300 },
     { path: 'Ideas/Plan B.md', content: PLAN_B, age: 90 },
+    { path: 'Rich Markdown.md', content: RICH, age: 10 },
+    { path: 'Ideas/Formulas.md', content: FORMULAS, age: 95 },
     { path: 'Reading/Book list.md', content: BOOKS, age: 60 * 24 * 3 },
     { path: 'Imported/Windows note.md', content: WINDOWS_NOTE, age: 60 * 24 * 10 },
     { path: 'Templates/Daily note.md', content: DAILY_TEMPLATE, age: 60 * 24 * 30 },
