@@ -172,9 +172,15 @@ export async function createNamedNote(name: string, fromPath: string | null, via
 
 // ---------- rename and move ----------
 
+/** '1 note', '3 notes', or 'files' when task lists (or other indexed files) are among them. */
+export function updatedFilesText(updates: ReadonlyArray<{ path: string }>): string {
+  const n = updates.length;
+  const notes = updates.every((u) => extensionOf(u.path) === 'md');
+  return `${n} ${notes ? (n === 1 ? 'note' : 'notes') : n === 1 ? 'file' : 'files'}`;
+}
+
 function linkSummary(r: MoveResult): string {
-  const n = r.linkUpdates.length;
-  return n === 0 ? '' : ` · updated links in ${n} ${n === 1 ? 'note' : 'notes'}`;
+  return r.linkUpdates.length === 0 ? '' : ` · updated links in ${updatedFilesText(r.linkUpdates)}`;
 }
 
 const FAILED_REASON: Record<string, string> = {

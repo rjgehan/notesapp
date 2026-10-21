@@ -5,7 +5,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import { errorMessage } from '../../api/client';
 import { useTree, useVaultSettings } from '../../api/hooks';
 import type { MoveResult } from '../../api/types';
-import { failedReason, moveWithUndo, nameWithExtension, previewMove, validateNewName } from '../../features/fileOps';
+import { failedReason, moveWithUndo, nameWithExtension, previewMove, updatedFilesText, validateNewName } from '../../features/fileOps';
 import { fuzzyRank } from '../../features/fuzzy';
 import { basenameOf, displayName, folderOf, isWithin, joinPath, lastSegment } from '../../features/paths';
 import { useUi } from '../../state/ui';
@@ -131,7 +131,7 @@ function MoveForm({ path, type, onClose }: { path: string; type: 'file' | 'folde
             <span>
               {shown.result.linkUpdates.length === 0
                 ? 'No links need updating.'
-                : `${shown.result.linkUpdates.length} ${shown.result.linkUpdates.length === 1 ? 'note' : 'notes'} will be updated.`}
+                : `${updatedFilesText(shown.result.linkUpdates)} will be updated.`}
               {shown.result.type === 'folder' && ` ${shown.result.moved.length} ${shown.result.moved.length === 1 ? 'file moves' : 'files move'}.`}
             </span>
             {shown.result.failed.length > 0 && (

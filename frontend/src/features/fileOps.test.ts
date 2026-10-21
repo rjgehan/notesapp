@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './settings';
-import { failedReason, nameWithExtension, newNoteFolder, validateNewName } from './fileOps';
+import { failedReason, nameWithExtension, newNoteFolder, updatedFilesText, validateNewName } from './fileOps';
 
 describe('nameWithExtension', () => {
   it('keeps the extension when only the basename is edited', () => {
@@ -45,5 +45,14 @@ describe('failedReason (MoveResult.failed)', () => {
     expect(failedReason({ path: 'Notes/Plan.md', reason: 'not-rewritable' })).toBe('a property link that cannot be rewritten');
     expect(failedReason({ path: 'Tasks/Home.tasks', reason: 'not-rewritable' })).toBe('a task list that cannot be changed here; edit the links in its tasks');
     expect(failedReason({ path: 'Tasks/Home.tasks', reason: 'io-error' })).toBe('storage error');
+  });
+});
+
+describe('updatedFilesText', () => {
+  it('counts notes, or files once a task list is among them', () => {
+    expect(updatedFilesText([{ path: 'A.md' }])).toBe('1 note');
+    expect(updatedFilesText([{ path: 'A.md' }, { path: 'B.md' }])).toBe('2 notes');
+    expect(updatedFilesText([{ path: 'Tasks/Home.tasks' }])).toBe('1 file');
+    expect(updatedFilesText([{ path: 'A.md' }, { path: 'Tasks/Home.tasks' }])).toBe('2 files');
   });
 });
