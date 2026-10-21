@@ -5,8 +5,9 @@ import { CalendarDays, CloudUpload, Command as CommandIcon, Ellipsis, FileSearch
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
+import { pageRoute, registeredPages, useExtensionsVersion } from '../../extensions';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
-import { pushMirrorNow } from '../../features/mirror';
+import { mirrorMisconfigured, pushMirrorNow } from '../../features/mirror';
 import { setNoteMode, useNoteMode } from '../../features/noteMode';
 import { navigateOverOverlays, useOverlayHistory } from '../../features/overlayHistory';
 import { displayName, isNotePath, pathFromLocation } from '../../features/paths';
@@ -73,7 +74,7 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
           <TriangleAlert size={14} aria-hidden /> {mirrorWarning.text}
         </div>
       )}
-      {mirrorWarning && item('Push to mirror now', <CloudUpload size={16} />, () => void pushMirrorNow())}
+      {mirrorWarning && !mirrorMisconfigured(mirrorWarning.mirror) && item('Push to mirror now', <CloudUpload size={16} />, () => void pushMirrorNow())}
       {command('app.commandPalette', 'Command palette', <CommandIcon size={16} />)}
       {hasFile && item('Backlinks', <Link2 size={16} />, () => showPanel('right', 'backlinks'))}
       {note && item('Outline', <ListTree size={16} />, () => showPanel('right', 'outline'))}
@@ -100,6 +101,7 @@ function TopBarSaveStatus({ path }: { path: string }) {
 
 export function TopBar() {
   useCommandsVersion();
+  useExtensionsVersion();
   const location = useLocation();
   const path = pathFromLocation(location.pathname);
   const entry = useTree().data?.byPath.get(path ?? '');
@@ -112,7 +114,8 @@ export function TopBar() {
   const closeMenu = useCallback(() => setMenuOpen(false), [setMenuOpen]);
   const descriptor = entry && !pending ? viewFor(entry) : null;
   const phone = useBreakpoint() === 'phone';
-  const title = pending ? pending.title || 'New note' : path ? displayName(path) : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
+  const page = location.pathname.startsWith('/x/') ? registeredPages().find((p) => pageRoute(p) === location.pathname) : undefined;
+  const title = pending ? pending.title || 'New note' : path ? displayName(path) : page ? page.title : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
 
   return (
     <header className="top-bar">
