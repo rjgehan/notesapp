@@ -12,7 +12,7 @@ import { columnIndex, columnLetters, parseA1, toA1, MAX_COLUMNS, MAX_ROWS } from
 import { effectiveFormat } from './display';
 import { cellValue, freeSheetName, isCellError, type CachedValue, type ColumnProps, type RowProps, type SheetCell, type SheetFile } from './format';
 import { isGeneral } from './numfmt';
-import { renameSheetInFormula } from './refs';
+import { renameSheetsInFormula } from './refs';
 
 export interface ImportedSheet {
   name: string;
@@ -156,12 +156,9 @@ export function readWorkbook(data: Uint8Array): ImportedBook {
     if (ws['!merges']?.length) skipped.add('Merged cells are shown unmerged.');
     sheets.push(sheet);
   }
-  // Sheets whose names had to change keep their formulas.
-  wb.SheetNames.forEach((original, i) => {
-    const name = sheets[i].name;
-    if (name === original) return;
-    for (const s of sheets) for (const c of Object.values(s.cells)) if (c.f !== undefined) c.f = renameSheetInFormula(c.f, original, name);
-  });
+  // Sheets whose names had to change keep their formulas (all renamed at once, so renames never chain).
+  const renames = wb.SheetNames.flatMap((original, i): Array<[string, string]> => (sheets[i].name === original ? [] : [[original, sheets[i].name]]));
+  if (renames.length > 0) for (const s of sheets) for (const c of Object.values(s.cells)) if (c.f !== undefined) c.f = renameSheetsInFormula(c.f, renames);
   const named: Record<string, string> = {};
   for (const n of wb.Workbook?.Names ?? []) {
     if (n.Sheet !== undefined) {
@@ -169,11 +166,8 @@ export function readWorkbook(data: Uint8Array): ImportedBook {
       continue;
     }
     if (n.Name.startsWith('_xlnm.') || /^_/.test(n.Name)) continue;
-    let ref = n.Ref.startsWith('=') ? n.Ref.slice(1) : n.Ref;
-    wb.SheetNames.forEach((original, i) => {
-      if (sheets[i].name !== original) ref = renameSheetInFormula('=' + ref, original, sheets[i].name).slice(1);
-    });
-    named[n.Name] = ref;
+    const ref = n.Ref.startsWith('=') ? n.Ref.slice(1) : n.Ref;
+    named[n.Name] = renameSheetsInFormula('=' + ref, renames).slice(1);
   }
   return { sheets, named, skipped: [...skipped] };
 }
@@ -215,7 +209,7 @@ function excelNames(file: SheetFile): { names: string[]; follow(formula: string)
     names.push(name);
     if (name !== sheet.name) renamed.push([sheet.name, name]);
   }
-  return { names, follow: (f) => renamed.reduce((acc, [from, to]) => renameSheetInFormula(acc, from, to), f) };
+  return { names, follow: (f) => renameSheetsInFormula(f, renamed) };
 }
 
 /** The workbook as an .xlsx file. */

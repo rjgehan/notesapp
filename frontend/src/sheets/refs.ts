@@ -220,9 +220,19 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
  * imported sheet that had to be renamed keeps its formulas. Strings are never changed.
  */
 export function renameSheetInFormula(formula: string, from: string, to: string): string {
+  return renameSheetsInFormula(formula, [[from, to]]);
+}
+
+/**
+ * `formula` with several sheets renamed at once (`renames` pairs old and new names; old names in any
+ * case). Each reference is renamed once, so renames that chain (`Sheet1` → `Sheet1 (2)` while
+ * `Sheet1 (2)` → `Sheet1 (3)`) or swap two names point every reference at the right sheet.
+ */
+export function renameSheetsInFormula(formula: string, renames: Iterable<readonly [string, string]>): string {
   if (!formula.startsWith('=')) return formula;
-  const target = formulaSheetName(to);
-  const matches = (name: string) => name.toLowerCase() === from.toLowerCase();
+  const targets = new Map<string, string>();
+  for (const [from, to] of renames) if (!targets.has(from.toLowerCase())) targets.set(from.toLowerCase(), formulaSheetName(to));
+  if (targets.size === 0) return formula;
   let out = '';
   let i = 0;
   while (i < formula.length) {
@@ -230,14 +240,15 @@ export function renameSheetInFormula(formula: string, from: string, to: string):
     if (ch === '"' || ch === "'") {
       const end = quotedEnd(formula, i);
       const quoted = formula.slice(i, end);
-      if (ch === "'" && formula[end] === '!' && matches(quoted.slice(1, -1).replace(/''/g, "'"))) out += target;
-      else out += quoted;
+      const target = ch === "'" && formula[end] === '!' ? targets.get(quoted.slice(1, -1).replace(/''/g, "'").toLowerCase()) : undefined;
+      out += target ?? quoted;
       i = end;
       continue;
     }
     if (isWordChar(ch) && !isWordChar(formula[i - 1])) {
       const word = readWord(formula, i);
-      out += formula[i + word.length] === '!' && matches(word) ? target : word;
+      const target = formula[i + word.length] === '!' ? targets.get(word.toLowerCase()) : undefined;
+      out += target ?? word;
       i += word.length;
       continue;
     }

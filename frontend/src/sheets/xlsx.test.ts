@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
-import { parseSheet, type SheetFile } from './format';
+import { formulaSheetName, parseSheet, type SheetFile } from './format';
 import { fromExcelFormula, readWorkbook, toExcelFormula, writeWorkbook } from './xlsx';
 
 function file(value: unknown): SheetFile {
@@ -119,5 +119,33 @@ describe('importing workbooks made elsewhere', () => {
 
   it('refuses what is not a workbook', () => {
     expect(() => readWorkbook(new TextEncoder().encode('\u0000\u0001 not a workbook'))).toThrow();
+  });
+});
+
+describe('sheet names Excel cannot take', () => {
+  it('points formulas at the right sheet when one cut name takes another sheet’s name', () => {
+    const long = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const cut = long.slice(0, 31);
+    const book = readWorkbook(
+      writeWorkbook(
+        file({
+          type: 'notesapp-sheet',
+          version: 1,
+          engine: '',
+          sheets: [
+            { id: 's1', name: long, cells: { A1: { v: 1 } } },
+            { id: 's2', name: cut, cells: { A1: { v: 2 } } },
+            { id: 's3', name: 'Sum', cells: { A1: { f: `='${long}'!A1*10+'${cut}'!A1`, c: 12 } } },
+          ],
+          named: { First: `'${long}'!$A$1`, Second: `'${cut}'!$A$1` },
+        }),
+      ),
+    );
+    const names = book.sheets.map((s) => s.name);
+    const [a, b] = names.map(formulaSheetName);
+    expect(names[0]).toBe(cut);
+    expect(names[1]).not.toBe(cut);
+    expect(book.sheets[2].cells.A1.f).toBe(`=${a}!A1*10+${b}!A1`);
+    expect(book.named).toEqual({ First: `${a}!$A$1`, Second: `${b}!$A$1` });
   });
 });

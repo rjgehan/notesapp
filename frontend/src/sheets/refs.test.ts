@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { absoluteRangeText, parseRangeText, rangeText, shiftFormula } from './refs';
+import { absoluteRangeText, parseRangeText, rangeText, renameSheetsInFormula, shiftFormula } from './refs';
 
 describe('shiftFormula', () => {
   it('shifts relative references and keeps absolute parts', () => {
@@ -68,5 +68,22 @@ describe('range text', () => {
     expect(parseRangeText('Total')).toBeNull();
     expect(parseRangeText('A1:B2:C3')).toBeNull();
     expect(parseRangeText('!A1')).toBeNull();
+  });
+});
+
+describe('renameSheetsInFormula', () => {
+  it('renames each reference once, so chained renames and swaps land right', () => {
+    const chain: Array<[string, string]> = [
+      ['Sheet1', 'Sheet1 (2)'],
+      ['Sheet1 (2)', 'Sheet1 (3)'],
+    ];
+    expect(renameSheetsInFormula("=Sheet1!A1+'Sheet1 (2)'!B2+sheet1!C3", chain)).toBe("='Sheet1 (2)'!A1+'Sheet1 (3)'!B2+'Sheet1 (2)'!C3");
+    const swap: Array<[string, string]> = [
+      ['A', 'B'],
+      ['B', 'A'],
+    ];
+    expect(renameSheetsInFormula('=A!A1+B!A1+"A!A1"', swap)).toBe('=B!A1+A!A1+"A!A1"');
+    expect(renameSheetsInFormula('=A1+1', swap)).toBe('=A1+1');
+    expect(renameSheetsInFormula('plain', swap)).toBe('plain');
   });
 });

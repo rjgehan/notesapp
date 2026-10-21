@@ -51,6 +51,23 @@ describe('importing into the open workbook', () => {
     expect(wb.file.named).toEqual({ Rate: '0.2' });
   });
 
+  it('renames clashing sheets all at once, so renames that chain keep formulas on the right sheet', () => {
+    const wb = Workbook.open(file({ type: 'notesapp-sheet', version: 1, engine: '', sheets: [{ id: 's1', name: 'Sheet1', cells: {} }], named: {} }));
+    addToWorkbook(wb, {
+      sheets: [
+        { name: 'Sheet1', cells: { A1: { v: 111 } }, cols: {}, rows: {} },
+        { name: 'Sheet1 (2)', cells: { A1: { v: 222 }, B1: { f: '=Sheet1!A1' }, C1: { f: "='Sheet1 (2)'!A1" } }, cols: {}, rows: {} },
+      ],
+      named: { Imported: 'Sheet1!$A$1' },
+      skipped: [],
+    });
+    expect(wb.file.sheets.map((s) => s.name)).toEqual(['Sheet1', 'Sheet1 (2)', 'Sheet1 (3)']);
+    const third = wb.file.sheets[2];
+    expect(third.cells.B1).toEqual({ f: "='Sheet1 (2)'!A1", c: 111 });
+    expect(third.cells.C1).toEqual({ f: "='Sheet1 (3)'!A1", c: 222 });
+    expect(wb.file.named).toEqual({ Imported: "'Sheet1 (2)'!$A$1" });
+  });
+
   it('imports a CSV file as one sheet named after it', () => {
     const wb = open();
     const book = csvBook('Bank export.csv', 'Date;Amount\n2026-10-17;12,5\n', ';', true);

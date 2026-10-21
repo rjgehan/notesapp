@@ -8,7 +8,7 @@ import { joinPath, titleOf } from '../../features/paths';
 import { decodeText, detectSeparator, parseCsv, rowsToCells, sheetToCsv, type Separator } from '../../sheets/csv';
 import type { CellEdit, Workbook } from '../../sheets/engine';
 import { freeSheetName, sameName, serializeSheet, SHEET_TYPE, SHEET_VERSION, type Sheet, type SheetFile } from '../../sheets/format';
-import { renameSheetInFormula } from '../../sheets/refs';
+import { renameSheetsInFormula } from '../../sheets/refs';
 import type { ImportedBook } from '../../sheets/xlsx';
 import { newIdempotencyKey } from '../../state/clientId';
 import { applyWriteResult } from '../../sync/treePatch';
@@ -57,7 +57,8 @@ function renamedFor(book: ImportedBook, taken: ReadonlyArray<{ name: string }>):
     if (name !== s.name) renames.push([s.name, name]);
   }
   if (renames.length === 0) return book;
-  const follow = (f: string) => renames.reduce((acc, [from, to]) => renameSheetInFormula(acc, from, to), f);
+  // All at once: `Sheet1` → `Sheet1 (2)` and `Sheet1 (2)` → `Sheet1 (3)` must not chain.
+  const follow = (f: string) => renameSheetsInFormula(f, renames);
   return {
     ...book,
     sheets: book.sheets.map((s, i) => ({
