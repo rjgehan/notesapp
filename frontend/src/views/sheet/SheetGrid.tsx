@@ -447,6 +447,15 @@ export function SheetGrid({ sheet, layout, version, selection, marked, picked, e
         frozenPress.current = f > 0 && y >= band && y < headerHeight;
         lastPointer.current = e.pointerType;
         userInput.current = y >= headerHeight ? Date.now() : 0;
+        // Glide focuses itself only when a press selects another cell: a press on the selected
+        // cell (a new sheet's A1) after a button or a tab had the focus would leave the keys
+        // there. Touch devices keep theirs (a tap may move the focus to the formula bar).
+        if (e.pointerType !== 'touch') {
+          requestAnimationFrame(() => {
+            const active = document.activeElement;
+            if (!wrapper.current?.contains(active) && !(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) gridRef.current?.focus();
+          });
+        }
       }}
       onKeyDownCapture={() => {
         userInput.current = Date.now();

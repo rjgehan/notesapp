@@ -81,6 +81,11 @@ const remembered = new Map<string, { sheetId: string; selections: ReadonlyMap<st
 /** The last copy (or cut) made in any spreadsheet, so a paste in this app brings formulas, or moves the cut cells. */
 let lastClip: SheetClip | null = null;
 
+/** Escape drops a pending cut: a later paste copies. */
+function dropPendingCut(): void {
+  if (lastClip?.cut) lastClip = { ...lastClip, cut: undefined };
+}
+
 /** Rows at most that "Bold" changes in one go (a whole-column selection bolds columns instead). */
 const BOLD_LIMIT = 5000;
 /** Cells at most that a number format is set on one by one; whole columns or rows take a column or row format. */
@@ -471,7 +476,11 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     },
   ];
 
-  const addSheet = () => run(() => setSheetId(workbook.addSheet()));
+  // The new sheet takes the keys at once, as in Google Sheets.
+  const addSheet = () => {
+    run(() => setSheetId(workbook.addSheet()));
+    focusGrid();
+  };
 
   const renameSheet = async (id: string) => {
     const current = sheetById(workbook.file, id);
@@ -684,8 +693,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     onUndo: undo,
     onRedo: redo,
     onEscape: () => {
-      // Escape drops a pending cut: a later paste copies.
-      if (lastClip?.cut) lastClip = { ...lastClip, cut: undefined };
+      dropPendingCut();
       setCutMark(null);
     },
     onFillDown: fillDown,
@@ -841,7 +849,10 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
         sheets={model.file.sheets}
         activeId={sheet.id}
         editable={editable}
-        onSelect={setSheetId}
+        onSelect={(id, pointer) => {
+          setSheetId(id);
+          if (pointer) focusGrid();
+        }}
         onAdd={addSheet}
         onRename={(id) => void renameSheet(id)}
         onDelete={(id) => void deleteSheet(id)}

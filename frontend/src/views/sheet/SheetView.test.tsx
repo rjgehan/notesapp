@@ -452,6 +452,27 @@ describe('the spreadsheet view', () => {
     expect(document.activeElement).toBe(screen.getByTestId('grid'));
   });
 
+  it('gives the grid the keys after a click on it, a new sheet or a clicked tab', async () => {
+    await openGrid();
+    // Glide focuses itself only when a press selects another cell.
+    const add = screen.getByRole('button', { name: 'Add sheet' });
+    act(() => add.focus());
+    fireEvent.pointerDown(screen.getByTestId('grid'), { clientY: 500, pointerType: 'mouse' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('grid')));
+    // Adding a sheet, and clicking a tab, hand the keys to the grid too.
+    act(() => add.focus());
+    fireEvent.click(add);
+    expect(document.activeElement).toBe(screen.getByTestId('grid'));
+    const tab = screen.getByRole('tab', { name: 'Budget' });
+    act(() => tab.focus());
+    fireEvent.click(tab, { detail: 1 });
+    expect(document.activeElement).toBe(screen.getByTestId('grid'));
+    // Arrow keys in the tab list stay there.
+    act(() => tab.focus());
+    fireEvent.keyDown(tab, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Notes' }));
+  });
+
   it('sets a column width from the dialog (the way on a phone)', async () => {
     const path = await openGrid();
     select(1, 0);

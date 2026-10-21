@@ -9,7 +9,8 @@ interface Props {
   sheets: ReadonlyArray<{ id: string; name: string }>;
   activeId: string;
   editable: boolean;
-  onSelect(id: string): void;
+  /** `pointer`: chosen with a click, so the grid takes the keys (arrow keys stay in the tabs). */
+  onSelect(id: string, pointer?: boolean): void;
   onAdd(): void;
   onRename(id: string): void;
   onDelete(id: string): void;
@@ -100,7 +101,7 @@ export function SheetTabs({ sheets, activeId, editable, onSelect, onAdd, onRenam
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
                 title={editable ? `${s.name} (double-click to rename)` : s.name}
-                onClick={() => onSelect(s.id)}
+                onClick={(e) => onSelect(s.id, e.detail > 0)}
                 onDoubleClick={() => editable && onRename(s.id)}
               >
                 {s.name}
