@@ -1400,6 +1400,13 @@ Cards are written in notes and parsed by the client (§6.34); nothing is ever wr
 - **Source notes.** `GET /api/flashcards/notes` takes the notes from the index: by tag (`TagIndex.notesWithTag`, nested tags included), or, with folder decks, every note with a card marker. Only the client parses them: it alone schedules, and one parser keeps the syntax in one language.
 - **Why not in the notes.** The Spaced Repetition plugin writes `<!--SR:!2026-10-25,3,250-->` after each card. Writing into notes from a review on the phone would put an open copy of the note on another device into conflict while the user types there, and those numbers are SM-2's, not FSRS's. Such comments in an imported vault are ignored (and hidden from the cards); their schedule is not imported.
 
+### 5.35 Habits (ROADMAP item 35)
+
+Habits keep no data of their own on the server: a habit is a note, and its check-ins are in its frontmatter (`entries`, the shape of Obsidian's Habit Tracker 21 plugin) or in daily notes' frontmatter (`exercise: true`). `habits.HabitService` only reads the index, for `GET /api/habits` (API.md §35): the habit notes (in `Habits/` at any depth, or tagged `#habit`; not under the templates folder) with their frontmatter as parsed, and, in the same answer, the simple frontmatter values of every note under the daily-notes folder. One request then serves a page whatever the number of daily notes, and the server does not need the daily-note date format (a moment.js format, which only the client parses, §5.11).
+
+- **Why notes, not a store.** Check-ins in plain frontmatter are diffable, show in Obsidian (Habit Tracker 21 reads `entries`; Dataview and Tracker read daily-note properties), and need nothing new for history, trash, sync or conflicts: they are note edits (§6.35).
+- **Item 4 later.** ROADMAP item 35 depends on "4 or 13": this builds on daily-note properties (13's territory) and works without tasks. A habit note may later name a recurring task (`task: <id>`) whose completions count as check-ins, read by the same endpoint; nothing here would change.
+
 ---
 
 ## 6. Frontend design
@@ -1473,6 +1480,8 @@ frontend/src/
 │   │                         registerEventHandler; builtins.ts registers every v1 view, panel and command through them
 ├── flashcards/               ROADMAP item 34 (§6.34): parse.ts, ids.ts, reviews.ts, schedule.ts (ts-fsrs), deck.ts,
 │                             session.ts, stats.ts, store.ts (records, outbox), register.ts, ui/ (the /x/flashcards page)
+├── habits/                   ROADMAP item 35 (§6.35): model.ts, progress.ts, frontmatterEdit.ts, write.ts, actions.ts,
+│                             useHabits.ts, register.ts, ui/ (the /x/habits page and the Habits panel)
 ├── views/                    FILE-TYPE → VIEW REGISTRY (§6.8)
 │   ├── registry.ts
 │   ├── excalidraw/           drawings (§6.8.1): register.ts (descriptors, eager), format.ts and merge.ts (pure, eager),
@@ -2259,6 +2268,32 @@ The code is in `frontend/src/flashcards/`. The pure parts are `parse.ts` (cards 
 - **Statistics.** Today (answers, time, share of *again*), the day streak, retention over 30 days (review answers that were not *again*, young and mature apart at Anki's 21 days), the cards by stage, and two single-series bar charts: answers per day for 30 days, and cards due in the next 30 days.
 - **Settings.** The fields of API.md §34.3; only the changed fields are sent.
 - **Commands:** Open Flashcards, Review flashcards, Review flashcards in this note (all its due and new cards, without daily limits), Show flashcard statistics.
+
+### 6.35 Habits (ROADMAP item 35)
+
+The code is in `frontend/src/habits/`: `model.ts` (habits from notes, schedules), `progress.ts` (streaks, rates, calendars), `frontmatterEdit.ts` and `write.ts` (note edits), `actions.ts` (check-ins, new habits, changes), `useHabits.ts`, `register.ts`, and `ui/` (the page and the panel).
+
+**A habit** is a note in `Habits/` or tagged `#habit` (API.md §35 has the frontmatter). Its name is `title` or the note's name; its colour is `color`, else one of the charts' eight categorical hues picked from its path, so every device shows the same. Its daily-note property is `property`, else the name in lower case with dashes. A day is done when the note's `entries` list it or that day's daily note has the property set to `true`, `yes`, `done`, `x`, a check mark or a number above 0.
+
+**Schedules** (`schedule`): `daily` (the default), `weekdays`, `weekends`, a list of days (`mon, wed, fri`, also as a YAML list), or `N/week` (also "3 times a week"). Anything unreadable is daily.
+
+**Progress** (local days, `YYYY-MM-DD`):
+
+- **Streaks.** For a day schedule, the current streak counts done days back from today (from yesterday while today is still open); a scheduled day that was missed ends it once more than `maxGap` such days follow each other (Habit Tracker 21's gap tolerance), and days the schedule skips neither count nor break it, though a done day still counts. An N-a-week habit counts weeks (Monday to Sunday) that met the target; the current week counts once met.
+- **Rate.** The share of scheduled days done over the last 30 days (four full weeks, each capped at its target, for N a week), from the habit's start: its `created` date, else its first check-in.
+- **Calendar.** 53 weeks, Monday on top, the latest week on the right (a phone opens on it and scrolls back). For one habit a day is done (the habit's colour), missed (an outline), not scheduled (faint), or before the start. For all habits each day has one of five levels of one hue: the share of the habits due that day that were done. Days have no tap targets of their own: a tap or focus on a day shows it in a readout above the grid, with **Mark done** or **Mark not done** for one habit.
+
+**Writes** (`write.ts`, `frontmatterEdit.ts`). A check-in adds the day to `entries`, sorted, in block style as Obsidian writes lists; undoing it removes the day, and when a daily note checked the day its property becomes `false`. Only that property's lines change: the YAML is parsed with `yaml`'s Document API for the property's exact range, the lines are replaced (a missing property is appended, a note without frontmatter gets one), and every other byte, comment and quoting stays. Broken YAML is never rewritten (a toast says why). A note that has a session on this device (open in a view, or cached) is edited through it, so the editor, drafts and autosave stay in charge; a note in conflict there is left alone with a toast. Any other note is read, edited and saved with its version, and a `409 version-conflict` re-applies the edit to the newer text (up to four times): the edits are set operations, so re-applying is always right. Edits of one note run one after another. The page shows a check-in at once (the query is patched) and refetches once it is written.
+
+**The page** (`/x/habits`; `?day=`, `?habit=`, `?view=new|edit`), phone first:
+
+- **Today.** A row per habit, 68 px tall, with a 48 px round check button in the habit's colour (filled when done), the name, the schedule (or "2 of 3 this week"), the streak and the last seven days as dots. Habits due that day come first; archived habits are behind a link. Above, the last seven days as a strip of 56 px buttons with each day's count, to check in late. Below, all habits on one calendar.
+- **A habit.** Today's check button and status, edit and open-note buttons, tiles for the current and longest streak, the rate and the total, and its calendar.
+- **New and edit.** Name (the note is `Habits/<name>.md`; a title is written only when the name has characters a file name cannot hold), how often (segments, day toggles, or times a week), colour swatches, the daily-note property, the missed days a streak survives, and Archived. Only changed properties are written.
+
+**Check-ins from daily notes:** the property in the note itself (in source mode, or the properties editor of item 13 once built), and the **Habits** panel (`registerPanel`, right side; the bottom sheet on phones), which lists the habits for the day of the daily note in view (today for any other note) with check buttons. A `habittracker` code block, Habit Tracker 21's way to show a grid in a note, is not rendered yet: the reading view has no code-block renderer registry (item 3 adds code-block rendering on another branch).
+
+**Live sync.** Habits and check-ins are notes, so other devices' changes arrive as `file.*` and `entry.moved` events; the page's query is refetched half a second after a note event (not for attachments), only while a page or the panel is open.
 
 ---
 

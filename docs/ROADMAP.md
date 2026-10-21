@@ -893,6 +893,13 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
 
 ### 35. Habit tracker
 
+**Status:** built (wave 3), on daily-note properties (the "13" of "4 or 13"), without tasks. A habit is a note in `Habits/` or tagged `#habit`; its check-ins are the `entries` list in its frontmatter, the format of Obsidian's Habit Tracker 21 plugin (`title`, `color` and `maxGap` too), and a daily note checks a habit in with a property such as `exercise: true`. `/x/habits` has one-tap check-ins for today, the last week to check in late, streaks, a 30-day rate and calendar heatmaps for each habit and for all of them; the Habits panel checks in from the daily note in view (DESIGN §5.35, §6.35; API.md §35). Deviations and additions:
+
+- **Schedules:** every day, weekdays, weekends, chosen days, or N times a week (streaks then count weeks), with Habit Tracker 21's `maxGap` gap tolerance.
+- **Edits touch only the property they change**, through an open note's session when there is one, and re-apply after a version conflict. Live sync is the notes' own `file.*` events.
+- **Tasks later:** a habit note may name a recurring task (item 4) whose completions would count as check-ins; not built.
+- **Left for later:** rendering Habit Tracker 21's `habittracker` code block in notes (it needs a code-block renderer in the reading view), goals for quantities (today any number above 0, such as `water: 6`, counts as done; a goal of 8 would not be met), and reminders (item 9).
+
 **One line:** track habits as recurring tasks (item 4) or as daily-note properties (`exercise: true`), with streaks and a heatmap, and one-tap check-off on the phone.
 
 | Value | Effort | Depends on |

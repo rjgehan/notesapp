@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; flashcards (item 34) in §16.4, §17, §18, §19 and §34. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -1965,6 +1965,17 @@ export interface FlashcardsChangedEvent {
   version: Version;
   origin: string | null;
 }
+
+// ---------- Habits (API.md §35, ROADMAP item 35) ----------
+export interface HabitNote { path: VaultPath; version: Version; properties: Record<string, unknown> }   // the frontmatter
+export interface DailyNoteValues { path: VaultPath; values: Record<string, boolean | number | string> }
+export interface HabitsResponse {
+  folder: VaultPath;            // where new habits go: 'Habits'
+  tag: string;                  // 'habit': notes with #habit anywhere are habits too
+  habits: HabitNote[];
+  dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
+  daily: DailyNoteValues[];     // daily notes with simple frontmatter values
+}
 ```
 
 ---
@@ -2013,6 +2024,7 @@ export interface FlashcardsChangedEvent {
 | POST | `/api/flashcards/undo` | `FlashcardUndoRequest` | 200 `FlashcardWriteResult` | 34.5 |
 | POST | `/api/flashcards/prune` | `FlashcardPruneRequest` | 200 `FlashcardWriteResult` | 34.5 |
 | PUT | `/api/flashcards/config` | `FlashcardConfigUpdateRequest` | 200 `FlashcardConfig` | 34.6 |
+| GET | `/api/habits` | | 200 `HabitsResponse` | 35.1 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -2044,6 +2056,7 @@ export interface FlashcardsChangedEvent {
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `FlashcardConfig`, `FlashcardCardState`, `FlashcardCard`, `FlashcardsResponse`, `FlashcardReview`, `FlashcardReviewRequest`, `FlashcardUndoRequest`, `FlashcardPruneRequest`, `FlashcardConfigUpdateRequest`, `FlashcardWriteResult`, `FlashcardNote`, `FlashcardNotesResponse` | Same (§34) | `FlashcardCardState.phase` is the enum `FlashcardPhase`; `FlashcardConfigUpdateRequest.config` is a `JsonNode`, validated field by field; `FlashcardReview` and `FlashcardUndoRequest` take `at` as a string, parsed as an ISO-8601 instant |
+| `HabitNote`, `DailyNoteValues`, `HabitsResponse` | Same (§35) | `HabitNote.properties` is a `Map<String, @Nullable Object>` (the frontmatter as parsed, §5.5.3 of DESIGN); `DailyNoteValues.values` holds `Boolean`, `Number` and `String` values only |
 | `FlashcardsChangedEvent` | Same name in `com.rjgehan.notes.events` | An extension event (§34.7): it echoes `origin` like a content event, and `cards` maps removed records to `null` |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 
@@ -2121,3 +2134,39 @@ Published after every write that changed the file, before the lock is released, 
 ```
 
 `cards` lists the changed records (`null` for a removed one); with more than 20 it is `null` and clients refetch §34.3. `config` is set when the settings changed.
+
+---
+
+## 35. Habits (ROADMAP item 35)
+
+Habits are notes, and check-ins are edits of notes through the text API (§8.3): there is no habit store. A **habit** is a note in the `Habits` folder (at any depth, matched ignoring case) or a note anywhere with the tag `#habit` (nested tags included). Notes under the templates folder are not habits. Its frontmatter is the shape of Obsidian's Habit Tracker 21 plugin, plus a schedule (DESIGN §6.35):
+
+```yaml
+---
+title: Morning workout      # optional; the note's name otherwise
+color: "#4CAF50"            # optional
+schedule: mon, wed, fri     # daily (default), weekdays, weekends, days, or "3/week"
+property: exercise          # the daily-note property that checks it in (default: the name, lower case, dashes for spaces)
+maxGap: 1                   # missed days a streak survives
+created: 2026-10-21
+archived: true              # optional: kept, but not listed
+entries:                    # the days it was done
+  - 2026-10-20
+---
+```
+
+A **daily note** (a note in the daily-notes folder whose name parses with the daily-note format, §15.2) checks a habit in with the habit's property: `exercise: true`, or `yes`, `y`, `done`, `x`, `✓`, `✔`, `✅`, or a number above 0. A day is done when either source says so.
+
+### 35.1 `GET /api/habits`
+
+`HabitsResponse`, in one request whatever the number of daily notes:
+
+| Field | Meaning |
+|---|---|
+| `folder` | Where new habits go: the `Habits` folder as it is in the vault, else `Habits` |
+| `tag` | `habit` |
+| `habits` | Every habit note, sorted by path, with its `version` and its frontmatter as parsed (YAML 1.2 core schema, so dates are strings); `{}` without frontmatter |
+| `dailyFolder` | The daily-notes folder (`settings.dailyNotes.folder`), as it is in the vault |
+| `daily` | Every note at any depth under `dailyFolder` (habit notes excepted) with at least one frontmatter value that is a boolean, a number, or a string of at most 100 characters, under a key of at most 64; only those values are listed. The client maps paths to days with the daily-note format. |
+
+**Writes.** A check-in adds or removes the day in the habit note's `entries`; undoing a day that a daily note checked sets that note's property to `false`. Clients edit only those properties' lines (`PUT /api/files` with `baseVersion`, re-applying the edit after a `409 version-conflict`), so the rest of each note stays byte for byte. New habits are `POST /api/files` in `folder`. Other devices learn of them through the usual `file.*` events (§16.4).
