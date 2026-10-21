@@ -1,5 +1,5 @@
 // Vim mode (ROADMAP item 36, DESIGN §6.36): the small, always-loaded half. The keys themselves
-// (`@replit/codemirror-vim`, about 300 kB) are a lazy chunk, `./vim`, loaded the first time an
+// (`@replit/codemirror-vim`, 122 kB minified) are a lazy chunk, `./vim`, loaded the first time an
 // editor mounts with the preference on; until then the editor's compartment is empty.
 import { Compartment, Facet, type Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
