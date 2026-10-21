@@ -62,6 +62,7 @@ import { eventStream } from '../sync/liveSync';
 import { registerTasks } from '../tasks/register';
 import { registerFlashcards } from '../flashcards/register';
 import { registerHabits } from '../habits/register';
+import { registerCanvasView } from '../views/canvas/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerSheetView } from '../views/sheet/register';
@@ -189,6 +190,8 @@ export function registerBuiltins(): void {
     load: () => import('../views/UnsupportedView'),
   });
   registerDrawingViews();
+  // JSON Canvas boards (ROADMAP item 25).
+  registerCanvasView();
   registerCreateCommands();
   onViewsChanged(registerCreateCommands);
   // Commands contributed by a view are active only while that view shows the open file.

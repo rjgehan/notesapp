@@ -316,6 +316,64 @@ class SearchAndLinksIntegrationTest {
 			.isEqualTo("bad-request");
 	}
 
+	/** ROADMAP item 25: a canvas's cards are searchable, and its cards and file nodes link to notes. */
+	@Test
+	void canvasesFeedSearchBacklinksAndTags() {
+		create("Canvas/Roadmap.md", "# Roadmap\n");
+		String board = String.join("\n", "{", "\t\"nodes\":[",
+				"\t\t{\"id\":\"a\",\"type\":\"text\",\"text\":\"Quokka launch with [[Roadmap]] #cnvtag\",\"x\":0,\"y\":0,\"width\":250,\"height\":60},",
+				"\t\t{\"id\":\"b\",\"type\":\"file\",\"file\":\"Canvas/Roadmap.md\",\"x\":300,\"y\":0,\"width\":400,\"height\":400},",
+				"\t\t{\"id\":\"c\",\"type\":\"text\",\"text\":\"the roadmap is unlinked here\",\"x\":0,\"y\":100,\"width\":250,\"height\":60}",
+				"\t],", "\t\"edges\":[]", "}");
+		String version = create("Canvas/Board.canvas", board).get("file").get("version").asString();
+
+		JsonNode hits = search("quokka");
+		assertThat(paths(hits)).containsExactly("Canvas/Board.canvas");
+		assertThat(hits.get("results").get(0).get("basename").asString()).isEqualTo("Board");
+		assertThat(hits.get("results").get(0).get("matches").get(0).get("text").asString())
+			.isEqualTo("Quokka launch with [[Roadmap]] #cnvtag");
+
+		JsonNode backlinks = this.api
+			.get("/api/notes/backlinks?unlinked=true&path=" + Api.enc("Canvas/Roadmap.md"))
+			.ok(200);
+		JsonNode linked = backlinks.get("linked").get(0);
+		assertThat(linked.get("source").asString()).isEqualTo("Canvas/Board.canvas");
+		assertThat(linked.get("sourceVersion").asString()).isEqualTo(version);
+		assertThat(linked.get("mentions").values().stream().map((m) -> m.get("matched").asString()))
+			.containsExactly("[[Roadmap]]", "![Roadmap.md](/Canvas/Roadmap.md)");
+		assertThat(linked.get("mentions").get(1).get("context").asString()).isEqualTo("![Roadmap.md](/Canvas/Roadmap.md)");
+		// Mentions in a canvas cannot be turned into links in place, so they are not offered.
+		assertThat(backlinks.get("unlinked").values().stream().map((g) -> g.get("source").asString()))
+			.doesNotContain("Canvas/Board.canvas");
+
+		List<String> tags = new ArrayList<>();
+		this.api.get("/api/tags").ok(200).get("tags").forEach((tag) -> tags.add(tag.get("tag").asString()));
+		assertThat(tags).contains("cnvtag");
+
+		var meta = this.api.get("/api/notes/meta?path=" + Api.enc("Canvas/Board.canvas"));
+		assertThat(meta.problem(409)).isEqualTo("type-mismatch");
+
+		// A save re-indexes the canvas.
+		String edited = board.replace("Quokka", "Wombat");
+		this.api
+			.putJson("/api/files?path=" + Api.enc("Canvas/Board.canvas"), Map.of("content", edited, "baseVersion", version))
+			.ok(200);
+		assertThat(paths(search("quokka"))).isEmpty();
+		assertThat(paths(search("wombat"))).containsExactly("Canvas/Board.canvas");
+
+		// A move rewrites the canvas through its indexer: the file node follows the note, and [[Roadmap]] still
+		// resolves by name, so only the node's "file" string changes and every other byte stays.
+		JsonNode moved = this.api
+			.postJson("/api/move", Map.of("from", "Canvas/Roadmap.md", "to", "Canvas/Old/Roadmap.md"))
+			.ok(200);
+		assertThat(moved.get("linkUpdates").get(0).get("path").asString()).isEqualTo("Canvas/Board.canvas");
+		assertThat(moved.get("linkUpdates").get(0).get("links").asInt()).isEqualTo(1);
+		assertThat(moved.get("failed").isEmpty()).isTrue();
+		assertThat(this.api.get("/api/files?path=" + Api.enc("Canvas/Board.canvas")).ok(200).get("content").asString())
+			.isEqualTo(edited.replace("\"file\":\"Canvas/Roadmap.md\"", "\"file\":\"Canvas/Old/Roadmap.md\""));
+		assertThat(paths(search("wombat"))).containsExactly("Canvas/Board.canvas");
+	}
+
 	@Test
 	void templatesAreListedFromTheTemplatesFolder() {
 		create("Templates/Meeting.md", "# {{title}}\n");

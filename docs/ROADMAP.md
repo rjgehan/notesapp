@@ -871,6 +871,15 @@ A managed section of `info/exclude` holds the exclusions, and `/api/status` show
 
 Plugs into the view registry. `.canvas` is already a text kind.
 
+**Status:** built (wave 3). Design in DESIGN §6.8.2 (the view) and §5.5.13 (indexing, through the `DocumentIndexer` of §6.8), contract in API.md §1.8, §11 and §12. What it does:
+
+- **Board.** Text cards (Markdown rendered like the reading view, edited inline with `[[` and `#` completion), file nodes (notes as transclusions, images, audio and video, nested canvases, other files), web links (address and Open: the CSP does not allow embedding other sites), groups with labels, colours and background images, and edges with sides, arrows, labels and colours.
+- **Editing.** Pan and zoom (wheel, trackpad, pinch), selection box and multi-select, drag (groups carry their contents, 20 px grid), resize, connect (dropping on empty space makes a connected card), delete, undo and redo, copy, cut, paste and duplicate as JSON Canvas, convert a card to a note, open files and links, drag and drop from the explorer and the OS, menus on right click and long press, palette commands. iPhone: pinch, one-finger pan, double tap to edit (the keyboard opens), long press for menus.
+- **Files.** Byte-stable: an unchanged file is written back exactly, and an edit rewrites only the lines of the nodes it touched in the file's own layout (Obsidian's by default), keeping fields this app does not know.
+- **Sync.** Autosave, drafts, history and conflicts through the document session; edits from two devices merge node by node (the banner shows only when both changed the same card's content).
+- **Elsewhere.** `![[Board.canvas]]` shows a scaled preview; search finds cards; notes on a canvas list it among their backlinks (the `DocumentIndexer` extension point, shared with item 5).
+- **Moves.** The server rewrites a canvas's links after a move (card links and file nodes, replacing only those JSON strings); an open canvas also follows moves its tab saw and offers to relink a missing file.
+
 ### 26. Publish a note publicly through Tailscale Funnel
 
 **One line:** share a read-only page for chosen notes with people outside the tailnet, without exposing the app.

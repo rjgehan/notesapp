@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -108,6 +108,7 @@ Besides notes, the server indexes the content of some structured text files (DES
 | `.tasks` lists (§20.9) | The list's name; each task's title, tags, related notes (`links`) and notes | Those in titles and notes, and each path in `links` |
 | `.excalidraw` drawings (DESIGN §6.8.1) | Each text element's text, each element link (web links excluded), each image stored as a vault attachment, frame names | None: the drawing is reported as `not-rewritable` |
 | `.sheet` spreadsheets (§12.3) | What each cell shows (its text or number, or its formula's cached result), sheet names, chart titles | None: the spreadsheet is reported as `not-rewritable` |
+| `.canvas` boards (DESIGN §6.8.2) | Each text card's Markdown, group names, link nodes' addresses, edge labels, and each file node as an embed of its file (with its subpath) | Those in cards, group names and edge labels, and each file node's `file`; only those JSON strings change |
 | `.excalidraw.md` drawings | A note, scanned as one; also the texts and links that only its drawing JSON holds | Those in its Markdown, as in any note; not those only its JSON holds (`not-rewritable`) |
 
 - `GET /api/search` (§12.1) can return a document; its `matches` are lines of the indexed text, never of the file's JSON.
@@ -907,7 +908,7 @@ Events to other clients, in this order: `folder.created` for new target parents,
 | Errors |
 |---|
 | `400`, `403`, `404` |
-| `409 type-mismatch` (`expected: "note"`) for non-`.md` files |
+| `409 type-mismatch` (`expected: "note"`) for non-`.md` files, canvases included |
 
 ### 11.2 `GET /api/notes/backlinks?path={path}[&unlinked=false]`
 
@@ -929,11 +930,11 @@ Events to other clients, in this order: `folder.created` for new target parents,
 
 | Item | Meaning |
 |---|---|
-| `linked` | Notes with a link or embed (including frontmatter `"[[...]]"`) resolving to `path`, sorted by source mtime, newest first. `matched` is the raw link text. |
-| `unlinked` | `null` unless `unlinked=true`. Then it lists plain-text, whole-word, case-insensitive occurrences of the note's basename or aliases (3 or more characters) outside code, links, frontmatter and URLs, in notes not matching `excludedPaths`. `matched` is the text found. At most 200 groups. It is `[]` for non-notes. |
+| `linked` | Notes with a link or embed (including frontmatter `"[[...]]"`) resolving to `path`, and indexed documents (§1.8) linking to it, sorted by source mtime, newest first. `matched` is the raw link text; for a canvas's file node it is the embed that stands for it in the indexed text (`![Plan.md](/Projects/Plan.md)`), which is also the `context`. |
+| `unlinked` | `null` unless `unlinked=true`. Then it lists plain-text, whole-word, case-insensitive occurrences of the note's basename or aliases (3 or more characters) outside code, links, frontmatter and URLs, in notes (never documents, §1.8) not matching `excludedPaths`. `matched` is the text found. At most 200 groups. It is `[]` for non-notes. |
 | `context` | The source line, clipped to at most 240 characters around the match. A leading or trailing `…` marks clipping. `contextRange` is relative to `context`. |
 | `from`, `to` | Absolute offsets in the source file at `sourceVersion` (used by §15.5) |
-| Sources that are not notes | An indexed document (§1.8) is a source like a note. A `.tasks` list links to a note through `[[Note]]` in a task title or notes, or through a task's `links` (§20.9); an `.excalidraw` drawing through `[[Note]]` in a text element, an element's link, and the images it stores as attachments (DESIGN §6.8.1). Such a group's `source` is the document, `context` is the task's or the element's text or link (for example `Call [[Plumber]] about the leak`), and `line`, `from` and `to` refer to that indexed text, not to the file's JSON. An `.excalidraw.md` drawing is a note: links in its Markdown sections are ordinary mentions; a link only its JSON holds is a mention whose `line`, `from` and `to` lie past the end of the file. Unlinked mentions never come from a document, nor from a drawing's JSON. |
+| Sources that are not notes | An indexed document (§1.8) is a source like a note. A `.tasks` list links to a note through `[[Note]]` in a task title or notes, or through a task's `links` (§20.9); an `.excalidraw` drawing through `[[Note]]` in a text element, an element's link, and the images it stores as attachments (DESIGN §6.8.1); a `.canvas` through a link in a card, group name or edge label, and a file node, which is an embed of its file (DESIGN §6.8.2). Such a group's `source` is the document, `context` is the task's or the element's text or link, or the card's text (for example `Call [[Plumber]] about the leak`), and `line`, `from` and `to` refer to that indexed text, not to the file's JSON. An `.excalidraw.md` drawing is a note: links in its Markdown sections are ordinary mentions; a link only its JSON holds is a mention whose `line`, `from` and `to` lie past the end of the file. Unlinked mentions never come from a document, nor from a drawing's JSON. |
 
 | Errors |
 |---|
@@ -1068,7 +1069,7 @@ Request `ResolveRequest`:
 
 ### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true][&fuzzy=true]`
 
-This is full-text search over notes, over the indexed documents of §1.8 (the tasks of `.tasks` lists, §20.9; the texts of `.excalidraw` drawings; the cells of `.sheet` spreadsheets, §12.3) and over the text of PDF attachments (§12.5). A hit's `path` is then the document, and `matches` are lines of its indexed text, never of its JSON. Files whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes, over the indexed documents of §1.8 (the tasks of `.tasks` lists, §20.9; the texts of `.excalidraw` drawings; the cells of `.sheet` spreadsheets, §12.3; the cards, group names, web addresses, edge labels and file nodes of `.canvas` boards) and over the text of PDF attachments (§12.5). A hit's `path` is then the document, and `matches` are lines of its indexed text, never of its JSON. Files whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
@@ -1155,7 +1156,7 @@ Clauses next to each other must all match (AND).
 ] }
 ```
 
-- `count` is the number of notes with exactly this tag. Indexed documents (§1.8) count as notes here: a `.tasks` list or an `.excalidraw` drawing whose indexed text holds the tag, and an `.excalidraw.md` drawing through its Markdown or the texts only its JSON holds (DESIGN §6.8.1).
+- `count` is the number of notes with exactly this tag. Indexed documents (§1.8) count as notes here: a `.tasks` list, an `.excalidraw` drawing or a `.canvas` whose indexed text holds the tag, and an `.excalidraw.md` drawing through its Markdown or the texts only its JSON holds (DESIGN §6.8.1).
 - `total` is the number of distinct notes (documents included) with this tag or any descendant.
 - A parent that only exists through nesting has `count: 0`.
 - Display casing is the first one seen.

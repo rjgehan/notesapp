@@ -5,7 +5,7 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Lets a structured text type ({@code .tasks} lists, Excalidraw drawings, {@code .sheet} spreadsheets; canvases later)
+ * Lets a structured text type ({@code .tasks} lists, Excalidraw drawings, {@code .sheet} spreadsheets, JSON canvases)
  * feed full-text search, backlinks and tags without teaching {@link MarkdownScanner} its format (DESIGN §6.8). A Spring
  * bean that implements it is picked up by {@link FileIndexer}, which calls the first one that {@link #supports} a file
  * whenever it indexes it: at startup, after an app write, and when the watcher or the rescan sees an external change.

@@ -34,7 +34,7 @@ final class ObsidianPlugins {
 			Map.entry("switcher", k("Quick switcher", Support.SUPPORTED, "Mod-O, with aliases and recent files.")),
 			Map.entry("graph", k("Graph view", Support.SUPPORTED, "Global and local graph, with filters and groups.")),
 			Map.entry("backlink", k("Backlinks", Support.SUPPORTED, "Linked and unlinked mentions.")),
-			Map.entry("canvas", k("Canvas", Support.PLANNED, ".canvas files are listed and downloadable; the editor is planned.", 25)),
+			Map.entry("canvas", k("Canvas", Support.SUPPORTED, "Canvases open as boards in the same JSON Canvas format; search, backlinks and moves include them.")),
 			Map.entry("outgoing-link", k("Outgoing links", Support.PARTIAL, "The local graph shows a note's outgoing links; there is no outgoing-links panel.")),
 			Map.entry("tag-pane", k("Tags", Support.SUPPORTED, "The tags panel, with nested tags.")),
 			Map.entry("properties", k("Properties view", Support.PARTIAL, "The reading view shows properties; a properties editor is planned.", 13)),

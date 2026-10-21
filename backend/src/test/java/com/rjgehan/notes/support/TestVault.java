@@ -17,6 +17,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import com.rjgehan.notes.bookmarks.BookmarkService;
+import com.rjgehan.notes.canvas.CanvasDocumentIndexer;
 import com.rjgehan.notes.config.JsonConfig;
 import com.rjgehan.notes.config.NotesProperties;
 import com.rjgehan.notes.drawings.ExcalidrawDocumentIndexer;
@@ -131,7 +132,8 @@ public final class TestVault implements AutoCloseable {
 		this.kinds = new FileKinds(this.properties);
 		this.paths = new VaultPaths(this.index, this.fs);
 		this.indexer = new FileIndexer(this.fs, this.kinds, List.of(new ExcalidrawDocumentIndexer(JSON),
-				new SheetDocumentIndexer(JSON), new TaskDocumentIndexer(JSON, this.clock)));
+				new SheetDocumentIndexer(JSON), new TaskDocumentIndexer(JSON, this.clock),
+				new CanvasDocumentIndexer(JSON)));
 		this.hub = new RecordingEventHub(this.properties, this.clock);
 		this.largeFiles = new LargeFiles(this.index, this.properties);
 		this.git = new FailingGitStore(this.fs, this.properties, this.clock, this.largeFiles);

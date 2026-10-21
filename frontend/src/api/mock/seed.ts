@@ -1,4 +1,5 @@
 // Demo vault for the dev mock. It exercises every feature the reading view and editor support.
+import { bigBoard, CANVAS_NOTE, PROJECT_BOARD } from './canvasSeed';
 
 const WELCOME = `---
 aliases: [Start here]
@@ -365,6 +366,9 @@ export function seedFiles(): SeedFile[] {
     { path: 'Templates/Meeting.md', content: MEETING_TEMPLATE, age: 60 * 24 * 30 },
     { path: 'Attachments/diagram.svg', content: DIAGRAM_SVG, age: 60 * 24 * 5 },
     { path: 'Scratch/data.json', content: DATA_JSON, age: 60 * 24 * 2 },
+    { path: 'Projects/Project board.canvas', content: PROJECT_BOARD, age: 45 },
+    { path: 'Projects/Canvas notes.md', content: CANVAS_NOTE, age: 50 },
+    { path: 'Canvas/Big board.canvas', content: bigBoard(), age: 60 * 24 },
     ...dailyNotes(),
   ];
 }

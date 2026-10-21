@@ -1,0 +1,132 @@
+// Inline editing of a text card: a small CodeMirror Markdown editor with the note editor's
+// language, highlighting and `[[` / `#` completion, resolved from the canvas's own folder (as
+// Obsidian resolves links in canvas cards). Esc or a tap outside the card ends editing.
+import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { syntaxHighlighting } from '@codemirror/language';
+import { EditorState } from '@codemirror/state';
+import { EditorView, keymap, placeholder, tooltips } from '@codemirror/view';
+import { useLayoutEffect, useRef } from 'react';
+import { currentSettings, currentTree, fetchNoteMeta, fetchTags } from '../../api/hooks';
+import { clearActiveEditor, setActiveEditor } from '../../editor/activeEditor';
+import { headingSource, tagSource, wikilinkSource } from '../../editor/completion';
+import { noteContext, type NoteContext } from '../../editor/context';
+import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, toggleItalic } from '../../editor/editorCommands';
+import { lineClassPlugin, obsidianHighlight } from '../../editor/highlight';
+import { markdownNoteLanguage } from '../../editor/language';
+import { pasteAndDrop } from '../../editor/pasteAndDrop';
+import { unresolvedLinks } from '../../editor/unresolved';
+import { linkTo } from '../../features/fileOps';
+import { uploadForCard } from './actions';
+import { openLink, openTag } from '../../features/navigation';
+import { recentPaths } from '../../features/recent';
+import { usePrefs } from '../../state/prefs';
+
+interface Props {
+  text: string;
+  canvasPath: string;
+  onChange(text: string): void;
+  onDone(): void;
+  onSave(): void;
+  onBlur(): void;
+}
+
+export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur }: Props) {
+  const host = useRef<HTMLDivElement>(null);
+  const spellcheck = usePrefs((s) => s.spellcheck);
+  const autocorrect = usePrefs((s) => s.autocorrect);
+  const callbacks = useRef({ onChange, onDone, onSave, onBlur });
+  const initial = useRef(text);
+  const viewRef = useRef<EditorView | null>(null);
+
+  useLayoutEffect(() => {
+    callbacks.current = { onChange, onDone, onSave, onBlur };
+  });
+
+  useLayoutEffect(() => {
+    const parent = host.current;
+    if (!parent) return;
+    const ctx: NoteContext = {
+      path: () => canvasPath,
+      tree: currentTree,
+      settings: currentSettings,
+      openLink: (target, subpath) => void openLink(target, subpath, canvasPath),
+      openTag,
+      noteMeta: fetchNoteMeta,
+      vaultTags: async () => (await fetchTags()).tags.map((t) => t.tag),
+      recentPaths,
+      save: () => callbacks.current.onSave(),
+      toggleMode: () => {},
+      insertFiles: (files, range, pasted) => {
+        void uploadForCard(canvasPath, files, pasted).then((embeds) => {
+          const v = viewRef.current;
+          if (!v || embeds.length === 0) return;
+          const end = v.state.doc.length;
+          const from = Math.min(range.from, end);
+          const to = Math.min(Math.max(range.to, from), end);
+          const insert = embeds.join('\n');
+          v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
+        });
+      },
+      linkTo: (path) => linkTo(path, canvasPath),
+    };
+    const view: EditorView = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc: initial.current,
+        selection: { anchor: initial.current.length },
+        extensions: [
+          noteContext.of(ctx),
+          history(),
+          markdownNoteLanguage(),
+          syntaxHighlighting(obsidianHighlight),
+          lineClassPlugin,
+          unresolvedLinks,
+          // Pasted or dropped images become attachments of the canvas, embedded in the card.
+          pasteAndDrop,
+          closeBrackets(),
+          autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
+          // Completions draw on the page, unscaled and unclipped by the card.
+          tooltips({ parent: document.body }),
+          placeholder('Type here…'),
+          EditorView.lineWrapping,
+          EditorView.contentAttributes.of({
+            spellcheck: String(spellcheck),
+            autocorrect: autocorrect ? 'on' : 'off',
+            autocapitalize: 'sentences',
+            'aria-label': 'Card text',
+          }),
+          keymap.of([
+            { key: 'Escape', run: () => (callbacks.current.onDone(), true) },
+            { key: 'Mod-s', run: () => (callbacks.current.onSave(), true), preventDefault: true },
+            { key: 'Mod-Enter', run: followLinkAtCursor },
+            { key: 'Mod-l', run: toggleCheckbox, preventDefault: true },
+            { key: 'Mod-b', run: toggleBold, preventDefault: true },
+            { key: 'Mod-i', run: toggleItalic, preventDefault: true },
+            { key: 'Mod-k', run: insertMarkdownLink, preventDefault: true },
+          ]),
+          keymap.of([...closeBracketsKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged) {
+              initial.current = u.state.doc.toString();
+              callbacks.current.onChange(initial.current);
+            }
+            if (u.focusChanged && !u.view.hasFocus) callbacks.current.onBlur();
+            if (u.focusChanged && u.view.hasFocus) setActiveEditor(u.view);
+          }),
+        ],
+      }),
+    });
+    viewRef.current = view;
+    setActiveEditor(view);
+    // Inside the gesture that started editing (the caller renders synchronously), so iOS opens the keyboard.
+    view.focus();
+    return () => {
+      viewRef.current = null;
+      clearActiveEditor(view);
+      view.destroy();
+    };
+  }, [canvasPath, spellcheck, autocorrect]);
+
+  return <div ref={host} className="canvas-card-editor" onPointerDown={(e) => e.stopPropagation()} />;
+}

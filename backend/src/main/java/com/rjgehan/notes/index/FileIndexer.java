@@ -82,8 +82,8 @@ public class FileIndexer {
 	}
 
 	/**
-	 * True when both names are indexed the same way (same kind and text limit), so a file renamed from one to the
-	 * other keeps its record; otherwise it must be indexed again from disk.
+	 * True when both names are indexed the same way (same kind, text limit and document indexer), so a file renamed
+	 * from one to the other keeps its record; otherwise it must be indexed again from disk.
 	 */
 	public boolean indexesAlike(String path, String other) {
 		return this.kinds.kindOf(path) == this.kinds.kindOf(other)

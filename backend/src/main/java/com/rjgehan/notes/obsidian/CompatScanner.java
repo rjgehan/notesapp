@@ -88,7 +88,9 @@ public final class CompatScanner {
 						+ "these show as Markdown. Rename them to open them as drawings.",
 				null),
 		CANVAS("canvas", Category.FILES, Severity.INFO, "Canvases",
-				".canvas files are listed and downloadable; the canvas editor is planned.", 25),
+				"Supported: .canvas files open as boards, where cards, notes, images, groups and arrows can be edited; "
+						+ "search, backlinks and moves include them.",
+				null),
 		BASES("bases", Category.FILES, Severity.INFO, "Bases", ".base files are listed but not shown as tables.", null);
 
 		final String id;

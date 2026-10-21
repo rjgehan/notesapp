@@ -9,9 +9,11 @@ import { lineAt, type NoteScan } from './scan';
 
 export interface SearchDoc {
   path: string;
-  text: string;
+  text: string;                  // a note's content, or a document's indexed text (a canvas's)
   scan: NoteScan;
   mtime: string;
+  title?: string;                // default: the file name without .md
+  kind?: SearchHit['kind'];      // default: 'note'
 }
 
 export function foldAccents(s: string): string {
@@ -143,7 +145,7 @@ export function mockSearch(docs: SearchDoc[], q: string, limit: number, sort: 'r
   const hits: SearchHit[] = [];
   for (const doc of docs) {
     if (!evaluator.matches(root, doc, null)) continue;
-    const title = stripMd(lastSegment(doc.path));
+    const title = doc.title ?? stripMd(lastSegment(doc.path));
     const all = doc.text.split('\n');
     const matches: SearchHit['matches'] = [];
     let moreMatches = 0;
@@ -157,7 +159,7 @@ export function mockSearch(docs: SearchDoc[], q: string, limit: number, sort: 'r
     }
     const titleRanges = rangesIn(title, terms, []);
     const score = terms.reduce((s, t) => s + (foldAccents(title).includes(t) ? 4 : 0) + Math.min(5, foldAccents(doc.text).split(t).length - 1), 0);
-    hits.push({ path: doc.path, basename: title, kind: 'note', score, mtime: doc.mtime, titleRanges, matches, moreMatches });
+    hits.push({ path: doc.path, basename: title, kind: doc.kind ?? 'note', score, mtime: doc.mtime, titleRanges, matches, moreMatches });
   }
   hits.sort((a, b) => (sort === 'mtime' ? 0 : b.score - a.score) || Date.parse(b.mtime) - Date.parse(a.mtime));
   return { query: q, total: hits.length, tookMs: Math.round(performance.now() - started), results: hits.slice(0, limit), corrections: [] };
