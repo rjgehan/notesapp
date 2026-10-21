@@ -33,7 +33,7 @@ import static org.awaitility.Awaitility.await;
 /**
  * The CSRF guard, the Host allowlist and the response headers (DESIGN §8.1 integration item 3 with
  * {@code allow-default=true}), and the single-page app routes (item 10). The test classpath carries a stand-in
- * {@code static/index.html} and {@code static/assets/app-test.js}.
+ * {@code static/index.html}, {@code static/assets/app-test.js} and a self-hosted Excalidraw font.
  */
 @NotesIntegrationTest
 class SecurityIntegrationTest {
@@ -255,6 +255,19 @@ class SecurityIntegrationTest {
 		assertThat(root.status()).isEqualTo(200);
 		assertThat(root.header("Cache-Control")).isEqualTo("no-cache");
 		assertThat(this.api.get("/assets/missing.js").problem(404)).isEqualTo("not-found");
+	}
+
+	@Test
+	void selfHostedExcalidrawFontsAreImmutableSameOriginFonts() {
+		// ROADMAP item 5: the build copies Excalidraw's fonts to /assets/excalidraw-<version>/fonts/, because the
+		// CSP's font-src 'self' blocks its CDN. The version in the path makes them safe to cache for good.
+		Reply font = this.api.get("/assets/excalidraw-0.0.0/fonts/Test/Test-Regular.woff2");
+		assertThat(font.status()).isEqualTo(200);
+		assertThat(font.header("Content-Type")).isEqualTo("font/woff2");
+		assertThat(font.header("Cache-Control")).isEqualTo("max-age=31536000, public, immutable");
+		assertThat(font.header("X-Content-Type-Options")).isEqualTo("nosniff");
+		assertThat(font.header("Cross-Origin-Resource-Policy")).isEqualTo("same-origin");
+		assertThat(font.header("Content-Security-Policy")).isEqualTo(APP_CSP);
 	}
 
 	@Test

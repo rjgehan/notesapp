@@ -1,5 +1,6 @@
 // The optimistic new-note view (DESIGN §6.15): shown at once by the tap on "New note", with its
-// title focused synchronously (so iOS opens the keyboard) while the note is created.
+// title focused synchronously (so iOS opens the keyboard) while the note is created. Another
+// view's new file (a drawing) is named here too, and opens once its name is committed.
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useVaultSettings } from '../../api/hooks';
 import { autoGrow, useAutoGrow } from '../autoGrow';
@@ -11,7 +12,9 @@ export function PendingNoteView({ pending }: { pending: PendingNote }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [title, setTitle] = useState(pending.title);
   useAutoGrow(input);
-  const error = title.trim() === '' ? null : validateNewName(title.trim() + '.md');
+  const error = title.trim() === '' ? null : validateNewName(`${title.trim()}.${pending.extension}`);
+  const note = pending.extension === 'md';
+  const kind = pending.label.charAt(0).toUpperCase() + pending.label.slice(1);
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -41,7 +44,7 @@ export function PendingNoteView({ pending }: { pending: PendingNote }) {
               className="inline-title-input"
               rows={1}
               value={title}
-              aria-label="Note title"
+              aria-label={`${kind} title`}
               aria-invalid={!!error}
               spellCheck={false}
               autoCapitalize="sentences"
@@ -64,7 +67,9 @@ export function PendingNoteView({ pending }: { pending: PendingNote }) {
           )}
         </div>
       </header>
-      <p className="pending-note-hint muted">{pending.committed ? 'Creating the note…' : 'Name the new note, then start writing.'}</p>
+      <p className="pending-note-hint muted">
+        {pending.committed ? `Creating the ${pending.label}…` : note ? 'Name the new note, then start writing.' : `Name the new ${pending.label}, then press Enter to open it.`}
+      </p>
     </div>
   );
 }

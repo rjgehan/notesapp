@@ -94,7 +94,18 @@ export interface SessionDeps {
   caughtUp(): boolean;
   /** The tree's version for a path (null for a file without one, undefined when not in the tree). */
   treeVersion?(path: string): Version | null | undefined;
+  /** The view's semantic 3-way merge for a path (DESIGN §6.8), when it has one. */
+  mergeFor?(path: string): MergeFn | undefined;
 }
+
+/** `FileViewDescriptor.merge`: the merged text, or null when the view cannot merge these versions. */
+export type MergeFn = (base: string, mine: string, theirs: string) => string | null;
+
+/**
+ * `markDirty`'s serializer (DESIGN §6.8). `'save'` asks for the file's text; `'draft'` for text
+ * that only has to read back as the same document, so a view may skip a costly encoding there.
+ */
+export type Serializer = (purpose: 'save' | 'draft') => string;
 
 export const DEBOUNCE_MS = 1000;
 export const MAX_WAIT_MS = 5000;
@@ -121,7 +132,7 @@ export class DocumentSession {
   private state: EditorState;
   private view: EditorView | null = null;
   private selectionKnown = false;
-  private serializer: (() => string) | null = null;
+  private serializer: Serializer | null = null;
 
   private status: SessionStatus = 'loading';
   /** The content was read at least once; a session that never loaded has no buffer. */
@@ -151,6 +162,7 @@ export class DocumentSession {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
+  private refusedTimer: ReturnType<typeof setTimeout> | null = null;
   private retryAttempt = 0;
   private retryAt: number | null = null;
 
@@ -189,6 +201,16 @@ export class DocumentSession {
 
   /** Increments on every content change (local or remote); readers re-render from it. */
   getChangeCount = (): number => this.changes + this.remoteChanges;
+
+  /**
+   * Increments whenever the session itself puts text into the buffer (load, remote change, Take
+   * theirs, merge, restored draft, an edit from outside the view), also when that text equals the
+   * buffer's. A view that keeps its own model (`markDirty(serialize)`) re-reads the buffer when it
+   * changes.
+   */
+  get remoteChangeCount(): number {
+    return this.remoteChanges;
+  }
 
   private makeSnapshot(): SessionSnapshot {
     return {
@@ -257,9 +279,14 @@ export class DocumentSession {
     return this.view ? this.view.state : this.state;
   }
 
-  /** The document text, LF-only. */
+  /**
+   * The document text, LF-only. A view that marks edits with a serializer (DESIGN §6.8) is asked
+   * for it; text the session put into the buffer itself (a load, a remote change, Take theirs, a
+   * merge, a restored draft, an edit from outside the view) is the text until the view reports its
+   * next edit, so that text is never shadowed by a scene the view has not caught up with yet.
+   */
   getText(): string {
-    return this.serializer ? this.serializer() : this.editorState.doc.toString();
+    return this.serializer ? this.serializer('save') : this.editorState.doc.toString();
   }
 
   get baseContent(): string {
@@ -296,13 +323,21 @@ export class DocumentSession {
     this.view = null;
   }
 
-  /** Applies a local edit from outside the editor (reading-view checkbox, generic views). */
+  /**
+   * Applies a local edit from outside the editor (reading-view checkbox, generic views, a restored
+   * text, a linked mention), at positions in `getText()`. A view that keeps its own model
+   * (`markDirty(serialize)`) may have edits the buffer does not show yet: the buffer takes them
+   * first, and the edited buffer is then the text, which such a view re-reads like any other text
+   * the session puts there (`remoteChangeCount`).
+   */
   applyEdit(
     changes: ChangeSpec,
     opts: { selection?: { anchor: number; head?: number }; userEvent?: string; effects?: StateEffect<unknown>[] } = {},
   ): void {
     if (!this.isEditable()) return;
+    this.settleSerializer();
     const spec = { changes, selection: opts.selection, effects: opts.effects, userEvent: opts.userEvent ?? 'input', scrollIntoView: !!opts.selection };
+    this.remoteChanges++;
     if (this.view) {
       this.view.dispatch(spec);
       // The editor's update listener calls markDirty.
@@ -312,9 +347,25 @@ export class DocumentSession {
     this.markDirty();
   }
 
-  /** Replaces the whole text as a local edit (generic textual views). */
+  /** Replaces the whole text as a local edit (generic textual views, a restored text). */
   setText(text: string): void {
+    if (!this.isEditable()) return;
+    this.settleSerializer();
     this.applyEdit(remoteChanges(this.editorState.doc.toString(), text));
+  }
+
+  /**
+   * The serialized text of a view that keeps its own model becomes the buffer's, outside the undo
+   * history and without counting as an edit (it is the text already); the serializer goes.
+   */
+  private settleSerializer(): void {
+    const serialize = this.serializer;
+    if (!serialize) return;
+    this.serializer = null;
+    const spec = remoteTransaction(this.editorState, serialize('save'));
+    if (!spec) return;
+    if (this.view) this.view.dispatch(spec);
+    else this.state = this.state.update(spec).state;
   }
 
   /** Effects that change no text (pending uploads). */
@@ -394,6 +445,7 @@ export class DocumentSession {
     this.eol = detectEol(file.content);
     const text = toLf(file.content);
     this.state = EditorState.create({ doc: text, extensions: this.baseExtensions() });
+    this.serializer = null;
     this.remoteChanges++;
     this.loaded = true;
     this.version = file.version;
@@ -430,6 +482,7 @@ export class DocumentSession {
       const spec = remoteTransaction(this.state, text);
       if (spec) this.state = this.state.update(spec).state;
     }
+    this.serializer = null;
     this.remoteChanges++;
   }
 
@@ -441,6 +494,7 @@ export class DocumentSession {
     };
     if (this.view) this.view.dispatch(spec);
     else this.state = this.state.update(spec).state;
+    this.serializer = null;
     this.remoteChanges++;
   }
 
@@ -525,6 +579,8 @@ export class DocumentSession {
         return;
       }
       case 'conflict':
+        // Theirs changed again: a version the view's merge can read resolves the banner.
+        if (this.tryMerge(theirs, file.version, theirsEol, this.conflict!.baseText)) return;
         this.conflict = { ...this.conflict!, theirsText: theirs, theirsVersion: file.version, theirsEol };
         this.emit();
         return;
@@ -569,9 +625,50 @@ export class DocumentSession {
   }
 
   private enterConflict(theirsText: string, theirsVersion: Version, theirsEol: Eol, source: ConflictInfo['source']): void {
+    if (this.tryMerge(theirsText, theirsVersion, theirsEol, this.baseText)) return;
     this.clearSaveTimers();
     this.conflict = { theirsText, theirsVersion, theirsEol, baseText: this.baseText, source, historyBlocked: false };
     this.setStatus('conflict');
+  }
+
+  /**
+   * A view's semantic merge (DESIGN §6.8) settles a conflict without the banner: the merged text
+   * becomes a local edit on top of theirs, saved like "Save merged" (with flushHistory, so the
+   * server commits theirs first). False when the view has no merge, the base is unknown, or the
+   * merge gives up; the banner then appears as usual.
+   */
+  private tryMerge(theirsText: string, theirsVersion: Version, theirsEol: Eol, baseText: string | null): boolean {
+    const merge = this.deps.mergeFor?.(this.path);
+    if (!merge || baseText === null || !this.loaded || this.lossy) return false;
+    let merged: string | null;
+    try {
+      merged = merge(baseText, this.getText(), theirsText);
+    } catch (e) {
+      console.error('[notesapp] merge failed', e);
+      merged = null;
+    }
+    if (merged === null) return false;
+    this.clearSaveTimers();
+    if (merged === theirsText) {
+      // Everything mine changed is in theirs already.
+      this.replaceUndoable(theirsText);
+      this.adoptVersion(theirsVersion, theirsText, theirsEol);
+    } else {
+      this.replaceUndoable(merged);
+      this.version = theirsVersion;
+      this.baseText = theirsText;
+      this.conflict = null;
+      this.deleted = null;
+      this.flushHistoryNext = true;
+      this.changes++;
+      if (this.firstUnsavedAt === null) this.firstUnsavedAt = Date.now();
+      this.setStatus('dirty');
+      // The merge is unsaved work: a killed tab restores it (as a pending merge), not the old text.
+      void this.writeDraft();
+      this.scheduleSave(true);
+    }
+    this.deps.notify({ message: 'Merged changes from another device' });
+    return true;
   }
 
   /** `file.deleted` for this path. */
@@ -623,17 +720,32 @@ export class DocumentSession {
    * Records a local edit. `serialize` makes serialization lazy for non-CodeMirror views: the
    * session calls it only when it saves or writes a draft.
    */
-  markDirty(serialize?: () => string): void {
+  markDirty(serialize?: Serializer): void {
     if (serialize) this.serializer = serialize;
     this.changes++;
     if (this.firstUnsavedAt === null) this.firstUnsavedAt = Date.now();
     if (this.status === 'clean') this.status = 'dirty';
-    // Text a 413 refused: once it is shorter, autosave tries again.
-    if (this.status === 'error' && this.refusedLength !== null && this.editorState.doc.length < this.refusedLength) this.status = 'dirty';
+    // Text a 413 refused: once it is shorter, autosave tries again. A view's model is measured once
+    // its edits pause, not on every change it reports (serializing it can be costly).
+    if (this.status === 'error' && this.refusedLength !== null) {
+      if (this.serializer) this.scheduleRefusedCheck();
+      else if (this.editorState.doc.length < this.refusedLength) this.status = 'dirty';
+    }
     if (this.status === 'deleted' && this.deleted) this.deleted = { ...this.deleted, hasLocalEdits: true };
     this.scheduleDraft();
     if (this.status === 'dirty') this.scheduleSave(false);
     this.emit();
+  }
+
+  private scheduleRefusedCheck(): void {
+    if (this.refusedTimer) clearTimeout(this.refusedTimer);
+    this.refusedTimer = setTimeout(() => {
+      this.refusedTimer = null;
+      if (this.disposed || this.status !== 'error' || this.refusedLength === null || this.getText().length >= this.refusedLength) return;
+      this.status = 'dirty';
+      this.scheduleSave(true);
+      this.emit();
+    }, DRAFT_INTERVAL_MS);
   }
 
   private scheduleSave(immediate: boolean): void {
@@ -773,6 +885,7 @@ export class DocumentSession {
           }
           return;
         }
+        if (this.tryMerge(theirs, p.currentVersion, detectEol(p.currentContent), this.baseText)) return;
         this.status = 'conflict';
         this.conflict = {
           theirsText: theirs,
@@ -1023,6 +1136,16 @@ export class DocumentSession {
     if (pendingUploads(this.editorState).some((u) => u.id === id)) this.dispatchEffects([endUpload.of({ id })]);
   }
 
+  /** An upload of a view without editor widgets (a drawing's image): unsaved work while it runs. */
+  async trackUpload<T>(upload: Promise<T>): Promise<T> {
+    this.uploads++;
+    try {
+      return await upload;
+    } finally {
+      this.uploads = Math.max(0, this.uploads - 1);
+    }
+  }
+
   // ---------- drafts ----------
 
   private scheduleDraft(): void {
@@ -1035,7 +1158,8 @@ export class DocumentSession {
 
   private async writeDraft(): Promise<void> {
     if (this.disposed || !this.hasUnsavedChanges()) return;
-    const text = this.getText();
+    // A view's draft may skip costly encodings (a drawing's compression): it reads back the same.
+    const text = this.serializer ? this.serializer('draft') : this.editorState.doc.toString();
     const draft: DraftRecord = {
       path: this.path,
       clientId: this.deps.clientId,
@@ -1103,7 +1227,7 @@ export class DocumentSession {
         this.setStatus('dirty');
         this.scheduleSave(false);
         this.deps.notify({ message: 'Restored unsaved changes' });
-      } else {
+      } else if (!this.tryMerge(serverText, file.version, detectEol(file.content), d.baseText ?? null)) {
         this.version = d.baseVersion;
         this.conflict = {
           theirsText: serverText,
@@ -1129,8 +1253,10 @@ export class DocumentSession {
     this.clearTimers();
     if (this.draftTimer) clearTimeout(this.draftTimer);
     if (this.loadTimer) clearTimeout(this.loadTimer);
+    if (this.refusedTimer) clearTimeout(this.refusedTimer);
     this.draftTimer = null;
     this.loadTimer = null;
+    this.refusedTimer = null;
     // Views holding a disposed session re-acquire one for their path (the snapshot changes so
     // that subscribers re-render).
     this.snapshot = { ...this.snapshot };

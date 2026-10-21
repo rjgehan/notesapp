@@ -7,7 +7,7 @@ import { currentSettings, currentTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
 import type { FileEntry, MoveResult, Settings } from '../api/types';
 import { newIdempotencyKey } from '../state/clientId';
-import { clearPendingNote, startPendingNote, usePendingNote } from '../state/pendingNote';
+import { clearPendingNote, startPendingNote, usePendingNote, type PendingNote } from '../state/pendingNote';
 import { toast } from '../state/toasts';
 import { useUi } from '../state/ui';
 import { applyFolderResult, applyMoveResult, applyRestoreResult, applyTrashEntry } from '../sync/applyEvents';
@@ -80,17 +80,34 @@ export async function retitleNewNote(from: string, to: string): Promise<void> {
   titled = { path: to, render: t.render, title };
 }
 
+/** The pending note `id` once its title is committed, or null when another view replaced it. */
+function titleCommitted(id: number): Promise<PendingNote | null> {
+  return new Promise((resolve) => {
+    const check = (): boolean => {
+      const { pending } = usePendingNote.getState();
+      if (pending && pending.id === id && !pending.committed) return false;
+      resolve(pending && pending.id === id ? pending : null);
+      return true;
+    };
+    if (check()) return;
+    const unsubscribe = usePendingNote.subscribe(() => {
+      if (check()) unsubscribe();
+    });
+  });
+}
+
 /**
  * "New note" (DESIGN §6.15): the pending view (title focused, inside the tap) appears at once and
  * `POST /api/files {Untitled.md, onConflict: rename}` runs in the background. A title committed
  * before the POST returns becomes a rename; otherwise the typed title is handed to the note.
  * Content from a template (`TitledContent`) renders its `{{title}}` with the note's final name.
+ * Another view's file (`extension`, called `label` in the pending view) is created the same way.
  */
-export function createNote(folder: string, initialContent: string | Promise<string | TitledContent> = '', extension = 'md'): void {
+export function createNote(folder: string, initialContent: string | Promise<string | TitledContent> = '', extension = 'md', label = 'note'): void {
   const id = ++pendingSeq;
   const key = newIdempotencyKey();
   const initialTitle = 'Untitled';
-  startPendingNote(id, folder, initialTitle);
+  startPendingNote(id, folder, initialTitle, { extension, label });
   useUi.getState().setDrawerOpen(false);
   void (async () => {
     let created: FileEntry;
@@ -109,7 +126,11 @@ export function createNote(folder: string, initialContent: string | Promise<stri
       return;
     }
     if (render) titled = { path: created.path, render, title: initialTitle };
-    const pending = usePendingNote.getState().pending;
+    let pending = usePendingNote.getState().pending;
+    // A file without an inline title to hand the typing over to (a drawing) takes its name from
+    // the pending view: it opens once the title is committed (Enter or blur), or never if the
+    // user went elsewhere.
+    if (extension !== 'md' && pending?.id === id && !pending.committed) pending = await titleCommitted(id);
     if (!pending || pending.id !== id) {
       // The user went elsewhere; the note exists (as `Untitled 1`, say).
       void retitleNewNote(created.path, created.path);

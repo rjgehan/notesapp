@@ -1,6 +1,6 @@
 // Embed hydration (DESIGN §6.7 #5), run after the rendered HTML is in the document. Media and PDF
-// embeds are plain elements; embeds whose view descriptor has `loadEmbed` (notes, and later
-// sheets or drawings) mount a React root. Images are built before insertion (render.ts).
+// embeds are plain elements; embeds whose view descriptor has `loadEmbed` (notes, drawings, and
+// later sheets) mount a React root. Images are built before insertion (render.ts).
 import { QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, type ComponentType } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -8,7 +8,7 @@ import { queryClient } from '../api/queryClient';
 import type { FileEntry } from '../api/types';
 import { formatBytes } from '../features/format';
 import { ErrorBoundary } from '../components/ErrorBoundary';
-import { viewFor, type EmbedProps, type FileViewDescriptor } from '../views/registry';
+import { isMarkdownViewPath, viewFor, type EmbedProps, type FileViewDescriptor } from '../views/registry';
 
 export interface EmbedContext {
   sourcePath: string;
@@ -28,6 +28,12 @@ function lazyEmbed(d: FileViewDescriptor): ComponentType<EmbedProps> | null {
     lazyEmbeds.set(d.id, c);
   }
   return c;
+}
+
+/** A `data-width` or `data-height` value (from `|W` or `|WxH`). */
+function size(value: string | undefined): number | undefined {
+  const n = Number(value);
+  return value && Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 /** `page=3&height=400` style parameters of a PDF embed subpath. */
@@ -109,11 +115,21 @@ export function hydrateEmbeds(container: Element, ctx: EmbedContext): void {
         continue;
       }
       // Transclusion is one level deep and never of the note itself (the renderer turns deeper
-      // embeds into links; this guards any placeholder that did not come from it).
-      if (entry.kind === 'note' && (ctx.depth >= 1 || entry.path === ctx.sourcePath)) continue;
+      // embeds into links; this guards any placeholder that did not come from it). A note another
+      // view shows (a drawing) embeds nothing further, so it is embedded at any depth.
+      if (entry.kind === 'note' && isMarkdownViewPath(entry.path) && (ctx.depth >= 1 || entry.path === ctx.sourcePath)) continue;
       mountReact(
         el,
-        <Embed path={entry.path} entry={entry} subpath={subpath} display={el.dataset.embedAlt} sourcePath={ctx.sourcePath} depth={ctx.depth + 1} />,
+        <Embed
+          path={entry.path}
+          entry={entry}
+          subpath={subpath}
+          display={el.dataset.embedAlt}
+          width={size(el.dataset.width)}
+          height={size(el.dataset.height)}
+          sourcePath={ctx.sourcePath}
+          depth={ctx.depth + 1}
+        />,
       );
     }
   }

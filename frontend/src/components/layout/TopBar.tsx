@@ -10,13 +10,13 @@ import { getCommand, runCommand, useCommandsVersion } from '../../features/comma
 import { mirrorMisconfigured, pushMirrorNow } from '../../features/mirror';
 import { setNoteMode, useNoteMode } from '../../features/noteMode';
 import { navigateOverOverlays, useOverlayHistory } from '../../features/overlayHistory';
-import { displayName, isNotePath, pathFromLocation } from '../../features/paths';
+import { displayName, pathFromLocation } from '../../features/paths';
 import { usePendingNote } from '../../state/pendingNote';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
 import { useUi } from '../../state/ui';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import { ModeToggle } from '../../views/markdown/NoteHeader';
-import { viewFor } from '../../views/registry';
+import { isMarkdownViewPath, viewFor } from '../../views/registry';
 import { ConnectionIndicator } from '../ConnectionIndicator';
 import { SaveStatus } from '../SaveStatus';
 import { showPanel } from './showPanel';
@@ -29,7 +29,8 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
   const ref = useRef<HTMLDivElement>(null);
   const historyWarning = useHistoryWarning();
   const mirrorWarning = useMirrorWarning();
-  const hasFile = useTree().data?.byPath.has(path ?? '') ?? false;
+  const entry = useTree().data?.byPath.get(path ?? '');
+  const hasFile = !!entry;
   useOverlayHistory(true, onClose);
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
@@ -61,7 +62,8 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
   );
   const command = (id: string, label: string, icon: ReactNode) => (getCommand(id) ? item(label, icon, () => runCommand(id, { activePath: path })) : null);
   const dark = resolvedTheme() === 'dark';
-  const note = hasFile && path !== null && isNotePath(path);
+  // Notes shown by another view (an `.excalidraw.md` drawing) have no outline or template target.
+  const note = !!entry && isMarkdownViewPath(entry.path);
   return (
     <div ref={ref} className="menu" role="menu" aria-label="More">
       {historyWarning && (
@@ -115,7 +117,7 @@ export function TopBar() {
   const descriptor = entry && !pending ? viewFor(entry) : null;
   const phone = useBreakpoint() === 'phone';
   const page = location.pathname.startsWith('/x/') ? registeredPages().find((p) => pageRoute(p) === location.pathname) : undefined;
-  const title = pending ? pending.title || 'New note' : path ? displayName(path) : page ? page.title : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
+  const title = pending ? pending.title || `New ${pending.label}` : path ? displayName(path) : page ? page.title : location.pathname.startsWith('/settings') ? 'Settings' : location.pathname === '/trash' ? 'Trash' : location.pathname === '/search' ? 'Search' : 'Notes';
 
   return (
     <header className="top-bar">

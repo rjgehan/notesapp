@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides) |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -782,7 +782,7 @@ Request `MoveRequest`:
 | `moved` | Every moved **file** (for folders, all descendants), as old and new paths |
 | `createdFolders` | Missing parents of `to` that the move created, outermost first. The caller adds them itself, because its own `folder.created` events are not echoed. `[]` in a dry run. |
 | `linkUpdates` | Notes whose text was (or, in a dry run, would be) rewritten. Paths are post-move. `version` is the new version, or `null` when `dryRun`. **The calling client applies these itself**, because its own `file.changed` events are not echoed: refresh the open sessions and update the tree versions. |
-| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
+| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string, or a link in a drawing that is indexed from its JSON rather than its Markdown, §11.2), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
 | `commitId` | The **last** commit made (the link-update commit when there is one, otherwise the rename commit). `null` when `dryRun`, when git is disabled, when nothing was committed (an empty folder), or when the commit failed and is being retried |
 
 | Errors |
@@ -854,6 +854,7 @@ Events to other clients, in this order: `folder.created` for new target parents,
 | `unlinked` | `null` unless `unlinked=true`. Then it lists plain-text, whole-word, case-insensitive occurrences of the note's basename or aliases (3 or more characters) outside code, links, frontmatter and URLs, in notes not matching `excludedPaths`. `matched` is the text found. At most 200 groups. It is `[]` for non-notes. |
 | `context` | The source line, clipped to at most 240 characters around the match. A leading or trailing `…` marks clipping. `contextRange` is relative to `context`. |
 | `from`, `to` | Absolute offsets in the source file at `sourceVersion` (used by §15.5) |
+| Drawings as sources | An `.excalidraw` drawing links through `[[Note]]` in a text element, an element's link, and the images it stores as attachments (DESIGN §6.8.1). Such a group's `source` is the drawing, `context` is the element's text or link (for example `Call [[Plumber]] about the leak`), and `line`, `from` and `to` refer to that indexed text, not to the file's JSON. An `.excalidraw.md` drawing is a note: links in its Markdown sections are ordinary mentions; a link only its JSON holds is a mention whose `line`, `from` and `to` lie past the end of the file. Unlinked mentions never come from a drawing's JSON. |
 
 | Errors |
 |---|
@@ -906,7 +907,7 @@ Request `ResolveRequest`:
 
 ### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true]`
 
-This is full-text search over notes. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes, and over the texts of `.excalidraw` drawings (a hit's `path` is then the drawing, and `matches` are lines of its text, never of its JSON). Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
@@ -975,8 +976,8 @@ All clauses must match (AND). `OR`, parentheses and regular expressions are not 
 ] }
 ```
 
-- `count` is the number of notes with exactly this tag.
-- `total` is the number of distinct notes with this tag or any descendant.
+- `count` is the number of notes with exactly this tag. Drawings count as notes here: an `.excalidraw` drawing whose texts hold the tag, and an `.excalidraw.md` drawing through its Markdown or the texts only its JSON holds (DESIGN §6.8.1).
+- `total` is the number of distinct notes (drawings included) with this tag or any descendant.
 - A parent that only exists through nesting has `count: 0`.
 - Display casing is the first one seen.
 

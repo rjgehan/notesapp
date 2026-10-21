@@ -1,6 +1,8 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { createReadStream, readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative, resolve, sep } from 'node:path'
+import { defineConfig, type Plugin } from 'vite'
 
 // The Dockerfile sets VITE_BUILD_SHA; everywhere else the build is "dev", which the
 // backend also reports outside the image, so the version check never fires (DESIGN §6.18).
@@ -11,10 +13,48 @@ const buildSha = process.env.VITE_BUILD_SHA || 'dev'
 // list the Vite origin's host:port.
 const backendUrl = process.env.NOTES_DEV_BACKEND || 'http://127.0.0.1:8080'
 
+// Excalidraw's fonts are self-hosted (DESIGN §6.8.1): the CSP blocks its CDN fallback. They go into a
+// folder named after the package version under /assets/, which the server caches as immutable.
+const excalidrawPackage = resolve('node_modules/@excalidraw/excalidraw')
+const excalidrawVersion = (JSON.parse(readFileSync(join(excalidrawPackage, 'package.json'), 'utf8')) as { version: string }).version
+const excalidrawAssets = `assets/excalidraw-${excalidrawVersion}/`
+const excalidrawFonts = join(excalidrawPackage, 'dist', 'prod', 'fonts')
+
+function filesUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? filesUnder(join(dir, d.name)) : [join(dir, d.name)]))
+}
+
+function excalidrawFontsPlugin(): Plugin {
+  const prefix = `/${excalidrawAssets}fonts/`
+  return {
+    name: 'notesapp-excalidraw-fonts',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url?.split('?')[0] ?? ''
+        if (!url.startsWith(prefix)) return next()
+        const file = resolve(excalidrawFonts, decodeURIComponent(url.slice(prefix.length)))
+        if (!file.startsWith(excalidrawFonts + sep) || !statSync(file, { throwIfNoEntry: false })?.isFile()) return next()
+        res.setHeader('Content-Type', 'font/woff2')
+        createReadStream(file).pipe(res)
+      })
+    },
+    generateBundle() {
+      for (const file of filesUnder(excalidrawFonts)) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `${excalidrawAssets}fonts/${relative(excalidrawFonts, file).split(sep).join('/')}`,
+          source: readFileSync(file),
+        })
+      }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), excalidrawFontsPlugin()],
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(buildSha),
+    'import.meta.env.VITE_EXCALIDRAW_ASSETS': JSON.stringify('/' + excalidrawAssets),
   },
   server: {
     proxy: {

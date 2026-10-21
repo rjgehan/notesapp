@@ -9,6 +9,7 @@ import { mirrorMisconfigured, mirrorWarningDetail, pushMirrorNow } from '../../f
 import { isNotePath, pathFromLocation } from '../../features/paths';
 import { useUi, type SaveSummary } from '../../state/ui';
 import { useDocumentSession, useSessionChangeCount } from '../../sync/useTextDocument';
+import { isMarkdownViewPath } from '../../views/registry';
 import { ConnectionIndicator } from '../ConnectionIndicator';
 import { showPanel } from './showPanel';
 import { useHistoryWarning } from './useHistoryWarning';
@@ -84,7 +85,7 @@ export function StatusBar() {
         {SUMMARY[summary]}
       </span>
       {note && <BacklinkCount key={`b:${path}`} path={path} />}
-      {note && <Counts key={path} path={path} />}
+      {note && isMarkdownViewPath(path) && <Counts key={path} path={path} />}
     </footer>
   );
 }

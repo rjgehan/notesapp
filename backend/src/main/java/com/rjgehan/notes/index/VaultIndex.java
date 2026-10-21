@@ -20,6 +20,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.rjgehan.notes.api.dto.FileEntry;
+import com.rjgehan.notes.api.dto.FileKind;
 import com.rjgehan.notes.api.dto.FolderEntry;
 import com.rjgehan.notes.api.dto.LinkStyle;
 import com.rjgehan.notes.api.dto.SkippedEntry;
@@ -193,6 +194,19 @@ public class VaultIndex {
 				if (record.size() > bytes) {
 					found.add(new SizedFile(record.path(), this.diskNames.getOrDefault(record.path(), record.path()),
 							record.size()));
+				}
+			}
+			return found;
+		});
+	}
+
+	/** Every indexed file for which {@code filter} holds, in path order. */
+	public List<FileRecord> files(Predicate<FileRecord> filter) {
+		return read(() -> {
+			List<FileRecord> found = new ArrayList<>();
+			for (FileRecord record : this.files.values()) {
+				if (filter.test(record)) {
+					found.add(record);
 				}
 			}
 			return found;
@@ -519,7 +533,17 @@ public class VaultIndex {
 	}
 
 	public Stats stats() {
-		return read(() -> new Stats(this.notes.size(), this.files.size(), this.folders.size(), this.totalBytes));
+		return read(() -> {
+			// Documents (DocumentIndexer) are indexed like notes but are not counted as notes.
+			int notes = 0;
+			for (String path : this.notes.keySet()) {
+				FileRecord record = this.files.get(path);
+				if (record != null && record.kind() == FileKind.NOTE) {
+					notes++;
+				}
+			}
+			return new Stats(notes, this.files.size(), this.folders.size(), this.totalBytes);
+		});
 	}
 
 	public List<SkippedEntry> skipped() {

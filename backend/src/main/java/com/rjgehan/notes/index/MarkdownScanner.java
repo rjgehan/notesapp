@@ -50,6 +50,18 @@ public final class MarkdownScanner {
 	}
 
 	public static NoteParse scan(String text, boolean hadBom, boolean lossy) {
+		return scan(text, hadBom, lossy, true);
+	}
+
+	/**
+	 * Scans a Markdown fragment that is not a whole note, such as a task's title or notes: the same rules, except that
+	 * a leading {@code ---} block is never frontmatter.
+	 */
+	public static NoteParse scanFragment(String text) {
+		return scan(text, false, false, false);
+	}
+
+	private static NoteParse scan(String text, boolean hadBom, boolean lossy, boolean frontmatterAllowed) {
 		int[] lineStarts = lineStarts(text);
 		int lineCount = lineStarts.length;
 		List<TextRange> excluded = new ArrayList<>();
@@ -60,7 +72,7 @@ public final class MarkdownScanner {
 		List<TagOcc> tags = new ArrayList<>();
 		List<LinkOcc> links = new ArrayList<>();
 		int bodyStart = 0;
-		if (isDashLine(text, lineStarts, 0)) {
+		if (frontmatterAllowed && isDashLine(text, lineStarts, 0)) {
 			int closing = -1;
 			for (int j = 1; j < lineCount; j++) {
 				if (isDashLine(text, lineStarts, j)) {

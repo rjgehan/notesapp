@@ -15,6 +15,9 @@ export interface EmbedProps {
   entry: FileEntry;
   subpath?: string;
   display?: string;
+  /** The embed's size in CSS pixels, from `![[file|W]]` or `![[file|WxH]]`. */
+  width?: number;
+  height?: number;
   sourcePath: string;
   depth: number;
 }
@@ -63,6 +66,22 @@ export function viewFor(entry: FileEntry): FileViewDescriptor {
   }
   if (!best) throw new Error(`No view registered for ${entry.path}`);
   return best;
+}
+
+/**
+ * True when the Markdown view shows the note at `path`: false for other files, and for notes
+ * another view claims by name (an `.excalidraw.md` drawing), whose text has no outline, word
+ * count or insertion point.
+ */
+export function isMarkdownViewPath(path: string): boolean {
+  if (!path.toLowerCase().endsWith('.md')) return false;
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const probe: FileEntry = { path, name, basename: name.slice(0, -3), extension: 'md', kind: 'note', size: 0, mtime: '', version: null, aliases: [] };
+  try {
+    return viewFor(probe).id === 'markdown';
+  } catch {
+    return true;
+  }
 }
 
 export function registeredViews(): readonly FileViewDescriptor[] {
