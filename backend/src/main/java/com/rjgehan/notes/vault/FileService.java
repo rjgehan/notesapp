@@ -11,12 +11,14 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 import com.rjgehan.notes.api.dto.FileEntry;
 import com.rjgehan.notes.api.dto.FileKind;
 import com.rjgehan.notes.api.dto.OnConflict;
 import com.rjgehan.notes.api.dto.TextFile;
 import com.rjgehan.notes.api.dto.WriteResult;
+import com.rjgehan.notes.api.error.ErrorCode;
 import com.rjgehan.notes.api.error.NotesException;
 import com.rjgehan.notes.api.error.VersionConflictException;
 import com.rjgehan.notes.config.NotesProperties;
@@ -225,6 +227,102 @@ public class FileService {
 			logger.debug("SAVE {} client={} {} bytes", entry.path(), origin, newBytes.length);
 			return new Saved(new WriteResult(entry, false, List.of()), false);
 		}
+	}
+
+	/**
+	 * Quick capture (API.md §8.5): appends {@code entry} (LF line breaks, ending with one) to the text file at
+	 * {@code apiPath}, or creates it with {@code initialContent} followed by the entry. An existing file is found
+	 * ignoring case. Its bytes are kept exactly (BOM, invalid UTF-8 and all); the entry follows the file's line
+	 * endings and starts on a new line. Nothing the requester has not seen is replaced, so no conflict is possible:
+	 * other clients get {@code file.changed} and an open, dirty note there enters the ordinary conflict flow.
+	 */
+	public Saved appendText(String apiPath, String entry, Supplier<String> initialContent, Identity identity,
+			@Nullable String origin) throws IOException {
+		String nfc = this.paths.normalize(apiPath);
+		for (int attempt = 0;; attempt++) {
+			String existing = this.index.fileIgnoreCase(nfc);
+			if (existing == null) {
+				try {
+					WriteResult created = createText(nfc, initialContent.get() + entry, OnConflict.FAIL, identity,
+							origin);
+					return new Saved(created, true);
+				}
+				catch (NotesException ex) {
+					// Created meanwhile (another capture, today's note opened on another device): append to it.
+					boolean raced = ex.code() == ErrorCode.ALREADY_EXISTS || ex.code() == ErrorCode.CASE_COLLISION;
+					if (!raced || attempt >= 2) {
+						throw ex;
+					}
+					continue;
+				}
+			}
+			Saved appended = appendExisting(this.paths.resolve(existing, Mode.EXISTING), entry, identity, origin);
+			if (appended != null) {
+				return appended;
+			}
+			if (attempt >= 2) {
+				throw NotesException.notFound(existing);
+			}
+		}
+	}
+
+	/** Appends under the locks; null when the file vanished meanwhile (the caller creates it). */
+	private @Nullable Saved appendExisting(ApiPath path, String entry, Identity identity, @Nullable String origin)
+			throws IOException {
+		requireTextKind(path);
+		long limit = this.kinds.textLimit(path.nfc());
+		Author author = Author.of(identity);
+		try (CommitBatcher.Operation operation = this.batcher.beginOperation();
+				VaultLocks.Held held = this.locks.read(lockPaths(path))) {
+			if (existingLocked(path) == null) {
+				return null;
+			}
+			byte[] disk = readOrNull(path);
+			if (disk == null) {
+				return null;
+			}
+			FileRecord record = this.index.file(path.nfc());
+			if (record == null || !Hashing.blobId(disk).equals(record.version())) {
+				// An external edit the watcher has not indexed yet: index and announce it first.
+				this.reconciler.reconcileLocked(path);
+			}
+			byte[] addition = appendBytes(disk, entry);
+			if ((long) disk.length + addition.length > limit) {
+				throw NotesException.tooLarge(limit, "Text files are limited to " + limit + " bytes");
+			}
+			byte[] newBytes = new byte[disk.length + addition.length];
+			System.arraycopy(disk, 0, newBytes, 0, disk.length);
+			System.arraycopy(addition, 0, newBytes, disk.length, addition.length);
+			this.batcher.prepareWrite(author);
+			this.fs.atomicWrite(path.disk(), newBytes);
+			FileEntry entryAfter = indexWritten(path, newBytes);
+			this.batcher.markDirty(path, author);
+			this.hub.publish(FileEvent.changed(entryAfter, origin));
+			logger.info("CAPTURE {} client={} user={}", entryAfter.path(), origin, identity.login());
+			return new Saved(new WriteResult(entryAfter, false, List.of()), false);
+		}
+	}
+
+	/**
+	 * The bytes that append {@code entry} (LF-only) to a file holding {@code disk}: on a new line, in the file's line
+	 * endings (CRLF when every line break in it is CRLF, DESIGN §6.9).
+	 */
+	static byte[] appendBytes(byte[] disk, String entry) {
+		int lf = 0;
+		int crlf = 0;
+		for (int i = 0; i < disk.length; i++) {
+			if (disk[i] == '\n') {
+				lf++;
+				if (i > 0 && disk[i - 1] == '\r') {
+					crlf++;
+				}
+			}
+		}
+		String eol = (lf > 0 && lf == crlf) ? "\r\n" : "\n";
+		boolean bomOnly = disk.length == 3 && TextCodec.hasBom(disk);
+		boolean needsBreak = disk.length > 0 && !bomOnly && disk[disk.length - 1] != '\n';
+		String text = (needsBreak ? "\n" : "") + entry;
+		return text.replace("\n", eol).getBytes(StandardCharsets.UTF_8);
 	}
 
 	/** "Recreate with my text": the name existed, so neither the name nor its parents get the new-name rules. */

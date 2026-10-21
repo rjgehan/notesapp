@@ -55,7 +55,8 @@ public class RequestSizeFilter extends OncePerRequestFilter {
 	@Override
 	protected boolean shouldNotFilter(HttpServletRequest request) {
 		String path = RequestPaths.of(request);
-		return !path.startsWith("/api/") || path.equals("/api/files/raw") || path.equals("/api/attachments");
+		return !path.startsWith("/api/") || path.equals("/api/files/raw") || path.equals("/api/attachments")
+				|| path.equals("/api/capture/file");
 	}
 
 	@Override
