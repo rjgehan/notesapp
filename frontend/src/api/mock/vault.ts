@@ -2,7 +2,7 @@
 // can be built and exercised without the backend: version protocol (API.md §4), name rules,
 // case policy, trash, link rewriting on move, backlinks, search, tags, history and events.
 import { flattenItems as flattenBookmarkItems, rekeyBookmarks } from '../../features/bookmarks';
-import { buildLinkIndex, createPath, linkText, linkTextRaw, resolve, type LinkIndex } from '../../features/links';
+import { buildLinkIndex, createPath, encodeMdPath, linkText, linkTextRaw, resolve, type LinkIndex } from '../../features/links';
 import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, newPathError, pathSafetyError, rebasePath, stripMd } from '../../features/paths';
 import { splitWikiBody } from '../../features/syntax';
 import { DEFAULT_SETTINGS } from '../../features/settings';
@@ -19,6 +19,8 @@ import type {
   FileEntry,
   FileKind,
   FolderResult,
+  HeadingRenameRequest,
+  HeadingRenameResult,
   HistoryContent,
   HistoryEntry,
   HistoryResponse,
@@ -331,6 +333,82 @@ export class MockVault {
     this.settingsVersion = blobId(encoder.encode(JSON.stringify(this.settings)));
     this.hub.publish('settings.changed', { version: this.settingsVersion, origin }, origin);
     return this.getSettings();
+  }
+
+  // ---------- heading renames (API.md §22) ----------
+
+  renameHeading(req: HeadingRenameRequest, origin: string | null): HeadingRenameResult {
+    const note = this.existing(req.path);
+    const key = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+    const from = req.from.trim();
+    const to = req.to.trim();
+    if (!from || !to || key(from) === key(to)) fail('bad-request', 'Invalid heading rename', { errors: [{ field: 'to', message: 'must differ' }] });
+    const headings = this.scanOf(note).headings.map((h) => key(h.text));
+    if (headings.includes(key(from)) || !headings.includes(key(to))) fail('bad-request', 'The note must have the new heading and not the old one', { errors: [] });
+    const index = this.linkIndex();
+    const linkUpdates: HeadingRenameResult['linkUpdates'] = [];
+    const rewrites: Array<{ path: string; text: string }> = [];
+    for (const source of this.notes()) {
+      let text = this.textOf(source);
+      let count = 0;
+      for (const link of [...this.scanOf(source).links].sort((a, b) => b.from - a.from)) {
+        if (link.subpath === null) continue;
+        const resolved = link.target === '' ? source.path : resolve(link.target, source.path, index);
+        if (resolved !== req.path) continue;
+        const span = headingSubpathSpan(text, link);
+        if (!span) continue;
+        const decode = link.style === 'markdown' && !link.angle;
+        let matched = false;
+        const segments = text.slice(span[0], span[1]).split('#').map((seg) => {
+          const plain = decode ? safeDecode(seg) : seg;
+          if (plain.startsWith('^') || key(plain) !== key(from)) return seg;
+          matched = true;
+          return decode ? encodeMdPath(to) : to;
+        });
+        if (!matched || (link.style === 'wiki' && /[|#[\]]/.test(to))) continue;
+        text = text.slice(0, span[0]) + segments.join('#') + text.slice(span[1]);
+        count++;
+      }
+      if (count > 0) {
+        rewrites.push({ path: source.path, text });
+        linkUpdates.push({ path: source.path, links: count, version: null });
+      }
+    }
+    const bookmarks = this.renameHeadingBookmarks(req.path, from, to, req.dryRun ?? false);
+    if (req.dryRun) return { dryRun: true, path: req.path, from, to, linkUpdates, failed: [], bookmarks, commitId: null };
+    for (const r of rewrites) {
+      const file = this.entry(this.writeRaw(r.path, encoder.encode(r.text)));
+      linkUpdates.find((u) => u.path === r.path)!.version = file.version;
+      this.hub.publish('file.changed', { file, origin }, origin);
+    }
+    const commitId = rewrites.length
+      ? this.commit(`Update links after renaming heading “${from}” → “${to}” in ${req.path} (${rewrites.length} notes)`, rewrites.map((r) => ({ path: r.path, change: 'modified' as const, renamedFrom: null })))
+      : null;
+    return { dryRun: false, path: req.path, from, to, linkUpdates, failed: [], bookmarks, commitId };
+  }
+
+  private renameHeadingBookmarks(path: string, from: string, to: string, dryRun: boolean): number {
+    const key = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+    let count = 0;
+    const visit = (items: BookmarkItem[]): BookmarkItem[] =>
+      items.map((item) => {
+        if (item.type === 'group' && Array.isArray(item.items)) return { ...item, items: visit(item.items) };
+        if (item.type !== 'file' || typeof item.path !== 'string' || typeof item.subpath !== 'string' || item.path.toLowerCase() !== path.toLowerCase()) return item;
+        const segments = item.subpath.split('#');
+        let changed = false;
+        for (let i = 1; i < segments.length; i++) {
+          if (!segments[i].startsWith('^') && key(segments[i]) === key(from)) {
+            segments[i] = to;
+            changed = true;
+          }
+        }
+        if (!changed) return item;
+        count++;
+        return { ...item, subpath: segments.join('#') };
+      });
+    const next = visit(this.bookmarks);
+    if (count > 0 && !dryRun) this.setBookmarks(next, null);
+    return count;
   }
 
   // ---------- bookmarks (API.md §21) ----------
@@ -1163,4 +1241,28 @@ export function parseQuery(q: string): QueryClause[] {
     if (value) out.push({ kind: phrase ? 'phrase' : 'word', value, negated });
   }
   return out;
+}
+
+/** Where a link's subpath (after its first `#`) is in the text, or null (API.md §22). */
+export function headingSubpathSpan(text: string, link: { style: 'wiki' | 'markdown'; embed: boolean; raw: string; from: number; targetFrom: number; targetTo: number }): [number, number] | null {
+  if (link.style === 'wiki') {
+    const prefix = link.embed ? 3 : 2;
+    const body = link.raw.slice(prefix, -2);
+    const pipe = body.indexOf('|');
+    const leftEnd = pipe < 0 ? body.length : pipe > 0 && body[pipe - 1] === '\\' ? pipe - 1 : pipe;
+    const hash = body.indexOf('#');
+    if (hash < 0 || hash >= leftEnd) return null;
+    return [link.from + prefix + hash + 1, link.from + prefix + leftEnd];
+  }
+  // The mock's markdown target span is the whole destination, subpath included.
+  const hash = text.slice(link.targetFrom, link.targetTo).indexOf('#');
+  return hash < 0 ? null : [link.targetFrom + hash + 1, link.targetTo];
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }

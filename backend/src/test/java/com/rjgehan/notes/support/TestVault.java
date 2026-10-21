@@ -35,6 +35,7 @@ import com.rjgehan.notes.vault.AttachmentService;
 import com.rjgehan.notes.vault.FileKinds;
 import com.rjgehan.notes.vault.FileService;
 import com.rjgehan.notes.vault.FolderService;
+import com.rjgehan.notes.vault.HeadingRenameService;
 import com.rjgehan.notes.vault.MoveLog;
 import com.rjgehan.notes.vault.MoveService;
 import com.rjgehan.notes.vault.NameRules;
@@ -111,6 +112,8 @@ public final class TestVault implements AutoCloseable {
 
 	public final AttachmentService attachments;
 
+	public final HeadingRenameService headings;
+
 	private TestVault(Path root, Map<String, String> overrides, Function<NotesProperties, VaultFs> fsFactory) {
 		this.root = root;
 		Map<String, String> settings = new HashMap<>();
@@ -142,6 +145,8 @@ public final class TestVault implements AutoCloseable {
 		this.moves = new MoveService(this.paths, this.fs, this.locks, this.index, this.files, this.indexer,
 				this.reconciler, this.batcher, this.hub, this.moveLog, this.settings, this.bookmarks);
 		this.attachments = new AttachmentService(this.paths, this.nameRules, this.files, this.index, this.settings);
+		this.headings = new HeadingRenameService(this.paths, this.fs, this.locks, this.index, this.files,
+				this.reconciler, this.batcher, this.hub, this.bookmarks);
 	}
 
 	/** Prepares the vault, opens git and builds the index, like the startup sequence. */

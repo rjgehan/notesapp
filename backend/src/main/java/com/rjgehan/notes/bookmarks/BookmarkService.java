@@ -9,10 +9,12 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 import com.rjgehan.notes.api.dto.BookmarksResponse;
@@ -203,12 +205,52 @@ public class BookmarkService {
 	}
 
 	/**
-	 * Rewrites the file bookmarks of a note in place: {@code rewrite} gets each file bookmark (in groups too) and
-	 * returns it unchanged or a changed copy. Used when headings are renamed (ROADMAP item 21). Returns true when any
-	 * bookmark changed.
+	 * After a heading of {@code notePath} was renamed (ROADMAP item 21): heading bookmarks of that note whose subpath
+	 * names {@code from} (in any {@code #} segment, compared like heading targets) name {@code to} instead. Returns how
+	 * many bookmarks changed, or would change in a dry run, which writes nothing.
 	 */
-	public boolean rewriteFileBookmarks(Function<ObjectNode, ObjectNode> rewrite, String what, Identity identity) {
-		return change((items) -> BookmarkCodec.rewriteFileItems(items, rewrite::apply), what, identity);
+	public int headingRenamed(String notePath, String from, String to, boolean dryRun, Identity identity) {
+		String lowerPath = PathNames.lower(notePath);
+		String fromKey = headingKey(from);
+		int[] count = { 0 };
+		UnaryOperator<ObjectNode> rename = (item) -> {
+			String path = BookmarkCodec.text(item, "path");
+			String subpath = BookmarkCodec.text(item, "subpath");
+			if (path == null || subpath == null || !PathNames.lower(path).equals(lowerPath)) {
+				return item;
+			}
+			String[] segments = subpath.split("#", -1);
+			boolean changed = false;
+			for (int i = 1; i < segments.length; i++) {
+				if (!segments[i].startsWith("^") && headingKey(segments[i]).equals(fromKey)) {
+					segments[i] = to;
+					changed = true;
+				}
+			}
+			if (!changed) {
+				return item;
+			}
+			count[0]++;
+			ObjectNode copy = item.deepCopy();
+			copy.put("subpath", String.join("#", segments));
+			return copy;
+		};
+		if (dryRun) {
+			try {
+				BookmarkCodec.rewriteFileItems(read().items(), rename);
+			}
+			catch (IOException ex) {
+				return 0;
+			}
+			return count[0];
+		}
+		change((items) -> BookmarkCodec.rewriteFileItems(items, rename), "heading rename in " + notePath, identity);
+		return count[0];
+	}
+
+	/** Heading text as heading targets compare it: case-insensitive, whitespace collapsed (DESIGN §6.4). */
+	public static String headingKey(String text) {
+		return text.replaceAll("(?U)\\s+", " ").trim().toLowerCase(Locale.ROOT);
 	}
 
 	private void rekey(BookmarkCodec.PathRewrite rewrite, String what, Identity identity) {

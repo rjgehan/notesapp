@@ -201,6 +201,17 @@ export interface BacklinksResponse { path: VaultPath; linked: BacklinkGroup[]; u
 export interface ResolveRequest { source: VaultPath; targets: string[] }
 export interface ResolvedLink { path: VaultPath | null; createPath: VaultPath | null }
 export interface ResolveResponse { resolved: Record<string, ResolvedLink> }
+export interface HeadingRenameRequest { path: VaultPath; from: string; to: string; dryRun?: boolean }   // §22
+export interface HeadingRenameResult {
+  dryRun: boolean;
+  path: VaultPath;
+  from: string;
+  to: string;
+  linkUpdates: LinkUpdate[];      // notes whose links were (or, in a dry run, would be) updated; version null in a dry run
+  failed: FailedUpdate[];
+  bookmarks: number;              // heading bookmarks of the note that were (or would be) updated
+  commitId: string | null;
+}
 
 // ---------- search / tags (§12) ----------
 export interface SearchMatch { line: number; text: string; ranges: TextRange[] }

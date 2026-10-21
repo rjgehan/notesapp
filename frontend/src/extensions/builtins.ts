@@ -37,6 +37,7 @@ import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, tog
 import { pickAndInsertAttachments } from '../features/attachments';
 import { currentBookmarks, isFileBookmarked, promptNewGroup, toggleFileBookmark, toggleSearchBookmark } from '../features/bookmarkStore';
 import { findSearchBookmarks } from '../features/bookmarks';
+import { promptRenameHeading } from '../features/headingRename';
 import { getCommand, setViewCommandSource } from '../features/commands';
 import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../features/daily';
 import { toastError } from '../features/errors';
@@ -309,6 +310,15 @@ export function registerBuiltins(): void {
     icon: BookmarkPlus,
     when: () => useUi.getState().searchQuery.trim() !== '' && findSearchBookmarks(currentBookmarks(), useUi.getState().searchQuery).length === 0,
     run: () => toggleSearchBookmark(useUi.getState().searchQuery),
+  });
+  registerCommand({
+    id: 'editor.renameHeading',
+    name: 'Rename heading and update links to it…',
+    when: (c) => hasNote(c) && activeEditor() !== null,
+    run: (c) => {
+      const view = activeEditor();
+      if (view && c.activePath) void promptRenameHeading(view, c.activePath);
+    },
   });
   registerCommand({ id: 'bookmarks.newGroup', name: 'Create new bookmark group', run: () => promptNewGroup() });
 

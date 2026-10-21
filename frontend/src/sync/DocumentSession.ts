@@ -190,6 +190,9 @@ export class DocumentSession {
   /** Increments on every content change (local or remote); readers re-render from it. */
   getChangeCount = (): number => this.changes + this.remoteChanges;
 
+  /** Increments on every change that came from the server (another device, a link rewrite). */
+  getRemoteChangeCount = (): number => this.remoteChanges;
+
   private makeSnapshot(): SessionSnapshot {
     return {
       path: this.path,

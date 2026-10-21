@@ -12,6 +12,7 @@ import type {
   FolderDeletedEvent,
   FolderEvent,
   FolderResult,
+  HeadingRenameResult,
   HistoryCommittedEvent,
   HistoryRestoreResult,
   MovedEvent,
@@ -171,6 +172,17 @@ export function applyMoveResult(t: SyncTarget, r: MoveResult): void {
   }
   invalidate(t.qc, queryKeys.backlinksAll(), queryKeys.tags(), queryKeys.searchAll());
   if (inTemplates(t, r.from) || inTemplates(t, r.to)) invalidate(t.qc, queryKeys.templates());
+}
+
+/** Notes whose links to a renamed heading were updated (API.md §22): like a move's `linkUpdates`. */
+export function applyHeadingRenameResult(t: SyncTarget, r: HeadingRenameResult): void {
+  if (r.dryRun) return;
+  for (const u of r.linkUpdates) {
+    if (u.version !== null) setFileVersion(t.qc, u.path, u.version);
+    refreshFileQuery(t.qc, u.path);
+    void t.documents.get(u.path)?.onRemoteChanged({ version: u.version }, { quiet: true });
+  }
+  invalidate(t.qc, queryKeys.backlinksAll(), queryKeys.searchAll());
 }
 
 export function applyRestoreResult(t: SyncTarget, r: RestoreResult): void {
