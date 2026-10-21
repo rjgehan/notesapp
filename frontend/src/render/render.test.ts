@@ -270,6 +270,27 @@ describe('patch', () => {
     expect(container.firstElementChild?.textContent).toBe('Intro changed');
   });
 
+  it('keeps a block whose only change is a task state, and syncs the checkbox (an opened callout stays open)', () => {
+    const container = document.createElement('div');
+    patchChildren(container, renderNote('> [!todo]- Tasks\n> - [ ] one\n> - [ ] two', ctx()).fragment);
+    const callout = container.firstElementChild as HTMLDetailsElement;
+    callout.open = true;
+    const stats = patchChildren(container, renderNote('> [!todo]- Tasks\n> - [x] one\n> - [ ] two', ctx()).fragment);
+    expect(stats).toEqual({ kept: 1, inserted: 0, removed: 0 });
+    expect(container.firstElementChild).toBe(callout);
+    expect(callout.open).toBe(true);
+    const boxes = callout.querySelectorAll<HTMLInputElement>('input.task-list-item-checkbox');
+    expect([...boxes].map((b) => b.checked)).toEqual([true, false]);
+    expect(boxes[0].getAttribute('data-hash')).toBe(lineHash('> - [x] one'));
+  });
+
+  it('never ignores attribute-like text when keying blocks', () => {
+    const container = document.createElement('div');
+    patchChildren(container, renderNote('a checked="x" data-line="3" b', ctx()).fragment);
+    patchChildren(container, renderNote('a b', ctx()).fragment);
+    expect(container.textContent).toBe('a b');
+  });
+
   it('updates data-line on kept blocks when lines shift', () => {
     const container = document.createElement('div');
     patchChildren(container, renderNote('A\n\nB', ctx()).fragment);
