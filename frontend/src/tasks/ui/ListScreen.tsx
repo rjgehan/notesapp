@@ -6,6 +6,8 @@
 // Alt+→/← indent and outdent.
 import {
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Ban,
   ChevronDown,
@@ -35,8 +37,8 @@ import { usePageTitle } from '../../components/pages/usePageTitle';
 import { navigateTo } from '../../features/navigation';
 import { confirmAction, promptText } from '../../state/dialogs';
 import { useToday } from '../dates';
-import { buildRows, childrenByParent, isClosed, MAX_DEPTH, subtreeHeight, type ListRow, type SectionRow, type TaskRow } from '../model';
-import { cancelTask, createSection, deleteSection, deleteTask, isPending, moveTask, renameSection, type Placement } from '../mutations';
+import { buildRows, childrenByParent, isClosed, MAX_DEPTH, sortSections, subtreeHeight, type ListRow, type SectionRow, type TaskRow } from '../model';
+import { cancelTask, createSection, deleteSection, deleteTask, isPending, moveSection, moveTask, renameSection, type Placement } from '../mutations';
 import { loadParser } from '../quickadd/loadParser';
 import { listParams, useTaskView } from '../queries';
 import { Loading, LoadError, TaskFab, TaskProblems, TasksNav } from './common';
@@ -366,6 +368,10 @@ export function ListScreen({ listId: id, headerExtra, highlight = null, asFile =
 
   const sectionMenu = (e: MouseEvent, section: TaskSection) => {
     if (!list) return;
+    // Sections are also the board's columns: there they move left and right.
+    const sections = sortSections(list.sections);
+    const at = sections.findIndex((s) => s.id === section.id);
+    const sideways = layout === 'board-section';
     setMenu(
       menuAt(e, `${section.name} actions`, [
         {
@@ -376,6 +382,20 @@ export function ListScreen({ listId: id, headerExtra, highlight = null, asFile =
             const name = await promptText({ title: 'Rename section', label: 'Name', value: section.name, confirmLabel: 'Rename' });
             if (name?.trim() && name.trim() !== section.name) await renameSection(list, section.id, name);
           },
+        },
+        {
+          id: 'section-up',
+          label: sideways ? 'Move left' : 'Move up',
+          icon: sideways ? <ArrowLeft size={16} /> : <ArrowUp size={16} />,
+          disabled: at <= 0,
+          run: () => void moveSection(list, section.id, sections[at - 2]?.id ?? null),
+        },
+        {
+          id: 'section-down',
+          label: sideways ? 'Move right' : 'Move down',
+          icon: sideways ? <ArrowRight size={16} /> : <ArrowDown size={16} />,
+          disabled: at < 0 || at >= sections.length - 1,
+          run: () => void moveSection(list, section.id, sections[at + 1].id),
         },
         {
           id: 'delete',

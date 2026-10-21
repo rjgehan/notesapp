@@ -143,6 +143,21 @@ describe('List page (ROADMAP item 4)', () => {
     await waitFor(() => expect(titles()).toContain('0:Pay rent'));
   });
 
+  it('moves a section up and down from its menu (they are the board’s columns too)', async () => {
+    const two = { ...list, sections: [makeSection('S1', 'Errands', 'a0'), makeSection('S2', 'Calls', 'a1')] };
+    serve(two);
+    const reorder = vi.spyOn(taskApi, 'reorderSections').mockResolvedValue({ lists: [{ ...two, sections: [makeSection('S2', 'Calls', 'Zz'), makeSection('S1', 'Errands', 'a0')] }], files: [], createdFolders: [], moved: null, trash: null });
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'More for section Errands' }));
+    expect(screen.getByRole('menuitem', { name: 'Move up' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move down' }));
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith('L1', { ids: ['S1'], after: 'S2' }, expect.any(String)));
+    await waitFor(() => expect([...document.querySelectorAll('.task-section-toggle > span:first-of-type')].map((s) => s.textContent)).toEqual(['Calls', 'Errands']));
+    fireEvent.click(screen.getByRole('button', { name: 'More for section Errands' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move up' }));
+    await waitFor(() => expect(reorder).toHaveBeenLastCalledWith('L1', { ids: ['S1'], after: null }, expect.any(String)));
+  });
+
   it('shows a list written by a newer version read-only', async () => {
     serve({ ...list, writable: false });
     renderList();

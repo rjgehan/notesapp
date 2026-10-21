@@ -59,4 +59,5 @@ export const taskApi = {
     apiFetch<TaskListWriteResult>(`/api/tasks/lists/${id(listId)}/sections/${id(sectionId)}`, { method: 'PATCH', json: req, idempotencyKey: key }),
   deleteSection: (listId: string, sectionId: string, key?: string) =>
     apiFetch<TaskListWriteResult>(`/api/tasks/lists/${id(listId)}/sections/${id(sectionId)}`, { method: 'DELETE', idempotencyKey: key }),
+  reorderSections: (listId: string, req: ReorderRequest, key?: string) => post<TaskListWriteResult>(`/api/tasks/lists/${id(listId)}/sections/reorder`, req, key),
 };

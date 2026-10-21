@@ -8,6 +8,7 @@ import { addDays, localToday } from '../dates';
 import { taskStore } from '../store';
 import { makeList, makeTask } from '../testing';
 import ListsPage from './ListsPage';
+import { TaskOverlays } from './TaskOverlays';
 import { renderWithApp } from './renderWithApp';
 
 const today = localToday();
@@ -68,5 +69,25 @@ describe('task list index', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'More for Home' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }));
     await waitFor(() => expect(updateList).toHaveBeenCalledWith('L1', { changes: { archived: true }, base: { archived: false } }, expect.any(String)));
+  });
+
+  it('sets a list’s color from its menu', async () => {
+    const updateList = vi.spyOn(taskApi, 'updateList').mockResolvedValue({ lists: [{ ...home, color: '#2f9e44' }], files: [], createdFolders: [], moved: null, trash: null });
+    renderWithApp(
+      <>
+        <ListsPage />
+        <TaskOverlays />
+      </>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'More for Home' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Color…' }));
+    const colors = await screen.findByRole('radiogroup', { name: 'Color' });
+    expect(within(colors).getByRole('radio', { name: 'No color' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(colors).getByRole('radio', { name: 'Green' }));
+    await waitFor(() => expect(updateList).toHaveBeenCalledWith('L1', { changes: { color: '#2f9e44' }, base: { color: null } }, expect.any(String)));
+    await waitFor(() => expect(taskStore.list('L1')?.color).toBe('#2f9e44'));
+    expect(screen.queryByRole('radiogroup', { name: 'Color' })).not.toBeInTheDocument();
+    const dot = within(screen.getByRole('list', { name: 'Lists' })).getAllByRole('listitem')[0].querySelector('.task-list-dot') as HTMLElement;
+    expect(dot.style.background).toBe('rgb(47, 158, 68)');
   });
 });

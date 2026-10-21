@@ -540,6 +540,11 @@ export async function deleteSection(list: TaskList, sectionId: string, store: Ta
   return result !== null;
 }
 
+/** POST /api/tasks/lists/{id}/sections/reorder for one section: right after `afterId` (null: first). */
+export async function moveSection(list: TaskList, sectionId: string, afterId: string | null, store: TaskStore = taskStore): Promise<boolean> {
+  return (await listWrite((key) => taskApi.reorderSections(list.id, { ids: [sectionId], after: afterId }, key), list.name, store)) !== null;
+}
+
 /** POST /api/tasks/lists/reorder for one list. */
 export async function moveList(list: TaskList, afterId: string | null, store: TaskStore = taskStore): Promise<boolean> {
   return (await listWrite((key) => taskApi.reorderLists({ ids: [list.id], after: afterId }, key), list.name, store)) !== null;

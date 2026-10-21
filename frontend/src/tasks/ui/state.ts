@@ -24,20 +24,27 @@ interface TaskUiState {
   /** Counts openings, so a dialog opened again (with other text) starts afresh. */
   quickAddSeq: number;
   detailId: string | null;
+  /** The list whose color is being chosen. */
+  colorListId: string | null;
   openQuickAdd(context?: QuickAddContext): void;
   closeQuickAdd(): void;
   openDetail(id: string): void;
   closeDetail(): void;
+  openListColor(listId: string): void;
+  closeListColor(): void;
 }
 
 export const useTaskUi = create<TaskUiState>()((set) => ({
   quickAdd: null,
   quickAddSeq: 0,
   detailId: null,
+  colorListId: null,
   openQuickAdd: (context = {}) => set((s) => ({ quickAdd: context, quickAddSeq: s.quickAddSeq + 1, detailId: null })),
   closeQuickAdd: () => set({ quickAdd: null }),
   openDetail: (detailId) => set({ detailId, quickAdd: null }),
   closeDetail: () => set({ detailId: null }),
+  openListColor: (colorListId) => set({ colorListId }),
+  closeListColor: () => set({ colorListId: null }),
 }));
 
 export function openQuickAdd(context?: QuickAddContext): void {
@@ -46,6 +53,10 @@ export function openQuickAdd(context?: QuickAddContext): void {
 
 export function openTaskDetail(id: string): void {
   useTaskUi.getState().openDetail(id);
+}
+
+export function openListColor(listId: string): void {
+  useTaskUi.getState().openListColor(listId);
 }
 
 /** The route of a list's page. */

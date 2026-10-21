@@ -172,6 +172,46 @@ button.link-button {
   height: 14px;
 }
 
+/* The list color dialog. */
+.task-color-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+
+.task-color-choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+}
+
+.task-color-choice[aria-checked='true'] {
+  box-shadow:
+    0 0 0 2px var(--background-primary),
+    0 0 0 4px var(--text-normal);
+}
+
+.task-color-choice.is-none {
+  border-color: var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+@media (pointer: coarse) {
+  .task-color-choice {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* ---------- rows ---------- */
 
 .task-list {

@@ -1,11 +1,11 @@
 // List actions shared by the index page and a list page's header (API.md §20.5).
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, FileText, Pencil, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, FileText, Palette, Pencil, Trash2 } from 'lucide-react';
 import type { TaskList } from '../../api/types';
 import type { MenuEntry } from '../../components/overlays/ContextMenu';
 import { navigateTo } from '../../features/navigation';
 import { promptText } from '../../state/dialogs';
 import { createList, deleteList, moveList, updateList } from '../mutations';
-import { listRoute, openListSource } from './state';
+import { listRoute, openListColor, openListSource } from './state';
 
 const validName = (v: string) => (v.trim().length > 200 ? 'At most 200 characters' : /[\r\n]/.test(v) ? 'One line only' : null);
 
@@ -27,6 +27,7 @@ export function listMenu(list: TaskList, neighbours?: { before: TaskList | null;
   const writable = list.writable;
   const items: MenuEntry[] = [
     { id: 'rename', label: 'Rename…', icon: <Pencil size={16} />, disabled: !writable, run: () => void promptRenameList(list) },
+    { id: 'color', label: 'Color…', icon: <Palette size={16} />, disabled: !writable, run: () => openListColor(list.id) },
   ];
   if (neighbours) {
     items.push(
