@@ -55,7 +55,7 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		response.setHeader("X-Frame-Options", "DENY");
 		response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 		response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-		response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+		response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=()");
 		response.setHeader(BUILD_HEADER, this.buildSha);
 		String path = RequestPaths.of(request);
 		if (path.startsWith("/api/") && !setsOwnCaching(path)) {

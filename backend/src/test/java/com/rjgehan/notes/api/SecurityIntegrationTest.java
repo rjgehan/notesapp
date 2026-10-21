@@ -160,7 +160,8 @@ class SecurityIntegrationTest {
 		assertThat(tree.header("X-Frame-Options")).isEqualTo("DENY");
 		assertThat(tree.header("Cross-Origin-Opener-Policy")).isEqualTo("same-origin");
 		assertThat(tree.header("Cross-Origin-Resource-Policy")).isEqualTo("same-origin");
-		assertThat(tree.header("Permissions-Policy")).isEqualTo("camera=(), microphone=(), geolocation=(), payment=()");
+		// The microphone is the app's own, for voice notes (ROADMAP item 33); nothing it embeds gets it.
+		assertThat(tree.header("Permissions-Policy")).isEqualTo("camera=(), microphone=(self), geolocation=(), payment=()");
 		assertThat(tree.headers().get("Cache-Control")).hasSize(1);
 
 		Reply problem = this.api.get("/api/files?path=nope.md");

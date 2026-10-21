@@ -33,7 +33,10 @@ public enum ErrorCode {
 	INTERNAL_ERROR("internal-error", HttpStatus.INTERNAL_SERVER_ERROR, "Internal error"),
 	BUSY("busy", HttpStatus.SERVICE_UNAVAILABLE, "Busy, retry"),
 	HISTORY_UNAVAILABLE("history-unavailable", HttpStatus.SERVICE_UNAVAILABLE, "History unavailable"),
-	INSUFFICIENT_STORAGE("insufficient-storage", HttpStatus.INSUFFICIENT_STORAGE, "Insufficient storage");
+	INSUFFICIENT_STORAGE("insufficient-storage", HttpStatus.INSUFFICIENT_STORAGE, "Insufficient storage"),
+	NOT_AUDIO("not-audio", HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Not an audio or video file"),
+	TRANSCRIPTION_OFF("transcription-off", HttpStatus.CONFLICT, "Transcription is off"),
+	TRANSCRIPTION_FAILED("transcription-failed", HttpStatus.SERVICE_UNAVAILABLE, "Transcription failed");
 
 	private final String code;
 
