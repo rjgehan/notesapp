@@ -133,6 +133,7 @@ final class SettingsCodec {
 		AiSettings a = settings.ai();
 		ObjectNode ai = group(merged, "ai");
 		ai.put("enabled", a.enabled());
+		ai.put("provider", a.provider());
 		ai.put("model", a.model());
 		ArrayNode aiExcluded = NODES.arrayNode();
 		a.excludedPaths().forEach(aiExcluded::add);
@@ -283,6 +284,10 @@ final class SettingsCodec {
 				return d;
 			}
 			boolean enabled = present(group, "enabled") ? bool(group, "settings.ai.enabled", d.enabled()) : d.enabled();
+			String provider = present(group, "provider") ? checked(group, "settings.ai.provider", d.provider(),
+					(s) -> AiSettings.PROVIDERS.contains(s) ? null
+							: "must be one of " + String.join(", ", AiSettings.PROVIDERS))
+					: d.provider();
 			String model = present(group, "model") ? checked(group, "settings.ai.model", d.model(),
 					(s) -> AiSettings.MODELS.contains(s) ? null : "must be one of " + String.join(", ", AiSettings.MODELS))
 					: d.model();
@@ -308,7 +313,7 @@ final class SettingsCodec {
 					budget = value.doubleValue();
 				}
 			}
-			return new AiSettings(enabled, model, excluded, maxContext, budget);
+			return new AiSettings(enabled, provider, model, excluded, maxContext, budget);
 		}
 
 		private static boolean present(JsonNode group, String name) {

@@ -8,18 +8,26 @@ import com.rjgehan.notes.vault.PathNames;
  * {@code settings.ai}: Ask your vault and summaries, powered by Claude (ROADMAP item 18, API.md §5, DESIGN §5.20).
  * Off by default; note text leaves the tailnet only when it is on and you ask.
  *
- * @param enabled whether the feature may be used at all (the server also needs an API key file)
+ * @param enabled whether the feature may be used at all (the server also needs the provider's credential file)
+ * @param provider one of {@link #PROVIDERS}: {@code claude-code} (the default) or {@code api}
  * @param model one of {@link #MODELS}
  * @param excludedPaths folders or files whose text is never sent (case-insensitive prefixes, as
  * {@code files.excludedPaths}, which are never sent either)
  * @param maxContextChars the most characters of note text one request may carry, history included
  * @param monthlyBudgetUsd requests are refused once this month's estimated spend reaches this amount
  */
-public record AiSettings(boolean enabled, String model, List<String> excludedPaths, int maxContextChars,
+public record AiSettings(boolean enabled, String provider, String model, List<String> excludedPaths, int maxContextChars,
 		double monthlyBudgetUsd) {
 
 	/** The models Settings offers, the default first: Sonnet for everyday use, Opus for harder questions. */
 	public static final List<String> MODELS = List.of("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5");
+
+	/** Claude Code with the user's Claude subscription (the default), or the Anthropic API billed per token. */
+	public static final String PROVIDER_CLAUDE_CODE = "claude-code";
+
+	public static final String PROVIDER_API = "api";
+
+	public static final List<String> PROVIDERS = List.of(PROVIDER_CLAUDE_CODE, PROVIDER_API);
 
 	public static final int MIN_CONTEXT_CHARS = 4_000;
 
@@ -32,7 +40,7 @@ public record AiSettings(boolean enabled, String model, List<String> excludedPat
 	}
 
 	public static AiSettings defaults() {
-		return new AiSettings(false, MODELS.get(0), List.of("Private"), 60_000, 5.0);
+		return new AiSettings(false, PROVIDER_CLAUDE_CODE, MODELS.get(0), List.of("Private"), 60_000, 5.0);
 	}
 
 	/**

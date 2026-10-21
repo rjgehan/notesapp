@@ -97,7 +97,8 @@ class AiIntegrationTest {
 		assertThat(off.get("state").asString()).isEqualTo("off");
 		assertThat(off.get("model").asString()).isEqualTo("claude-sonnet-5-5");
 		assertThat(off.get("models")).hasSize(3);
-		assertThat(off.get("keyFile").asString()).isEqualTo("anthropic-key");
+		assertThat(off.get("keyFile").asString()).isEqualTo("claude-token");
+		assertThat(off.get("provider").asString()).isEqualTo("claude-code");
 		// Asking while off is a problem document, also for a client that asked for an event stream.
 		Reply refused = this.api.postJson("/api/ai/ask", Map.of("question", "kitchen budget?"), "Accept",
 				"text/event-stream, application/problem+json");

@@ -10,30 +10,27 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.util.regex.Pattern;
 
-import com.rjgehan.notes.config.NotesProperties;
 import org.jspecify.annotations.Nullable;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-
 /**
- * The Anthropic API key, read from a file outside the vault: {@code notes.ai.api-key-file}
- * ({@code NOTES_AI_API_KEY_FILE}), by default {@code <notes.secrets-dir>/anthropic-key} ({@code /data/secrets}, DESIGN
- * §4.1), or a compose secret. It is never configured directly and never written to the vault, the settings, a log line
- * or an error text. The file is read again whenever its size or modification time changes, so a new key needs no
- * restart.
+ * A credential read from a file outside the vault (DESIGN §4.1, §5.20): the Claude Code OAuth token
+ * ({@code <notes.secrets-dir>/claude-token}, made with {@code claude setup-token}) or the Anthropic API key
+ * ({@code <notes.secrets-dir>/anthropic-key}), or a compose secret. It is never configured directly and never written
+ * to the vault, the settings, a log line or an error text. The file is read again whenever its size or modification
+ * time changes, so a new credential needs no restart.
  */
-@Component
 public class ApiKeyFile {
 
-	public static final String DEFAULT_NAME = "anthropic-key";
+	public static final String API_KEY_NAME = "anthropic-key";
+
+	public static final String CLAUDE_TOKEN_NAME = "claude-token";
 
 	private static final int MAX_SIZE = 4096;
 
-	/** Printable ASCII without spaces, so a key can never break out of its header. */
+	/** Printable ASCII without spaces, so a credential can never break out of a header or an environment entry. */
 	private static final Pattern KEY = Pattern.compile("[\\x21-\\x7E]{8,1024}");
 
-	/** What reading the file gave: the key, or none with the reason (which never quotes the file's content). */
+	/** What reading the file gave: the credential, or none with the reason (which never quotes the content). */
 	public record Loaded(@Nullable String key, @Nullable String problem) {
 
 		public boolean present() {
@@ -52,16 +49,18 @@ public class ApiKeyFile {
 
 	private final Path file;
 
+	private final String what;
+
 	private volatile @Nullable Cached cached;
 
-	@Autowired
-	public ApiKeyFile(AiProperties properties, NotesProperties notes) {
-		this(properties.apiKeyFile().isBlank() ? notes.secretsDir().resolve(DEFAULT_NAME)
-				: Path.of(properties.apiKeyFile().strip()));
+	/** {@code what} names the credential in problems, e.g. "API key" or "Claude Code token". */
+	public ApiKeyFile(Path file, String what) {
+		this.file = file;
+		this.what = what;
 	}
 
 	ApiKeyFile(Path file) {
-		this.file = file;
+		this(file, "API key");
 	}
 
 	/** The file's name, for messages; the directory is the operator's business. */
@@ -74,7 +73,7 @@ public class ApiKeyFile {
 		return this.file;
 	}
 
-	/** Reads the key, from the cache when the file has not changed. */
+	/** Reads the credential, from the cache when the file has not changed. */
 	public Loaded load() {
 		BasicFileAttributes attributes;
 		try {
@@ -82,11 +81,11 @@ public class ApiKeyFile {
 		}
 		catch (NoSuchFileException ex) {
 			this.cached = null;
-			return new Loaded(null, "no API key: " + fileName() + " does not exist");
+			return new Loaded(null, "no " + this.what + ": " + fileName() + " does not exist");
 		}
 		catch (IOException ex) {
 			this.cached = null;
-			return new Loaded(null, "the API key file cannot be read (" + ex.getClass().getSimpleName() + ")");
+			return new Loaded(null, "the " + this.what + " file cannot be read (" + ex.getClass().getSimpleName() + ")");
 		}
 		Cached current = this.cached;
 		if (current != null && current.size() == attributes.size()
@@ -103,7 +102,7 @@ public class ApiKeyFile {
 			return new Loaded(null, fileName() + " is not a file");
 		}
 		if (attributes.size() > MAX_SIZE) {
-			return new Loaded(null, fileName() + " is too large to be an API key");
+			return new Loaded(null, fileName() + " is too large to hold a " + this.what);
 		}
 		String text;
 		try {
@@ -113,13 +112,13 @@ public class ApiKeyFile {
 			return new Loaded(null, fileName() + " is not readable by the app's user (uid 1000)");
 		}
 		catch (IOException ex) {
-			return new Loaded(null, "the API key file cannot be read (" + ex.getClass().getSimpleName() + ")");
+			return new Loaded(null, "the " + this.what + " file cannot be read (" + ex.getClass().getSimpleName() + ")");
 		}
 		if (text.isEmpty()) {
-			return new Loaded(null, "no API key: " + fileName() + " is empty");
+			return new Loaded(null, "no " + this.what + ": " + fileName() + " is empty");
 		}
 		if (!KEY.matcher(text).matches()) {
-			return new Loaded(null, fileName() + " must hold just the key, on one line");
+			return new Loaded(null, fileName() + " must hold just the " + this.what + ", on one line");
 		}
 		return new Loaded(text, null);
 	}

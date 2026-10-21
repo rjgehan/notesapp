@@ -25,7 +25,7 @@ public interface ClaudeGateway {
 	 * @param model a model id such as {@code claude-sonnet-5-5}
 	 * @param fallbacks ask for the server-side fallback ({@code fallbacks: "default"}) when the model declines
 	 */
-	record Request(String apiKey, String model, String system, List<Message> messages, int maxTokens, String effort,
+	record Request(String credential, String model, String system, List<Message> messages, int maxTokens, String effort,
 			boolean fallbacks) {
 
 		public Request {
@@ -97,18 +97,29 @@ public interface ClaudeGateway {
 	 * @param hops the tokens each model used: one entry, or one per model when a fallback took over
 	 */
 	record Result(String model, String stopReason, @Nullable String refusalCategory, List<Hop> hops,
-			boolean fellBack) {
+			boolean fellBack, @Nullable Double reportedCostUsd) {
 
 		public Result {
 			hops = List.copyOf(hops);
+		}
+
+		public Result(String model, String stopReason, @Nullable String refusalCategory, List<Hop> hops,
+				boolean fellBack) {
+			this(model, stopReason, refusalCategory, hops, fellBack, null);
 		}
 
 		public AiModels.Usage usage() {
 			return this.hops.stream().map(Hop::usage).reduce(AiModels.Usage.ZERO, AiModels.Usage::plus);
 		}
 
-		/** The estimated cost in USD, each hop at its own model's prices. */
+		/**
+		 * The estimated cost in USD: what the provider reported (Claude Code's {@code total_cost_usd}, the API value of
+		 * a subscription run), or each hop at its own model's list prices.
+		 */
 		public double cost() {
+			if (this.reportedCostUsd != null && this.reportedCostUsd >= 0) {
+				return this.reportedCostUsd;
+			}
 			return this.hops.stream().mapToDouble((hop) -> AiModels.of(hop.model()).cost(hop.usage())).sum();
 		}
 

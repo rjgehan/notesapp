@@ -266,7 +266,7 @@ class SettingsServiceTest {
 		ai.put("monthlyBudgetUsd", 12.5);
 		service().update(tree, service().get().version(), TestVault.ALICE, "client-a1");
 		assertThat(service().current().ai())
-			.isEqualTo(new AiSettings(true, "claude-opus-5-5", List.of("Private"), 60_000, 12.5));
+			.isEqualTo(new AiSettings(true, "claude-code", "claude-opus-5-5", List.of("Private"), 60_000, 12.5));
 		JsonNode onDisk = TestVault.JSON.readTree(Files.readString(this.file));
 		assertThat(onDisk.get("ai").get("model").asString()).isEqualTo("claude-opus-5-5");
 		// An old page sends no "ai": the feature stays as it was rather than falling back to "off".
@@ -279,7 +279,7 @@ class SettingsServiceTest {
 
 	@Test
 	void aiExcludedPathsMatchFoldersAndFiles() {
-		AiSettings ai = new AiSettings(true, "claude-sonnet-5-5", List.of("Private/", "Health.md"), 60_000, 5);
+		AiSettings ai = new AiSettings(true, "claude-code", "claude-sonnet-5-5", List.of("Private/", "Health.md"), 60_000, 5);
 		assertThat(ai.isExcluded("private/diary.md")).isTrue();
 		assertThat(ai.isExcluded("Private")).isTrue();
 		assertThat(ai.isExcluded("health.md")).isTrue();

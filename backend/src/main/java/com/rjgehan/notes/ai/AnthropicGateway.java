@@ -70,7 +70,7 @@ public class AnthropicGateway implements ClaudeGateway, AutoCloseable {
 
 	@Override
 	public Result stream(Request request, Listener listener) throws ClaudeException {
-		AnthropicClient client = client(request.apiKey());
+		AnthropicClient client = client(request.credential());
 		MessageCreateParams params = params(request);
 		State state = new State(request.model());
 		try (StreamResponse<BetaRawMessageStreamEvent> response = client.beta().messages().createStreaming(params)) {

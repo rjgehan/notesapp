@@ -86,7 +86,8 @@ public class AiService {
 	}
 
 	/** A checked request with its prompt, ready to run. */
-	public record Prepared(String kind, ClaudeGateway.Request request, AiStartEvent start, int historyTurns) {
+	public record Prepared(String kind, ClaudeGateway.Request request, AiStartEvent start, int historyTurns,
+			ClaudeGateway gateway) {
 
 		@Override
 		public String toString() {
@@ -99,11 +100,10 @@ public class AiService {
 
 	private final SettingsService settings;
 
-	private final ApiKeyFile keyFile;
+	private final AiProviders providers;
 
 	private final UsageLedger ledger;
 
-	private final ClaudeGateway gateway;
 
 	private final AiProperties properties;
 
@@ -113,13 +113,12 @@ public class AiService {
 
 	private final Semaphore running;
 
-	public AiService(VaultIndex index, SettingsService settings, ApiKeyFile keyFile, UsageLedger ledger,
-			ClaudeGateway gateway, AiProperties properties, Clock clock) {
+	public AiService(VaultIndex index, SettingsService settings, AiProviders providers, UsageLedger ledger,
+			AiProperties properties, Clock clock) {
 		this.index = index;
 		this.settings = settings;
-		this.keyFile = keyFile;
+		this.providers = providers;
 		this.ledger = ledger;
-		this.gateway = gateway;
 		this.properties = properties;
 		this.clock = clock;
 		this.zone = ZoneId.systemDefault();
@@ -130,17 +129,20 @@ public class AiService {
 
 	public AiStatus status() {
 		AiSettings ai = this.settings.current().ai();
-		ApiKeyFile.Loaded key = this.keyFile.load();
+		AiProviders.Provider provider = this.providers.get(ai.provider());
+		ApiKeyFile.Loaded key = provider.credential().load();
+		boolean cli = this.providers.cliInstalled();
 		UsageLedger.Month month = this.ledger.thisMonth();
 		AiState state;
 		String reason = null;
+		String missing = missing(provider, key, cli);
 		if (!ai.enabled()) {
 			state = AiState.OFF;
 			reason = "Ask and summaries are switched off in Settings";
 		}
-		else if (!key.present() && !this.properties.fake()) {
+		else if (missing != null) {
 			state = AiState.NOT_CONFIGURED;
-			reason = key.problem();
+			reason = missing;
 		}
 		else if (month.costUsd() >= ai.monthlyBudgetUsd()) {
 			state = AiState.OVER_BUDGET;
@@ -152,16 +154,27 @@ public class AiService {
 		List<AiModelInfo> models = AiModels.selectable().stream()
 			.map((m) -> new AiModelInfo(m.id(), m.label(), m.input(), m.output()))
 			.toList();
-		return new AiStatus(state, reason, ai.model(), models, this.keyFile.fileName(), key.present(),
-				this.ledger.currentMonth(), round(month.costUsd()), month.requests(), ai.monthlyBudgetUsd(),
-				ai.maxContextChars(), this.properties.fake());
+		return new AiStatus(state, reason, provider.id(), ai.model(), models, provider.credential().fileName(),
+				key.present(), cli, this.ledger.currentMonth(), round(month.costUsd()), month.requests(),
+				ai.monthlyBudgetUsd(), ai.maxContextChars(), this.providers.fake());
+	}
+
+	/** Why the provider cannot be used, or null; the fake needs nothing. */
+	private @Nullable String missing(AiProviders.Provider provider, ApiKeyFile.Loaded key, boolean cli) {
+		if (this.providers.fake()) {
+			return null;
+		}
+		if (provider.id().equals(AiSettings.PROVIDER_CLAUDE_CODE) && !cli) {
+			return "the Claude Code CLI (" + this.providers.cliCommand() + ") is not installed on the server";
+		}
+		return key.present() ? null : key.problem();
 	}
 
 	// ---------------------------------------------------------------- preparing
 
 	public Prepared prepareAsk(AiAskRequest request) {
 		Settings current = this.settings.current();
-		String apiKey = checkAvailable(current.ai());
+		Access access = checkAvailable(current.ai());
 		String question = (request.question() != null) ? request.question().strip() : "";
 		if (question.isEmpty() || question.length() > MAX_QUESTION) {
 			throw NotesException.badRequest("question must be 1 to " + MAX_QUESTION + " characters");
@@ -172,22 +185,22 @@ public class AiService {
 		int maxContext = current.ai().maxContextChars();
 		int budget = Math.max(maxContext / 2, maxContext - history.chars());
 		PromptBuilder.Turn turn = builder.ask(question, active, history.sentPaths(), budget);
-		return prepared("ask", current, apiKey, history, turn);
+		return prepared("ask", current, access, history, turn);
 	}
 
 	public Prepared prepareSummarize(AiSummarizeRequest request) {
 		Settings current = this.settings.current();
-		String apiKey = checkAvailable(current.ai());
+		Access access = checkAvailable(current.ai());
 		PromptBuilder.Prompt prompt = summaryPrompt(request.action(), request.scope(), request.path(), request.paths(),
 				request.text(), request.label(), true);
 		PromptBuilder builder = builder(current);
 		checkTarget(prompt, excluded(current));
 		History history = history(builder, request.history());
 		PromptBuilder.Turn turn = builder.summarize(prompt);
-		return prepared(prompt.action().name().toLowerCase(Locale.ROOT), current, apiKey, history, turn);
+		return prepared(prompt.action().name().toLowerCase(Locale.ROOT), current, access, history, turn);
 	}
 
-	private Prepared prepared(String kind, Settings current, String apiKey, History history,
+	private Prepared prepared(String kind, Settings current, Access access, History history,
 			PromptBuilder.Turn turn) {
 		AiSettings ai = current.ai();
 		List<PromptBuilder.Turn> turns = new ArrayList<>(history.turns());
@@ -217,33 +230,41 @@ public class AiService {
 		}
 		messages.add(ClaudeGateway.Message.user(new ClaudeGateway.Block(turn.render(true), true)));
 		AiModels.Model model = AiModels.of(ai.model());
-		ClaudeGateway.Request request = new ClaudeGateway.Request(apiKey, model.id(),
+		boolean api = access.provider().id().equals(AiSettings.PROVIDER_API);
+		ClaudeGateway.Request request = new ClaudeGateway.Request(access.credential(), model.id(),
 				PromptBuilder.system(LocalDate.ofInstant(this.clock.instant(), this.zone)), messages,
-				this.properties.maxOutputTokens(), this.properties.effort(), model.serverFallback());
+				this.properties.maxOutputTokens(), this.properties.effort(), api && model.serverFallback());
 		List<AiSource> sources = turn.sources().stream()
 			.map((s) -> new AiSource(s.path(), s.chars(), s.truncated()))
 			.toList();
 		return new Prepared(kind, request, new AiStartEvent(model.id(), sources, turn.omitted(), turn.excluded()),
-				turns.size());
+				turns.size(), access.provider().gateway());
 	}
 
-	/** The API key, or a refusal when the feature is off, has no key, or is over its budget. */
-	private String checkAvailable(AiSettings ai) {
+	/** The provider and its credential for a request. */
+	private record Access(AiProviders.Provider provider, String credential) {
+
+		@Override
+		public String toString() {
+			return "Access[" + this.provider.id() + "]";
+		}
+
+	}
+
+	/** The provider and its credential, or a refusal when the feature is off, not set up, or over its budget. */
+	private Access checkAvailable(AiSettings ai) {
 		if (!ai.enabled()) {
 			throw new NotesException(ErrorCode.AI_UNAVAILABLE, "Ask and summaries are switched off in Settings",
 					Map.of("reason", "off"));
 		}
-		String key;
-		if (this.properties.fake()) {
-			key = "fake";
-		}
-		else {
-			ApiKeyFile.Loaded loaded = this.keyFile.load();
-			if (loaded.key() == null) {
-				throw new NotesException(ErrorCode.AI_UNAVAILABLE,
-						"The server has no Anthropic API key: " + loaded.problem(), Map.of("reason", "not-configured"));
-			}
-			key = loaded.key();
+		AiProviders.Provider provider = this.providers.get(ai.provider());
+		ApiKeyFile.Loaded loaded = this.providers.fake() ? new ApiKeyFile.Loaded("fake", null)
+				: provider.credential().load();
+		String missing = missing(provider, loaded, this.providers.cliInstalled());
+		if (missing != null || loaded.key() == null) {
+			String what = provider.id().equals(AiSettings.PROVIDER_API) ? "The server cannot use the Anthropic API: "
+					: "The server cannot use Claude Code: ";
+			throw new NotesException(ErrorCode.AI_UNAVAILABLE, what + missing, Map.of("reason", "not-configured"));
 		}
 		UsageLedger.Month month = this.ledger.thisMonth();
 		if (month.costUsd() >= ai.monthlyBudgetUsd()) {
@@ -251,7 +272,7 @@ public class AiService {
 					+ money(month.costUsd()) + ") reached the budget of $" + money(ai.monthlyBudgetUsd()),
 					Map.of("limit", ai.monthlyBudgetUsd(), "spent", round(month.costUsd())));
 		}
-		return key;
+		return new Access(provider, loaded.key());
 	}
 
 	private PromptBuilder builder(Settings current) {
@@ -422,7 +443,7 @@ public class AiService {
 		try {
 			sink.send("start", prepared.start());
 			upstream = true;
-			ClaudeGateway.Result result = this.gateway.stream(prepared.request(), new ClaudeGateway.Listener() {
+			ClaudeGateway.Result result = prepared.gateway().stream(prepared.request(), new ClaudeGateway.Listener() {
 
 				@Override
 				public void onText(String text) {

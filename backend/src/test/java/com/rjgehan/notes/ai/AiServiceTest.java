@@ -54,6 +54,8 @@ class AiServiceTest {
 
 	private AiService service;
 
+	private boolean cliInstalled = true;
+
 	/** Records requests and answers with a fixed text, or with what a test sets. */
 	static final class RecordingGateway implements ClaudeGateway {
 
@@ -109,9 +111,17 @@ class AiServiceTest {
 	}
 
 	private AiService service(boolean fake) {
-		AiProperties properties = new AiProperties("", fake, 16000, "medium", Duration.ofMinutes(5), 2);
-		return new AiService(this.vault.index, this.vault.settings, new ApiKeyFile(this.secrets.resolve("anthropic-key")),
-				this.ledger, this.gateway, properties, this.vault.clock);
+		return service(fake, this.gateway);
+	}
+
+	private AiService service(boolean fake, ClaudeGateway gateway) {
+		AiProperties properties = new AiProperties("", "claude", "", "", fake, 16000, "medium", Duration.ofMinutes(5), 2);
+		AiProviders providers = new AiProviders(fake,
+				new AiProviders.Provider("claude-code", gateway,
+						new ApiKeyFile(this.secrets.resolve("claude-token"), "Claude Code token")),
+				new AiProviders.Provider("api", gateway, new ApiKeyFile(this.secrets.resolve("anthropic-key"), "API key")),
+				() -> this.cliInstalled, "claude");
+		return new AiService(this.vault.index, this.vault.settings, providers, this.ledger, properties, this.vault.clock);
 	}
 
 	private void write(String path, String text) throws Exception {
@@ -121,7 +131,7 @@ class AiServiceTest {
 	}
 
 	private void key() throws Exception {
-		Files.writeString(this.secrets.resolve("anthropic-key"), "sk-ant-api03-test-key\n");
+		Files.writeString(this.secrets.resolve("claude-token"), "sk-ant-oat01-test-token\n");
 	}
 
 	/** Turns the feature on, with optional changes to {@code settings.ai} and {@code settings.files}. */
@@ -168,7 +178,7 @@ class AiServiceTest {
 	void withoutAKeyFileItIsNotConfigured() throws Exception {
 		enable();
 		assertThat(this.service.status().state()).isEqualTo(AiState.NOT_CONFIGURED);
-		assertThat(this.service.status().reason()).contains("anthropic-key does not exist");
+		assertThat(this.service.status().reason()).contains("claude-token does not exist");
 		assertThat(this.service.status().keyPresent()).isFalse();
 		assertThatThrownBy(() -> this.service.prepareAsk(new AiAskRequest("Kitchen budget?", null, null)))
 			.isInstanceOfSatisfying(NotesException.class,
@@ -178,8 +188,34 @@ class AiServiceTest {
 	@Test
 	void anEmptyKeyFileIsNotAKey() throws Exception {
 		enable();
-		Files.writeString(this.secrets.resolve("anthropic-key"), "  \n");
+		Files.writeString(this.secrets.resolve("claude-token"), "  \n");
 		assertThat(this.service.status().reason()).contains("is empty");
+	}
+
+	@Test
+	void claudeCodeIsTheDefaultAndNeedsTheCli() throws Exception {
+		key();
+		enable();
+		assertThat(this.service.status().provider()).isEqualTo("claude-code");
+		assertThat(this.service.status().keyFile()).isEqualTo("claude-token");
+		this.cliInstalled = false;
+		assertThat(this.service.status().state()).isEqualTo(AiState.NOT_CONFIGURED);
+		assertThat(this.service.status().reason()).contains("Claude Code CLI (claude) is not installed");
+		assertThatThrownBy(() -> this.service.prepareAsk(new AiAskRequest("Kitchen budget?", null, null)))
+			.isInstanceOfSatisfying(NotesException.class, (ex) -> assertThat(ex.getMessage()).contains("Claude Code"));
+	}
+
+	@Test
+	void theApiProviderUsesTheApiKeyAndTheServerSideFallback() throws Exception {
+		Files.writeString(this.secrets.resolve("anthropic-key"), "sk-ant-api03-test-key\n");
+		enable((ai) -> ai.put("provider", "api"), (files) -> {
+		});
+		this.cliInstalled = false;
+		assertThat(this.service.status().state()).isEqualTo(AiState.READY);
+		assertThat(this.service.status().keyFile()).isEqualTo("anthropic-key");
+		ClaudeGateway.Request request = this.service.prepareAsk(new AiAskRequest("kitchen?", null, null)).request();
+		assertThat(request.credential()).isEqualTo("sk-ant-api03-test-key");
+		assertThat(request.fallbacks()).isTrue();
 	}
 
 	@Test
@@ -210,8 +246,8 @@ class AiServiceTest {
 			.doesNotContain("Recipes/Soup.md");
 		ClaudeGateway.Request request = prepared.request();
 		assertThat(request.model()).isEqualTo("claude-sonnet-5-5");
-		assertThat(request.fallbacks()).isTrue();
-		assertThat(request.apiKey()).isEqualTo("sk-ant-api03-test-key");
+		assertThat(request.fallbacks()).as("Claude Code has no server-side fallback").isFalse();
+		assertThat(request.credential()).isEqualTo("sk-ant-oat01-test-token");
 		ClaudeGateway.Message last = request.messages().get(request.messages().size() - 1);
 		assertThat(last.blocks()).singleElement().satisfies((block) -> assertThat(block.cacheBreakpoint()).isTrue());
 		assertThat(text(last)).contains("<note path=\"Projects/Kitchen.md\" link=\"Projects/Kitchen\"")
@@ -516,9 +552,7 @@ class AiServiceTest {
 	@Test
 	void theFakeGatewayCitesTheNotesItWasGiven() throws Exception {
 		enable();
-		AiService fake = new AiService(this.vault.index, this.vault.settings,
-				new ApiKeyFile(this.secrets.resolve("anthropic-key")), this.ledger, new FakeGateway(0),
-				new AiProperties("", true, 16000, "medium", Duration.ofMinutes(5), 2), this.vault.clock);
+		AiService fake = service(true, new FakeGateway(0));
 		List<Event> events = new ArrayList<>();
 		fake.run(fake.prepareAsk(new AiAskRequest("kitchen budget", null, null)),
 				(name, data) -> events.add(new Event(name, data)), "c");
