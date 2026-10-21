@@ -24,6 +24,8 @@ CHECK_DAY=${NOTES_BACKUP_CHECK_DAY:-7} # ISO weekday of the repository check (da
 NTFY=${NOTES_BACKUP_NTFY_URL:-}
 HEARTBEAT=${NOTES_BACKUP_HEARTBEAT_URL:-}
 HOST_LABEL=${NOTES_BACKUP_HOST:-homeserver}
+# What the alerts say to run when the app or the backup container is down (CasaOS: casaos-backup-compose.yml).
+UP_HINT=${NOTES_BACKUP_UP_HINT:-cd ~/notesapp/deploy && docker compose up -d}
 START_RETRY=${NOTES_BACKUP_START_RETRY_SECONDS:-10}
 HTTP_CLIENT=${NOTES_BACKUP_HTTP_CLIENT:-} # curl or wget; by default curl where installed (docker:cli has wget only)
 if [ -z "$HTTP_CLIENT" ]; then
@@ -157,7 +159,7 @@ recover() {
 	else
 		log "ERROR could not start $APP"
 		notify "NotesApp is down" urgent rotating_light \
-			"$1 while NotesApp was stopped for the snapshot, and it could not be started again. On homeserver: cd ~/notesapp/deploy && docker compose up -d"
+			"$1 while NotesApp was stopped for the snapshot, and it could not be started again. On $HOST_LABEL: $UP_HINT"
 	fi
 }
 
@@ -258,7 +260,7 @@ snapshot_phase() {
 			[ "$stop_status" -ne 0 ] || fail "$APP was running again right after it was stopped (a Watchtower update?)"
 			start_app 6 || {
 				URGENT=1
-				fail "$APP could not be started again (run: cd ~/notesapp/deploy && docker compose up -d)"
+				fail "$APP could not be started again (run: $UP_HINT)"
 			}
 			return 1
 			;;
@@ -280,7 +282,7 @@ snapshot_phase() {
 			log "$APP started again; it was down for $(($(date +%s) - stopped)) s"
 		else
 			URGENT=1
-			fail "$APP could not be started again after the snapshot (run: cd ~/notesapp/deploy && docker compose up -d)"
+			fail "$APP could not be started again after the snapshot (run: $UP_HINT)"
 		fi
 	fi
 
@@ -299,7 +301,7 @@ snapshot_phase() {
 	fi
 
 	if [ -n "$stopped" ] && [ -z "$URGENT" ] && ! wait_healthy; then
-		fail "$APP did not become healthy within $HEALTH_WAIT s after the backup (check: docker compose ps; docker compose logs notes)"
+		fail "$APP did not become healthy within $HEALTH_WAIT s after the backup (check: docker ps -a; docker logs $APP)"
 	fi
 	return 0
 }
@@ -322,7 +324,7 @@ run() {
 	log "backup run started"
 
 	if [ "$(docker inspect -f '{{.State.Running}}' "$BACKUP" 2>/dev/null)" != true ]; then
-		fail "the backup container $BACKUP is not running (start it with: cd ~/notesapp/deploy && docker compose up -d)"
+		fail "the backup container $BACKUP is not running (start it with: $UP_HINT)"
 		finish
 	fi
 	if ! step preflight; then

@@ -107,7 +107,7 @@ cmd_init() {
 		restic -r "$OFFSITE" init --from-repo "$LOCAL" --from-password-file "$RESTIC_PASSWORD_FILE" \
 			--copy-chunker-params
 	fi
-	echo "Keep the repository password (deploy/secrets/restic-password) in your password manager:"
+	echo "Keep the repository password (the restic-password secret file) in your password manager:"
 	echo "without it no backup can be restored."
 }
 

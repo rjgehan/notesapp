@@ -429,6 +429,8 @@ Nothing runs until you set it up. Two containers do the work:
 - `backup` is the restic sidecar.
 - `backup-scheduler` starts each night's run and holds the Docker socket, like Watchtower. *Host cron instead of backup-scheduler* below avoids that.
 
+On CasaOS the same two containers are a second paste-in app: [CASAOS.md](CASAOS.md) *Nightly backups*.
+
 #### Set up the nightly backups
 
 **1. A second disk.** Mount a USB disk or a second internal disk permanently, then create the repository directory on it. The example formats a **new, empty** partition `/dev/sdX1`; skip `mkfs` for a disk that already has a filesystem, and use its label or UUID.

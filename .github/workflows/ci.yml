@@ -76,6 +76,12 @@ jobs:
         run: |
           command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
           shellcheck --shell=sh --severity=warning deploy/backup/*.sh deploy/backup/test/*.sh deploy/backup/test/fake-bin/*
+      - name: CasaOS composes (valid, and pinned to the images Dependabot keeps current in docker-compose.yml)
+        run: |
+          for f in deploy/casaos-compose.yml deploy/casaos-backup-compose.yml; do docker compose -f "$f" config --quiet; done
+          for image in $(sed -n 's/^ *image: \([^ ]*@sha256:[0-9a-f]*\).*/\1/p' deploy/casaos-*compose.yml); do
+            grep -qF "image: $image" deploy/docker-compose.yml || { echo "::error::$image differs from deploy/docker-compose.yml"; exit 1; }
+          done
       - name: nightly.sh and scheduler.sh (dash)
         run: sh deploy/backup/test/run-tests.sh sh
       - name: nightly.sh and scheduler.sh (BusyBox, in the backup-scheduler image)

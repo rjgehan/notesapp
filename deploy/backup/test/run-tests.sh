@@ -27,7 +27,8 @@ setup() {
 	for name in FAKE_BACKUP_RUNNING FAKE_HEALTH FAKE_STOP_FAIL FAKE_STOP_RESTARTS FAKE_START_FAIL FAKE_RESTIC_RUNNING \
 		FAKE_SNAPSHOT_SLEEP FAKE_DURING_SNAPSHOT FAKE_SNAPSHOT_NOID FAKE_SNAPSHOT_ID FAKE_OFFSITE_RESULT \
 		FAKE_FAIL_preflight FAKE_FAIL_snapshot FAKE_FAIL_discard FAKE_FAIL_forget FAKE_FAIL_offsite FAKE_FAIL_check \
-		FAKE_HTTP_FAIL FAKE_STDERR NOTES_BACKUP_TIME NOTES_BACKUP_NOW TZ; do
+		FAKE_HTTP_FAIL FAKE_STDERR NOTES_BACKUP_TIME NOTES_BACKUP_NOW TZ \
+		NOTES_BACKUP_APP_CONTAINER NOTES_BACKUP_CONTAINER NOTES_BACKUP_UP_HINT; do
 		unset "$name"
 	done
 	export NOTES_BACKUP_STATE_DIR="$T/state"
@@ -245,6 +246,30 @@ called "Priority: urgent"
 called "could not be started again after the snapshot"
 present "$NOTES_BACKUP_STATE_DIR/app-stopped"
 not_called "hc.example"
+
+setup "CasaOS (casaos-backup-compose.yml): its container names"
+export NOTES_BACKUP_APP_CONTAINER=notesapp NOTES_BACKUP_CONTAINER=notesapp-backup
+export NOTES_BACKUP_UP_HINT='docker start notesapp-tailscale notesapp'
+nightly
+exit_is 0
+in_order "notesapp-backup sh $JOB preflight" "stop -t 45 notesapp"
+in_order "stop -t 45 notesapp" "notesapp-backup sh $JOB snapshot"
+in_order "notesapp-backup sh $JOB snapshot" "start notesapp"
+not_called "notes-notes-1"
+not_called "notes-backup-1"
+app_is running
+status_has '"result":"ok"'
+
+setup "CasaOS: the alerts name its own way to start the app again, not docker compose"
+export NOTES_BACKUP_APP_CONTAINER=notesapp NOTES_BACKUP_CONTAINER=notesapp-backup FAKE_START_FAIL=99
+export NOTES_BACKUP_UP_HINT='docker start notesapp-tailscale notesapp'
+nightly
+exit_is 1
+called "Priority: urgent"
+called "- notesapp could not be started again after the snapshot (run: docker start notesapp-tailscale notesapp)"
+not_called "docker compose"
+nightly --recover
+called "On homeserver: docker start notesapp-tailscale notesapp"
 
 setup "an app that starts on the second attempt is fine"
 export FAKE_START_FAIL=1

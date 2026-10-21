@@ -4,10 +4,14 @@
 #
 # Data lives under /DATA/AppData/notesapp:
 #   data/vault       your notes (plain Markdown + git history), editable over SSH as uid 1000
+#   data/secrets/    optional, outside the vault: ntfy.json (app alerts), mirror-token (GitHub mirror)
 #   tailscale/       Tailscale node identity + HTTPS certs (never delete)
+#   backup/          only with the optional NotesApp Backup app (casaos-backup-compose.yml)
 #
 # The app is reachable ONLY over your tailnet at https://notes.<tailnet>.ts.net — no ports are
 # published on the LAN. Full runbook and troubleshooting: docs/DEPLOY.md and docs/CASAOS.md.
+# The optional extras (app alerts, GitHub mirror, nightly backups) are off until you set them
+# up as docs/CASAOS.md describes; a fresh install needs none of them.
 name: notesapp
 
 x-logging: &logging
@@ -75,8 +79,19 @@ services:
       NOTES_ALLOWED_HOSTS: notes.CHANGE-ME.ts.net
       NOTES_IDENTITY_ALLOWED_LOGINS: you@example.com   # your Tailscale login; comma-separate several
       NOTES_TAILSCALE_WATCHDOG_ENABLED: "true"
+      # Files larger than this stay in the vault and in backups but out of git history (0 = version
+      # everything; otherwise at least 5MB, or the app refuses to start).
+      NOTES_GIT_LARGE_FILE_THRESHOLD: 25MB
+      # Optional mirror of the history to a private GitHub repository (docs/CASAOS.md "GitHub mirror").
+      # Empty = off. The token goes in /DATA/AppData/notesapp/data/secrets/mirror-token, never here.
+      NOTES_MIRROR_URL: ""
+      NOTES_MIRROR_TOKEN_FILE: /data/secrets/mirror-token
+      # App alerts are on once /DATA/AppData/notesapp/data/secrets/ntfy.json exists (docs/CASAOS.md).
     volumes:
       - /DATA/AppData/notesapp/data:/data
+      # The last nightly backup's status for the status page, read-only. Written by the optional
+      # NotesApp Backup app; until then the status page says no backup has reported.
+      - /DATA/AppData/notesapp/backup/state:/backup-state:ro
     mem_limit: 1g
     stop_grace_period: 45s
     labels:

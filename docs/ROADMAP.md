@@ -514,6 +514,7 @@ Clicking an embed opens the full editor.
 - **Off-site through the S3 API.** Backblaze B2 is reached through its S3-compatible endpoint, which restic recommends over its own B2 backend; Amazon S3 works the same way.
 - **Additions:** failure alerts on ntfy, an optional heartbeat URL, a weekly `restic check` with a low-priority "backups OK" report, and CI tests of the scripts against a fake Docker CLI and a real restic.
 - **Alerts name the failed steps only.** restic's output names vault files, so it goes to `status.json` (the status page) and the log, never to the ntfy topic, which may be on ntfy.sh.
+- **CasaOS: a second paste-in app.** CasaOS has no `.env`, compose profiles or checkout of `deploy/`, so the sidecars are `deploy/casaos-backup-compose.yml`, installed after its setup (docs/CASAOS.md), with bind mounts under `/DATA/AppData/notesapp/backup`; NotesApp itself installs and runs the same without it.
 
 **One line:** automatic nightly snapshots of the `notes-data` volume (vault plus `.git`) and `tailscale-state` to a local disk and to off-site object storage.
 
@@ -535,6 +536,7 @@ Clicking an embed opens the full editor.
 - **The secret is always mounted.** Compose cannot create a container whose secret file is missing, so `mirror_token` defaults to an empty file in git (`deploy/mirror/no-token`) and `NOTES_MIRROR_TOKEN_SECRET` points it at `deploy/secrets/mirror-token` when the mirror is set up; existing deploys need no change.
 - **Additions:** `file:` URLs work too (the tests push to a local bare repository); URLs with credentials are refused; the mirror's state is in Settings › About; nothing is pushed at shutdown.
 - **A mirror whose settings cannot be used is a problem, not just "off".** An SSH or `http://` URL, or one with a token in it, is refused; the status bar, the ⋯ menu and the status page then warn "Mirror is off: …", and the startup logs `GIT_MIRROR_FAILED`, which raises an app alert.
+- **On CasaOS** the token is a file next to the vault, `/DATA/AppData/notesapp/data/secrets/mirror-token` (`NOTES_MIRROR_TOKEN_FILE`), read before every push, and `NOTES_MIRROR_URL` is set in the app's settings; empty by default.
 
 **One line:** push the vault repo to a private GitHub repository, debounced to about 10 minutes after commits, for off-site history you can browse on github.com.
 

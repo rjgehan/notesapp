@@ -4,8 +4,8 @@
 # script the behaviour; run-tests.sh documents them where it uses them.
 set -u
 echo "docker $*" >>"$FAKE_DIR/calls"
-APP=notes-notes-1
-BACKUP=notes-backup-1
+APP=${NOTES_BACKUP_APP_CONTAINER:-notes-notes-1}
+BACKUP=${NOTES_BACKUP_CONTAINER:-notes-backup-1}
 
 app_exists() { [ -f "$FAKE_DIR/app" ]; }
 app_running() { [ "$(cat "$FAKE_DIR/app" 2>/dev/null)" = running ]; }
