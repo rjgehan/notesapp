@@ -46,6 +46,16 @@ describe('StatusBar mirror warning (DESIGN §6.18)', () => {
     expect(screen.getByRole('button', { name: /Mirror stopped/ })).toBeInTheDocument();
   });
 
+  it('shows a mirror whose settings cannot be used, with nothing to click', () => {
+    const push = vi.spyOn(api, 'pushMirror');
+    renderBar(statusWith({ state: 'disabled', reason: 'the mirror URL is not a valid URL', remote: 'git@github.com:me/vault.git' }));
+    const warning = screen.getByText('Mirror is off: the mirror URL is not a valid URL');
+    expect(warning).toHaveAttribute('title', expect.stringMatching(/^Nothing is pushed until/));
+    expect(screen.queryByRole('button', { name: /Mirror/ })).not.toBeInTheDocument();
+    fireEvent.click(warning);
+    expect(push).not.toHaveBeenCalled();
+  });
+
   it('shows nothing while the mirror is off or working', () => {
     renderBar(statusWith({}));
     expect(screen.queryByRole('button', { name: /Mirror/ })).not.toBeInTheDocument();

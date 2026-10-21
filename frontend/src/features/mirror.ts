@@ -8,14 +8,24 @@ import { toast } from '../state/toasts';
 import { toastError } from './errors';
 import { formatRelative, formatSince } from './format';
 
+/**
+ * True when a mirror was set up but its settings cannot be used (an SSH or http:// URL, a URL with a token in it,
+ * no token file): it never pushes, so it is a problem, unlike a mirror that is simply not configured. History
+ * being off has its own warning.
+ */
+export function mirrorMisconfigured(mirror: MirrorStatus): boolean {
+  return mirror.state === 'disabled' && !!mirror.reason && mirror.reason !== 'not configured' && mirror.reason !== 'history is disabled';
+}
+
 /** What is wrong with the mirror, without the subject: "not being updated (for 2 hours)"; null while it works or is off. */
 function mirrorProblem(mirror: MirrorStatus, now: number): string | null {
+  if (mirrorMisconfigured(mirror)) return `off: ${mirror.reason}`;
   if (mirror.state === 'diverged') return 'stopped: it has commits this vault does not';
   if (mirror.state !== 'failing') return null;
   return mirror.failingSince ? `not being updated (${formatSince(mirror.failingSince, now)})` : 'not being updated';
 }
 
-/** The warning the status bar shows for the mirror; null while it works or is off. */
+/** The warning the status bar shows for the mirror; null while it works or is not set up. */
 export function mirrorWarning(mirror: MirrorStatus | undefined, now = Date.now()): string | null {
   const problem = mirror ? mirrorProblem(mirror, now) : null;
   if (!problem) return null;
@@ -24,6 +34,7 @@ export function mirrorWarning(mirror: MirrorStatus | undefined, now = Date.now()
 
 /** A tooltip for the warning: the server's error, and what clicking does. */
 export function mirrorWarningDetail(mirror: MirrorStatus): string {
+  if (mirrorMisconfigured(mirror)) return 'Nothing is pushed until the mirror settings on the server are fixed and NotesApp is restarted.';
   const fix = mirror.state === 'diverged' ? 'NotesApp never force-pushes. Fix the mirror, then click to push again.' : 'Click to push now.';
   return [mirror.lastError, fix].filter(Boolean).join('\n');
 }

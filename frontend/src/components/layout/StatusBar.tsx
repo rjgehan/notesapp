@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
 import { useBacklinks } from '../../api/hooks';
 import { countWords } from '../../features/format';
-import { mirrorWarningDetail, pushMirrorNow } from '../../features/mirror';
+import { mirrorMisconfigured, mirrorWarningDetail, pushMirrorNow } from '../../features/mirror';
 import { isNotePath, pathFromLocation } from '../../features/paths';
 import { useUi, type SaveSummary } from '../../state/ui';
 import { useDocumentSession, useSessionChangeCount } from '../../sync/useTextDocument';
@@ -64,11 +64,17 @@ export function StatusBar() {
           <History size={13} aria-hidden /> {historyWarning}
         </span>
       )}
-      {mirrorWarning && (
-        <button type="button" className="status-item status-button tone-warning" title={mirrorWarningDetail(mirrorWarning.mirror)} onClick={() => void pushMirrorNow()}>
-          <CloudAlert size={13} aria-hidden /> {mirrorWarning.text}
-        </button>
-      )}
+      {mirrorWarning &&
+        (mirrorMisconfigured(mirrorWarning.mirror) ? (
+          // Nothing to push until the server's settings are fixed.
+          <span className="status-item tone-warning" title={mirrorWarningDetail(mirrorWarning.mirror)}>
+            <CloudAlert size={13} aria-hidden /> {mirrorWarning.text}
+          </span>
+        ) : (
+          <button type="button" className="status-item status-button tone-warning" title={mirrorWarningDetail(mirrorWarning.mirror)} onClick={() => void pushMirrorNow()}>
+            <CloudAlert size={13} aria-hidden /> {mirrorWarning.text}
+          </button>
+        ))}
       {draftsFailing && (
         <span className="status-item tone-warning" title="The browser refused to store drafts (storage full or blocked)">
           <CircleAlert size={13} aria-hidden /> Unsaved changes are not protected on this device.

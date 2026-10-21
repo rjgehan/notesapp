@@ -431,7 +431,11 @@ public class GitMirror implements SmartLifecycle {
 	public void start() {
 		String reason = disabledReason();
 		if (reason != null) {
-			if (!reason.equals(NOT_CONFIGURED)) {
+			if (this.configurationError != null && !reason.equals(NOT_CONFIGURED)) {
+				// A mirror that was set up but cannot run never pushes: raised like a failing one (DESIGN §5.18).
+				logger.error("GIT_MIRROR_FAILED the git mirror is off: {}", reason);
+			}
+			else if (!reason.equals(NOT_CONFIGURED)) {
 				logger.warn("The git mirror is off: {}", reason);
 			}
 			return;

@@ -92,6 +92,15 @@ describe('status page wording (ROADMAP item 38)', () => {
     ]);
   });
 
+  it('lists a mirror that was set up but cannot run, and not one that was never set up', () => {
+    const { status, details } = healthy();
+    expect(status.mirror.state).toBe('disabled');
+    const http: StatusResponse = { ...status, mirror: { ...status.mirror, state: 'disabled', reason: 'the mirror URL must start with https://', remote: 'http://github.com/me/vault.git' } };
+    expect(statusProblems(http, details, NOW)).toEqual([{ level: 'warning', text: 'Mirror is off: the mirror URL must start with https://' }]);
+    const never: StatusResponse = { ...status, mirror: { ...status.mirror, state: 'disabled', reason: 'not configured', remote: null } };
+    expect(statusProblems(never, details, NOW)).toEqual([]);
+  });
+
   it('does not count history switched off on purpose, or an alert error that a later send superseded', () => {
     const { status, details } = healthy();
     const off: StatusResponse = { ...status, git: { ...status.git, enabled: false, state: 'disabled', reason: 'disabled by configuration' } };

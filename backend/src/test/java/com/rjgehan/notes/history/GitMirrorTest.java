@@ -135,6 +135,24 @@ class GitMirrorTest {
 	}
 
 	@Test
+	void aMirrorThatIsSetUpButCannotRunRaisesAnAlertAtStartup(CapturedOutput output) {
+		GitMirror mirror = mirror("git@github.com:me/vault.git", "notes.mirror.token-file", "/t");
+		mirror.start();
+		assertThat(mirror.isRunning()).isFalse();
+		assertThat(mirror.status().state()).isEqualTo(MirrorState.DISABLED);
+		assertThat(mirror.status().remote()).isEqualTo("git@github.com:me/vault.git");
+		assertThat(output.getAll()).contains("GIT_MIRROR_FAILED the git mirror is off: the mirror URL");
+	}
+
+	@Test
+	void aMirrorThatIsNotSetUpStartsQuietly(CapturedOutput output) {
+		GitMirror mirror = mirror("");
+		mirror.start();
+		assertThat(mirror.isRunning()).isFalse();
+		assertThat(output.getAll()).doesNotContain("GIT_MIRROR_FAILED").doesNotContain("The git mirror is off");
+	}
+
+	@Test
 	void aUrlWithCredentialsIsRefusedAndNeverShown() {
 		GitMirror mirror = mirror("https://me:ghp_secret@github.com/me/vault.git", "notes.mirror.token-file", "/t");
 		MirrorStatus status = mirror.status();

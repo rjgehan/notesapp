@@ -14,8 +14,8 @@ public enum AlertMarker {
 					+ "saved, and NotesApp keeps retrying."),
 
 	GIT_MIRROR_FAILED(3, "The history mirror is not being updated",
-			"Pushing the history to the mirror failed, or the mirror has commits this vault does not. NotesApp "
-					+ "retries failures, and never force-pushes."),
+			"Pushing the history to the mirror failed, the mirror's settings cannot be used, or the mirror has "
+					+ "commits this vault does not. NotesApp retries failed pushes, and never force-pushes."),
 
 	WATCHER_DEGRADED(3, "Changes made outside NotesApp appear late",
 			"The file watcher failed, so changes made on the server outside the app are only found by the "

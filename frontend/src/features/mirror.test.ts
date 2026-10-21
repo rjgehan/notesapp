@@ -5,7 +5,7 @@ import { queryClient } from '../api/queryClient';
 import { queryKeys } from '../api/queryKeys';
 import type { MirrorStatus, StatusResponse } from '../api/types';
 import { useToasts } from '../state/toasts';
-import { mirrorConfigured, mirrorSummary, mirrorWarning, mirrorWarningDetail, pushMirrorNow } from './mirror';
+import { mirrorConfigured, mirrorMisconfigured, mirrorSummary, mirrorWarning, mirrorWarningDetail, pushMirrorNow } from './mirror';
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z');
 
@@ -47,6 +47,20 @@ describe('mirror warning (DESIGN §6.18)', () => {
     expect(mirrorWarning(failing, NOW)).toBe('Mirror is not being updated (for 2 hours)');
     expect(mirrorWarning({ ...failing, failingSince: null }, NOW)).toBe('Mirror is not being updated');
     expect(mirrorWarningDetail(failing)).toBe('not authorized\nClick to push now.');
+  });
+
+  it('warns about a mirror that was set up but whose settings cannot be used', () => {
+    const ssh: MirrorStatus = { ...DISABLED, reason: 'the mirror URL is not a valid URL', remote: 'git@github.com:me/vault.git' };
+    expect(mirrorMisconfigured(ssh)).toBe(true);
+    expect(mirrorWarning(ssh, NOW)).toBe('Mirror is off: the mirror URL is not a valid URL');
+    expect(mirrorWarningDetail(ssh)).toMatch(/^Nothing is pushed until/);
+    const withToken: MirrorStatus = { ...DISABLED, reason: 'the mirror URL must be a plain https:// URL, without credentials, query or fragment', remote: 'https://github.com/me/vault.git' };
+    expect(mirrorWarning(withToken, NOW)).toMatch(/^Mirror is off: the mirror URL must be a plain https:\/\/ URL/);
+    // Not set up at all, or off because history is off (which has its own warning): nothing to say.
+    expect(mirrorMisconfigured(DISABLED)).toBe(false);
+    expect(mirrorWarning({ ...DISABLED, reason: 'history is disabled', remote: 'https://github.com/me/vault.git' })).toBeNull();
+    // Still nothing to push.
+    expect(mirrorConfigured(status(ssh))).toBe(false);
   });
 
   it('explains a diverged mirror and that NotesApp never forces', () => {
