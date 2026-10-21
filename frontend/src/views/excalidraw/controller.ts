@@ -157,6 +157,8 @@ export class DrawingController {
   private reported = new Set<string>();
   /** The generated HTML of `iframe` elements, by id: kept in the file, never shown. */
   private iframeData = new Map<string, unknown>();
+  /** The last serialization, reused while nothing changed (a draft, then the save after it). */
+  private memo: { key: readonly unknown[]; purpose: 'save' | 'draft'; text: string } | null = null;
   private readonly listeners = new Set<() => void>();
 
   /** Created once the session has loaded. */
@@ -287,11 +289,25 @@ export class DrawingController {
     if (this.session.isEditable()) this.session.markDirty(this.serialize);
   }
 
-  /** The file text for the current scene; called by the session only when it saves or writes a draft. */
-  serialize = (): string => {
+  /**
+   * The file text for the current scene; called by the session only when it saves or writes a
+   * draft. A draft of a compressed drawing is written uncompressed (compressing a large drawing
+   * takes the main thread for a while), and nothing is serialized twice for the same scene.
+   */
+  serialize = (purpose: 'save' | 'draft' = 'save'): string => {
     const latest = this.latest;
     const drawing = this.drawing;
     if (!latest || !drawing) return this.session.editorState.doc.toString();
+    const kind = purpose === 'draft' && drawing.markdown?.drawing?.encoding === 'compressed-json' ? 'draft' : 'save';
+    const key = [this.lastSig, latest.elements.length, latest.files, drawing, this.vault.size];
+    const memo = this.memo;
+    if (memo && (memo.purpose === kind || memo.purpose === 'save') && memo.key.every((k, i) => k === key[i])) return memo.text;
+    const text = this.write(latest, drawing, kind);
+    this.memo = { key, purpose: kind, text };
+    return text;
+  };
+
+  private write(latest: NonNullable<DrawingController['latest']>, drawing: Drawing, kind: 'save' | 'draft'): string {
     // Image elements still waiting for their upload are not part of the file yet.
     let elements = latest.elements.filter((e) => !e.isDeleted && !(e.type === 'image' && typeof e.fileId !== 'string'));
     if (this.format === 'markdown') elements = this.withMarkdownIds(elements, latest.elements);
@@ -313,8 +329,9 @@ export class DrawingController {
         return raws.get(e.id);
       },
       addEmbedded: attachments.map((a) => ({ id: a.id, value: `[[${this.env.linkText(a.path, this.session.path)}]]` })),
+      ...(kind === 'draft' ? { encoding: 'json' as const } : {}),
     });
-  };
+  }
 
   /**
    * The Markdown source of a text the file had (undefined for a new one): as loaded while its text

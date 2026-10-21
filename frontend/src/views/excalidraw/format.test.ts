@@ -212,6 +212,17 @@ describe('.excalidraw.md (Obsidian Excalidraw)', () => {
     expect(performance.now() - started).toBeLessThan(2000);
   });
 
+  it('writes a block in another encoding when asked (a draft skips the compression)', () => {
+    const compressed = markdownDrawing({ texts: [['Ab12Cd34', 'Hello World']], scene: base, compressed: true, tail: '\n' });
+    const d = parsed('markdown', compressed);
+    const json = writeDrawing(d, d.scene, { encoding: 'json' });
+    expect(json).toContain('## Drawing\n```json\n{\n\t"type": "excalidraw"');
+    expect(markdownRest(markdownParts(json))).toBe(markdownRest(markdownParts(compressed)));
+    expect(parsed('markdown', json).scene.elements.map((e) => e.id)).toEqual(['Ab12Cd34', 'Xy98Zw76', 'rect0001']);
+    // The next save restores the drawing's own encoding.
+    expect(writeDrawing(parsed('markdown', json), d.scene, { encoding: 'compressed-json' })).toMatch(/```compressed-json\n[A-Za-z0-9+/=\n]+\n```\n%%\n$/);
+  });
+
   it('takes a text’s source from the section when a rename rewrote it there, with the link and the text shown', () => {
     const renamed = markdownDrawing({
       texts: [

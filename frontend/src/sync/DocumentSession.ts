@@ -101,6 +101,12 @@ export interface SessionDeps {
 /** `FileViewDescriptor.merge`: the merged text, or null when the view cannot merge these versions. */
 export type MergeFn = (base: string, mine: string, theirs: string) => string | null;
 
+/**
+ * `markDirty`'s serializer (DESIGN §6.8). `'save'` asks for the file's text; `'draft'` for text
+ * that only has to read back as the same document, so a view may skip a costly encoding there.
+ */
+export type Serializer = (purpose: 'save' | 'draft') => string;
+
 export const DEBOUNCE_MS = 1000;
 export const MAX_WAIT_MS = 5000;
 export const DRAFT_INTERVAL_MS = 500;
@@ -126,7 +132,7 @@ export class DocumentSession {
   private state: EditorState;
   private view: EditorView | null = null;
   private selectionKnown = false;
-  private serializer: (() => string) | null = null;
+  private serializer: Serializer | null = null;
 
   private status: SessionStatus = 'loading';
   /** The content was read at least once; a session that never loaded has no buffer. */
@@ -156,6 +162,7 @@ export class DocumentSession {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
+  private refusedTimer: ReturnType<typeof setTimeout> | null = null;
   private retryAttempt = 0;
   private retryAt: number | null = null;
 
@@ -279,7 +286,7 @@ export class DocumentSession {
    * next edit, so that text is never shadowed by a scene the view has not caught up with yet.
    */
   getText(): string {
-    return this.serializer ? this.serializer() : this.editorState.doc.toString();
+    return this.serializer ? this.serializer('save') : this.editorState.doc.toString();
   }
 
   get baseContent(): string {
@@ -355,7 +362,7 @@ export class DocumentSession {
     const serialize = this.serializer;
     if (!serialize) return;
     this.serializer = null;
-    const spec = remoteTransaction(this.editorState, serialize());
+    const spec = remoteTransaction(this.editorState, serialize('save'));
     if (!spec) return;
     if (this.view) this.view.dispatch(spec);
     else this.state = this.state.update(spec).state;
@@ -713,17 +720,32 @@ export class DocumentSession {
    * Records a local edit. `serialize` makes serialization lazy for non-CodeMirror views: the
    * session calls it only when it saves or writes a draft.
    */
-  markDirty(serialize?: () => string): void {
+  markDirty(serialize?: Serializer): void {
     if (serialize) this.serializer = serialize;
     this.changes++;
     if (this.firstUnsavedAt === null) this.firstUnsavedAt = Date.now();
     if (this.status === 'clean') this.status = 'dirty';
-    // Text a 413 refused: once it is shorter, autosave tries again.
-    if (this.status === 'error' && this.refusedLength !== null && (this.serializer ? this.getText() : this.editorState.doc).length < this.refusedLength) this.status = 'dirty';
+    // Text a 413 refused: once it is shorter, autosave tries again. A view's model is measured once
+    // its edits pause, not on every change it reports (serializing it can be costly).
+    if (this.status === 'error' && this.refusedLength !== null) {
+      if (this.serializer) this.scheduleRefusedCheck();
+      else if (this.editorState.doc.length < this.refusedLength) this.status = 'dirty';
+    }
     if (this.status === 'deleted' && this.deleted) this.deleted = { ...this.deleted, hasLocalEdits: true };
     this.scheduleDraft();
     if (this.status === 'dirty') this.scheduleSave(false);
     this.emit();
+  }
+
+  private scheduleRefusedCheck(): void {
+    if (this.refusedTimer) clearTimeout(this.refusedTimer);
+    this.refusedTimer = setTimeout(() => {
+      this.refusedTimer = null;
+      if (this.disposed || this.status !== 'error' || this.refusedLength === null || this.getText().length >= this.refusedLength) return;
+      this.status = 'dirty';
+      this.scheduleSave(true);
+      this.emit();
+    }, DRAFT_INTERVAL_MS);
   }
 
   private scheduleSave(immediate: boolean): void {
@@ -1136,7 +1158,8 @@ export class DocumentSession {
 
   private async writeDraft(): Promise<void> {
     if (this.disposed || !this.hasUnsavedChanges()) return;
-    const text = this.getText();
+    // A view's draft may skip costly encodings (a drawing's compression): it reads back the same.
+    const text = this.serializer ? this.serializer('draft') : this.editorState.doc.toString();
     const draft: DraftRecord = {
       path: this.path,
       clientId: this.deps.clientId,
@@ -1230,8 +1253,10 @@ export class DocumentSession {
     this.clearTimers();
     if (this.draftTimer) clearTimeout(this.draftTimer);
     if (this.loadTimer) clearTimeout(this.loadTimer);
+    if (this.refusedTimer) clearTimeout(this.refusedTimer);
     this.draftTimer = null;
     this.loadTimer = null;
+    this.refusedTimer = null;
     // Views holding a disposed session re-acquire one for their path (the snapshot changes so
     // that subscribers re-render).
     this.snapshot = { ...this.snapshot };

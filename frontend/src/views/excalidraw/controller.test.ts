@@ -175,6 +175,20 @@ describe('saving a drawing', () => {
     expect(serialize).not.toHaveBeenCalled();
   });
 
+  it('serializes a scene once for its draft and the save after it', async () => {
+    const { canvas, controller, deps, saved } = await setup('Plan.excalidraw', json(scene([el('a')])));
+    const write = vi.spyOn(controller as unknown as { write: (...args: unknown[]) => string }, 'write');
+    canvas.add(el('b'));
+    await vi.advanceTimersByTimeAsync(DRAFT_INTERVAL_MS + 10);
+    expect(deps.drafts.forPath('Plan.excalidraw')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => e.id)).toEqual(['a', 'b']);
+    expect(write).toHaveBeenCalledTimes(1);
+    canvas.change('b', { x: 3 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
   it('drops deleted elements and image placeholders still waiting for their upload', async () => {
     const { canvas, saved } = await setup('Plan.excalidraw', json(scene([el('a'), el('b')])));
     canvas.change('b', { isDeleted: true });
@@ -443,6 +457,20 @@ describe('Obsidian Excalidraw (.excalidraw.md)', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(markdownParts(vault.readFile(path).content).texts[0].raw).toBe('Quote: the changed words!!! ![[Notes#^abc1]]');
     expect(env.errors).toHaveLength(1);
+  });
+
+  it('drafts a compressed drawing uncompressed, and saves it compressed', async () => {
+    const compressed = markdownDrawing({ texts: [['Ab12Cd34', 'Hello']], scene: scene([text('Ab12Cd34', 'Hello'), el('rect0001')]), compressed: true });
+    const { canvas, deps, vault } = await setup(path, compressed);
+    canvas.change('rect0001', { x: 7 });
+    await vi.advanceTimersByTimeAsync(DRAFT_INTERVAL_MS + 10);
+    const [draft] = deps.drafts.forPath(path);
+    expect(draft.text).toContain('## Drawing\n```json\n');
+    expect(parseDrawing('markdown', draft.text)).toMatchObject({ ok: true, drawing: { scene: { elements: [{ id: 'Ab12Cd34' }, { id: 'rect0001', x: 7 }] } } });
+    await vi.advanceTimersByTimeAsync(1000);
+    const out = vault.readFile(path).content;
+    expect(out).toContain('## Drawing\n```compressed-json\n');
+    expect(parseDrawing('markdown', out)).toMatchObject({ ok: true, drawing: { scene: { elements: [{ id: 'Ab12Cd34' }, { id: 'rect0001', x: 7 }] } } });
   });
 
   it('shows Embedded Files images through the vault, and Obsidian-only extras as static placeholders', async () => {

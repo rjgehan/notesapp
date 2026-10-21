@@ -1,14 +1,14 @@
 // The textual-view API of DESIGN §6.8: every textual view gets autosave, drafts, conflicts and
 // live sync through its DocumentSession.
 import { useEffect, useId, useState, useSyncExternalStore } from 'react';
-import type { DocumentSession, SessionSnapshot } from './DocumentSession';
+import type { DocumentSession, Serializer, SessionSnapshot } from './DocumentSession';
 import { documents } from './instance';
 
 export interface TextDocument extends SessionSnapshot {
   session: DocumentSession;
   getText(): string;
   setText(text: string): void;
-  markDirty(serialize?: () => string): void;
+  markDirty(serialize?: Serializer): void;
   flush(): Promise<void>;
 }
 

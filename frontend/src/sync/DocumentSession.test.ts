@@ -9,7 +9,7 @@ import { isLocalEdit } from '../editor/remote';
 import { serverToDocOffset } from '../features/eol';
 import { lineHash, toggleTaskAtLine } from '../render/render';
 import { fakeApi, MemoryDraftStore, sessionDeps } from '../test/fakes';
-import { DocumentSession } from './DocumentSession';
+import { DocumentSession, DRAFT_INTERVAL_MS } from './DocumentSession';
 import { DocumentRegistry, KEEPALIVE_BUDGET } from './documents';
 import { MoveMap } from './moves';
 
@@ -1143,6 +1143,28 @@ describe('views that keep their own model (markDirty(serialize), DESIGN §6.8)',
     expect(vault.readFile('a.md').content).toBe('x'.repeat(50));
   });
 
+  it('measures a refused text again once edits pause, not on every change the view reports', async () => {
+    const { fake, session } = setup('x');
+    await session.ready;
+    const { view } = modelView(session, 'x');
+    const serialize = vi.fn(() => view.model);
+    fake.failNext(() => {
+      throw problem({ code: 'too-large', status: 413, limit: 5 });
+    });
+    view.model = 'x'.repeat(100);
+    session.markDirty(serialize);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(session.getSnapshot().tooLarge).toBe(true);
+    serialize.mockClear();
+    for (let i = 0; i < 50; i++) {
+      view.model = 'x'.repeat(99 - i);
+      session.markDirty(serialize);
+    }
+    expect(serialize).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(DRAFT_INTERVAL_MS);
+    expect(status(session)).not.toBe('error');
+  });
+
   it('an edit from outside the view applies to its serialized text, which the view then re-reads', async () => {
     const { vault, session } = setup('one');
     await session.ready;
@@ -1161,6 +1183,17 @@ describe('views that keep their own model (markDirty(serialize), DESIGN §6.8)',
     expect(view.model).toBe('restored');
     await vi.advanceTimersByTimeAsync(1000);
     expect(vault.readFile('a.md').content).toBe('restored');
+  });
+
+  it('asks the view for a draft, which may skip costly encodings', async () => {
+    const { deps, session } = setup('one');
+    await session.ready;
+    const serialize = vi.fn((purpose: 'save' | 'draft') => (purpose === 'draft' ? 'one, as a draft' : 'one, saved'));
+    session.markDirty(serialize);
+    await vi.advanceTimersByTimeAsync(DRAFT_INTERVAL_MS + 10);
+    expect(deps.drafts.forPath('a.md')[0].text).toBe('one, as a draft');
+    expect(serialize).toHaveBeenCalledWith('draft');
+    expect(session.getText()).toBe('one, saved');
   });
 
   it('counts uploads of views without editor widgets as unsaved work', async () => {

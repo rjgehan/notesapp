@@ -15,6 +15,9 @@ import { firstLink, shownFor } from './textLinks';
 
 export type DrawingFormat = 'excalidraw' | 'markdown';
 
+/** How an `.excalidraw.md` drawing block holds the scene. */
+export type DrawingEncoding = 'json' | 'compressed-json';
+
 /** An element as stored in the file. Unknown properties are kept as they are. */
 export interface SceneElement {
   id: string;
@@ -82,8 +85,11 @@ export interface EmbeddedEntry {
 /** Where the managed parts of an `.excalidraw.md` file are; everything else is left alone. */
 export interface MarkdownParts {
   text: string;
-  /** The drawing block's lines between the fences (with the last line's `\n`), or null when there is none yet. */
-  drawing: { range: TextRange; encoding: 'json' | 'compressed-json' } | null;
+  /**
+   * The drawing block's lines between the fences (with the last line's `\n`) and its opening fence
+   * line (without it), or null when there is none yet.
+   */
+  drawing: { range: TextRange; fence: TextRange; encoding: DrawingEncoding } | null;
   /** The Text Elements section's body (after its heading line). */
   textSection: TextRange | null;
   texts: TextEntry[];
@@ -316,7 +322,11 @@ export function markdownParts(text: string): MarkdownParts {
     const fence = FENCE_OPEN.exec(lines[i + 1].text);
     if (!fence) continue;
     drawingLine = i;
-    drawing = { range: { from: lines[i + 2].from, to: lines[close].from }, encoding: fence[1] as 'json' | 'compressed-json' };
+    drawing = {
+      range: { from: lines[i + 2].from, to: lines[close].from },
+      fence: { from: lines[i + 1].from, to: lines[i + 1].to },
+      encoding: fence[1] as 'json' | 'compressed-json',
+    };
     break;
   }
   const limit = drawingLine >= 0 ? drawingLine : lines.length;
@@ -382,7 +392,10 @@ export function markdownParts(text: string): MarkdownParts {
  * same rest differ only in the drawing (merging, DESIGN §6.8.1).
  */
 export function markdownRest(parts: MarkdownParts): string {
-  const ranges = [parts.drawing?.range, parts.textSection, parts.linkSection, parts.embeddedSection].filter((r): r is TextRange => !!r).sort((a, b) => a.from - b.from);
+  // The fence line names the block's encoding, which a draft may change.
+  const ranges = [parts.drawing?.fence, parts.drawing?.range, parts.textSection, parts.linkSection, parts.embeddedSection]
+    .filter((r): r is TextRange => !!r)
+    .sort((a, b) => a.from - b.from);
   let out = '';
   let pos = 0;
   for (const r of ranges) {
@@ -474,6 +487,8 @@ export interface WriteOptions {
   rawText?(element: SceneElement): string | undefined;
   /** Embedded Files entries to add (Markdown drawings): `fileId: value`. */
   addEmbedded?: Array<{ id: string; value: string }>;
+  /** The drawing block's encoding, when not the one it had (a draft skips the compression). */
+  encoding?: DrawingEncoding;
 }
 
 export function isLiveText(e: SceneElement): boolean {
@@ -578,7 +593,7 @@ export function writeDrawing(drawing: Drawing, scene: Scene, opts: WriteOptions 
   // The plugin keeps each text element's Markdown source in `rawText` too.
   const elements = scene.elements.map((e) => (isLiveText(e) ? { ...e, rawText: rawText(e) } : e));
   const json = sceneJson('markdown', { ...scene, elements });
-  const encoding = parts.drawing?.encoding ?? 'json';
+  const encoding = opts.encoding ?? parts.drawing?.encoding ?? 'json';
   const block = (encoding === 'compressed-json' ? compressDrawing(json) : json) + '\n';
   const entries = textEntriesFor(parts, elements, rawText);
   const links = linkEntriesFor(parts, drawing.scene.elements, elements);
@@ -600,13 +615,16 @@ export function writeDrawing(drawing: Drawing, scene: Scene, opts: WriteOptions 
       textBody(entries ?? []) +
       newLinkSection +
       (added.length > 0 ? '## Embedded Files\n' + embeddedBody(added) : '') +
-      '%%\n## Drawing\n```json\n' +
+      '%%\n## Drawing\n```' +
+      encoding +
+      '\n' +
       block +
       '```\n%%\n'
     );
   }
 
   const replacements: Replacement[] = [{ ...parts.drawing.range, insert: block }];
+  if (encoding !== parts.drawing.encoding) replacements.push({ ...parts.drawing.fence, insert: '```' + encoding });
   let inserted = '';
   if (links && parts.linkSection) replacements.push({ ...parts.linkSection, insert: linkBody(links) });
   if (parts.textSection) {
