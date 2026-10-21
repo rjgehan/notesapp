@@ -19,7 +19,7 @@ const COLUMN = /^(\$?)([A-Za-z]{1,3})$/;
 const ROW = /^(\$?)([0-9]{1,7})$/;
 const WORD = /[\p{L}\p{N}_.$\\]/u;
 const ERROR_LITERAL = /^#(?:NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|SPILL!|CYCLE!|ERROR!|LIC!|CALC!|GETTING_DATA)/i;
-const NUMBER = /^(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/;
+const NUMBER = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/;
 const ROW_RANGE = /^\$?[0-9]{1,7}:\$?[0-9]{1,7}/;
 
 type Shift = (part: string) => string | null;

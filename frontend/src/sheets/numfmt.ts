@@ -210,7 +210,9 @@ function tokenize(src: string): { tokens: Token[]; color?: FormatColor } {
       i++;
     } else if (ch === '.') {
       // `.0` after seconds is a fraction of a second.
-      const prev = [...tokens].reverse().find((t) => t.t !== 'lit');
+      let back = tokens.length - 1;
+      while (back >= 0 && tokens[back].t === 'lit') back--;
+      const prev = back >= 0 ? tokens[back] : undefined;
       if (prev?.t === 'date' && prev.code.startsWith('s') && src[i + 1] === '0') {
         let j = i + 1;
         while (src[j] === '0') j++;
@@ -267,6 +269,15 @@ function compileSection(src: string): Section {
     section.kind = 'number';
     let part: 'int' | 'frac' | 'exp' = 'int';
     let seenDigit = false;
+    // For each token, what follows it (one backward pass, so long codes compile in linear time):
+    // the first token that is not a comma, and the first digit, point or exponent.
+    const nextNonComma: Array<Token['t'] | null> = new Array<Token['t'] | null>(tokens.length).fill(null);
+    const nextNumeric: Array<Token['t'] | null> = new Array<Token['t'] | null>(tokens.length).fill(null);
+    for (let k = tokens.length - 2; k >= 0; k--) {
+      const after = tokens[k + 1];
+      nextNonComma[k] = after.t === 'comma' ? nextNonComma[k + 1] : after.t;
+      nextNumeric[k] = after.t === 'digit' || after.t === 'point' || after.t === 'exp' ? after.t : nextNumeric[k + 1];
+    }
     tokens.forEach((t, k) => {
       if (t.t === 'digit') {
         section[part].push(t.c);
@@ -277,10 +288,8 @@ function compileSection(src: string): Section {
       else if (t.t === 'comma' && part !== 'exp' && seenDigit) {
         // Between digit placeholders of the whole part: thousands; after the last placeholder of
         // the number (before or after its decimals): scaling by 1000.
-        const rest = tokens.slice(k + 1);
-        const nextDigit = rest.findIndex((x) => x.t === 'digit' || x.t === 'point' || x.t === 'exp');
-        if (part === 'int' && nextDigit >= 0 && rest[nextDigit].t === 'digit' && rest.slice(0, nextDigit).every((x) => x.t === 'comma')) section.grouping = true;
-        else if (nextDigit < 0 || rest[nextDigit].t !== 'digit') section.scale++;
+        if (part === 'int' && nextNonComma[k] === 'digit') section.grouping = true;
+        else if (nextNumeric[k] !== 'digit') section.scale++;
       }
     });
     return section;

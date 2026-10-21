@@ -14,7 +14,9 @@ export interface TypedInput {
   fmt?: string;
 }
 
-const NUMBER = /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+// The patterns are unambiguous (one way to split the digits), so a long run of digits from a file
+// or a CSV never backtracks quadratically.
+const NUMBER = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
 /** Digits with optional thousands separators and decimals: `1,450.50`, `.5`. */
 const AMOUNT = '((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]*)?|\\.[0-9]+)';
 const PERCENT = new RegExp(`^([+-]?)${AMOUNT}\\s?%$`);

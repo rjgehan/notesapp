@@ -104,3 +104,15 @@ describe('numberText and cellText', () => {
     expect(cellText({ v: 0.25 }, '0%')).toBe('25%');
   });
 });
+
+describe('long input from a file or a CSV', () => {
+  it('is read in linear time', () => {
+    const started = performance.now();
+    const digits = '1'.repeat(200_000);
+    expect(typedInput(digits + 'x')).toEqual({ content: { v: digits + 'x' } });
+    expect(typedInput(digits + '%x')).toEqual({ content: { v: digits + '%x' } });
+    expect(typedInput('$' + digits + 'x')).toEqual({ content: { v: '$' + digits + 'x' } });
+    expect(cellText({ v: digits + 'x' })).toBe(digits + 'x');
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+});

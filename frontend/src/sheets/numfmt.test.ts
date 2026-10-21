@@ -229,3 +229,21 @@ describe('FORMAT_PRESETS', () => {
     });
   });
 });
+
+describe('long format codes from a file', () => {
+  it('compile and format in linear time', () => {
+    const started = performance.now();
+    expect(fmt(1, '0' + ','.repeat(100_000))).toBe('0');
+    expect(fmt(1, '0' + '.'.repeat(100_000)).length).toBeGreaterThan(0);
+    expect(fmt(1234, '#' + ',#'.repeat(50_000))).toContain('1');
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
+  it('still reads thousands separators and scaling commas', () => {
+    expect(fmt(1234567, '#,##0')).toBe('1,234,567');
+    expect(fmt(1234567, '#,,##0')).toBe('1,234,567');
+    expect(fmt(1234567, '0.0,,"M"')).toBe('1.2M');
+    expect(fmt(1234567, '0,')).toBe('1235');
+    expect(fmt(1234.5, '#,##0.00,')).toBe('1.23');
+  });
+});
