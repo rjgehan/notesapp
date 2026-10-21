@@ -147,6 +147,8 @@ export class DocumentSession {
   private firstUnsavedAt: number | null = null;
   private inFlight: Promise<void> | null = null;
   private flushHistoryNext = false;
+  /** The conflict an automatic merge settled, while its flushHistory save is pending. */
+  private pendingMerge: ConflictInfo | null = null;
   private deferred: DeferredEvent | null = null;
   private reconcileSeq = 0;
   private uploads = 0;
@@ -476,14 +478,25 @@ export class DocumentSession {
 
   /** Replaces the buffer as an ordinary undoable edit that does not mark the session dirty. */
   private replaceUndoable(text: string): void {
-    const spec = {
-      changes: remoteChanges(this.editorState.doc.toString(), text),
-      annotations: [sessionEdit.of(true), Transaction.userEvent.of('input.replace')],
-    };
+    this.replaceBuffer(text, true);
+  }
+
+  /**
+   * Replaces the buffer with an automatic merge: not an undo step (in the buffer nor in a view's
+   * own model), since undoing it would take the other device's edits away and autosave that.
+   */
+  private replaceMerged(text: string): void {
+    this.replaceBuffer(text, false);
+  }
+
+  private replaceBuffer(text: string, undoable: boolean): void {
+    const annotations = [sessionEdit.of(true), Transaction.userEvent.of('input.replace')];
+    if (!undoable) annotations.push(Transaction.addToHistory.of(false));
+    const spec = { changes: remoteChanges(this.editorState.doc.toString(), text), annotations };
     if (this.view) this.view.dispatch(spec);
     else this.state = this.state.update(spec).state;
     this.serializer = null;
-    this.replacedUndoable = true;
+    this.replacedUndoable = undoable;
     this.remoteChanges++;
   }
 
@@ -603,6 +616,7 @@ export class DocumentSession {
     this.error = null;
     this.refusedLength = null;
     this.flushHistoryNext = false;
+    this.pendingMerge = null;
     this.savedChanges = this.changes;
     this.clearTimers();
     this.retryAttempt = 0;
@@ -612,7 +626,7 @@ export class DocumentSession {
   }
 
   private enterConflict(theirsText: string, theirsVersion: Version, theirsEol: Eol, source: ConflictInfo['source']): void {
-    if (this.tryMerge(theirsText, theirsVersion, theirsEol, this.baseText)) return;
+    if (this.tryMerge(theirsText, theirsVersion, theirsEol, this.baseText, source)) return;
     this.clearSaveTimers();
     this.conflict = { theirsText, theirsVersion, theirsEol, baseText: this.baseText, source, historyBlocked: false };
     this.setStatus('conflict');
@@ -624,7 +638,7 @@ export class DocumentSession {
    * server commits theirs first). False when the view has no merge, the base is unknown, or the
    * merge gives up; the banner then appears as usual.
    */
-  private tryMerge(theirsText: string, theirsVersion: Version, theirsEol: Eol, baseText: string | null): boolean {
+  private tryMerge(theirsText: string, theirsVersion: Version, theirsEol: Eol, baseText: string | null, source: ConflictInfo['source']): boolean {
     const merge = this.deps.mergeFor?.(this.path);
     if (!merge || baseText === null || !this.loaded || this.lossy) return false;
     let merged: string | null;
@@ -638,15 +652,17 @@ export class DocumentSession {
     this.clearSaveTimers();
     if (merged === theirsText) {
       // Everything mine changed is in theirs already.
-      this.replaceUndoable(theirsText);
+      this.replaceMerged(theirsText);
       this.adoptVersion(theirsVersion, theirsText, theirsEol);
     } else {
-      this.replaceUndoable(merged);
+      this.replaceMerged(merged);
       this.version = theirsVersion;
       this.baseText = theirsText;
       this.conflict = null;
       this.deleted = null;
       this.flushHistoryNext = true;
+      // Should the server refuse the save (history failing), the banner shows this conflict.
+      this.pendingMerge = { theirsText, theirsVersion, theirsEol, baseText, source, historyBlocked: false };
       this.changes++;
       if (this.firstUnsavedAt === null) this.firstUnsavedAt = Date.now();
       this.setStatus('dirty');
@@ -805,6 +821,7 @@ export class DocumentSession {
     this.version = result.file.version;
     this.baseText = text;
     this.flushHistoryNext = false;
+    this.pendingMerge = null;
     this.conflict = null;
     this.deleted = null;
     this.error = null;
@@ -847,6 +864,7 @@ export class DocumentSession {
           this.version = p.currentVersion;
           this.baseText = theirs;
           this.flushHistoryNext = false;
+          this.pendingMerge = null;
           this.conflict = null;
           this.savedChanges = covered;
           if (this.changes === covered) {
@@ -857,7 +875,7 @@ export class DocumentSession {
           }
           return;
         }
-        if (this.tryMerge(theirs, p.currentVersion, detectEol(p.currentContent), this.baseText)) return;
+        if (this.tryMerge(theirs, p.currentVersion, detectEol(p.currentContent), this.baseText, 'save')) return;
         this.status = 'conflict';
         this.conflict = {
           theirsText: theirs,
@@ -886,8 +904,15 @@ export class DocumentSession {
     }
     if (isProblem(e, 'history-unavailable') && this.flushHistoryNext) {
       this.flushHistoryNext = false;
+      const merged = this.pendingMerge;
+      this.pendingMerge = null;
       if (this.conflict) {
         this.conflict = { ...this.conflict, historyBlocked: true };
+        this.status = 'conflict';
+      } else if (merged) {
+        // An automatic merge could not be saved over theirs: the conflict it settled comes back,
+        // with the merged text as mine, never the deleted state of a Recreate.
+        this.conflict = { ...merged, historyBlocked: true };
         this.status = 'conflict';
       } else {
         this.status = 'deleted';
@@ -974,6 +999,7 @@ export class DocumentSession {
     this.baseText = this.conflict.theirsText;
     this.conflict = { ...this.conflict, historyBlocked: false };
     this.flushHistoryNext = true;
+    this.pendingMerge = null;
     this.status = 'dirty';
     await this.save();
   }
@@ -1007,6 +1033,7 @@ export class DocumentSession {
     if (this.status !== 'deleted') return;
     this.version = null;
     this.flushHistoryNext = true;
+    this.pendingMerge = null;
     this.status = 'dirty';
     await this.save();
   }
@@ -1188,7 +1215,7 @@ export class DocumentSession {
         this.setStatus('dirty');
         this.scheduleSave(false);
         this.deps.notify({ message: 'Restored unsaved changes' });
-      } else if (!this.tryMerge(serverText, file.version, detectEol(file.content), d.baseText ?? null)) {
+      } else if (!this.tryMerge(serverText, file.version, detectEol(file.content), d.baseText ?? null, 'draft')) {
         this.version = d.baseVersion;
         this.conflict = {
           theirsText: serverText,

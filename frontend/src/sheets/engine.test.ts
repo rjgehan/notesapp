@@ -640,7 +640,7 @@ describe('names that are also Object.prototype members', () => {
   it('applies another device’s removal of such a name, and of such a chart or unknown key', () => {
     const wb = workbook([{ name: 'Sheet1', cells: { A1: { v: 1 } } }], { constructor: 'Sheet1!$A$1' });
     const base = file(JSON.parse(wb.serialize()));
-    base.sheets[0].charts = { toString: { type: 'bar', range: 'A1:A1' } };
+    base.sheets[0].charts = { toString: { type: 'bar' as const, range: 'A1:A1' } };
     base.extra = { valueOf: 1 };
     wb.replace(base, { undoable: false });
     const next = file(JSON.parse(wb.serialize()));

@@ -353,9 +353,9 @@ describe('keys that are also Object.prototype members', () => {
   });
 
   it('merges charts and unknown keys named toString or valueOf', () => {
-    const b = edited((f) => (budget(f).charts = { toString: { type: 'bar', range: 'A1:B3' } }));
+    const b = edited((f) => (budget(f).charts = { toString: { type: 'bar' as const, range: 'A1:B3' } }));
     const mine = edited((f) => (f.extra = { valueOf: 1 }));
-    const theirs = edited((f) => (budget(f).charts = { toString: { type: 'bar', range: 'A1:B3' } }));
+    const theirs = edited((f) => (budget(f).charts = { toString: { type: 'bar' as const, range: 'A1:B3' } }));
     const merged = mergeSheetText(b, mine, theirs);
     const result = parseSheet(merged!);
     expect(result.ok).toBe(true);

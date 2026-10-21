@@ -141,6 +141,26 @@ describe('the spreadsheet binding', () => {
     expect(file.engine).toBe(ENGINE_ID);
   });
 
+  it('undo after an automatic merge reverts only this device’s edit, never the other device’s', async () => {
+    const { binding, session, vault } = setup(BASE, true);
+    await settle();
+    const wb = ready(binding);
+    wb.setCell('s1', 'A1', { v: 10 });
+    // The other device changed A2 meanwhile; its change arrives before this one is saved.
+    vault.externalWrite('b.sheet', sheetText({ A1: { v: 1 }, A2: { v: 20 }, A3: { f: '=SUM(A1:A2)', c: 21 } }));
+    await session.onRemoteChanged({ version: vault.readFile('b.sheet').version });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(savedFile(vault).sheets[0].cells.A2.v).toBe(20);
+    expect(wb.undo()).toBe(true);
+    expect(cellValue(wb.cell('s1', 'A1'))).toBe(1);
+    expect(cellValue(wb.cell('s1', 'A2'))).toBe(20);
+    await vi.advanceTimersByTimeAsync(2000);
+    const file = savedFile(vault);
+    expect(file.sheets[0].cells.A1.v).toBe(1);
+    expect(file.sheets[0].cells.A2.v).toBe(20);
+    expect(wb.canUndo()).toBe(false);
+  });
+
   it('refuses a file it cannot read, leaves it alone, and opens it once fixed', async () => {
     const { binding, session, vault, fake } = setup('{"type": "notesapp-sheet", "version": 1, "sheets": [], "sheets": []}');
     await settle();

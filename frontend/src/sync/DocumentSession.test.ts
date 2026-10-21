@@ -1182,7 +1182,8 @@ describe('views with their own model (DESIGN §6.8)', () => {
     edit('MINE\nb\nc');
     await vi.advanceTimersByTimeAsync(1000);
     expect(deps.notices).toContain('Merged changes from another device');
-    expect(model.applied.at(-1)).toEqual({ text: 'MINE\nb\nTHEIRS', undoable: true });
+    // An automatic merge is not an undo step: undoing it would take the other device's edit away.
+    expect(model.applied.at(-1)).toEqual({ text: 'MINE\nb\nTHEIRS', undoable: false });
     // Once the save that met the conflict has settled, autosave saves the merge.
     await vi.advanceTimersByTimeAsync(1000);
     expect(status(session)).toBe('clean');
@@ -1200,6 +1201,57 @@ describe('views with their own model (DESIGN §6.8)', () => {
     expect(status(session)).not.toBe('conflict');
     await vi.advanceTimersByTimeAsync(0);
     expect(vault.readFile('x.sheet').content).toBe('THEIRS\nMINE\nc');
+  });
+
+  it("an automatic merge is not undoable in the session's buffer either", async () => {
+    const { vault, session } = setupModel('a\nb\nc', lineMerge);
+    await session.ready;
+    const view = new EditorView({
+      state: session.prepareState((st) =>
+        st.update({
+          effects: StateEffect.reconfigure.of([
+            history(),
+            EditorView.updateListener.of((u) => {
+              if (u.transactions.some(isLocalEdit)) session.markDirty();
+            }),
+          ]),
+        }).state,
+      ),
+    });
+    session.attach(view);
+    view.dispatch({ changes: { from: 0, to: 1, insert: 'MINE' }, userEvent: 'input' });
+    vault.externalWrite('x.sheet', 'a\nb\nTHEIRS');
+    await session.onRemoteChanged({ version: versionOf(vault, 'x.sheet') });
+    expect(text(session)).toBe('MINE\nb\nTHEIRS');
+    expect(session.remoteChangeUndoable).toBe(false);
+    // Undo takes back this device's own typing only.
+    undo(view);
+    expect(text(session)).toBe('a\nb\nTHEIRS');
+    view.destroy();
+  });
+
+  it('a merge whose save meets history-unavailable shows the conflict, not a deleted file', async () => {
+    const { vault, fake, session } = setupModel('a\nb\nc', lineMerge);
+    await session.ready;
+    const { edit } = modelView(session);
+    edit('MINE\nb\nc');
+    vault.externalWrite('x.sheet', 'a\nb\nTHEIRS');
+    await session.onRemoteChanged({ version: versionOf(vault, 'x.sheet') });
+    expect(text(session)).toBe('MINE\nb\nTHEIRS');
+    fake.failNext(() => {
+      throw problem({ code: 'history-unavailable', status: 503, reason: 'commit-failed' });
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    const snap = session.getSnapshot();
+    expect(snap.status).toBe('conflict');
+    expect(snap.deleted).toBeNull();
+    expect(snap.conflict).toMatchObject({ theirsText: 'a\nb\nTHEIRS', baseText: 'a\nb\nc', source: 'remote', historyBlocked: true });
+    expect(text(session)).toBe('MINE\nb\nTHEIRS');
+    expect(vault.readFile('x.sheet').content).toBe('a\nb\nTHEIRS');
+    // Keep mine tries again once history works.
+    await session.keepMine();
+    expect(status(session)).toBe('clean');
+    expect(vault.readFile('x.sheet').content).toBe('MINE\nb\nTHEIRS');
   });
 
   it('a merge that equals theirs adopts their version without saving', async () => {
