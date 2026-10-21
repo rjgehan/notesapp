@@ -101,6 +101,11 @@ export function planMaintenance(
 
 export class IdbNoteCache implements NoteCacheStore {
   private db: Promise<IDBDatabase> | null = null;
+  /**
+   * What is stored, without the texts: read once per page, then kept up to date, so evictions never
+   * read every copy again on a save. Another tab's writes are not seen; eviction is best effort.
+   */
+  private meta: Promise<Map<string, CacheIndexEntry>> | null = null;
   private readonly factory: IDBFactory;
   private readonly name: string | undefined;
 
@@ -126,22 +131,41 @@ export class IdbNoteCache implements NoteCacheStore {
     return (await request(tx.objectStore(NOTES).get(path) as IDBRequest<CachedNote | undefined>)) ?? null;
   }
 
+  private loadMeta(): Promise<Map<string, CacheIndexEntry>> {
+    if (!this.meta) {
+      this.meta = (async () => {
+        const db = await this.open();
+        const tx = db.transaction(NOTES, 'readonly');
+        const all = await request(tx.objectStore(NOTES).getAll() as IDBRequest<CachedNote[]>);
+        return new Map(all.map((n) => [n.path, entryOf(n)]));
+      })();
+      this.meta.catch(() => {
+        this.meta = null;
+      });
+    }
+    return this.meta;
+  }
+
   async put(file: TextFile, touch: boolean, now = Date.now()): Promise<void> {
     if (!cacheable(file)) {
       await this.remove(file.path);
       return;
     }
+    const meta = await this.loadMeta();
     const db = await this.open();
     const tx = db.transaction(NOTES, 'readwrite');
     const store = tx.objectStore(NOTES);
     const existing = store.get(file.path) as IDBRequest<CachedNote | undefined>;
+    let written: CachedNote | null = null;
     existing.onsuccess = () => {
       const prev = existing.result;
       if (!prev && !touch) return;
-      store.put({ path: file.path, file, at: touch || !prev ? now : prev.at, storedAt: now } satisfies CachedNote);
+      written = { path: file.path, file, at: touch || !prev ? now : prev.at, storedAt: now };
+      store.put(written);
     };
     await done(tx);
-    if (touch) await this.prune();
+    if (written) meta.set(file.path, entryOf(written));
+    if (touch) await this.prune(meta);
   }
 
   async remove(path: string): Promise<void> {
@@ -149,6 +173,7 @@ export class IdbNoteCache implements NoteCacheStore {
     const tx = db.transaction(NOTES, 'readwrite');
     tx.objectStore(NOTES).delete(path);
     await done(tx);
+    (await this.loadMeta().catch(() => null))?.delete(path);
   }
 
   async rekey(from: string, to: string): Promise<void> {
@@ -156,29 +181,32 @@ export class IdbNoteCache implements NoteCacheStore {
     const tx = db.transaction(NOTES, 'readwrite');
     const store = tx.objectStore(NOTES);
     const get = store.get(from) as IDBRequest<CachedNote | undefined>;
+    let moved: CachedNote | null = null;
     get.onsuccess = () => {
       const note = get.result;
       if (!note) return;
+      moved = { ...note, path: to, file: { ...note.file, path: to } };
       store.delete(from);
-      store.put({ ...note, path: to, file: { ...note.file, path: to } } satisfies CachedNote);
+      store.put(moved);
     };
     await done(tx);
+    const meta = await this.loadMeta().catch(() => null);
+    meta?.delete(from);
+    if (moved) meta?.set(to, entryOf(moved));
   }
 
   async index(): Promise<CacheIndexEntry[]> {
-    const db = await this.open();
-    const tx = db.transaction(NOTES, 'readonly');
-    const all = await request(tx.objectStore(NOTES).getAll() as IDBRequest<CachedNote[]>);
-    return all.map((n) => ({ path: n.path, version: n.file.version, at: n.at, chars: n.file.content.length }));
+    return [...(await this.loadMeta()).values()];
   }
 
-  private async prune(): Promise<void> {
-    const drop = evictions(await this.index());
+  private async prune(meta: Map<string, CacheIndexEntry>): Promise<void> {
+    const drop = evictions([...meta.values()]);
     if (drop.length === 0) return;
     const db = await this.open();
     const tx = db.transaction(NOTES, 'readwrite');
     for (const path of drop) tx.objectStore(NOTES).delete(path);
     await done(tx);
+    for (const path of drop) meta.delete(path);
   }
 
   async saveTree(tree: TreeResponse, now = Date.now()): Promise<void> {
@@ -200,7 +228,12 @@ export class IdbNoteCache implements NoteCacheStore {
     tx.objectStore(NOTES).clear();
     tx.objectStore(META).clear();
     await done(tx);
+    this.meta = Promise.resolve(new Map());
   }
+}
+
+function entryOf(n: CachedNote): CacheIndexEntry {
+  return { path: n.path, version: n.file.version, at: n.at, chars: n.file.content.length };
 }
 
 /** IndexedDB missing (old private modes): nothing is kept, and reads find nothing. */
