@@ -1379,7 +1379,7 @@ mark.match {
 /* ---------- status page (/x/status, DESIGN §6.18.1) ---------- */
 
 .status-page {
-  max-width: calc(64rem + 2 * var(--content-gutter));
+  max-width: calc(832px + 2 * var(--content-gutter));
 }
 
 .status-refresh {
@@ -1440,7 +1440,7 @@ mark.match {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 338px), 1fr));
   gap: 16px;
   align-items: start;
 }
