@@ -10,7 +10,8 @@ import { registerBuiltins } from './extensions/builtins';
 import { installInputModality } from './features/focus';
 import { clearStaleOverlayEntry } from './features/overlayHistory';
 import { installHotkeys } from './features/hotkeys';
-import { installPreloadErrorHandler } from './state/buildCheck';
+import { registerServiceWorker, prepareReload } from './pwa/serviceWorker';
+import { installPreloadErrorHandler, setReloadPreparer } from './state/buildCheck';
 import { installOnlineListener } from './state/connection';
 import { applyTheme, installThemeListener } from './state/prefs';
 import { documents } from './sync/instance';
@@ -37,6 +38,9 @@ async function boot(): Promise<void> {
   installHotkeys();
   installInputModality();
   installPreloadErrorHandler();
+  // The installable app (DESIGN §6.21): a build reload first lets the new service worker take over.
+  setReloadPreparer(() => prepareReload());
+  registerServiceWorker();
   installOnlineListener();
   documents.installLifecycle(() => currentBreakpoint() === 'desktop');
   void startLiveSync();

@@ -10,6 +10,7 @@ import { runCommand } from '../../features/commands';
 import { useFocusRequests } from '../../features/focus';
 import { registeredPages, useExtensionsVersion } from '../../extensions';
 import { activePath } from '../../features/navigation';
+import { reloadForNewBuild } from '../../state/buildCheck';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
 import { LEFT_WIDTH, RIGHT_WIDTH, useUi } from '../../state/ui';
 import { MoveDialog } from '../explorer/MoveDialog';
@@ -40,7 +41,7 @@ function Banners() {
       {newBuild && (
         <div className="banner banner-info" role="status">
           A new version is available.
-          <button type="button" className="button button-small" onClick={() => window.location.reload()}>
+          <button type="button" className="button button-small" onClick={reloadForNewBuild}>
             <RefreshCw size={14} aria-hidden /> Reload
           </button>
         </div>

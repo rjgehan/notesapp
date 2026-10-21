@@ -30,6 +30,13 @@ export default defineConfig([
     },
   },
   {
+    // The service worker runs in its own global scope (DESIGN §6.21).
+    files: ['src/sw/sw.ts'],
+    languageOptions: {
+      globals: globals.serviceworker,
+    },
+  },
+  {
     files: ['public/**/*.js'],
     languageOptions: {
       globals: globals.browser,

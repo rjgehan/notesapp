@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { serviceWorker } from './vite-plugin-sw.ts'
 
 // The Dockerfile sets VITE_BUILD_SHA; everywhere else the build is "dev", which the
 // backend also reports outside the image, so the version check never fires (DESIGN §6.18).
@@ -12,7 +13,8 @@ const buildSha = process.env.VITE_BUILD_SHA || 'dev'
 const backendUrl = process.env.NOTES_DEV_BACKEND || 'http://127.0.0.1:8080'
 
 export default defineConfig({
-  plugins: [react()],
+  // The service worker is built after the app, from the files the build wrote (DESIGN §6.21).
+  plugins: [react(), serviceWorker({ entry: 'src/sw/sw.ts', buildSha })],
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(buildSha),
   },
