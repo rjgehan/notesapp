@@ -7,6 +7,7 @@
 import {
   emptySheet,
   isEmptyCell,
+  own,
   parseSheet,
   sameName,
   serializeSheet,
@@ -43,7 +44,7 @@ function merge3<T>(base: T | undefined, mine: T | undefined, theirs: T | undefin
 function mergeKeyed<T>(base: Record<string, T>, mine: Record<string, T>, theirs: Record<string, T>): Record<string, T> | Conflict {
   const out: Record<string, T> = {};
   for (const key of new Set([...Object.keys(base), ...Object.keys(mine), ...Object.keys(theirs)])) {
-    const merged = merge3(base[key], mine[key], theirs[key]);
+    const merged = merge3(own(base, key), own(mine, key), own(theirs, key));
     if (merged === CONFLICT) return CONFLICT;
     if (merged !== undefined) out[key] = merged;
   }
@@ -83,7 +84,7 @@ const sheetContent = (s: Sheet) => ({
 function mergeCells(base: Record<string, SheetCell>, mine: Record<string, SheetCell>, theirs: Record<string, SheetCell>): Record<string, SheetCell> | Conflict {
   const out: Record<string, SheetCell> = {};
   for (const ref of new Set([...Object.keys(base), ...Object.keys(mine), ...Object.keys(theirs)])) {
-    const [b, m, t] = [base[ref], mine[ref], theirs[ref]];
+    const [b, m, t] = [own(base, ref), own(mine, ref), own(theirs, ref)];
     const whole = merge3(b, m, t);
     if (whole !== CONFLICT) {
       if (whole !== undefined) out[ref] = whole;
@@ -242,5 +243,8 @@ export function mergeSheetText(base: string, mine: string, theirs: string): stri
   const merged = mergeSheetFiles(b.file, m.file, t.file);
   if (!merged) return null;
   const text = serializeSheet(merged);
-  return text === mText ? mine : text === tText ? theirs : text;
+  if (text === mText) return mine;
+  if (text === tText) return theirs;
+  // A defect in the merge must show the banner, never save a file that no device can open.
+  return parseSheet(text).ok ? text : null;
 }

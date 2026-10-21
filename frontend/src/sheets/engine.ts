@@ -25,6 +25,7 @@ import {
   emptySheet,
   isEmptyCell,
   newChartId,
+  own,
   newSheetId,
   nextSheetName,
   sameName,
@@ -132,7 +133,9 @@ function meta(s: Sheet): SheetMeta {
 
 function diffKeyed<T>(kind: 'col' | 'row' | 'chart', id: string, a: Record<string, T>, b: Record<string, T>, out: Patch): void {
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    if (!same(a[key], b[key])) out.push({ kind, id, key, before: a[key], after: b[key] } as Change);
+    const before = own(a, key);
+    const after = own(b, key);
+    if (!same(before, after)) out.push({ kind, id, key, before, after } as Change);
   }
 }
 
@@ -160,10 +163,14 @@ function diff(a: SheetFile, b: SheetFile): Patch {
   const ob = b.sheets.map((s) => s.id);
   if (oa.join('\n') !== ob.join('\n')) out.push({ kind: 'order', before: oa, after: ob });
   for (const name of new Set([...Object.keys(a.named), ...Object.keys(b.named)])) {
-    if (a.named[name] !== b.named[name]) out.push({ kind: 'named', name, before: a.named[name], after: b.named[name] });
+    const before = own(a.named, name);
+    const after = own(b.named, name);
+    if (before !== after) out.push({ kind: 'named', name, before, after });
   }
   for (const key of new Set([...Object.keys(a.extra ?? {}), ...Object.keys(b.extra ?? {})])) {
-    if (!same(a.extra?.[key], b.extra?.[key])) out.push({ kind: 'extra', key, before: a.extra?.[key], after: b.extra?.[key] });
+    const before = own(a.extra, key);
+    const after = own(b.extra, key);
+    if (!same(before, after)) out.push({ kind: 'extra', key, before, after });
   }
   return out;
 }
@@ -375,7 +382,8 @@ export class Workbook {
   setChart(sheetId: string, key: string, props: ChartProps | null): void {
     const sheet = this.requireSheet(sheetId);
     const after = props ? { ...props } : undefined;
-    if (!same(sheet.charts[key], after)) this.record([{ kind: 'chart', id: sheetId, key, before: sheet.charts[key], after }]);
+    const before = own(sheet.charts, key);
+    if (!same(before, after)) this.record([{ kind: 'chart', id: sheetId, key, before, after }]);
   }
 
   /** Adds a sheet after the last one and returns its id. */
@@ -432,13 +440,15 @@ export class Workbook {
   setColumn(id: string, key: string, props: ColumnProps | null): void {
     const sheet = this.requireSheet(id);
     const after = props && Object.keys(props).length > 0 ? props : undefined;
-    if (!same(sheet.cols[key], after)) this.record([{ kind: 'col', id, key, before: sheet.cols[key], after }]);
+    const before = own(sheet.cols, key);
+    if (!same(before, after)) this.record([{ kind: 'col', id, key, before, after }]);
   }
 
   setRow(id: string, key: string, props: RowProps | null): void {
     const sheet = this.requireSheet(id);
     const after = props && Object.keys(props).length > 0 ? props : undefined;
-    if (!same(sheet.rows[key], after)) this.record([{ kind: 'row', id, key, before: sheet.rows[key], after }]);
+    const before = own(sheet.rows, key);
+    if (!same(before, after)) this.record([{ kind: 'row', id, key, before, after }]);
   }
 
   /** Defines, changes (`expression` without the leading `=`) or removes (null) a named range. */
@@ -454,7 +464,8 @@ export class Workbook {
     }
     const key = existing ?? name;
     const after = expression ?? undefined;
-    if (this.model.named[key] !== after) this.record([{ kind: 'named', name: key, before: this.model.named[key], after }]);
+    const before = own(this.model.named, key);
+    if (before !== after) this.record([{ kind: 'named', name: key, before, after }]);
   }
 
   /** Runs several edits as one undo step, with one change notification. */
@@ -719,7 +730,7 @@ export class Workbook {
     const hf = this.engine;
     const lower = name.toLowerCase();
     const holder = this.engineNames.get(lower);
-    const expression = this.model.named[name];
+    const expression = own(this.model.named, name);
     if (expression === undefined) {
       if (holder === name) {
         hf.removeNamedExpression(name);

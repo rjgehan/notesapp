@@ -447,3 +447,21 @@ describe('number formats and charts (6c)', () => {
     expect(first).toMatch(/^c[0-9a-z]{12}$/);
   });
 });
+
+describe('keys that are also Object.prototype members', () => {
+  it('reads charts, named ranges and unknown keys called toString or constructor', () => {
+    const text = JSON.stringify({
+      type: 'notesapp-sheet',
+      version: 1,
+      engine: SHEET_ENGINE,
+      sheets: [{ id: 's1', name: 'S', cells: {}, charts: { toString: { type: 'bar', range: 'A1:B2' } }, valueOf: 3 }],
+      named: { constructor: 'S!$A$1' },
+    });
+    const result = parseSheet(text);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.file.sheets[0].charts).toEqual({ toString: { type: 'bar', range: 'A1:B2' } });
+    expect(result.file.named).toEqual({ constructor: 'S!$A$1' });
+    expect(parseSheet(serializeSheet(result.file))).toEqual(result);
+  });
+});

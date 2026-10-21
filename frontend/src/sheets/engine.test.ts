@@ -588,3 +588,44 @@ describe('number formats and charts (6c)', () => {
     expect(seen[0].layout).toBe(true);
   });
 });
+
+describe('names that are also Object.prototype members', () => {
+  const parses = (wb: Workbook) => {
+    const result = parseSheet(wb.serialize());
+    expect(result.ok).toBe(true);
+    return result.ok ? result.file : null;
+  };
+
+  it('undoes the definition of a named range called toString or constructor', () => {
+    for (const name of ['toString', 'constructor', 'valueOf', 'hasOwnProperty']) {
+      const wb = workbook([{ name: 'Sheet1', cells: { A1: { v: 1 } } }]);
+      wb.setNamed(name, 'Sheet1!$A$1');
+      expect(wb.file.named[name]).toBe('Sheet1!$A$1');
+      wb.undo();
+      expect(Object.hasOwn(wb.file.named, name)).toBe(false);
+      expect(parses(wb)?.named).toEqual({});
+      wb.redo();
+      expect(parses(wb)?.named).toEqual({ [name]: 'Sheet1!$A$1' });
+    }
+  });
+
+  it('applies another device’s removal of such a name, and of such a chart or unknown key', () => {
+    const wb = workbook([{ name: 'Sheet1', cells: { A1: { v: 1 } } }], { constructor: 'Sheet1!$A$1' });
+    const base = file(JSON.parse(wb.serialize()));
+    base.sheets[0].charts = { toString: { type: 'bar', range: 'A1:A1' } };
+    base.extra = { valueOf: 1 };
+    wb.replace(base, { undoable: false });
+    const next = file(JSON.parse(wb.serialize()));
+    next.named = {};
+    next.sheets[0].charts = {};
+    delete next.extra;
+    wb.replace(next, { undoable: false });
+    const saved = parses(wb);
+    expect(saved?.named).toEqual({});
+    expect(saved?.sheets[0].charts).toEqual({});
+    expect(saved?.extra).toBeUndefined();
+    // And the engine no longer holds the name.
+    expect(() => wb.setNamed('constructor', '2')).not.toThrow();
+    expect(parses(wb)?.named).toEqual({ constructor: '2' });
+  });
+});

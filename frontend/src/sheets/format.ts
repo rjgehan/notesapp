@@ -355,7 +355,7 @@ function parseKeyed<T>(
   for (const [key, value] of Object.entries(raw)) {
     const k = normalize(key);
     if (k === null) throw new Refusal(`${what} has the key ${quote(key)}, which is not a valid reference.`);
-    if (k in out) throw new Refusal(`${what} has both ${quote(key)} and another key for ${k}.`);
+    if (Object.hasOwn(out, k)) throw new Refusal(`${what} has both ${quote(key)} and another key for ${k}.`);
     if (k !== key) repairs.push(`${what}: ${quote(key)} is written as ${quote(k)}.`);
     const parsed = parseValue(value, `${what} ${k}`);
     if (parsed !== null) out[k] = parsed;
@@ -650,6 +650,15 @@ export function serializeSheet(file: SheetFile): string {
 }
 
 // ---------- lookups ----------
+
+/**
+ * `map[key]` for the map's own keys only. Named ranges, charts and unknown keys are named by users
+ * and files, so a key such as `constructor` or `toString` must read as absent when it is not there,
+ * not as Object.prototype's function.
+ */
+export function own<T>(map: Readonly<Record<string, T>> | undefined, key: string): T | undefined {
+  return map !== undefined && Object.hasOwn(map, key) ? map[key] : undefined;
+}
 
 export function sheetById(file: SheetFile, id: string): Sheet | undefined {
   return file.sheets.find((s) => s.id === id);

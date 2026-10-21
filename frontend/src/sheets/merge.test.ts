@@ -337,3 +337,31 @@ describe('mergeSheetText with formats and charts (6c)', () => {
     expect(mergeSheetText(chartBase, removed, text((f) => (budget(f).cells.A9 = { v: 'x' })))).toContain('"A9"');
   });
 });
+
+describe('keys that are also Object.prototype members', () => {
+  it('merges the removal of a named range called constructor into a valid file', () => {
+    const named = (n: Record<string, string>) => (f: SheetFile) => (f.named = n);
+    const text = (...edits: Array<(f: SheetFile) => void>) => edited((f) => edits.forEach((e) => e(f)));
+    const b = text(named({ constructor: 'Budget!$B$2' }));
+    const mine = text(named({}));
+    const theirs = text(named({ constructor: 'Budget!$B$2' }), (f) => (budget(f).cells.A4 = { v: 'Gas' }));
+    const merged = mergeSheetText(b, mine, theirs);
+    expect(merged).not.toBeNull();
+    const result = parseSheet(merged!);
+    expect(result.ok && result.file.named).toEqual({});
+    expect(result.ok && budget(result.file).cells.A4).toEqual({ v: 'Gas' });
+  });
+
+  it('merges charts and unknown keys named toString or valueOf', () => {
+    const b = edited((f) => (budget(f).charts = { toString: { type: 'bar', range: 'A1:B3' } }));
+    const mine = edited((f) => (f.extra = { valueOf: 1 }));
+    const theirs = edited((f) => (budget(f).charts = { toString: { type: 'bar', range: 'A1:B3' } }));
+    const merged = mergeSheetText(b, mine, theirs);
+    const result = parseSheet(merged!);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(budget(result.file).charts).toEqual({});
+      expect(result.file.extra).toEqual({ valueOf: 1 });
+    }
+  });
+});
