@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides) |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -108,7 +108,7 @@ version = lowercase_hex( SHA1( "blob " + decimal(byteLength) + "\0" + bytes ) )
 | `Origin` | Sent automatically by browsers | On mutating requests, if present, its host:port must equal the `Host` header, compared case-insensitively. `Origin: null` is rejected. Failure gets `403 cross-origin`. |
 | `Sec-Fetch-Site` | Sent automatically by browsers | On mutating requests, if present, it must be `same-origin` or `none`. Anything else gets `403 cross-origin`. |
 | `Accept` | Optional | `application/json`, or `text/event-stream` for §16 |
-| `Idempotency-Key` | Optional on `POST /api/files`, `PUT /api/files/raw` and `POST /api/attachments` | Any string of 8 to 64 characters from `[A-Za-z0-9-]`, unique per logical operation (for example `crypto.randomUUID()` generated once and reused for every retry). The server keeps a per-boot cache of 1,000 keys for 1 hour; a request whose key, method and path match an earlier one gets the **stored status and body** of the first result, and nothing is done again. Without it, a retried "New note" whose response was lost would create `Untitled 1.md`. |
+| `Idempotency-Key` | Optional on `POST /api/files`, `PUT /api/files/raw`, `POST /api/attachments`, `POST /api/capture` and `POST /api/capture/file` | Any string of 8 to 64 characters from `[A-Za-z0-9-]`, unique per logical operation (for example `crypto.randomUUID()` generated once and reused for every retry). The server keeps a per-boot cache of 1,000 keys for 1 hour; a request whose key, method and path match an earlier one gets the **stored status and body** of the first result, and nothing is done again. Without it, a retried "New note" whose response was lost would create `Untitled 1.md`. |
 | `Host` | Sent by every client | Must match the server's allowlist (`notes.<tailnet>.ts.net` in production). Otherwise `421 unknown-host`. |
 | `Tailscale-User-*` | Set by `tailscale serve` in production | Identity (§6.1). A request without an allowed `Tailscale-User-Login` gets `403 identity-not-allowed` (DESIGN §5.13). Clients never send them. |
 
@@ -533,6 +533,66 @@ Events to other clients: `file.changed` (or `folder.created` and `file.created` 
 | `400`, `403`, `404 not-found`, `409 type-mismatch` |
 
 Events, in this order: `file.deleted {trashed: true, trashId}`, `trash.changed`, `history.committed` (only if a commit was made).
+
+### 8.5 `POST /api/capture`: quick capture
+
+*(ROADMAP item 7, added 2026-10-21.)* Appends one entry to `Inbox.md` at the vault root or to today's daily note, creating the note when it does not exist. Used by the app's capture box and share target (DESIGN §6.22) and by an iOS Shortcut.
+
+Request `CaptureRequest`:
+
+```json
+{ "text": "Call the plumber", "target": "inbox", "url": null, "title": null, "date": "2026-10-16", "time": "14:03", "tz": "America/New_York" }
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `text` | | The thought. May span lines. |
+| `target` | `"inbox"` | `"inbox"` (`Inbox.md`) or `"daily"` (today's daily note, path from `settings.dailyNotes` as in §15.2). |
+| `url`, `title` | | A shared link and its label. An `http`/`https` URL becomes `[title](url)` (or `<url>` without a title) after the text, unless the text already contains it; anything else is appended as plain text. At most 4,096 and 1,000 characters. |
+| `date`, `time` | | **"Today" is decided on the device** (DESIGN risk 20): its local date (`YYYY-MM-DD`) and time (`HH:mm`). |
+| `tz` | | The device's IANA time zone, for whatever `date` and `time` leave out. Without either, the server's own zone (`TZ`, UTC by default) is the fallback. |
+
+At least one of `text` and `url` is required.
+
+**The entry** is one list item, `- <stamp> <text>`, with any further lines indented two spaces under it. The stamp is `templates.dateFormat` + space + `templates.timeFormat` in the inbox (`2026-10-16 14:03`) and `templates.timeFormat` alone in a daily note (`14:03`).
+
+- The entry starts on a new line and ends with one. An existing file keeps its bytes exactly (BOM, invalid UTF-8); the entry follows its line endings (CRLF when every line break in it is CRLF).
+- An existing note is found ignoring case (`daily/2026-10-16.MD` is appended to, not shadowed).
+- A new daily note starts with its rendered template (`dailyNotes.template`, placeholders as in §15.4, with `title` the note's name and "now" the capture's date and time); a missing template means an empty start. Its missing parent folders are created.
+- Nothing is replaced, so a capture never conflicts. Other clients get `file.changed` (or `folder.created` and `file.created`); an open note with unsaved edits there enters the ordinary conflict flow (§4 step 5).
+- Send an `Idempotency-Key` (§2): a retried capture whose response was lost is not appended twice.
+- Mutations need `X-Client-Id` (§2). A Shortcut sends a fixed id of its own, for example `ios-shortcut-capture`; it sends no `Origin`, so the Origin checks pass.
+
+`201 CaptureResult` when the capture created the note, `200` when it appended to it:
+
+```json
+{
+  "file": { "path": "Inbox.md", "name": "Inbox.md", "basename": "Inbox", "extension": "md", "kind": "note",
+            "size": 74, "mtime": "2026-10-16T18:03:00.120Z", "version": "4f…", "aliases": [] },
+  "created": false,
+  "createdFolders": [],
+  "target": "inbox",
+  "attachment": null
+}
+```
+
+| Errors |
+|---|
+| `400 bad-request` (no text or URL; `date`, `time` or `tz` invalid; `target` unknown; with `errors[]`) |
+| `400 invalid-path` / `invalid-name` (the daily-note format produces an invalid name) |
+| `409 already-exists` / `type-mismatch` (a folder at the note's path) |
+| `413 too-large` (the note would exceed its size limit), `415 not-text` |
+
+### 8.6 `POST /api/capture/file?name={fileName}[&text=][&target=][&date=][&time=][&tz=]`: capture a file
+
+The body is the raw bytes (like §9.3). The file is stored as an attachment of the target note (folder from `settings.files.attachmentLocation`, name sanitized and de-duplicated as in §9.3), then one entry is appended with `text` as the caption and the attachment's embed on the next line:
+
+```
+- 16:20 Whiteboard
+  ![[IMG 0001.jpg]]
+```
+
+The query parameters mean what the §8.5 fields mean. The response is a `CaptureResult` whose `attachment` is the stored file. Send an `Idempotency-Key`. Errors: those of §8.5 and §9.3 (`413`, `507`). Events: `folder.created` as needed, `file.created` for the attachment, then the note's event.
 
 ---
 
@@ -1594,6 +1654,25 @@ export interface AttachmentResult {
   markdown: string;
 }
 
+// ---------- quick capture (§8.5, §8.6) ----------
+export type CaptureTarget = 'inbox' | 'daily';
+export interface CaptureRequest {
+  text?: string | null;
+  target?: CaptureTarget;         // default 'inbox'
+  url?: string | null;            // a shared link (http/https becomes a Markdown link)
+  title?: string | null;          // the link's label
+  date?: string;                  // YYYY-MM-DD, the device's day
+  time?: string;                  // HH:mm, the device's time
+  tz?: string;                    // IANA zone, used for what date/time leave out
+}
+export interface CaptureResult {
+  file: FileEntry;                // the note the entry was appended to
+  created: boolean;               // the capture created the note (201)
+  createdFolders: VaultPath[];
+  target: CaptureTarget;
+  attachment: FileEntry | null;   // POST /api/capture/file only
+}
+
 // ---------- folders / move (§10) ----------
 export interface CreateFolderRequest { path: VaultPath }
 export interface FolderResult { folder: FolderEntry; createdFolders: VaultPath[] }
@@ -1787,6 +1866,8 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | POST | `/api/files` | `CreateFileRequest` | 201 `WriteResult` | 8.2 |
 | PUT | `/api/files?path=` | `SaveFileRequest` | 200 `WriteResult` (201 when `baseVersion` was null) | 8.3 |
 | DELETE | `/api/files?path=` | | 200 `TrashEntry` | 8.4 |
+| POST | `/api/capture` | `CaptureRequest` | 201/200 `CaptureResult` | 8.5 |
+| POST | `/api/capture/file?name=&text=&target=&date=&time=&tz=` | raw bytes | 201/200 `CaptureResult` | 8.6 |
 | GET | `/api/files/raw?path=&v=&download=` | | 200/206/304 bytes | 9.1 |
 | PUT | `/api/files/raw?path=&onConflict=` | raw bytes | 201/200 `WriteResult` | 9.2 |
 | POST | `/api/attachments?name=&source=` | raw bytes | 201 `AttachmentResult` | 9.3 |
@@ -1812,7 +1893,9 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
-**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**` and `/x/**` (pages registered by extensions). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
+**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions) and `/capture` (quick capture, DESIGN §6.22). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
+
+**Installable app** (DESIGN §6.21): `/sw.js` (the service worker) is served with `Cache-Control: no-cache` and `Service-Worker-Allowed: /`; `/manifest.webmanifest` as `application/manifest+json` with `no-cache`. `POST /capture/share` is the manifest's share target, answered by the service worker; one that reaches the server (no worker) gets `303 See Other` to `/capture?share=lost` and nothing is stored.
 
 ---
 
@@ -1830,6 +1913,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `SettingsResponse`, `SettingsUpdateRequest` | Same | |
 | `FileEntry`, `FolderEntry`, `TreeResponse` | Same | |
 | `TextFile`, `CreateFileRequest`, `SaveFileRequest`, `WriteResult`, `AttachmentResult` | Same | `SaveFileRequest.baseVersion` is a `@Nullable String` (missing and `null` both mean "create"). `flushHistory` is `@Nullable Boolean` (default false). |
+| `CaptureRequest`, `CaptureResult`, `CaptureTarget` | Same | Every `CaptureRequest` component is `@Nullable`; `CaptureTarget` is an enum (`inbox`, `daily`); `CaptureResult.attachment` is a `@Nullable FileEntry`. |
 | `CreateFolderRequest`, `FolderResult`, `MoveRequest`, `MovedFile`, `LinkUpdate`, `FailedUpdate`, `MoveResult` | Same | `MoveRequest.updateLinks` and `dryRun` are `@Nullable Boolean`. `FailedUpdate.reason` is the enum `FailedReason` |
 | `HeadingInfo`, `OutgoingLink`, `NoteMeta`, `Mention`, `BacklinkGroup`, `BacklinksResponse`, `ResolveRequest`, `ResolvedLink`, `ResolveResponse` | Same | `NoteMeta.frontmatter` is `@Nullable Map<String, Object>` |
 | `SearchMatch`, `SearchHit`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | |
