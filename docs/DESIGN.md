@@ -1025,7 +1025,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | | `readableLineLength` | `true` |
 | | `strictLineBreaks` | `false` (as in Obsidian, a single newline renders as a line break in reading view) |
 
-**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on) and `loadRemoteImages` (default on). They are edited under Settings, "This device".
+**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on) and `loadRemoteImages` (default on). They are edited under Settings, "This device". Other per-device state also stays in `localStorage`: command keys (`notesapp:hotkeys`, Settings, "Hotkeys", §6.25), recent files (`notesapp:recentFiles`) and collapsed bookmark groups (§6.23).
 
 ### 5.13 Identity
 
@@ -1384,7 +1384,8 @@ frontend/src/
 │   ├── eol.ts                CRLF detection, LF ⇄ CRLF conversion, server-offset → document-offset mapping
 │   ├── daily.ts, templates.ts, dates.ts (dayjs + plugins)
 │   ├── commands.ts           command registry + built-in commands (§6.13)
-│   ├── hotkeys.ts            global key handler (Mod = Cmd on Apple, Ctrl elsewhere)
+│   ├── hotkeys.ts            global key handler (Mod = Cmd on Apple, Ctrl elsewhere), over each command's key on this device
+│   ├── hotkeyPrefs.ts        command keys chosen on this device (localStorage), conflicts, reserved keys (§6.25)
 │   ├── fuzzy.ts              fuzzysort wrappers
 │   ├── recent.ts             recently opened files, per device (localStorage), with times and a subscription (§6.23)
 │   ├── bookmarks.ts          bookmark item helpers (Obsidian format) and BookmarkWriter (§6.23)
@@ -1865,13 +1866,13 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 | `theme.toggle` | Toggle dark/light theme | |
 | `app.resync` | Reload vault from server | |
 
-`Mod` is `Cmd` on Apple platforms and `Ctrl` elsewhere. Browser-reserved combinations (`Mod-N`, `Mod-T`, `Mod-W`, `Mod-Shift-N`) cannot be intercepted, which is why "new note" is `Mod-Alt-N`. Hotkey customization is roadmap item 29.
+`Mod` is `Cmd` on Apple platforms and `Ctrl` elsewhere. Browser-reserved combinations (`Mod-N`, `Mod-T`, `Mod-W`, `Mod-Shift-N`) cannot be intercepted, which is why "new note" is `Mod-Alt-N`. Every key can be changed, removed or given to a command without one, per device, under Settings, "Hotkeys" (§6.25).
 
 ### 6.14 Keyboard shortcuts (complete v1 set)
 
 | Context | Keys |
 |---|---|
-| Global | The command hotkeys above. `Esc` closes the topmost overlay or the drawer. `Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,` and `Mod-Alt-←/→` work even while the editor has focus. |
+| Global | The command hotkeys above. `Esc` closes the topmost overlay or the drawer. `Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,` and `Mod-Alt-←/→` work even while the editor has focus. So does every key chosen under Settings, "Hotkeys" (§6.25). |
 | Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`. **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. |
 | Explorer (focused) | `↑/↓` move; `←/→` collapse and expand; `Enter` opens; `F2` renames; `Delete` deletes (with confirmation); `Mod-Alt-N` creates a new note in the focused folder |
 | Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Esc` |
@@ -2024,6 +2025,16 @@ Any other error shows the problem's `detail`. 5xx problem errors show a toast wi
 - **Offer** (`views/markdown/useHeadingRenameOffers.ts`, edit mode only). When the text has rested for 1.5 s, the outline (`headingsFromState`) is compared with the outline the last decision was made on. `detectHeadingRename` (`features/headingRename.ts`) reports a rename only when both have the same headings at the same levels and exactly one heading's text changed beyond case and spacing; anything else (a heading added or removed, several edited, or any change that came from the server, which `DocumentSession.getRemoteChangeCount()` counts) just becomes the new baseline. For a rename the note is saved and a **dry run** asks what would change; when links or heading bookmarks point at the old text, a toast (20 s) reads "Heading renamed to “New”. Update 3 links in 2 notes that pointed at “Old”?" with **Update links**. Typing on in the heading replaces the offer with a new one; a rename nothing points at is accepted silently.
 - **On purpose:** the palette command **Rename heading and update links to it…** (`editor.renameHeading`) asks for the new text of the heading at or above the cursor, edits it in place (keeping the `#` marks and any closing `#`s, or the setext underline) as one undoable change, and updates the links.
 - **Applying.** The note is flushed, then `POST /api/notes/rename-heading`; the result is applied like a move's `linkUpdates` (`applyHeadingRenameResult`: tree versions, `['file']` queries, open sessions refetch quietly), heading bookmarks arrive through `bookmarks.changed`, and a toast sums it up ("Updated 3 links in 2 notes and 1 bookmark to “New”"; notes that could not be updated are listed).
+
+### 6.25 Customizable hotkeys (ROADMAP item 29)
+
+Every command's key can be changed per device: a laptop and a desktop keyboard differ, and the phone has none.
+
+- **Storage** (`features/hotkeyPrefs.ts`): `localStorage notesapp:hotkeys`, a map from command id to a key spec (`Mod-Shift-b`) or `null` (no key). A command without an entry keeps its default: its `hotkey`, or the `editorHotkey` the editor binds. Binding a command to its default removes the entry. Other tabs follow through the `storage` event; `useHotkeyOverrides()` re-renders the palette, the ribbon tooltips and the note header's tooltips.
+- **Global handler** (`features/hotkeys.ts`). A key runs the available command whose key on this device it is. **Always-global** commands (switcher, palette, search, settings, back, forward; by id, so they stay global on a new key) and **every key chosen on this device** run in the capture phase, before the focused widget, so they work in the editor and in text fields too (not in modal dialogs, except the always-global ones). Default keys of other commands run in the bubble phase outside text fields, as before. A command whose default key the editor binds (`editorHotkey`: bold, italic, link, checkbox, follow link, find) is left to the editor until this device gives it another key.
+- **Editor keys step aside.** The editor's keymap wraps each default (`Mod-B`, `Mod-I`, `Mod-K`, `Mod-L`, `Mod-E`, `Mod-S`, `Mod-Enter`, `Mod-F`, `Mod-Alt-←/→`) in `ifDefault(commandId, …)`, which does nothing once the command was given another key, so the old key really is free.
+- **Settings, "Hotkeys"** (`components/pages/HotkeysSection.tsx`, route `/settings/hotkeys`): every command, sorted by name, with its key (a customized one is outlined, with its default named), a filter by name or key, and per row **Change** (the next key combination is recorded; `Esc` cancels; the global handler ignores keys aimed at the recorder), **Remove** and **Reset**, plus **Reset all**. A key needs `Mod`, `Alt` or a function key. A key another command uses shows "Ctrl+Alt+1 is used by “…”" with **Use it here instead** (that command loses its key) and **Cancel**. Keys the browser keeps (`Mod-N`, `Mod-T`, `Mod-W`, `Mod-Shift-N/T/W`, `Mod-Q`, `Mod-R`) and editing keys (`Mod-Z`, `Mod-Y`, `Mod-Shift-Z`, `Mod-C`, `Mod-V`, `Mod-X`, `Mod-A`) are refused with the reason.
+- The editor's own built-in keys (undo, indent, completion, search panel navigation) are not commands and keep their keys.
 
 ---
 
@@ -2513,6 +2524,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
 - Bookmarks and recent files: the item helpers (labels, insert, move into and out of groups, shift, find ignoring case and Unicode form, the server's re-keying for the mock) and `BookmarkWriter` (optimistic view, one request in flight with later edits batched, re-applying edits after a `409`, dropping refused edits); `features/recent.ts` (times, the 50 cap, the move from the first format, renames, deletes, subscribers); `BookmarksPanel` (kinds, missing targets and their Remove toast, opening files, headings and searches, collapsing groups, the menu's Remove and Move to group, a dropped explorer row) and `RecentPanel`; `applyEvents` for `bookmarks.changed`; the mock's bookmarks.
 - Heading renames: `detectHeadingRename` (one changed heading, ignoring case and spacing; not an added, removed or re-levelled heading), the summary text, saving before the update and applying its result, the dry-run preview, editing a heading at the cursor (ATX with closing `#`s, setext) and the Rename heading prompt; `useHeadingRenameOffers` with fake timers (an offer after a typed rename, the update on request, a silent accept when nothing links, no offer for a server change or in reading mode); the mock's rewrite.
+- Hotkeys: `hotkeyPrefs` (spec normalization, defaults, customizing, removing and resetting keys, invalid stored data, conflicts, reserved keys, subscribers); the global handler with customized keys (in the editor too, the old key inert, an editor-bound command global only once customized, the recorder left alone); an editor default key stepping aside once rebound; `HotkeysSection` (listing and filtering, recording, taking a key over from another command, refusing a reserved key, Escape, removing and resetting).
 
 ### 8.3 Browser smoke checklist
 
@@ -2544,6 +2556,7 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 24. Open the app from a tagged device or a non-allowed login: it gets 403. `docker compose config` shows both volumes as `external: true`.
 25. Bookmarks: star a note in its header (rgpc) and a heading in the Outline; on the iPhone they appear in the drawer's Bookmarks tab within a second, and ⋯ › Bookmark stars the open note. Rename the starred note on rgpc: both devices show the new name. Move it to the trash: the bookmark is dimmed; restore it: it lights up. Recent files lists the notes opened on that device only, with times.
 26. Heading links: in a note that others link to by heading, change the heading's text: after a moment a toast offers to update the links; **Update links** rewrites them (and a heading bookmark), and the referencing notes open at the renamed heading. **Rename heading…** in the palette does the same in one step.
+27. Hotkeys: under Settings, Hotkeys, give "Bookmark current file" a key (rgpc), then press it in a note, also while typing in it; give a command a key another command uses and take it over; reset all. The phone keeps its own (default) keys.
 
 ---
 

@@ -799,6 +799,8 @@ Plugs into the view registry. `.canvas` is already a text kind.
 
 ### 29. Customizable hotkeys and per-device preferences
 
+**Status:** built (with items 12 and 21, on `feat/bookmarks`): DESIGN §6.25. Settings has a **Hotkeys** section listing every command with its key on this device: change (record the next key), remove, reset, reset all, and a filter. A key another command uses can be taken over (that command loses it); keys the browser keeps (`Ctrl+T`, `Ctrl+W`, …) and editing keys (`Ctrl+Z`, `Ctrl+C`, …) are refused. Chosen keys work everywhere, in the editor too, and an editor default (`Ctrl+B`, `Ctrl+S`, …) steps aside once its command has another key. The palette, ribbon and header tooltips show each device's keys. The other per-device preferences (theme, spell check, autocorrect, remote images) were already kept per device; recent files and collapsed bookmark groups now are too (item 12).
+
 **One line:** rebind any command, with conflict detection. Bindings are stored per device.
 
 | Value | Effort | Depends on |
