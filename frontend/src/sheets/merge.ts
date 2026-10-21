@@ -16,6 +16,7 @@ import {
   type SheetCell,
   type SheetFile,
 } from './format';
+import { renameSheetsInFormula } from './refs';
 
 const CONFLICT = Symbol('conflict');
 type Conflict = typeof CONFLICT;
@@ -188,8 +189,43 @@ function staleCache(result: SheetFile, mine: SheetFile, theirs: SheetFile): void
   result.engine = '';
 }
 
-/** The 3-way merge of parsed files, or null when both sides changed the same thing differently. */
+/** Sheets that `side` renamed and `other` did not, as old name → new name. */
+function renamesBy(side: SheetFile, other: SheetFile, base: SheetFile): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const b of base.sheets) {
+    const s = side.sheets.find((x) => x.id === b.id);
+    const o = other.sheets.find((x) => x.id === b.id);
+    if (s && o && !sameName(s.name, b.name) && sameName(o.name, b.name)) out.push([b.name, s.name]);
+  }
+  return out;
+}
+
+/** `file` with the sheet references in its formulas and named ranges renamed. */
+function followRenames(file: SheetFile, renames: Array<[string, string]>): SheetFile {
+  if (renames.length === 0) return file;
+  return {
+    ...file,
+    sheets: file.sheets.map((s) => ({
+      ...s,
+      cells: Object.fromEntries(Object.entries(s.cells).map(([ref, c]) => [ref, c.f !== undefined ? { ...c, f: renameSheetsInFormula(c.f, renames) } : c])),
+    })),
+    named: Object.fromEntries(Object.entries(file.named).map(([n, e]) => [n, renameSheetsInFormula('=' + e, renames).slice(1)])),
+  };
+}
+
+/**
+ * The 3-way merge of parsed files, or null when both sides changed the same thing differently.
+ * A sheet renamed on one side is renamed in the other side's formulas first (and in the base, for
+ * comparing): a formula typed elsewhere against the old name then follows the sheet, as it would
+ * have on the device that renamed it, instead of showing #REF!.
+ */
 export function mergeSheetFiles(base: SheetFile, mine: SheetFile, theirs: SheetFile): SheetFile | null {
+  const mineRenames = renamesBy(mine, theirs, base);
+  const theirsRenames = renamesBy(theirs, mine, base);
+  return mergeFiles(followRenames(base, [...mineRenames, ...theirsRenames]), followRenames(mine, theirsRenames), followRenames(theirs, mineRenames));
+}
+
+function mergeFiles(base: SheetFile, mine: SheetFile, theirs: SheetFile): SheetFile | null {
   const byId = (file: SheetFile) => new Map(file.sheets.map((s) => [s.id, s]));
   const [b, m, t] = [base, mine, theirs].map(byId);
   const merged = new Map<string, Sheet>();

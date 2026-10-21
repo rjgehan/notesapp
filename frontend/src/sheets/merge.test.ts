@@ -365,3 +365,48 @@ describe('keys that are also Object.prototype members', () => {
     }
   });
 });
+
+describe('a sheet renamed on one device', () => {
+  const notes = (f: SheetFile) => f.sheets.find((s) => s.id === 's2')!;
+  /** What the renaming device's workbook does: the sheet and every reference to it follow. */
+  const rename = (f: SheetFile) => {
+    budget(f).name = 'Costs';
+    notes(f).cells.B1 = { f: '=Costs!B2' };
+    f.named.Total = 'Costs!$B$10';
+  };
+  const withRef = (f: SheetFile) => (notes(f).cells.B1 = { f: '=Budget!B2' });
+
+  it('renames the other device’s new formulas and named ranges too, instead of leaving #REF!', () => {
+    const text = (...edits: Array<(f: SheetFile) => void>) => edited((f) => edits.forEach((e) => e(f)));
+    const b = text(withRef);
+    const mine = text(withRef, rename);
+    const theirs = text(withRef, (f) => {
+      notes(f).cells.B2 = { f: '=Budget!B3*2' };
+      notes(f).cells.B3 = { f: "=SUM('Budget'!B2:B3)" };
+      f.named.Rent = 'Budget!$B$2';
+    });
+    for (const [x, y] of [
+      [mine, theirs],
+      [theirs, mine],
+    ]) {
+      const merged = parseSheet(mergeSheetText(b, x, y)!);
+      expect(merged.ok).toBe(true);
+      if (!merged.ok) return;
+      expect(budget(merged.file).name).toBe('Costs');
+      expect(notes(merged.file).cells.B1.f).toBe('=Costs!B2');
+      expect(notes(merged.file).cells.B2.f).toBe('=Costs!B3*2');
+      expect(notes(merged.file).cells.B3.f).toBe('=SUM(Costs!B2:B3)');
+      expect(merged.file.named).toEqual({ Rent: 'Costs!$B$2', Total: 'Costs!$B$10' });
+      expect(merged.file.engine).toBe('');
+    }
+  });
+
+  it('takes the other device’s change to a formula the rename rewrote', () => {
+    const text = (...edits: Array<(f: SheetFile) => void>) => edited((f) => edits.forEach((e) => e(f)));
+    const b = text(withRef);
+    const mine = text(withRef, rename);
+    const theirs = text(withRef, (f) => (notes(f).cells.B1 = { f: '=Budget!B2*2' }));
+    const merged = parseSheet(mergeSheetText(b, mine, theirs)!);
+    expect(merged.ok && notes(merged.file).cells.B1.f).toBe('=Costs!B2*2');
+  });
+});
