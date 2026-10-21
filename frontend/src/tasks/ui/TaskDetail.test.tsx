@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '../../api/client';
+import { ApiError, TransientError } from '../../api/client';
 import { queryClient } from '../../api/queryClient';
 import type { Problem, Task, TaskWriteResult, TreeResponse } from '../../api/types';
 import { taskApi } from '../api';
@@ -9,6 +9,7 @@ import { makeList, makeTask } from '../testing';
 import { renderWithApp } from './renderWithApp';
 import { useTaskUi } from './state';
 import TaskDetail from './TaskDetail';
+import { resetKeptDrafts } from './textField';
 
 function result(task: Task): TaskWriteResult {
   return { task, changed: [], deleted: [], rolledForward: false, files: [], createdFolders: [], lists: [] };
@@ -24,7 +25,10 @@ beforeEach(() => {
   useTaskUi.setState({ quickAdd: null, detailId: 'A' });
 });
 
-afterEach(() => queryClient.clear());
+afterEach(() => {
+  queryClient.clear();
+  resetKeptDrafts();
+});
 
 const update = () => vi.spyOn(taskApi, 'update').mockImplementation(async (id, req) => result({ ...taskStore.task(id)!, ...req.changes } as Task));
 
@@ -125,6 +129,55 @@ describe('task detail sheet', () => {
     fireEvent.change(title, { target: { value: 'Pay the rent' } });
     view.unmount();
     await waitFor(() => expect(patch).toHaveBeenCalledWith('A', { changes: { title: 'Pay the rent' }, base: { title: 'Pay rent' } }, expect.any(String)));
+  });
+
+  it('keeps notes whose save failed in the field, and sends them again on blur', async () => {
+    taskStore.upsert([makeTask({ id: 'A', title: 'Plan trip', notes: 'old notes' })]);
+    const patch = vi
+      .spyOn(taskApi, 'update')
+      .mockRejectedValueOnce(new TransientError('Failed to fetch'))
+      .mockImplementation(async (id, req) => result({ ...taskStore.task(id)!, ...req.changes } as Task));
+    renderWithApp(<TaskDetail id="A" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+    const area = screen.getByRole('textbox', { name: 'Notes' });
+    fireEvent.focus(area);
+    fireEvent.change(area, { target: { value: 'old notes\nNew paragraph typed on the train' } });
+    fireEvent.blur(area);
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    // Not saved: the text stays, marked, in the textarea (not the rendered notes).
+    const kept = await screen.findByRole('textbox', { name: 'Notes' });
+    await waitFor(() => expect(kept).toHaveAttribute('data-unsaved', 'true'));
+    expect(kept).toHaveValue('old notes\nNew paragraph typed on the train');
+    expect(taskStore.task('A')?.notes).toBe('old notes');
+    // Leaving the field again sends it, based on what the server still has.
+    fireEvent.focus(kept);
+    fireEvent.blur(kept);
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+    expect(patch.mock.calls[1][1]).toEqual({ changes: { notes: 'old notes\nNew paragraph typed on the train' }, base: { notes: 'old notes' } });
+    await waitFor(() => expect(taskStore.task('A')?.notes).toBe('old notes\nNew paragraph typed on the train'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit notes' })).toHaveTextContent('New paragraph typed on the train'));
+  });
+
+  it('keeps a title whose save failed after the sheet closed, for the next time it opens', async () => {
+    taskStore.upsert([makeTask({ id: 'A', title: 'Pay rent' })]);
+    const patch = vi
+      .spyOn(taskApi, 'update')
+      .mockRejectedValueOnce(new TransientError('Failed to fetch'))
+      .mockImplementation(async (id, req) => result({ ...taskStore.task(id)!, ...req.changes } as Task));
+    const view = renderWithApp(<TaskDetail id="A" />);
+    const title = screen.getByRole('textbox', { name: 'Title' });
+    fireEvent.focus(title);
+    fireEvent.change(title, { target: { value: 'Pay the rent' } });
+    view.unmount();
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(taskStore.hasPending('A')).toBe(false));
+    expect(taskStore.task('A')?.title).toBe('Pay rent');
+    renderWithApp(<TaskDetail id="A" />);
+    // Shown again, and sent again with the server's value as its base.
+    expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Pay the rent');
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+    expect(patch.mock.calls[1][1]).toEqual({ changes: { title: 'Pay the rent' }, base: { title: 'Pay rent' } });
+    await waitFor(() => expect(taskStore.task('A')?.title).toBe('Pay the rent'));
   });
 
   it('adds subtasks and opens them', async () => {

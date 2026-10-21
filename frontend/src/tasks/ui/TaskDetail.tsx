@@ -166,22 +166,23 @@ function NotesField({ task, listPath, disabled }: { task: Task; listPath: string
   const settings = useVaultSettings();
   const loadRemoteImages = usePrefs((s) => s.loadRemoteImages);
   const notes = task.notes ?? '';
+  // Notes the server does not have yet stay in the textarea rather than the rendered view.
+  const asText = editing || (!notes && !disabled) || field['data-unsaved'] === 'true';
 
   useLayoutEffect(() => {
-    if (editing && area.current) {
-      autoGrow(area.current);
-      if (document.activeElement !== area.current) area.current.focus();
-    }
+    if (!area.current) return;
+    autoGrow(area.current);
+    if (editing && document.activeElement !== area.current) area.current.focus();
   }, [editing, field.value]);
 
   useLayoutEffect(() => {
     const el = preview.current;
-    if (!el || !tree || editing) return;
+    if (!el || !tree || asText) return;
     el.replaceChildren(renderNote(notes, makeRenderContext(listPath, tree, settings, loadRemoteImages)).fragment);
     for (const box of el.querySelectorAll('input')) box.disabled = true;
-  }, [notes, tree, settings, loadRemoteImages, listPath, editing]);
+  }, [notes, tree, settings, loadRemoteImages, listPath, asText]);
 
-  if (editing || (!notes && !disabled)) {
+  if (asText) {
     return (
       <textarea
         ref={area}

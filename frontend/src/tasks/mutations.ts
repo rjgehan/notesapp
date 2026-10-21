@@ -156,9 +156,10 @@ function reportFailure<T>(e: unknown, write: Write<T>, store: TaskStore, key: st
     return;
   }
   if (isTransient(e)) {
+    // Kept until dismissed: its Retry may hold the only copy of what was typed (quick add).
     toast(`${subject}: not saved, you're offline.`, {
       action: { label: 'Retry', run: () => void runWrite(write, store, key) },
-      timeout: 12_000,
+      timeout: 0,
     });
     return;
   }

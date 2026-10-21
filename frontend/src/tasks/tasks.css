@@ -809,6 +809,12 @@ textarea.text-input.task-notes-input {
   resize: none;
 }
 
+/* Text the server does not have yet (a save failed): sent again on blur or when back online. */
+textarea[data-unsaved='true'] {
+  border-radius: var(--radius-s);
+  box-shadow: inset 3px 0 0 var(--text-warning);
+}
+
 .task-notes-preview {
   min-height: 2em;
   padding: 4px 8px;
