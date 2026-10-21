@@ -11,7 +11,8 @@ import { lastSegment } from '../features/paths';
 import { useDocumentSession, useSessionSnapshot } from '../sync/useTextDocument';
 import type { FileViewProps } from './registry';
 
-export default function TextView({ path }: FileViewProps) {
+/** `readOnly`: shown without editing even when the session could save (a view's fallback, such as a newer spreadsheet). */
+export default function TextView({ path, readOnly = false }: FileViewProps & { readOnly?: boolean }) {
   const session = useDocumentSession(path);
   const snapshot = useSessionSnapshot(session);
   const [language, setLanguage] = useState<LanguageSupport | null>(null);
@@ -45,7 +46,7 @@ export default function TextView({ path }: FileViewProps) {
         <SaveStatus snapshot={snapshot} />
       </header>
       {ready ? (
-        <NoteEditor session={session} readOnly={snapshot.status === 'readonly' || snapshot.lossy} extensions={extensions} onToggleMode={() => {}} />
+        <NoteEditor session={session} readOnly={readOnly || snapshot.status === 'readonly' || snapshot.lossy} extensions={extensions} onToggleMode={() => {}} />
       ) : snapshot.status === 'loading' ? (
         <div className="view-loading" aria-busy="true">
           <div className="skeleton-line" />

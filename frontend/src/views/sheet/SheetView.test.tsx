@@ -358,12 +358,26 @@ describe('the spreadsheet view', () => {
     expect(runCommand).toBeDefined();
   });
 
-  it('opens a file it cannot read as text, untouched, and as a sheet once fixed', async () => {
-    const path = await open('{"type": "notesapp-sheet", "version": 2, "sheets": []}');
-    expect(await screen.findByText(/cannot be shown as a spreadsheet/, {}, { timeout: 5000 })).toBeInTheDocument();
+  it('shows a file a newer NotesApp wrote read-only, without inviting a fix', async () => {
+    const text = '{"type": "notesapp-sheet", "version": 2, "sheets": []}';
+    const path = await open(text);
+    expect(await screen.findByText(/read-only here/, {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText(/saved by a newer NotesApp/)).toBeInTheDocument();
+    expect(screen.queryByText(/Fix it as text/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open as spreadsheet' })).toBeNull();
+    await waitFor(() => expect(document.querySelector('.cm-content')).not.toBeNull());
+    expect(document.querySelector('.cm-content')).toHaveAttribute('contenteditable', 'false');
+    expect(vault.readFile(path).content).toBe(text);
+  });
+
+  it('opens a file it cannot read as text, untouched, and as a sheet once fixed', async () => {
+    const text = '{"type": "notesapp-sheet", "version": 1, "sheets": [], "sheets": []}';
+    const path = await open(text);
+    expect(await screen.findByText(/cannot be shown as a spreadsheet/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText(/appears twice/)).toBeInTheDocument();
+    expect(screen.getByText(/Fix it as text/)).toBeInTheDocument();
     // Nothing was written: the file is as it was.
-    expect(vault.readFile(path).content).toBe('{"type": "notesapp-sheet", "version": 2, "sheets": []}');
+    expect(vault.readFile(path).content).toBe(text);
     act(() => session(path).applyEdit({ from: 0, to: session(path).editorState.doc.length, insert: JSON.stringify(BUDGET) }));
     fireEvent.click(screen.getByRole('button', { name: 'Open as spreadsheet' }));
     expect(await screen.findByTestId('grid')).toBeInTheDocument();

@@ -16,8 +16,8 @@ export type SheetDocument =
   | { kind: 'loading' }
   /** The engine chunk could not be loaded (offline, a deploy). */
   | { kind: 'failed'; message: string }
-  /** The parser refused the file: it stays untouched, to be fixed as text. */
-  | { kind: 'refused'; message: string }
+  /** The parser refused the file: it stays untouched, to be fixed as text (read-only when a newer NotesApp wrote it). */
+  | { kind: 'refused'; message: string; newer?: boolean }
   /** `version` changes with every change of the workbook. */
   | { kind: 'ready'; workbook: Workbook; version: number };
 
@@ -134,7 +134,7 @@ export class SheetBinding {
     this.seen = session.remoteChangeCount;
     const parsed = parseSheet(session.getText());
     if (!parsed.ok) {
-      this.set({ kind: 'refused', message: parsed.error });
+      this.set(refusal(parsed));
       return;
     }
     let wb: Workbook;
@@ -173,12 +173,16 @@ export class SheetBinding {
       this.offWorkbook = null;
       wb.destroy();
       this.workbook = null;
-      this.set({ kind: 'refused', message: parsed.error });
+      this.set(refusal(parsed));
       return;
     }
     const { stale } = wb.replace(parsed.file, { undoable: session.remoteChangeUndoable });
     if (stale && session.isEditable() && session.hasUnsavedChanges()) session.markDirty(() => wb.serialize());
   }
+}
+
+function refusal(parsed: { error: string; newer?: boolean }): SheetDocument {
+  return parsed.newer ? { kind: 'refused', message: parsed.error, newer: true } : { kind: 'refused', message: parsed.error };
 }
 
 function evict(): void {

@@ -100,7 +100,8 @@ export interface SheetFile {
   extra?: Extra;
 }
 
-export type ParseResult = { ok: true; file: SheetFile; repairs: string[] } | { ok: false; error: string };
+/** A refusal; `newer` when a later NotesApp wrote the file (it is shown read-only, never fixed here). */
+export type ParseResult = { ok: true; file: SheetFile; repairs: string[] } | { ok: false; error: string; newer?: boolean };
 
 const FILE_KEYS = ['type', 'version', 'engine', 'sheets', 'named'];
 const SHEET_KEYS = ['id', 'name', 'cells', 'cols', 'rows', 'frozen', 'charts'];
@@ -109,7 +110,14 @@ const COLUMN_KEYS = ['w', 'fmt', 'bold'];
 const ROW_KEYS = ['h', 'fmt', 'bold'];
 const CHART_KEYS = ['type', 'range', 'title', 'headers', 'labels'];
 
-class Refusal extends Error {}
+class Refusal extends Error {
+  /** A later NotesApp wrote the file. */
+  readonly newer: boolean;
+  constructor(message: string, newer = false) {
+    super(message);
+    this.newer = newer;
+  }
+}
 
 const isObject = (x: unknown): x is Record<string, Json> => typeof x === 'object' && x !== null && !Array.isArray(x);
 const isCellValue = (x: unknown): x is CellValue => typeof x === 'string' || typeof x === 'boolean' || (typeof x === 'number' && Number.isFinite(x));
@@ -531,7 +539,7 @@ export function parseSheet(text: string): ParseResult {
     if (raw.type !== SHEET_TYPE) throw new Refusal(`This is not a NotesApp sheet: "type" is ${JSON.stringify(raw.type ?? null)}, not "${SHEET_TYPE}".`);
     if (raw.version === undefined) repairs.push(`The format version was missing; it is ${SHEET_VERSION}.`);
     else if (typeof raw.version === 'number' && Number.isInteger(raw.version) && raw.version > SHEET_VERSION) {
-      throw new Refusal(`This sheet was saved by a newer NotesApp (format version ${raw.version}); update NotesApp to edit it.`);
+      throw new Refusal(`This sheet was saved by a newer NotesApp (format version ${raw.version}); update NotesApp to edit it.`, true);
     } else if (raw.version !== SHEET_VERSION) throw new Refusal(`Unknown format version ${JSON.stringify(raw.version)}.`);
     let engine = '';
     if (typeof raw.engine === 'string') engine = raw.engine;
@@ -548,7 +556,7 @@ export function parseSheet(text: string): ParseResult {
     if (extra) file.extra = extra;
     return { ok: true, file, repairs };
   } catch (e) {
-    if (e instanceof Refusal) return { ok: false, error: e.message };
+    if (e instanceof Refusal) return e.newer ? { ok: false, error: e.message, newer: true } : { ok: false, error: e.message };
     throw e;
   }
 }

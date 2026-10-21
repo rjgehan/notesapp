@@ -2175,7 +2175,7 @@ Embeds, search and merges need neither the engine nor the grid, because every fo
 
 **New spreadsheet.** The descriptor's `create` adds "New spreadsheet here" to the explorer's row menu and "Create new spreadsheet" to the palette. Both create `Untitled.sheet` with one empty sheet through the optimistic new-note flow (§6.15): a title typed meanwhile becomes the file's name, and Enter moves on to the grid. `.sheet` files show the `FileSpreadsheet` icon in the tree.
 
-**Files that cannot be edited.** A file the parser refuses opens in the text editor (the `text` view) below the parser's message, untouched, with "Open as spreadsheet" to try again after a fix. A file that is not valid UTF-8 (`lossy`, §4.2) is shown read-only.
+**Files that cannot be edited.** A file the parser refuses opens in the text editor (the `text` view) below the parser's message, untouched, with "Open as spreadsheet" to try again after a fix. A file a newer NotesApp wrote (a higher `version`) is not this version's to fix: its text is shown read-only with the message to update NotesApp. A file the engine fails to calculate is shown like a refused one. A file that is not valid UTF-8 (`lossy`, §4.2) is shown read-only.
 
 **Limits.** Frozen cells are edited in the formula bar rather than in place, and a range selection stops at the frozen rows. Fill copies values and formats (no series). Row heights are shown but cannot be changed yet. Copy and paste need a keyboard or the browser's own clipboard events; there is no Paste button for phones yet. Formats other than number formats (colours, alignment, borders) and floating charts are not in scope.
 

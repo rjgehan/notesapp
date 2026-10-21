@@ -106,6 +106,11 @@ describe('parseSheet', () => {
       expect(refusal(value)).toMatch(message);
     });
 
+    it('marks only a newer format as newer, which the view shows read-only', () => {
+      expect(parseSheet(JSON.stringify({ ...EXAMPLE, version: 2 }))).toMatchObject({ ok: false, newer: true });
+      expect(parseSheet(JSON.stringify({ ...EXAMPLE, version: '1' }))).not.toHaveProperty('newer');
+    });
+
     it('a key written twice, which JSON.parse would silently collapse', () => {
       const text = '{"type":"notesapp-sheet","version":1,"engine":"","sheets":[{"id":"s1","name":"A","cells":{"A1":{"v":1},"A1":{"v":2}}}],"named":{}}';
       expect(refusal(text)).toMatch(/"A1" appears twice/);

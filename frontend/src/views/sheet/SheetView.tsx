@@ -54,6 +54,23 @@ export default function SheetView(props: FileViewProps) {
         </div>
       );
     case 'refused':
+      if (doc.newer) {
+        // Written by a later NotesApp: this version cannot judge an edit, so the text is only shown.
+        return (
+          <div className="sheet-refused">
+            <div className="note-warning sheet-refused-notice" role="alert">
+              <FileWarning size={16} aria-hidden />
+              <div>
+                <p>
+                  <strong>This spreadsheet is read-only here.</strong> {doc.message}
+                </p>
+                <p>Its text is shown below, unchanged.</p>
+              </div>
+            </div>
+            <TextView {...props} readOnly />
+          </div>
+        );
+      }
       return (
         <div className="sheet-refused">
           <div className="note-warning sheet-refused-notice" role="alert">
