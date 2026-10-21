@@ -202,7 +202,7 @@ final class PromptBuilder {
 			sources.add(source);
 			used += source.chars();
 		}
-		return new Turn(sources, askTask(question, sources.isEmpty()), omitted, excludedCount);
+		return new Turn(sources, askTask(question, sources.isEmpty(), !alreadySent.isEmpty()), omitted, excludedCount);
 	}
 
 	/** {@code summarize} or {@code suggest} for a note, a folder, some notes or a selection. */
@@ -222,7 +222,7 @@ final class PromptBuilder {
 	 * An earlier turn, rebuilt from what it asked and the notes it was sent with (as they are now; deleted and excluded
 	 * notes are skipped). Uses the same rules as the first time, so unchanged notes give the same text.
 	 */
-	Turn rebuild(Prompt prompt, List<String> sources) {
+	Turn rebuild(Prompt prompt, List<String> sources, boolean earlierNotes) {
 		List<String> allowed = sources.stream().filter(this::isNote).filter(this.excluded.negate()).toList();
 		return switch (prompt.action()) {
 			case ASK -> {
@@ -231,7 +231,7 @@ final class PromptBuilder {
 				List<Source> rebuilt = allowed.stream().limit(ASK_MAX_NOTES)
 					.map((path) -> source(path, askPerNote(), terms))
 					.toList();
-				yield new Turn(rebuilt, askTask(question, rebuilt.isEmpty()), 0, 0);
+				yield new Turn(rebuilt, askTask(question, rebuilt.isEmpty(), earlierNotes), 0, 0);
 			}
 			case SUMMARIZE, SUGGEST -> switch (prompt.scope()) {
 				case NOTE -> (prompt.action() == Action.SUGGEST) ? suggest(prompt.path(), false) : note(prompt.path());
@@ -366,8 +366,16 @@ final class PromptBuilder {
 		return Math.max(ASK_MIN_NOTE_CHARS, Math.min(ASK_MAX_NOTE_CHARS, this.maxContext / 4));
 	}
 
-	private static String askTask(String question, boolean noNotes) {
-		String prefix = noNotes ? "(No note in the vault matched the words of this question.)\n\n" : "";
+	/**
+	 * The question, with a word for the model when no new note came with it: either nothing matched, or what matched
+	 * was already sent with an earlier question of the conversation.
+	 */
+	private static String askTask(String question, boolean noNotes, boolean earlierNotes) {
+		String prefix = "";
+		if (noNotes) {
+			prefix = earlierNotes ? "(No other note matched; the notes sent earlier in this conversation still apply.)\n\n"
+					: "(No note in the vault matched the words of this question.)\n\n";
+		}
 		return prefix + "Question: " + question;
 	}
 

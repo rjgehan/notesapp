@@ -34,7 +34,9 @@ public class FakeGateway implements ClaudeGateway {
 		StringBuilder answer = new StringBuilder();
 		answer.append("*Fake answer: this server runs with `notes.ai.fake=true`, so nothing was sent to Anthropic.*\n\n");
 		if (links.isEmpty()) {
-			answer.append("None of your notes matched, so this answer cites nothing.\n");
+			answer.append((request.messages().size() > 1)
+					? "No new note came with this question; the ones sent earlier still apply.\n"
+					: "None of your notes matched, so this answer cites nothing.\n");
 		}
 		else {
 			answer.append("Here is what your notes say:\n\n");

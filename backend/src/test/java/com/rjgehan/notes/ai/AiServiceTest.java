@@ -312,7 +312,13 @@ class AiServiceTest {
 		// Notes of the earlier turn are not sent twice.
 		assertThat(paths(second.start())).doesNotContain("Projects/Kitchen.md");
 		assertThat(messages.get(2).blocks().get(0).cacheBreakpoint()).isTrue();
+		assertThat(text(messages.get(2))).contains("the notes sent earlier in this conversation still apply");
 		assertThat(second.historyTurns()).isEqualTo(1);
+		// The second turn, once in the history itself, is rebuilt exactly too.
+		AiTurn secondTurn = new AiTurn(new AiPrompt("ask", "And when do the tiles arrive?", null, null, null, null, null),
+				"Monday.", paths(second.start()));
+		AiService.Prepared third = this.service.prepareAsk(new AiAskRequest("Thanks!", null, List.of(turn, secondTurn)));
+		assertThat(text(third.request().messages().get(2))).isEqualTo(text(messages.get(2)));
 	}
 
 	@Test

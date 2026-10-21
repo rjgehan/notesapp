@@ -130,7 +130,7 @@ public class AiService {
 
 	public AiStatus status() {
 		AiSettings ai = this.settings.current().ai();
-		ApiKeyFile.Loaded key = this.properties.fake() ? new ApiKeyFile.Loaded("fake", null) : this.keyFile.load();
+		ApiKeyFile.Loaded key = this.keyFile.load();
 		UsageLedger.Month month = this.ledger.thisMonth();
 		AiState state;
 		String reason = null;
@@ -138,7 +138,7 @@ public class AiService {
 			state = AiState.OFF;
 			reason = "Ask and summaries are switched off in Settings";
 		}
-		else if (!key.present()) {
+		else if (!key.present() && !this.properties.fake()) {
 			state = AiState.NOT_CONFIGURED;
 			reason = key.problem();
 		}
@@ -384,7 +384,7 @@ public class AiService {
 					}
 				}
 			}
-			PromptBuilder.Turn rebuilt = builder.rebuild(historyPrompt(turn.prompt()), sources);
+			PromptBuilder.Turn rebuilt = builder.rebuild(historyPrompt(turn.prompt()), sources, !sent.isEmpty());
 			turns.add(rebuilt);
 			answers.add(answer);
 			rebuilt.sources().forEach((s) -> sent.add(s.path()));
