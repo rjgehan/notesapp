@@ -388,6 +388,70 @@ describe('the spreadsheet view', () => {
     expect(cells.B5).toEqual({ f: '=SUM(B2:B4)', c: 1937.5 });
   });
 
+  it('inserts references to the cells clicked or dragged over while a formula is typed', async () => {
+    const path = await openGrid();
+    select(3, 3); // D5
+    const input = formulaInput();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: '=SUM(' } });
+    // Glide reports grid cells under the pointer; grid row 0 is sheet row 2 (row 1 is frozen).
+    fakeGrid.mouseArgs = (x, y) => ({ kind: 'cell', location: [Math.floor(x / 100), Math.floor(y / 20)] }) as never;
+    const grid = screen.getByTestId('grid');
+    const down = fireEvent.pointerDown(grid, { clientX: 150, clientY: 5, pointerType: 'mouse', button: 0 });
+    expect(down).toBe(false); // default prevented: the field keeps the focus
+    expect(input.value).toBe('=SUM(B2');
+    fireEvent.pointerMove(grid, { clientX: 150, clientY: 25, pointerType: 'mouse' });
+    expect(input.value).toBe('=SUM(B2:B3');
+    fireEvent.pointerUp(grid, { clientX: 150, clientY: 25, pointerType: 'mouse' });
+    // The pointed-at range is outlined, and the selection did not move.
+    expect(gridProps().highlightRegions).toEqual([expect.objectContaining({ style: 'solid', range: { x: 1, y: 0, width: 1, height: 2 } })]);
+    expect(nameBox().value).toBe('D5');
+    // Another click replaces the reference just pointed at; after an operator, a new one goes in.
+    fireEvent.pointerDown(grid, { clientX: 150, clientY: 45, pointerType: 'mouse', button: 0 });
+    fireEvent.pointerUp(grid, { clientX: 150, clientY: 45, pointerType: 'mouse' });
+    expect(input.value).toBe('=SUM(B4');
+    fireEvent.change(input, { target: { value: '=SUM(B4,' } });
+    fireEvent.pointerDown(grid, { clientX: 150, clientY: 5, pointerType: 'mouse', button: 0 });
+    fireEvent.pointerUp(grid, { clientX: 150, clientY: 5, pointerType: 'mouse' });
+    expect(input.value).toBe('=SUM(B4,B2');
+    // With the caret after a complete operand, a click is an ordinary click (it ends the edit).
+    fireEvent.change(input, { target: { value: '=SUM(B4,B2)' } });
+    expect(fireEvent.pointerDown(grid, { clientX: 150, clientY: 5, pointerType: 'mouse', button: 0 })).toBe(true);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect((await saved(path)).sheets[0].cells.D5).toEqual({ f: '=SUM(B4,B2)', c: 1450 });
+    fakeGrid.mouseArgs = undefined;
+  });
+
+  it('on a touch device inserts a reference on a tap, not on a scroll, and keeps the keyboard up', async () => {
+    await openGrid();
+    select(3, 3);
+    const input = formulaInput();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: '=' } });
+    fakeGrid.mouseArgs = (x, y) => ({ kind: 'cell', location: [Math.floor(x / 100), Math.floor(y / 20)] }) as never;
+    const grid = screen.getByTestId('grid');
+    // A scroll: the finger moves before it lifts.
+    fireEvent.pointerDown(grid, { clientX: 50, clientY: 5, pointerType: 'touch' });
+    expect(fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 50, clientY: 80 }] })).toBe(true);
+    expect(input.value).toBe('=');
+    // A tap: the touchend's default is prevented, so no mouse events take the focus away.
+    fireEvent.pointerDown(grid, { clientX: 50, clientY: 5, pointerType: 'touch' });
+    expect(fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 52, clientY: 6 }] })).toBe(false);
+    expect(input.value).toBe('=A2');
+    expect(document.activeElement).toBe(input);
+    fakeGrid.mouseArgs = undefined;
+  });
+
+  it('moves on from the title to the grid with Enter, renamed or not', async () => {
+    await openGrid();
+    const title = screen.getByLabelText('Spreadsheet title');
+    act(() => title.focus());
+    const before = fakeGrid.focused;
+    fireEvent.keyDown(title, { key: 'Enter' });
+    expect(fakeGrid.focused).toBe(before + 1);
+    expect(document.activeElement).toBe(screen.getByTestId('grid'));
+  });
+
   it('sets a column width from the dialog (the way on a phone)', async () => {
     const path = await openGrid();
     select(1, 0);

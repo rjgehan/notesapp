@@ -66,6 +66,8 @@ interface Props {
   selection: SheetSelection;
   /** A range to outline with dashes (a cut waiting to be pasted), or null. */
   marked: CellRange | null;
+  /** A range a formula being typed points at, or null. */
+  picked: CellRange | null;
   editable: boolean;
   touch: boolean;
   theme: SheetTheme;
@@ -84,7 +86,7 @@ const KEYBINDINGS = { copy: false, cut: false, paste: false, downFill: false, ri
 
 const MOVES: Record<string, [number, number]> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
 
-export function SheetGrid({ sheet, layout, version, selection, marked, editable, touch, theme, handlers, gridRef, portalRef }: Props) {
+export function SheetGrid({ sheet, layout, version, selection, marked, picked, editable, touch, theme, handlers, gridRef, portalRef }: Props) {
   const wrapper = useRef<HTMLDivElement>(null);
   /** The last press began on the frozen rows: Glide must not turn it into a column selection. */
   const frozenPress = useRef(false);
@@ -148,12 +150,16 @@ export function SheetGrid({ sheet, layout, version, selection, marked, editable,
   const model = useMemo(() => ({ sheet, version }), [sheet, version]);
   const columns = useMemo(() => gridColumns(model.sheet, layout, sizing, theme), [model, layout, sizing, theme]);
   const gridSelection = useMemo(() => toGridSelection(selection, layout), [selection, layout]);
-  // The part of a marked range below the frozen rows (those are drawn in the header).
+  // The parts of the cut and the pointed-at ranges below the frozen rows (those are drawn in the header).
   const highlightRegions = useMemo(() => {
-    if (!marked || marked.row + marked.height <= f) return undefined;
-    const top = Math.max(marked.row, f);
-    return [{ color: theme.grid.accentLight ?? 'rgba(138, 92, 245, 0.16)', style: 'dashed' as const, range: { x: marked.col, y: top - f, width: marked.width, height: marked.row + marked.height - top } }];
-  }, [marked, f, theme]);
+    const color = theme.grid.accentLight ?? 'rgba(138, 92, 245, 0.16)';
+    const regions = ([[marked, 'dashed'], [picked, 'solid']] as const).flatMap(([r, style]) => {
+      if (!r || r.row + r.height <= f) return [];
+      const top = Math.max(r.row, f);
+      return [{ color, style, range: { x: r.col, y: top - f, width: r.width, height: r.row + r.height - top } }];
+    });
+    return regions.length > 0 ? regions : undefined;
+  }, [marked, picked, f, theme]);
 
   const cellOptions = useMemo(() => ({ overlay: editable && !touch, readonly: !editable, colors: theme.colors }), [editable, touch, theme.colors]);
   const getCellContent = useCallback(([col, row]: Item): GridCell => gridCell(model.sheet, col, row + f, cellOptions), [model, f, cellOptions]);

@@ -63,6 +63,7 @@ import {
   type ImportKind,
 } from './importExport';
 import { ChartDialog, ColumnWidthDialog, ImportDialog, NamedRangesDialog, NumberFormatDialog, type ImportChoice } from './SheetDialogs';
+import { useReferencePicking } from './referencePicking';
 import { SheetGrid, type SheetGridHandlers } from './SheetGrid';
 import { SheetTabs } from './SheetTabs';
 import { useCoarsePointer, useSheetTheme } from './theme';
@@ -157,6 +158,8 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   const [linesMenu, setLinesMenu] = useState<{ x: number; y: number } | null>(null);
   /** The cut waiting to be pasted, shown with a dashed outline while it is still the last copy. */
   const [cutMark, setCutMark] = useState<SheetClip | null>(null);
+  /** The range a formula being typed points at. */
+  const [picked, setPicked] = useState<CellRange | null>(null);
   // On a phone the charts start folded, so the grid keeps its room.
   const [chartsOpen, setChartsOpen] = useState(() => remembered.get(path)?.chartsOpen ?? !phone);
   const location = useLocation();
@@ -191,6 +194,9 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   const single = selection.range.width === 1 && selection.range.height === 1;
   const wholeColumns = selection.range.row === 0 && selection.range.height >= layout.rows;
   const wholeRows = !wholeColumns && selection.range.col === 0 && selection.range.width >= layout.cols;
+
+  // A click or drag on cells while a formula is typed inserts references into it.
+  useReferencePicking({ gridBox, gridRef, portalRef, barInput: () => bar.current?.editingInput() ?? null, layout: () => layout, onPick: setPicked });
 
   useEffect(() => {
     remembered.set(path, { sheetId: sheet.id, selections, chartsOpen });
@@ -718,7 +724,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   return (
     <div className="sheet-view">
       <header className="sheet-header">
-        <InlineTitle key={path} path={path} editable={editable} label="Spreadsheet title" />
+        <InlineTitle key={path} path={path} editable={editable} label="Spreadsheet title" onEnter={() => gridRef.current?.focus()} />
         {!phone && <SaveStatus snapshot={snapshot} />}
       </header>
       <div className="sheet-toolbar" role="toolbar" aria-label="Spreadsheet">
@@ -817,6 +823,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
           touch={touch}
           theme={theme}
           handlers={handlers}
+          picked={picked}
           marked={cutMark !== null && cutMark === lastClip && cutMark.cut?.sheet === sheet.id && cutMark.cut.source === path ? cutMark.range : null}
           gridRef={gridRef}
           portalRef={portalRef}

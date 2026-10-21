@@ -13,7 +13,11 @@ import { takeTitleHandoff } from '../../state/pendingNote';
 import { toast } from '../../state/toasts';
 import { toastError } from '../../features/errors';
 
-export function InlineTitle({ path, editable, label = 'Note title' }: { path: string; editable: boolean; label?: string }) {
+/**
+ * `onEnter`: where Enter continues in a view without a text editor (the spreadsheet's grid), focused
+ * inside the key press; without it, the note's editor.
+ */
+export function InlineTitle({ path, editable, label = 'Note title', onEnter }: { path: string; editable: boolean; label?: string; onEnter?: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const reverting = useRef(false);
   const toText = useRef(false);
@@ -55,7 +59,7 @@ export function InlineTitle({ path, editable, label = 'Note title' }: { path: st
     const value = el.value.trim();
     if (value === '' || value === title) {
       revert();
-      if (continueInText) {
+      if (continueInText && !onEnter) {
         // The editor may not exist yet (the note is still loading): it takes the focus on mount.
         const editor = activeEditor();
         if (editor) editor.focus();
@@ -95,8 +99,9 @@ export function InlineTitle({ path, editable, label = 'Note title' }: { path: st
         toText.current = true;
         // Focusing the editor inside the key press keeps the iOS keyboard open; the title's blur
         // then commits. A renamed note's editor remounts and takes the focus again.
-        const editor = activeEditor();
-        if (editor) editor.focus();
+        const editor = onEnter ? null : activeEditor();
+        if (onEnter) onEnter();
+        else if (editor) editor.focus();
         else {
           // No editor: the note shows the reading view, or is still loading. Writing continues
           // in the editor, which takes the focus when it mounts.

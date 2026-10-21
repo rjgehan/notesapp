@@ -15,6 +15,8 @@ export interface FormulaBarHandle {
   /** Starts editing `target` (inside the user's gesture, so iOS opens the keyboard), optionally replacing its text. */
   edit(target: EditTarget, text: string, initial?: string): void;
   isEditing(): boolean;
+  /** The field, while it edits a cell (pointing at cells inserts references into it). */
+  editingInput(): HTMLInputElement | null;
 }
 
 interface Props {
@@ -62,6 +64,7 @@ export const FormulaBar = forwardRef<FormulaBarHandle, Props>(function FormulaBa
       el.setSelectionRange(end, end);
     },
     isEditing: () => draftRef.current !== null,
+    editingInput: () => (draftRef.current !== null ? input.current : null),
   }));
 
   const commit = (move: Move) => {

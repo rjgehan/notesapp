@@ -4,7 +4,8 @@
 import type { DataEditorProps, DataEditorRef } from '@glideapps/glide-data-grid';
 import { forwardRef, useImperativeHandle } from 'react';
 
-export const fakeGrid: { props: DataEditorProps | null; focused: number } = { props: null, focused: 0 };
+/** `mouseArgs`: what getMouseArgsForPosition reports for a point (a test sets it). */
+export const fakeGrid: { props: DataEditorProps | null; focused: number; mouseArgs?: (x: number, y: number) => ReturnType<DataEditorRef['getMouseArgsForPosition']> } = { props: null, focused: 0 };
 
 /** The latest props, for calling Glide's callbacks. */
 export function gridProps(): DataEditorProps {
@@ -26,7 +27,7 @@ export const FakeDataEditor = forwardRef<DataEditorRef, DataEditorProps>(functio
     appendRow: async () => {},
     appendColumn: async () => {},
     remeasureColumns: () => {},
-    getMouseArgsForPosition: () => undefined,
+    getMouseArgsForPosition: (x: number, y: number) => fakeGrid.mouseArgs?.(x, y),
   }));
   const rows = Array.from({ length: Math.min(props.rows, 6) }, (_, r) => r);
   const cols = props.columns.slice(0, 4);
