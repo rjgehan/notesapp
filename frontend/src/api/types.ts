@@ -436,3 +436,14 @@ export interface FlashcardsChangedEvent {
   version: Version;
   origin: string | null;
 }
+
+// ---------- Habits (API.md §35, ROADMAP item 35) ----------
+export interface HabitNote { path: VaultPath; version: Version; properties: Record<string, unknown> }   // the frontmatter
+export interface DailyNoteValues { path: VaultPath; values: Record<string, boolean | number | string> }
+export interface HabitsResponse {
+  folder: VaultPath;            // where new habits go: 'Habits'
+  tag: string;                  // 'habit': notes with #habit anywhere are habits too
+  habits: HabitNote[];
+  dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
+  daily: DailyNoteValues[];     // daily notes with simple frontmatter values
+}

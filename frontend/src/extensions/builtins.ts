@@ -48,6 +48,7 @@ import { useUi } from '../state/ui';
 import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
 import { registerFlashcards } from '../flashcards/register';
+import { registerHabits } from '../habits/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
@@ -306,6 +307,8 @@ export function registerBuiltins(): void {
   registerPage({ route: 'status', title: 'Status', icon: Activity, load: () => import('../components/pages/StatusPage') });
   // Flashcards and spaced repetition (ROADMAP item 34, DESIGN §6.34).
   registerFlashcards();
+  // The habit tracker (ROADMAP item 35, DESIGN §6.35).
+  registerHabits();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 
