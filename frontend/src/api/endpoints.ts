@@ -6,6 +6,7 @@ import type {
   AttachmentResult,
   BacklinksResponse,
   CommitResult,
+  CompatReport,
   CreateFileRequest,
   FileEntry,
   FolderResult,
@@ -89,6 +90,8 @@ export interface Endpoints {
   getTags(): Promise<TagsResponse>;
   /** The link graph (API.md §11.4); with `since`, an unchanged graph comes back empty with `unchanged: true`. */
   getGraph(since?: string): Promise<GraphResponse>;
+  /** The Obsidian compatibility report (API.md §11.5). */
+  getCompat(): Promise<CompatReport>;
   listTrash(): Promise<TrashListResponse>;
   restoreTrash(id: string, req?: RestoreRequest): Promise<RestoreResult>;
   purgeTrashEntry(id: string): Promise<void>;
@@ -144,6 +147,7 @@ export const httpEndpoints: Endpoints = {
   search: (q, opts = {}) => apiFetch('/api/search' + query({ q, limit: opts.limit, sort: opts.sort, prefix: opts.prefix })),
   getTags: () => apiFetch('/api/tags'),
   getGraph: (since) => apiFetch('/api/graph' + query({ since })),
+  getCompat: () => apiFetch('/api/compat'),
   listTrash: () => apiFetch('/api/trash'),
   restoreTrash: (id, req) => apiFetch(`/api/trash/${encodeURIComponent(id)}/restore`, { method: 'POST', json: req ?? {} }),
   purgeTrashEntry: (id) => apiFetch(`/api/trash/${encodeURIComponent(id)}`, { method: 'DELETE' }),

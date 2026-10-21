@@ -269,6 +269,52 @@ export interface GraphResponse {
   edges: number[];     // flat triples [source, target, count, ...]: node indexes, links from source to target
 }
 
+// ---------- compatibility report (§11.5) ----------
+export interface ObsidianInfo { found: boolean; configFiles: string[]; problems: string[] }
+export interface CompatSetting {
+  source: string;               // 'app.json › attachmentFolderPath'
+  obsidianValue: string;        // the value as JSON text
+  setting: string | null;       // 'files.attachmentLocation'; null when NotesApp has none
+  current: string | null;
+  proposed: string | null;
+  status: 'same' | 'different' | 'unsupported';
+  note: string | null;
+}
+export interface CompatPlugin {
+  id: string;
+  name: string;
+  kind: 'core' | 'community';
+  status: 'supported' | 'partial' | 'planned' | 'unsupported' | 'unknown';
+  note: string;
+  roadmapItem: number | null;
+}
+export interface CompatOccurrence { path: VaultPath; line: number | null; text: string }
+export interface CompatIssue {
+  id: string;                   // 'dataview', 'missing-notes', …
+  category: 'syntax' | 'links' | 'files';
+  severity: 'info' | 'warning' | 'error';
+  title: string;
+  detail: string;
+  roadmapItem: number | null;
+  count: number;
+  noteCount: number;
+  occurrences: CompatOccurrence[];   // at most 200, in path order
+  truncated: boolean;
+}
+export interface CompatTotals { notes: number; files: number; errors: number; warnings: number; infos: number }
+export interface CompatReport {
+  generatedAt: IsoInstant;
+  tookMs: number;
+  obsidian: ObsidianInfo;
+  settings: CompatSetting[];
+  proposedSettings: Settings | null;   // PUT /api/settings with baseVersion: settingsVersion to apply
+  settingsVersion: Version;
+  graph: Record<string, unknown> | null;   // .obsidian/graph.json, only the keys the graph view uses
+  plugins: CompatPlugin[];
+  issues: CompatIssue[];
+  totals: CompatTotals;
+}
+
 // ---------- search / tags (§12) ----------
 export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
 export interface SearchHit {

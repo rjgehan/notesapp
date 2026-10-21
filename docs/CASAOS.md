@@ -40,6 +40,25 @@ Pushes from the private repo create a **private** package, and CasaOS cannot log
 3. Wait about a minute. The `notes` machine appears in the Tailscale admin console and the CasaOS tile turns green.
 4. Open `https://notes.<tailnet>.ts.net` on any tailnet device, including the iPhone (Safari → Share → Add to Home Screen for an app icon). The first visit can take ~30 s while the HTTPS certificate is issued.
 
+## Import an Obsidian vault
+
+Do this right after installing, before you write notes in NotesApp: a vault whose data folder has no settings yet takes its settings from Obsidian's `.obsidian/` folder at its first start (attachment folder, new notes, link format, excluded files, daily notes, templates, …; ROADMAP item 24). `.obsidian/` is read but never changed, so the vault keeps working in Obsidian. DEPLOY.md *Import an Obsidian vault* has the details.
+
+1. **Copy the vault to the server.** Close Obsidian (or let its sync finish), then from your PC, for example: `scp -r "C:\Users\<you>\Documents\MyVault" <you>@<server>:/tmp/MyVault`. Without SSH, zip the vault, upload it with CasaOS's **Files** app to `/DATA`, and unzip it there (Files → right-click → Extract); an iCloud vault must be fully downloaded on the PC first.
+2. **Swap it in**, in CasaOS's terminal or over SSH (the app's data folder must contain only the empty vault NotesApp created, with at most its `Welcome.md`):
+   ```sh
+   docker stop notesapp
+   sudo mv /DATA/AppData/notesapp/data/vault /DATA/AppData/notesapp/data/vault.empty
+   sudo mkdir /DATA/AppData/notesapp/data/vault
+   sudo cp -a /tmp/MyVault/. /DATA/AppData/notesapp/data/vault/
+   sudo chown -R 1000:1000 /DATA/AppData/notesapp/data/vault
+   docker start notesapp
+   ```
+   The app is ready at once and records the import in its history in the background. Once the notes show up, delete `vault.empty` (and `/tmp/MyVault`).
+3. **Check `https://notes.<tailnet>.ts.net/x/compat`**, the *Compatibility report* (also in the drawer and Settings › About): every Obsidian setting should be *In effect*. It lists the plugins the vault used and what NotesApp offers instead, and everything that does not carry over (Dataview queries, Templater commands, links to missing files or headings, …), each opening the note at its line. **Use them on this device** takes Obsidian's graph colors and forces for the graph view, once per device.
+
+If the vault has its own `.git` (the obsidian-git plugin), it is kept and NotesApp commits to it; turn the plugin off in Obsidian. Into an installation that already has notes, copy the vault into a subfolder instead and leave out its `.obsidian` and `.git` (DEPLOY.md).
+
 ## Updating
 
 Push to `main`. CI builds and publishes the image, and Watchtower restarts `notesapp` within about 5 minutes. To update Tailscale or Watchtower themselves, use the CasaOS app's **Update** or **Rebuild**.

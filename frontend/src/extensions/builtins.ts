@@ -6,6 +6,7 @@ import {
   CloudUpload,
   Command as CommandIcon,
   FileBraces,
+  FileCheck,
   FileImage,
   FilePlay,
   FilePlus,
@@ -307,6 +308,8 @@ export function registerBuiltins(): void {
   registerPage({ route: 'status', title: 'Status', icon: Activity, load: () => import('../components/pages/StatusPage') });
   // ROADMAP item 16 (DESIGN §6.21): /x/graph, the graph of every note, and "Open Graph".
   registerPage({ route: 'graph', title: 'Graph', icon: GitFork, load: () => import('../components/pages/GraphPage') });
+  // ROADMAP item 24 (DESIGN §6.22): /x/compat, how an imported Obsidian vault works here.
+  registerPage({ route: 'compat', title: 'Compatibility report', icon: FileCheck, load: () => import('../components/pages/CompatPage') });
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

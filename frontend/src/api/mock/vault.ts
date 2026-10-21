@@ -12,6 +12,9 @@ import type {
   BacklinksResponse,
   ChangeType,
   CommitResult,
+  CompatIssue,
+  CompatOccurrence,
+  CompatReport,
   CreateFileRequest,
   FileEntry,
   FileKind,
@@ -1046,6 +1049,50 @@ export class MockVault {
     const version = blobId(new TextEncoder().encode(JSON.stringify([nodes, edges])));
     if (since === version) return { version, unchanged: true, nodes: [], edges: [] };
     return { version, unchanged: false, nodes, edges };
+  }
+
+  /** The compatibility report (API.md §11.5): the mock vault has no .obsidian/, only its links are checked. */
+  getCompat(): CompatReport {
+    const index = this.linkIndex();
+    const notes: CompatOccurrence[] = [];
+    const files: CompatOccurrence[] = [];
+    const paths = { notes: new Set<string>(), files: new Set<string>() };
+    for (const note of this.notes().sort((a, b) => (a.path < b.path ? -1 : 1))) {
+      for (const link of this.scanOf(note).links) {
+        if (resolve(link.target, note.path, index) !== null) continue;
+        const kind = kindOf(link.target);
+        const toFile = link.embed || (kind !== 'note' && kind !== 'other');
+        (toFile ? files : notes).push({ path: note.path, line: link.line, text: link.raw });
+        (toFile ? paths.files : paths.notes).add(note.path);
+      }
+    }
+    const issue = (id: string, severity: CompatIssue['severity'], title: string, detail: string, list: CompatOccurrence[], count: number): CompatIssue => ({
+      id,
+      category: 'links',
+      severity,
+      title,
+      detail,
+      roadmapItem: null,
+      count: list.length,
+      noteCount: count,
+      occurrences: list.slice(0, 200),
+      truncated: list.length > 200,
+    });
+    const issues: CompatIssue[] = [];
+    if (files.length) issues.push(issue('missing-files', 'warning', 'Embeds and file links that lead nowhere', 'The embedded note or the linked attachment is not in the vault.', files, paths.files.size));
+    if (notes.length) issues.push(issue('missing-notes', 'info', 'Links to notes that do not exist yet', 'As in Obsidian, following such a link creates the note.', notes, paths.notes.size));
+    return {
+      generatedAt: new Date().toISOString(),
+      tookMs: 1,
+      obsidian: { found: false, configFiles: [], problems: [] },
+      settings: [],
+      proposedSettings: null,
+      settingsVersion: this.settingsVersion,
+      graph: null,
+      plugins: [],
+      issues,
+      totals: { notes: this.notes().length, files: this.files.size, errors: 0, warnings: files.length, infos: notes.length },
+    };
   }
 
   getTags(): TagCount[] {

@@ -201,7 +201,7 @@ NotesApp/                              (monorepo; branch main)
 | `.notesapp/cache/` | Reserved for derived caches (unused in v1) | hidden | excluded |
 | `.trash/` | Deleted items, stored **flat**: each trashed file or folder is one top-level entry, `.trash/<name>`, with ` 1`, ` 2`, ... on collisions. The original path is kept only in `trash.json`. | hidden; shown only in the Trash view | excluded |
 | `.git/` | JGit repository | hidden, never served | n/a |
-| `.obsidian/` | Obsidian desktop config, if the user ever opens the vault there. Never touched. | hidden | committed except `workspace*.json` |
+| `.obsidian/` | Obsidian's settings, from an imported vault or if the vault is ever opened in Obsidian. Read for the import and the compatibility report (§5.20), never written. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
 **Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties.
@@ -443,18 +443,21 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | `events` | `EventHub` | SSE connections, the 1024-event replay ring, the publish lock, echo suppression, `ping` heartbeats (§5.10). |
 | | `VaultEvent` | Sealed interface with one record per event type, matching API.md §16. |
 | | `EventIds` | Formats and parses `bootId.seq`. |
-| `settings` | `Settings` (+ nested records), `SettingsService` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12). |
+| `settings` | `Settings` (+ nested records), `SettingsService`, `SettingsSeed` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12); a missing file starts from the defaults plus every `SettingsSeed` (§5.20). |
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
 | | `TailscaleInterfaceCheck` | Refuses to start outside the dev profile when no kernel Tailscale interface is visible (§5.13). |
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
 | `notify` | `NtfyConfig`, `NtfyConfigFile` | `ntfy.json` in `notes.secrets-dir`: the server, the default topic, an optional token and the `alerts` section; read again when it changes (§5.18.1). Shared with the reminders of ROADMAP item 9. |
 | | `NtfyClient` | Publishes one message as JSON to the server's root URL, with the token as `Authorization: Bearer`; never follows a redirect. |
+| `obsidian` | `ObsidianConfigReader`, `ObsidianConfig` | Reads `.obsidian/` (never writes it): app, daily-notes, templates, graph and plugin files (ROADMAP item 24, §5.20). |
+| | `ObsidianSettings` | Obsidian's settings in NotesApp terms; the `SettingsSeed` of a first start. |
+| | `CompatScanner`, `CompatService`, `ObsidianPlugins` | The compatibility report of `GET /api/compat`. |
 | `ops` | `AlertMarker` | The stable log markers of §5.18, each with its alert's fixed title, text and priority. |
 | | `AlertLogBridge` | A Logback appender on the root logger: hands each WARN or ERROR whose message pattern starts with a marker to `AppAlerts` (§5.18.1). |
 | | `AppAlerts` | Counts the markers; deduplicates, rate-limits and sends them to ntfy on its own thread (§5.18.1). |
 | | `BackupStatusReader` | Reads the backup run's `status.json` for the status page (§7.10). |
 | | `RuntimeInfo` | The JVM's version and heap, and whether it uses the AOT cache (§7.1). |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `StatusDetailsController`, `AlertsController`, `MirrorController`, `GraphController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `StatusDetailsController`, `AlertsController`, `MirrorController`, `GraphController`, `CompatController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -1054,7 +1057,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 
 ### 5.12 Settings
 
-- The settings live in `.notesapp/settings.json`. They are read at startup. A missing file is created with defaults. A file that is not valid JSON at all is renamed to `settings.json.bak-<ts>` and replaced with defaults.
+- The settings live in `.notesapp/settings.json`. They are read at startup. A missing file is created with defaults, plus the settings of an imported Obsidian vault's `.obsidian/` (ROADMAP item 24, §5.20). A file that is not valid JSON at all is renamed to `settings.json.bak-<ts>` and replaced with defaults.
 - **Rollback safety.** If the file's `schemaVersion` is newer than this build supports, or a known schema version fails validation (for example an enum value that a newer build added), the app does **not** reset it. It uses every field it can read, fills the rest with defaults in memory, and marks settings **read-only**: `GET /api/settings` reports `readOnly: true`, `PUT /api/settings` returns `409 settings-read-only`, `/api/status` shows `settings.readOnly` with the reason, the settings page shows a banner, and the file is never rewritten. Rolling back a release therefore never destroys settings. Rule for future builds: adding a field needs no bump; adding an enum value or changing a meaning bumps `schemaVersion`.
 - **Unknown fields are preserved.** `SettingsService` keeps the file's raw JSON tree and merges the known fields into it on write, so an older build never drops fields a newer build added.
 - Writes go through `PUT /api/settings` with a `baseVersion` (the file's blob id): validate, `atomicWrite`, `markDirty`, then publish `settings.changed`.
@@ -1372,6 +1375,36 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | SSE fan-out to 5 clients | < 50 ms |
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
+| `GET /api/graph` (ROADMAP item 16) | < 150 ms; `?since=` unchanged < 10 ms |
+
+### 5.20 Obsidian vault import (ROADMAP item 24)
+
+An existing Obsidian vault is imported by copying it into the vault directory before the first start (DEPLOY.md *Import an Obsidian vault*, CASAOS.md). The package `obsidian` makes the result behave like the vault did in Obsidian, without ever writing `.obsidian/`, so the vault stays usable there.
+
+- **`.obsidian/` is read, never written.** `ObsidianConfigReader` reads `app.json`, `daily-notes.json`, `templates.json`, `graph.json`, `core-plugins.json` (an object of switches, or the older array; `core-plugins-migration.json` as a fallback) and `community-plugins.json` with each enabled plugin's `plugins/<id>/manifest.json` for its name. It does not follow symbolic links, skips files over 1 MiB, accepts a BOM, and reports unreadable files instead of failing. The folder stays hidden from the tree, the index and the API (§4.5: `403 reserved-path`), and is versioned except `workspace*.json` (§4.6).
+- **First start: the settings come from Obsidian.** `SettingsService.load()` creates a missing `settings.json` from the defaults passed through every `SettingsSeed` bean; `ObsidianSettings` is the one seed, and a seed whose result fails validation is ignored with a WARN. The mapping:
+
+| Obsidian | NotesApp |
+|---|---|
+| `app.json` `attachmentFolderPath`: `""` or `/`, `./`, `./sub`, `Folder` | `files.attachmentLocation` `root`, `current`, `subfolder` with `attachmentSubfolder: sub` (a single name), `folder` with `attachmentFolder` |
+| `newFileLocation` (`root`, `current`, `folder`) and `newFileFolderPath` | `files.newNoteLocation`, `newNoteFolder` (`folder` with an empty path is the root) |
+| `newLinkFormat`, `useMarkdownLinks` | `files.newLinkFormat`, `useWikilinks` (inverted) |
+| `alwaysUpdateLinks: true` | `files.autoUpdateLinks: true` (`false` means "ask" in Obsidian; NotesApp's Move dialog always shows the updates, so it is left alone) |
+| `userIgnoreFilters` | `files.excludedPaths` (paths only; `/regex/` entries are reported, not used) |
+| `strictLineBreaks`, `readableLineLength`, `defaultViewMode` (`source`, `preview`) | `editor.strictLineBreaks`, `readableLineLength`, `defaultMode` (`edit`, `read`) |
+| `daily-notes.json` `format` (empty is `YYYY-MM-DD`), `folder`, `template` (`.md` added), `autorun` | `dailyNotes.format`, `folder`, `template`, `openOnStartup` |
+| `templates.json` `folder`, `dateFormat`, `timeFormat` (empty is the default) | `templates.*` |
+
+  Folders are NFC-normalized and stripped of slashes; a value NotesApp cannot use (a dot-folder, a nested subfolder, an unknown enum value) is reported and the current setting kept. A later start never re-reads them: an existing `settings.json` wins.
+- **The compatibility report** (`GET /api/compat`, API.md §11.5, `CompatService`). Computed on request, nothing stored: what `.obsidian/` holds; one row per Obsidian setting with the NotesApp setting, its current value and Obsidian's (`same`, `different`, `unsupported`), and `proposedSettings` with `settingsVersion`, which the client saves with `PUT /api/settings` to apply them to an existing installation; the graph options of `graph.json` the graph view understands (§6.21); the enabled core and community plugins with what NotesApp offers instead (`ObsidianPlugins`, a table that roadmap items update); and the findings of `CompatScanner`, which runs over a snapshot of the index (`VaultIndex.noteViews()`) outside its lock:
+
+| Category | Findings |
+|---|---|
+| Syntax | Dataview (```` ```dataview ````, ```` ```dataviewjs ````, inline `` `= …` ``), Tasks queries, embedded searches (```` ```query ````), other plugin blocks (```` ```ad-… ````, ```` ```chart ```` …), callouts, Mermaid, math (`$$` blocks, `$…$`), Templater `<% … %>`, block references (`#^id`), `obsidian://` links, HTML the sanitizer removes, Kanban boards (`kanban-plugin` property) |
+| Links | Embeds and attachment links that lead nowhere; links to missing headings (matched as the client does, §6.4) or missing `^block-ids`; links to notes that do not exist yet (informational: following them creates the note) |
+| Files | Names the index skips (`/api/status` `vault.skipped`), notes over the text limit, invalid UTF-8, frontmatter that does not parse, Excalidraw drawings, canvases, bases |
+
+  Fenced code and code spans are skipped, so a note that *shows* such syntax is not reported. Each finding has a severity (`error`: data NotesApp cannot use; `warning`: shown wrong or not at all; `info`: works differently), the roadmap item that will handle it, an exact count, and at most 200 occurrences (path, 0-based line, text). The rules for rendering that a roadmap item adds (callouts, Mermaid and math with item 3) are removed when it lands.
 
 ---
 
@@ -1503,6 +1536,7 @@ frontend/src/
 | `['history', path]` | `GET /api/history` | 0 | |
 | `['historyContent', commit, path]` | `GET /api/history/content` | Infinity | Immutable |
 | `['trash']`, `['settings']`, `['me']`, `['status']`, `['templates']` | | 60 s / Infinity / Infinity / 10 s / 60 s | |
+| `['compat']` | `GET /api/compat` | 0 | The compatibility page only (ROADMAP item 24, §6.22) |
 | `['graph']` | `GET /api/graph` | Infinity | Graph views only (ROADMAP item 16, §6.21): refreshed with `since` at most every 800 ms after `['tree']` or `['settings']` change while one is mounted |
 
 There is no `['resolve']` query: link resolution runs on the client over the tree (§6.6).
@@ -2111,6 +2145,16 @@ Two views over the same data, both lazy chunks registered in `extensions/builtin
 
 **Interaction.** Wheel and trackpad pinch zoom around the pointer; dragging the background pans; dragging a node holds it in the layout; hovering (or pressing, on touch) highlights the node, its links and its neighbours and dims the rest; a click or tap opens it: a file opens, an unresolved link creates its note as following the link would (`openLink` from a note that links to it), a tag opens the search for it. Touch uses pointer events: one finger pans or drags a node, two fingers pinch-zoom around their midpoint (Safari's own gesture events are cancelled), `touch-action: none` on the canvas. Zoom in, zoom out and fit buttons are 44 px on touch screens; the canvas is focusable, with `+`, `-`, `0` (fit) and the arrow keys. Until the user moves the view, the graph is re-fitted as it settles. The canvas reports its zoom and hovered node in `data-zoom` and `data-hover`, for tests.
 
+### 6.22 Compatibility report (ROADMAP item 24)
+
+`/x/compat` (`components/pages/CompatPage.tsx`), registered with `registerPage({route: 'compat', title: 'Compatibility report', icon: FileCheck})` and linked from Settings › About. It reads `['compat']` (`GET /api/compat`, API.md §11.5) on every visit, with a *Check again* button; nothing refreshes it live.
+
+- **Summary**: errors, warnings and notices (occurrence counts), the vault's size, when it was checked; whether `.obsidian/` exists (and that it is never changed), and the files there that could not be read.
+- **Obsidian settings**: one row per Obsidian setting (file › key and value, the NotesApp setting, its current value, and *In effect*, Obsidian's value, or *Not used* with the reason). When a row differs, **Apply Obsidian's settings** saves `proposedSettings` with `PUT /api/settings` and `baseVersion: settingsVersion`; a `409` (the settings changed since the report) refreshes the report and asks to check it again. Disabled while the settings are read-only.
+- **Graph view**: when `graph.json` has options, **Use them on this device** turns them into graph options (`optionsFromObsidian`: colors `{a, rgb}` become `#rrggbb`, unknown keys are dropped) for this device (§6.21).
+- **Plugins**: the enabled core and community plugins, with *Supported*, *Partly*, *Planned* (and the roadmap item), *Not supported* or *Unknown*, and a one-line note.
+- **Findings** in three sections (syntax and plugins in notes, links, files), each a collapsed card with its severity icon, count, file count and roadmap item; expanded, it explains the finding and lists the occurrences, each opening the note at its line (`/n/<path>?line=N`, §6.4). Under 768 px the settings table stacks each row; occurrences are 44 px tall on touch screens.
+
 ---
 
 ## 7. Infrastructure
@@ -2667,6 +2711,8 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 | `EventHubTest` | Echo suppression; replay after `lastEventId` with the right `replayed` count; a foreign `bootId` or too-old id gives `hello{resync:true}` with the head id; **`ping` frames carry no `id:` and never enter the ring**; concurrent publishers produce strictly increasing ids in delivery order; `onTimeout` completes the emitter without an exception; a slow client does not block others; `closeAll`. |
 | `Rfc2047Test`, `IdentityResolverTest`, `HostAndIdentityFilterTest` | Q-encoding, B-encoding, multiple encoded words, invalid input. A missing login gives `403` unless `allow-default`; a login outside `allowed-logins` gives `403`; `Host: evil.example` gives `421`; health paths are exempt from both. |
 | `ApiGuardInterceptorTest`, `SettingsServiceTest` | Header, Origin and `Sec-Fetch-Site` rules. Settings defaults, validation and version conflict; unknown fields survive a write; a newer `schemaVersion` makes settings read-only and leaves the file byte-for-byte unchanged. |
+| `GraphBuilderTest` (ROADMAP item 16) | Every file a node, links counted per pair, embeds counted, same-note links left out; unresolved targets grouped case-insensitively without `.md`; excluded paths left out with their edges; the version stays on text edits and changes on a new link, a retag, a created, moved or removed file. |
+| `ObsidianConfigReaderTest`, `ObsidianSettingsTest`, `CompatScannerTest` (ROADMAP item 24, the fixture vault `src/test/resources/vaults/obsidian`) | What `.obsidian/` holds, invalid and oversized files reported, both core-plugin formats; every settings mapping, unusable values reported and not applied, a second mapping proposing nothing; every finding at the right line, nothing reported inside code, 200 occurrences listed of 250 counted. |
 
 **Integration tests** (classes named `*IntegrationTest`; `@SpringBootTest(webEnvironment = RANDOM_PORT)` + `@AutoConfigureRestTestClient`, `@TempDir` vault, `notes.watcher.enabled=false`, short git periods, `notes.allowed-hosts=localhost`, `notes.identity.allow-default=true`, `notes.security.require-tailscale-interface=false`):
 
@@ -2686,6 +2732,8 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 14. Importing a vault whose `.git` has a `post-commit` hook that writes a marker file: after several commits, the marker does not exist.
 15. A save is not delayed by more than a few ms while a slow upload (a body trickled over 5 s) is in progress.
 16. `/api/status` reports `git.largeFiles` and `mirror` (off by default, `POST /api/mirror/push` then gives `400`); a large upload is counted and its history says `excluded`; with a local bare repository as the mirror, `POST /api/mirror/push` answers `202` and the mirror receives `HEAD`; the push needs `X-Client-Id` like every mutation.
+17. `GET /api/graph` (ROADMAP item 16): nodes, edges and tags over HTTP; `?since=` answers `unchanged` until a save adds a link; excluded paths leave the graph.
+18. Obsidian import (ROADMAP item 24, `ObsidianImportIntegrationTest`): the fixture vault started once takes its settings from `.obsidian/`, keeps `.obsidian/` byte-for-byte, out of the tree and its `workspace.json` out of git; `GET /api/compat` reports every setting in effect, the plugins and the findings, and a changed setting as `different`; a second start keeps the changed settings.
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
@@ -2700,6 +2748,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - `drafts.ts` (with `fake-indexeddb`): write, restore, re-key, ownership by live tabs over a mocked `BroadcastChannel`, the quota-failure warning.
 - `applyEvents`: each event's cache patch, including `removeQueries(['file', …])` and the own-mutation invalidations. `events.ts`: `lastEventId` tracking; **an idle stream that receives only pings for 2 minutes stays Live and never reconnects**; `onerror` with `readyState` `CLOSED` recreates the stream with backoff; the `replayed` countdown sets `caughtUp`; resync buffering drops buffered events with `seq` at or below the tree's `eventId`; a `buildSha` mismatch reloads when all sessions are clean and shows the banner when one is dirty.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
+- Graph view (ROADMAP item 16): the query grammar on names, paths, aliases and tags; views with tags, attachments, unresolved links, orphans, folder and tag filters, the local graph by depth and direction; first-match color groups; options from storage and from Obsidian's `graph.json`; the force layout keeping positions by id and holding a dragged node; the runner's generations; renderer geometry (zoom around a point, fit, hit test) and batched drawing; the page and panel with their filters, groups, depth and the refresh after a tree change. The compatibility page (item 24): summary, settings rows, Apply with `baseVersion`, the conflict path, graph settings for this device, findings opening their line.
 - Mirror and large files (ROADMAP items 2 and 23): `features/mirror.ts` (the warning texts for `failing` and `diverged`, none while `ready` or `disabled`, the About summary, the push command shown only with a configured mirror, its toasts); `features/largeFiles.ts` (the threshold format, strictly-larger rule, policy off); `HistoryPanel` (the note replaces "No history" for an excluded file and older versions are still listed); `StatusBar` (the warning button with the error as its tooltip, and a click that calls `POST /api/mirror/push`).
 
 ### 8.3 Browser smoke checklist
@@ -2732,6 +2781,8 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 24. Open the app from a tagged device or a non-allowed login: it gets 403. `docker compose config` shows both volumes as `external: true`.
 25. Mirror (ROADMAP item 2), when configured: 10 minutes after an edit, the commit is on github.com; with the token file emptied (then `docker compose up -d --force-recreate notes`), the status bar shows "Mirror is not being updated" and clicking it reports the error again; a commit pushed to the GitHub repository from elsewhere makes the next push stop with "Mirror stopped", and the GitHub repository keeps that commit. `docker compose logs notes | grep -c <first characters of the token>` prints 0.
 26. Large files (ROADMAP item 23): drop a file over 25 MB onto a folder: it opens and downloads, its History panel shows the note, Settings › About counts it, `git -C /srv/notes/data/vault check-ignore -v <path>` names the `info/exclude` line, and replacing it with another upload puts the old one in the trash.
+27. Graph view (ROADMAP item 16): `/x/graph` on a vault of a few hundred notes settles within seconds and stays responsive while it does; hover highlights neighbours, a click opens the note, the filters, a color group and the forces change the picture at once; on the iPhone, pinch zooms, one finger pans or drags a node, a tap opens it, and the settings open as a sheet. The local graph follows the open note and its depth slider; an edit that adds a link appears in both graphs within a second.
+28. Obsidian import (ROADMAP item 24): start on a copy of a real Obsidian vault; Settings shows its attachment folder, daily note and template settings; `/x/compat` lists them as in effect, its plugins and findings, and each finding opens its note at the line; `.obsidian/` is unchanged and the vault still opens in Obsidian.
 
 ---
 

@@ -110,7 +110,7 @@ docker volume ls --filter name=notes-data --filter name=tailscale-state
 - `notes-data` is **bind-backed**: the vault is the plain directory `/srv/notes/data/vault` on the host, which makes backups, inspection and editing over SSH simple.
 - `tailscale-state` holds the node's identity and TLS certificate. **Never delete it.** A lost state creates a new node (`notes-1`, a different URL) and requests new certificates, and Let's Encrypt rate limits can then lock you out for about 34 hours.
 
-**Optional: import an existing Obsidian vault** now, before the first start:
+**Optional: import an existing Obsidian vault** now, before the first start, so that NotesApp takes over its settings (Part 2, *Import an Obsidian vault*, has the details and the checks afterwards):
 
 ```sh
 sudo cp -a /path/to/MyVault/. /srv/notes/data/vault/
@@ -739,9 +739,40 @@ Files larger than **25 MB** stay in the vault, the trash and the nightly backups
 
 **Settings › About** shows the history size and how many files are kept out of it. To change the threshold, set `NOTES_GIT_LARGE_FILE_THRESHOLD` in `.env` (for example `50MB`; `0` versions every file) and run `docker compose up -d`. At the next start, files now over the threshold stop being versioned (`Stop versioning …` commits) and files now under it are committed. Lowering it does not shrink the history: versions already committed stay. Keep it below 100 MB while the mirror is on, and at 5 MB or more, the largest note NotesApp saves (`notes.limits.max-text-size`): a lower threshold would leave large notes without versions while every save overwrites them, so NotesApp refuses to start with it and says why in `docker compose logs notes`.
 
-### Import an existing Obsidian vault later
+### Import an Obsidian vault
 
-Before the first start, use step 4. Into a running installation: stop the app, copy the vault into a subfolder, remove the copy's own `.git` and `.obsidian` (a nested repository would hide the folder from the vault's history), fix the owner, and start again. The app commits the new files as `Changes made while NotesApp was stopped`.
+NotesApp reads an Obsidian vault as it is (ROADMAP item 24): the same Markdown, wikilinks, embeds, tags, properties, daily notes and templates. `.obsidian/` is read but never written, so the vault keeps working in Obsidian; it stays hidden in NotesApp and is versioned except `workspace*.json`.
+
+**1. Get a copy of the vault to homeserver.** Close Obsidian on the device the copy comes from, or at least let its sync finish. From `rgpc` (an iCloud vault is under `iCloudDrive\iCloud~md~obsidian\` on Windows; make sure every file is downloaded, not just a placeholder):
+
+```powershell
+scp -r "C:\Users\<you>\Documents\MyVault" <you>@homeserver:/tmp/MyVault
+```
+
+`rsync -a /path/to/MyVault/ <you>@homeserver:/tmp/MyVault/` works too, from a Mac or Linux. Obsidian's own `.trash/` folder, when the vault has one, is the folder NotesApp uses for its trash: its files show up on the Trash page, to restore or empty there.
+
+**2. Put it in place before the first start** (an empty data folder, step 4 of Part 1):
+
+```sh
+sudo cp -a /tmp/MyVault/. /srv/notes/data/vault/
+sudo chown -R 1000:1000 /srv/notes/data/vault
+docker compose up -d
+```
+
+The first start creates `.notesapp/settings.json` from `.obsidian/`: attachment folder, new note location, link format and style, excluded files, strict line breaks, readable line length, default view, the daily note format, folder, template and "open on startup", and the template folder and formats (`docker compose logs notes | grep Imported` shows how many). A vault that already has `.notesapp/settings.json` keeps it; the report below proposes Obsidian's values instead.
+
+- **The vault has its own `.git`** (the obsidian-git plugin): it is kept and NotesApp commits on its current branch; turn the plugin off in Obsidian for this vault, NotesApp is now the only git writer. A detached `HEAD` turns history off until it is on a branch (`/api/status` says so).
+- **A large vault** (thousands of files) is ready at once; its history commit runs in the background.
+- **Names Windows cannot use** (`Meeting 10:30.md`) work in NotesApp; new names follow the rules of DESIGN §4.4.
+
+**3. Check the compatibility report.** Open `https://notes.<tailnet>.ts.net/x/compat` (also the ribbon, the drawer, *Open Compatibility report* in the palette, and Settings › About). It lists:
+
+- each Obsidian setting next to NotesApp's (*In effect* after a first start), with **Apply Obsidian's settings** for values that differ, for example after importing into an installation that already had settings;
+- **Use them on this device** for the graph settings of `graph.json` (graph settings are per device);
+- the core and community plugins the vault has turned on, and what NotesApp offers for each;
+- what does not carry over, each place opening the note at its line: Dataview and Tasks queries, Templater commands, callouts, Mermaid and math (until they are rendered), links to missing files, headings or blocks, notes it cannot read, Excalidraw drawings and canvases.
+
+**Into a running installation** with notes of its own: stop the app, copy the vault into a subfolder, remove the copy's own `.git` and `.obsidian` (a nested repository would hide the folder from the vault's history; Obsidian settings apply to the vault root only), fix the owner, and start again. The app commits the new files as `Changes made while NotesApp was stopped`. To take over the old vault's settings anyway, compare them with the report's rows by hand under Settings.
 
 ```sh
 cd ~/notesapp/deploy
