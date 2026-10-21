@@ -17,6 +17,7 @@ import {
   LayoutTemplate,
   Link2,
   ListTree,
+  Mic,
   Search,
   Settings as SettingsIcon,
   Tags,
@@ -49,6 +50,7 @@ import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { registerPdfView } from '../views/pdf/register';
+import { startVoiceNote, transcribeAtCursor } from '../features/voice/voiceNotes';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
 
@@ -234,6 +236,26 @@ export function registerBuiltins(): void {
   editorCommand('editor.insertLink', 'Insert Markdown link', insertMarkdownLink, 'Mod-k');
   editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
   editorCommand('editor.find', 'Find/replace in current note', openSearchPanel, 'Mod-f');
+  // Voice notes (ROADMAP item 33, DESIGN §6.21): recorded into the open note at its cursor.
+  registerCommand({
+    id: 'voice.record',
+    name: 'Record voice note',
+    icon: Mic,
+    when: hasNote,
+    run: (c) => {
+      const session = documents.get(c.activePath!);
+      if (session) startVoiceNote(session);
+    },
+  });
+  registerCommand({
+    id: 'voice.transcribe',
+    name: 'Transcribe recording on this line',
+    when: hasNote,
+    run: async (c) => {
+      const session = documents.get(c.activePath!);
+      if (session) await transcribeAtCursor(session);
+    },
+  });
   registerCommand({
     id: 'editor.insertAttachment',
     name: 'Insert attachment…',

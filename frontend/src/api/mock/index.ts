@@ -81,6 +81,8 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     commitHistory: () => call(() => vault.commitNow()),
     pushMirror: () => call(() => vault.pushMirror()),
     getTemplates: () => call(() => vault.getTemplates()),
+    getTranscriptionStatus: () => call(() => vault.getTranscriptionStatus()),
+    transcribe: (path) => call(() => vault.transcribe(path)),
     rawUrl: (entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>) =>
       blobUrl(`file:${entry.path}:${entry.size}:${entry.mtime}`, vault.rawBytes(entry.path), entry.path),
     trashRawUrl: (id) => {

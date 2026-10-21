@@ -27,6 +27,9 @@ const TABLE: Record<ErrorCode, [number, string]> = {
   busy: [503, 'Busy, retry'],
   'history-unavailable': [503, 'History unavailable'],
   'insufficient-storage': [507, 'Insufficient storage'],
+  'not-audio': [415, 'Not an audio or video file'],
+  'transcription-off': [409, 'Transcription is off'],
+  'transcription-failed': [503, 'Transcription failed'],
 };
 
 /** Builds and throws the server's problem document for `code` (API.md §3). */

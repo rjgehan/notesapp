@@ -21,7 +21,8 @@ export type ErrorCode =
   | 'already-exists' | 'case-collision' | 'type-mismatch' | 'version-conflict' | 'settings-read-only'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
-  | 'busy' | 'history-unavailable' | 'insufficient-storage';
+  | 'busy' | 'history-unavailable' | 'insufficient-storage'
+  | 'not-audio' | 'transcription-off' | 'transcription-failed';
 
 export interface FieldError { field: string; message: string }
 
@@ -328,6 +329,20 @@ export interface CommitResult { commitId: string | null }
 // ---------- templates (§15.4) ----------
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
+
+// ---------- voice notes (§20) ----------
+export interface TranscriptionStatus {
+  enabled: boolean;
+  service: string | null;   // "whisper-asr at http://notesapp-whisper:9000"; never credentials
+  language: string | null;  // the configured language; null = detected per recording
+  maxBytes: number;         // larger recordings are not sent
+}
+export interface TranscriptionResult {
+  path: VaultPath;
+  text: string;             // "" when no speech was recognized
+  language: string | null;
+  millis: number;           // the service's time; 0 for a transcript the server had kept
+}
 
 // ---------- SSE (§16) ----------
 export interface HelloEvent {

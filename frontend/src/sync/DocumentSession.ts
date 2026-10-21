@@ -1107,18 +1107,21 @@ export class DocumentSession {
    * Starts an upload shown at `range` (its text is replaced): a widget, never document text.
    * Returns the upload's id, or null when the document cannot be edited.
    */
-  beginUpload(range: { from: number; to: number }, label: string, userEvent: string): number | null {
+  beginUpload(range: { from: number; to: number }, label: string, userEvent: string, verb?: string): number | null {
     if (!this.isEditable()) return null;
     const id = ++uploadSeq;
-    const effects = [addUpload.of({ id, pos: range.from, label })];
+    const effects = [addUpload.of({ id, pos: range.from, label, verb })];
     if (range.from !== range.to) this.applyEdit({ from: range.from, to: range.to, insert: '' }, { selection: { anchor: range.from }, userEvent, effects });
     else this.dispatchEffects(effects);
     this.uploads++;
     return id;
   }
 
-  /** Inserts the upload's embed where its widget is (after the batch's earlier embeds). */
-  finishUpload(id: number, insert: string): boolean {
+  /**
+   * Inserts the upload's embed where its widget is (after the batch's earlier embeds). `insert` may
+   * depend on the text around that place (a voice note's transcript must start and end a block).
+   */
+  finishUpload(id: number, insertion: string | ((doc: string, pos: number) => string)): boolean {
     const upload = pendingUploads(this.editorState).find((u) => u.id === id);
     this.uploads = Math.max(0, this.uploads - 1);
     if (!upload) return false;
@@ -1126,8 +1129,14 @@ export class DocumentSession {
       this.dispatchEffects([endUpload.of({ id })]);
       return false;
     }
+    const insert = typeof insertion === 'string' ? insertion : insertion(this.editorState.doc.toString(), upload.pos);
     this.applyEdit({ from: upload.pos, insert }, { effects: [endUpload.of({ id, from: upload.pos, end: upload.pos + insert.length })] });
     return true;
+  }
+
+  /** Where the widget of upload `id` is now (it follows every edit), or null when it is gone. */
+  uploadPosition(id: number): number | null {
+    return pendingUploads(this.editorState).find((u) => u.id === id)?.pos ?? null;
   }
 
   /** A failed or abandoned upload: its widget goes. */

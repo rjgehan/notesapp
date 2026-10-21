@@ -2,13 +2,14 @@
 // written with the version protocol (`PUT /api/settings {settings, baseVersion}`); "This device"
 // holds the per-device preferences and the recently discarded edits.
 import { ArrowLeft, Copy, Info, Laptop, RotateCcw, Trash2, TriangleAlert } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation } from 'react-router';
 import { errorMessage } from '../../api/client';
 import { api } from '../../api/endpoints';
 import { useMe, useSettings, useStatus, useTree } from '../../api/hooks';
 import { queryClient } from '../../api/queryClient';
-import { queryKeys } from '../../api/queryKeys';
+import { queryKeys, STALE } from '../../api/queryKeys';
 import type { Settings, SettingsResponse } from '../../api/types';
 import { unsupportedTokens } from '../../features/dates';
 import { formatBytes, formatDateTime, formatRelative } from '../../features/format';
@@ -28,6 +29,7 @@ import { OrphanDraftList } from '../OrphanDrafts';
 import { usePageTitle } from './usePageTitle';
 import { toastError } from '../../features/errors';
 import { SettingsWriter } from '../../features/settingsWriter';
+import { setTranscribeNewRecordings, useVoice } from '../../features/voice/voiceNotes';
 
 const SECTIONS = [
   { id: 'files', title: 'Files and links' },
@@ -469,6 +471,7 @@ function DeviceSection() {
       <Row label="Load remote images" description="Off: images from other sites show a placeholder until tapped.">
         <Toggle label="Load remote images" checked={prefs.loadRemoteImages} onChange={(loadRemoteImages) => prefs.update({ loadRemoteImages })} />
       </Row>
+      <VoiceRow />
       <h3 className="settings-subtitle">Recently discarded edits</h3>
       {draftsFailing && (
         <p className="field-error">
@@ -478,6 +481,22 @@ function DeviceSection() {
       <OrphanDraftList />
       <DiscardedEdits />
     </>
+  );
+}
+
+/** Voice notes (ROADMAP item 33): whether this device's recordings are transcribed, and by what. */
+export function VoiceRow() {
+  const transcribe = useVoice((s) => s.transcribe);
+  const status = useQuery({ queryKey: queryKeys.transcription(), queryFn: () => api.getTranscriptionStatus(), staleTime: STALE.transcription }).data;
+  const description = !status
+    ? 'Voice notes are recorded with “Record voice note” (the microphone on the phone’s toolbar).'
+    : status.enabled
+      ? `New recordings are transcribed by ${status.service}, and the text is added under them.`
+      : 'The server has no transcription service, so recordings are saved without text (DEPLOY.md, Voice notes).';
+  return (
+    <Row label="Transcribe voice notes" description={description}>
+      <Toggle label="Transcribe voice notes" checked={transcribe} disabled={!status?.enabled} onChange={setTranscribeNewRecordings} />
+    </Row>
   );
 }
 

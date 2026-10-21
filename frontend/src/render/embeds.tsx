@@ -36,6 +36,25 @@ function size(value: string | undefined): number | undefined {
   return value && Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/**
+ * A video file without a picture (a voice note recorded as WebM, ROADMAP item 33) becomes an audio
+ * player once its metadata says so, instead of a black box with controls.
+ */
+export function playAudioOnlyAsAudio(video: HTMLVideoElement): void {
+  video.addEventListener(
+    'loadedmetadata',
+    () => {
+      if (video.videoWidth > 0 || video.videoHeight > 0 || !video.isConnected) return;
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.preload = 'metadata';
+      audio.src = video.currentSrc || video.src;
+      video.replaceWith(audio);
+    },
+    { once: true },
+  );
+}
+
 function fileChip(el: HTMLElement, entry: FileEntry, ctx: EmbedContext): void {
   const link = document.createElement('a');
   link.className = 'file-chip';
@@ -85,6 +104,7 @@ export function hydrateEmbeds(container: Element, ctx: EmbedContext): void {
       video.setAttribute('playsinline', '');
       video.src = ctx.rawUrl(entry);
       if (el.dataset.width) video.width = Number(el.dataset.width);
+      playAudioOnlyAsAudio(video);
       el.appendChild(video);
     } else {
       const descriptor = viewFor(entry);

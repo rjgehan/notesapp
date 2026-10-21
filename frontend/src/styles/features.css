@@ -1723,3 +1723,111 @@ mark.match {
   font-family: var(--font-text);
   line-height: var(--line-height);
 }
+
+/* ---------- voice notes (ROADMAP item 33, DESIGN §6.21) ---------- */
+
+.voice-panel {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--status-height) + 16px + env(safe-area-inset-bottom));
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(380px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary-alt);
+  box-shadow: var(--shadow-l);
+  transform: translateX(-50%);
+}
+
+/* Toasts (the "transcribing" and error messages) stay readable above the panel. */
+.app-shell:has(.voice-panel) .toasts {
+  bottom: calc(var(--status-height) + 156px + env(safe-area-inset-bottom));
+}
+
+.voice-panel-main,
+.voice-panel-row,
+.voice-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.voice-panel-actions {
+  justify-content: flex-end;
+}
+
+.voice-mic {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.is-recording .voice-mic {
+  color: var(--text-error);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.voice-time {
+  min-width: 3.5em;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15em;
+}
+
+.voice-meter {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+}
+
+.voice-meter-level {
+  position: absolute;
+  inset: 0;
+  background: var(--interactive-accent);
+  transform-origin: left center;
+  transition: transform 90ms linear;
+}
+
+.voice-status,
+.voice-target {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.voice-target {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-transcribe {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-ui-small);
+}
+
+@media (max-width: 767px) {
+  .voice-panel .button {
+    min-height: var(--tap-target);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-recording .voice-mic {
+    animation: none;
+  }
+}

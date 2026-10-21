@@ -40,6 +40,8 @@ import type {
   TagCount,
   TemplatesResponse,
   TextFile,
+  TranscriptionResult,
+  TranscriptionStatus,
   TrashEntry,
   TreeResponse,
   WriteResult,
@@ -418,6 +420,23 @@ export class MockVault {
 
   pushMirror(): MirrorStatus {
     return fail('bad-request', 'The mirror is off: not configured');
+  }
+
+  // ---------- voice notes (API.md §20) ----------
+
+  /** The mock transcribes like a configured service; tests turn it off. */
+  transcriptionEnabled = true;
+
+  getTranscriptionStatus(): TranscriptionStatus {
+    return { enabled: this.transcriptionEnabled, service: this.transcriptionEnabled ? 'mock' : null, language: null, maxBytes: 25 * 1024 * 1024 };
+  }
+
+  transcribe(path: string): TranscriptionResult {
+    if (!this.transcriptionEnabled) fail('transcription-off', 'Transcription is off: no transcription service is configured (NOTES_TRANSCRIPTION_URL)');
+    const f = this.existing(path);
+    const kind = kindOf(path);
+    if (kind !== 'audio' && kind !== 'video') fail('not-audio', 'Only audio and video files can be transcribed', { path });
+    return { path, text: `Transcript of ${lastSegment(path)} (${f.bytes.length} bytes).`, language: 'en', millis: 1 };
   }
 
   // ---------- tree and text files ----------

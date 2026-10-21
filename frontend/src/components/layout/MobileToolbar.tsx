@@ -5,13 +5,14 @@
 // the editor keeps the focus and the keyboard stays open while they dispatch to the EditorView.
 import { indentLess, indentMore, redo, undo } from '@codemirror/commands';
 import type { EditorView } from '@codemirror/view';
-import { Brackets, Code, Command as CommandIcon, Hash, ImagePlus, KeyboardOff, ListIndentDecrease, ListIndentIncrease, Minus, Redo2, SquareArrowOutUpRight, SquareCheck, Undo2, type LucideIcon } from 'lucide-react';
+import { Brackets, Code, Command as CommandIcon, Hash, ImagePlus, KeyboardOff, ListIndentDecrease, ListIndentIncrease, Mic, Minus, Redo2, SquareArrowOutUpRight, SquareCheck, Undo2, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { activeEditor } from '../../editor/activeEditor';
 import { insertWikilink } from '../../editor/completion';
 import { noteContext } from '../../editor/context';
 import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox, toggleInlineCode } from '../../editor/editorCommands';
 import { revealCaret } from '../../editor/mobileViewport';
+import { startVoiceNote } from '../../features/voice/voiceNotes';
 import { pickAndInsertAttachments } from '../../features/attachments';
 import { runCommand } from '../../features/commands';
 import { activePath } from '../../features/navigation';
@@ -59,6 +60,20 @@ const TOOLS: Tool[] = [
       const ctx = v.state.facet(noteContext);
       const session = ctx ? documents.get(ctx.path()) : undefined;
       if (session) pickAndInsertAttachments(session, 'image/*');
+    },
+  },
+  {
+    id: 'voice',
+    label: 'Record voice note',
+    icon: Mic,
+    markdown: true,
+    run: (v) => {
+      const ctx = v.state.facet(noteContext);
+      const session = ctx ? documents.get(ctx.path()) : undefined;
+      if (!session) return;
+      // The session remembers the cursor; the keyboard goes, so the recording panel has the room.
+      startVoiceNote(session);
+      v.contentDOM.blur();
     },
   },
   { id: 'hide', label: 'Hide keyboard', icon: KeyboardOff, run: (v) => v.contentDOM.blur() },

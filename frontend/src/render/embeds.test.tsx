@@ -3,7 +3,7 @@ import { Shapes } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 import type { FileEntry } from '../api/types';
 import { registerView, type EmbedProps } from '../views/registry';
-import { hydrateEmbeds, unmountEmbeds, type EmbedContext } from './embeds';
+import { hydrateEmbeds, playAudioOnlyAsAudio, unmountEmbeds, type EmbedContext } from './embeds';
 import { renderNote, type RenderContext } from './render';
 
 function entry(path: string, kind: FileEntry['kind']): FileEntry {
@@ -95,5 +95,37 @@ describe('PDF embeds', () => {
     expect([...container.querySelectorAll('[data-testid="pdf"]')].map((e) => e.textContent)).toEqual(['Docs/Manual.pdf #page=3 -', 'Docs/Manual.pdf #height=300 -', 'Docs/Manual.pdf # -']);
     act(() => unmountEmbeds(container));
     container.remove();
+  });
+});
+
+describe('audio-only video embeds', () => {
+  function video(width: number) {
+    const v = document.createElement('video');
+    v.src = '/raw/Recording.webm';
+    Object.defineProperty(v, 'videoWidth', { value: width });
+    Object.defineProperty(v, 'videoHeight', { value: width ? 360 : 0 });
+    const box = document.createElement('span');
+    box.appendChild(v);
+    document.body.appendChild(box);
+    return { v, box };
+  }
+
+  it('play a voice note recorded as WebM in an audio player', () => {
+    const { v, box } = video(0);
+    playAudioOnlyAsAudio(v);
+    v.dispatchEvent(new Event('loadedmetadata'));
+    const audio = box.querySelector('audio');
+    expect(box.querySelector('video')).toBeNull();
+    expect(audio?.controls).toBe(true);
+    expect(audio?.src.endsWith('/raw/Recording.webm')).toBe(true);
+    box.remove();
+  });
+
+  it('keep a real video a video', () => {
+    const { v, box } = video(640);
+    playAudioOnlyAsAudio(v);
+    v.dispatchEvent(new Event('loadedmetadata'));
+    expect(box.querySelector('video')).toBe(v);
+    box.remove();
   });
 });

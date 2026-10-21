@@ -18,6 +18,7 @@ import { Dialogs } from '../overlays/Dialogs';
 import { QuickSwitcher } from '../overlays/QuickSwitcher';
 import { TemplatePicker } from '../overlays/TemplatePicker';
 import { Toasts } from '../overlays/Toasts';
+import { VoiceRecorderPanel } from '../overlays/VoiceRecorderPanel';
 import { Overlay } from './Drawer';
 import { MobileToolbar } from './MobileToolbar';
 import { PanelTabs } from './Panels';
@@ -226,6 +227,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Overlays />
       <FileInput />
       <LiveRegion />
+      <VoiceRecorderPanel />
       <Toasts />
     </div>
   );

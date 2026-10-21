@@ -33,6 +33,8 @@ import type {
   TemplatesResponse,
   TextFile,
   TrashEntry,
+  TranscriptionResult,
+  TranscriptionStatus,
   TrashListResponse,
   TreeResponse,
   WriteResult,
@@ -96,6 +98,9 @@ export interface Endpoints {
   commitHistory(): Promise<CommitResult>;
   pushMirror(): Promise<MirrorStatus>;
   getTemplates(): Promise<TemplatesResponse>;
+  getTranscriptionStatus(): Promise<TranscriptionStatus>;
+  /** The transcript of a recording in the vault (API.md §20.2); it can take minutes. */
+  transcribe(path: string): Promise<TranscriptionResult>;
   /** Content-addressed raw URL (API.md §9.1). */
   rawUrl(entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>, opts?: { download?: boolean }): string;
   trashRawUrl(id: string): string;
@@ -150,6 +155,8 @@ export const httpEndpoints: Endpoints = {
   commitHistory: () => apiFetch('/api/history/commit', { method: 'POST' }),
   pushMirror: () => apiFetch('/api/mirror/push', { method: 'POST' }),
   getTemplates: () => apiFetch('/api/templates'),
+  getTranscriptionStatus: () => apiFetch('/api/transcription'),
+  transcribe: (path) => apiFetch('/api/transcriptions', { method: 'POST', json: { path } }),
   rawUrl: (entry, opts) =>
     '/api/files/raw?path=' +
     encodeURIComponent(entry.path) +
