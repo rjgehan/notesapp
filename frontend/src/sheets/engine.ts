@@ -23,6 +23,7 @@ import {
 import { MAX_COLUMNS, MAX_ROWS, parseA1, toA1 } from './a1';
 import {
   emptySheet,
+  isCellError,
   isEmptyCell,
   newChartId,
   own,
@@ -43,6 +44,7 @@ import {
   type SheetCell,
   type SheetFile,
 } from './format';
+import { moveReferences, parseRangeText, rangeText, type CellMove, type CellRange } from './refs';
 
 /** The engine identity written to `engine`. A config change that alters results must change it too. */
 export const ENGINE_ID = `hyperformula@${HyperFormula.version}`;
@@ -468,6 +470,84 @@ export class Workbook {
     if (before !== after) this.record([{ kind: 'named', name: key, before, after }]);
   }
 
+  /**
+   * Moves the cells of `from` so they start at `to` (a cut and paste), as one undo step, the way
+   * Excel and Google Sheets move cells: contents, formats and unknown keys go to the new place and
+   * the old one is emptied (where the two do not overlap); references to the moved cells, in every
+   * formula and named range and in the moved formulas themselves, follow them; other references,
+   * the moved formulas' included, keep pointing where they did. A chart of a range that moved within
+   * its sheet follows it. A value an array formula spilled into the range moves as a value (the array
+   * stays) unless its formula moves too.
+   */
+  moveCells(from: { sheet: string; range: CellRange }, to: { sheet: string; col: number; row: number }): void {
+    const src = this.requireSheet(from.sheet);
+    const dest = this.requireSheet(to.sheet);
+    const r = from.range;
+    if (to.col < 0 || to.row < 0 || to.col + r.width > MAX_COLUMNS || to.row + r.height > MAX_ROWS) throw new Error('The cells do not fit there.');
+    const move: CellMove = { sheet: src.name, range: r, toSheet: dest.name, dRow: to.row - r.row, dCol: to.col - r.col };
+    if (move.dRow === 0 && move.dCol === 0 && src.id === dest.id) return;
+    const inSource = (col: number, row: number) => col >= r.col && col < r.col + r.width && row >= r.row && row < r.row + r.height;
+
+    // Spilled cells whose array formula moves with them: they go with it, as nothing.
+    const carried = new Set<string>();
+    for (const [ref, cell] of Object.entries(src.cells)) {
+      const at = parseA1(ref);
+      const address = this.address(src.id, ref);
+      if (!at || !address || cell.f === undefined || !inSource(at.col, at.row) || this.engine.getCellType(address) !== CellType.ARRAYFORMULA) continue;
+      const { width, height } = this.arrayExtent(address);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) carried.add(toA1(at.col + x, at.row + y));
+    }
+
+    // Each changed slot's content after the move (undefined: empty), keyed by sheet id and ref.
+    const after = new Map<string, SheetCell | undefined>();
+    const slot = (id: string, ref: string) => `${id}\n${ref}`;
+    for (const [ref, cell] of Object.entries(src.cells)) {
+      const at = parseA1(ref);
+      if (at && inSource(at.col, at.row) && content(cell)) after.set(slot(src.id, ref), undefined);
+    }
+    for (let y = 0; y < r.height; y++) {
+      for (let x = 0; x < r.width; x++) {
+        const fromRef = toA1(r.col + x, r.row + y);
+        const cell = src.cells[fromRef];
+        let moved = content(cell);
+        const spill = cell?.c;
+        if (cell && cell.v === undefined && cell.f === undefined && spill !== undefined && spill !== null && !carried.has(fromRef)) {
+          moved = { ...moved, v: isCellError(spill) ? spill.e : spill };
+        }
+        if (moved?.f !== undefined) moved = { ...moved, f: moveReferences(moved.f, { from: src.name, to: dest.name }, move) };
+        after.set(slot(dest.id, toA1(to.col + x, to.row + y)), moved);
+      }
+    }
+    for (const sheet of this.model.sheets) {
+      for (const [ref, cell] of Object.entries(sheet.cells)) {
+        if (cell.f === undefined || after.has(slot(sheet.id, ref))) continue;
+        const f = moveReferences(cell.f, { from: sheet.name, to: sheet.name }, move);
+        if (f !== cell.f) after.set(slot(sheet.id, ref), { ...content(cell), f });
+      }
+    }
+
+    const patch: Patch = [];
+    for (const [key, next] of after) {
+      const [id, ref] = key.split('\n');
+      const before = content(sheetById(this.model, id)?.cells[ref]);
+      if (!same(before, next)) patch.push({ kind: 'cell', id, ref, before, after: next });
+    }
+    for (const [name, expression] of Object.entries(this.model.named)) {
+      const next = moveReferences('=' + expression, { from: null, to: null }, move).slice(1);
+      if (next !== expression) patch.push({ kind: 'named', name, before: expression, after: next });
+    }
+    if (src.id === dest.id) {
+      for (const [key, chart] of Object.entries(src.charts)) {
+        const range = chart.range === undefined ? null : parseRangeText(chart.range);
+        if (!range || range.sheet !== null) continue;
+        const c = range.range;
+        if (!inSource(c.col, c.row) || !inSource(c.col + c.width - 1, c.row + c.height - 1)) continue;
+        patch.push({ kind: 'chart', id: src.id, key, before: chart, after: { ...chart, range: rangeText({ ...c, col: c.col + move.dCol, row: c.row + move.dRow }) } });
+      }
+    }
+    this.record(patch);
+  }
+
   /** Runs several edits as one undo step, with one change notification. */
   transact(edits: () => void): void {
     if (this.transaction) {
@@ -849,12 +929,8 @@ export class Workbook {
     // Values in cells without content can only come from array formulas spilling into them. Each
     // array is read where it spills, from its formula's cell along the engine's array cells; never
     // the whole sheet, which one far-away value would make a matrix of billions of cells.
-    const spilled = (at: SimpleCellAddress) => at.col < MAX_COLUMNS && at.row < MAX_ROWS && hf.getCellType(at) === CellType.ARRAY;
     for (const at of arrays) {
-      let width = 1;
-      while (spilled({ ...at, col: at.col + width })) width++;
-      let height = 1;
-      while (spilled({ ...at, row: at.row + height })) height++;
+      const { width, height } = this.arrayExtent(at);
       if (width === 1 && height === 1) continue;
       hf.getRangeValues({ start: at, end: { ...at, col: at.col + width - 1, row: at.row + height - 1 } }).forEach((line, r) =>
         line.forEach((value, c) => {
@@ -864,6 +940,17 @@ export class Workbook {
         }),
       );
     }
+  }
+
+  /** The size of the array an array formula at `at` spills, read along the engine's array cells. */
+  private arrayExtent(at: SimpleCellAddress): { width: number; height: number } {
+    const hf = this.engine;
+    const spilled = (a: SimpleCellAddress) => a.col < MAX_COLUMNS && a.row < MAX_ROWS && hf.getCellType(a) === CellType.ARRAY;
+    let width = 1;
+    while (spilled({ ...at, col: at.col + width })) width++;
+    let height = 1;
+    while (spilled({ ...at, row: at.row + height })) height++;
+    return { width, height };
   }
 
   private cache(id: string, ref: string, cell: SheetCell, value: EngineValue): void {

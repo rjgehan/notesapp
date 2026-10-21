@@ -6,7 +6,7 @@
 import { MAX_COLUMNS, MAX_ROWS, parseA1, toA1 } from './a1';
 import { effectiveFormat, shownCell } from './display';
 import type { CellEdit } from './engine';
-import { type Sheet, type SheetCell } from './format';
+import { isCellError, type Sheet, type SheetCell } from './format';
 import { typedInput } from './input';
 import { isGeneral } from './numfmt';
 import { shiftFormula, type CellRange } from './refs';
@@ -23,6 +23,11 @@ export interface SheetClip {
   cells: Content[][];
   /** The copied cells' own number formats. */
   formats?: Array<Array<string | undefined>>;
+  /**
+   * Set for a cut: the workbook (`source`, its path) and sheet it came from. Pasting it in that
+   * workbook moves the cells (Workbook.moveCells) while they still hold what was cut.
+   */
+  cut?: { source: string; sheet: string };
 }
 
 const mod = (a: number, n: number) => ((a % n) + n) % n;
@@ -34,7 +39,16 @@ export function contentOf(cell: SheetCell | undefined): Content {
   return null;
 }
 
-const sameContent = (a: Content, b: Content) => (a?.f ?? null) === (b?.f ?? null) && (a?.v ?? null) === (b?.v ?? null);
+/**
+ * What a copy or fill takes from a cell: its formula or value, and for a cell that only shows what
+ * an array formula spilled into it, that value (an error as its text), so it pastes as it shows.
+ */
+export function copiedContent(cell: SheetCell | undefined): Content {
+  if (cell?.f === undefined && cell?.v === undefined && cell?.c !== undefined && cell.c !== null) return { v: isCellError(cell.c) ? cell.c.e : cell.c };
+  return contentOf(cell);
+}
+
+export const sameContent = (a: Content, b: Content) => (a?.f ?? null) === (b?.f ?? null) && (a?.v ?? null) === (b?.v ?? null);
 
 function within(col: number, row: number): boolean {
   return col >= 0 && row >= 0 && col < MAX_COLUMNS && row < MAX_ROWS;
@@ -88,7 +102,7 @@ export function fillEdits(sheet: Sheet, source: CellRange, dest: CellRange): Cel
       const srcRow = source.row + mod(row - source.row, source.height);
       const srcCol = source.col + mod(col - source.col, source.width);
       const from = sheet.cells[toA1(srcCol, srcRow)];
-      const edit = { sheet: sheet.id, ref: toA1(col, row), content: moved(contentOf(from), row - srcRow, col - srcCol) };
+      const edit = { sheet: sheet.id, ref: toA1(col, row), content: moved(copiedContent(from), row - srcRow, col - srcCol) };
       edits.push(withFormat(sheet, edit, from?.fmt));
     }
   }
@@ -162,7 +176,7 @@ export function copyRange(sheet: Sheet, selection: CellRange): SheetClip {
     for (let col = range.col; col < range.col + range.width; col++) {
       const cell = sheet.cells[toA1(col, row)];
       texts.push(shownCell(sheet, col, row).text);
-      contents.push(contentOf(cell));
+      contents.push(copiedContent(cell));
       fmts.push(cell?.fmt);
     }
     shown.push(texts);
@@ -170,6 +184,18 @@ export function copyRange(sheet: Sheet, selection: CellRange): SheetClip {
     formats.push(fmts);
   }
   return { text: toTsv(shown), range, cells, formats };
+}
+
+/** Whether the copied range of `sheet` still holds what `clip` took from it (a cut moves only then). */
+export function clipStillHolds(sheet: Sheet, clip: SheetClip): boolean {
+  const r = clip.range;
+  for (let i = 0; i < r.height; i++) {
+    for (let j = 0; j < r.width; j++) {
+      const cell = sheet.cells[toA1(r.col + j, r.row + i)];
+      if (!sameContent(copiedContent(cell), clip.cells[i]?.[j] ?? null) || cell?.fmt !== clip.formats?.[i]?.[j]) return false;
+    }
+  }
+  return true;
 }
 
 /**

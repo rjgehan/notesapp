@@ -33,7 +33,7 @@ import { setActiveSheet, type SheetActions } from '../../sheets/activeSheet';
 import { guessChartOptions } from '../../sheets/charts';
 import type { Separator } from '../../sheets/csv';
 import { effectiveFormat } from '../../sheets/display';
-import { clearEdits, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, typedEdit, type SheetClip } from '../../sheets/edits';
+import { clearEdits, clipStillHolds, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, typedEdit, type SheetClip } from '../../sheets/edits';
 import type { CellEdit, FormatEdit, Workbook } from '../../sheets/engine';
 import { cellText, cellValue, isCellError, sameName, sheetById, sheetByName, sheetNameProblem, type ChartProps, type Sheet } from '../../sheets/format';
 import { changeDecimals, isGeneral } from '../../sheets/numfmt';
@@ -76,7 +76,7 @@ interface Props {
 /** Per file, while the page lives: the open sheet, each sheet's selection, and whether the charts pane is folded. */
 const remembered = new Map<string, { sheetId: string; selections: ReadonlyMap<string, SheetSelection>; chartsOpen: boolean }>();
 
-/** The last copy made in any spreadsheet, so a paste in this app brings formulas. */
+/** The last copy (or cut) made in any spreadsheet, so a paste in this app brings formulas, or moves the cut cells. */
 let lastClip: SheetClip | null = null;
 
 /** Rows at most that "Bold" changes in one go (a whole-column selection bolds columns instead). */
@@ -153,6 +153,8 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [freezeMenu, setFreezeMenu] = useState<{ x: number; y: number } | null>(null);
   const [exportMenu, setExportMenu] = useState<{ x: number; y: number } | null>(null);
+  /** The cut waiting to be pasted, shown with a dashed outline while it is still the last copy. */
+  const [cutMark, setCutMark] = useState<SheetClip | null>(null);
   // On a phone the charts start folded, so the grid keeps its room.
   const [chartsOpen, setChartsOpen] = useState(() => remembered.get(path)?.chartsOpen ?? !phone);
   const location = useLocation();
@@ -512,30 +514,54 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
 
   // ---------- the clipboard (frozen cells included, so not Glide's) ----------
 
-  const latest = useRef({ sheet, selection, editable, setCells, select });
+  const latest = useRef({ path, workbook, sheet, selection, editable, setCells, select });
   useLayoutEffect(() => {
-    latest.current = { sheet, selection, editable, setCells, select };
+    latest.current = { path, workbook, sheet, selection, editable, setCells, select };
   });
 
   useEffect(() => {
     const focused = () => !!gridBox.current?.contains(document.activeElement) && !bar.current?.isEditing();
     const copy = (e: ClipboardEvent, cut: boolean) => {
       if (!focused() || !e.clipboardData) return;
-      const { sheet: s, selection: sel, editable: canEdit, setCells: apply } = latest.current;
+      const { path: source, sheet: s, selection: sel, editable: canEdit } = latest.current;
       const clip = copyRange(s, sel.range);
       e.clipboardData.setData('text/plain', clip.text);
       e.preventDefault();
-      lastClip = clip;
-      if (cut && canEdit) apply(clearEdits(s, sel.range));
+      // A cut moves the cells when it is pasted in this spreadsheet, as in Google Sheets and Excel;
+      // until then they stay, marked (pasted elsewhere, the cut is a copy).
+      lastClip = cut && canEdit ? { ...clip, cut: { source, sheet: s.id } } : clip;
+      setCutMark(lastClip.cut ? lastClip : null);
     };
     const onCopy = (e: ClipboardEvent) => copy(e, false);
     const onCut = (e: ClipboardEvent) => copy(e, true);
     const onPaste = (e: ClipboardEvent) => {
       if (!focused() || !e.clipboardData) return;
-      const { sheet: s, selection: sel, editable: canEdit, setCells: apply, select: choose } = latest.current;
+      const { path: here, workbook: wb, sheet: s, selection: sel, editable: canEdit, setCells: apply, select: choose } = latest.current;
       e.preventDefault();
       if (!canEdit) return;
-      const { edits, range } = pasteEdits(s, sel.range, e.clipboardData.getData('text/plain'), lastClip);
+      const text = e.clipboardData.getData('text/plain');
+      const clip = lastClip;
+      if (clip?.cut && clip.text === text) {
+        setCutMark(null);
+        const from = clip.cut.source === here ? sheetById(wb.file, clip.cut.sheet) : undefined;
+        if (from && clipStillHolds(from, clip)) {
+          const range: CellRange = { ...clip.range, col: sel.range.col, row: sel.range.row };
+          try {
+            wb.moveCells({ sheet: from.id, range: clip.range }, { sheet: s.id, col: range.col, row: range.row });
+          } catch (err) {
+            toast(errorText(err), { kind: 'error' });
+            return;
+          }
+          // Pasting again copies the moved cells from their new place.
+          const moved = sheetById(wb.file, s.id);
+          lastClip = moved ? { ...copyRange(moved, range), text: clip.text } : null;
+          choose({ active: { col: range.col, row: range.row }, range });
+          return;
+        }
+        // The cut cells changed meanwhile (or are in another spreadsheet): an ordinary paste.
+        lastClip = { ...clip, cut: undefined };
+      }
+      const { edits, range } = pasteEdits(s, sel.range, text, lastClip);
       apply(edits);
       choose({ active: { col: range.col, row: range.row }, range });
     };
@@ -614,6 +640,11 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     onFill: (source, dest) => setCells(fillEdits(sheet, source, dest)),
     onUndo: undo,
     onRedo: redo,
+    onEscape: () => {
+      // Escape drops a pending cut: a later paste copies.
+      if (lastClip?.cut) lastClip = { ...lastClip, cut: undefined };
+      setCutMark(null);
+    },
     onFillDown: fillDown,
     onFillRight: fillRight,
     onToggleBold: toggleBold,
@@ -736,6 +767,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
           touch={touch}
           theme={theme}
           handlers={handlers}
+          marked={cutMark !== null && cutMark === lastClip && cutMark.cut?.sheet === sheet.id && cutMark.cut.source === path ? cutMark.range : null}
           gridRef={gridRef}
           portalRef={portalRef}
         />

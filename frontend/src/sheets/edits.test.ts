@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearEdits, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, typedEdit, usedExtent } from './edits';
+import { clearEdits, clipStillHolds, copyRange, fillDownEdits, fillEdits, fillRightEdits, pasteEdits, typedEdit, usedExtent } from './edits';
 import { emptySheet, type Sheet, type SheetCell } from './format';
 
 function sheet(cells: Record<string, SheetCell>): Sheet {
@@ -152,5 +152,35 @@ describe('number formats in fill, copy and paste (6c)', () => {
     const s = sheet({ A1: { v: 1 }, D9: { fmt: '0%' } });
     expect(usedExtent(s)).toEqual({ rows: 8, cols: 3 });
     expect(usedExtent(s, { values: true })).toEqual({ rows: 0, cols: 0 });
+  });
+});
+
+describe('values an array formula spilled', () => {
+  // B1 =SORT(A1:A3) spills B2 and B3; D1:D2 hold values that must not be lost.
+  const spill = () => sheet({ A1: { v: 3 }, A2: { v: 1 }, A3: { v: 2 }, B1: { f: '=SORT(A1:A3)', c: 1 }, B2: { c: 2 }, B3: { c: 3 }, C1: { c: { e: '#N/A' } }, D1: { v: 'keep1' }, D2: { v: 'keep2' } });
+
+  it('copy and paste as the values they show', () => {
+    const s = spill();
+    const clip = copyRange(s, { col: 1, row: 1, width: 1, height: 2 });
+    expect(clip.text).toBe('2\n3');
+    expect(clip.cells).toEqual([[{ v: 2 }], [{ v: 3 }]]);
+    expect(pasteEdits(s, { col: 3, row: 0, width: 1, height: 1 }, clip.text, clip).edits).toEqual([edit('D1', { v: 2 }), edit('D2', { v: 3 })]);
+    // An error spilled into a cell pastes as its text.
+    expect(copyRange(s, { col: 2, row: 0, width: 1, height: 1 }).cells).toEqual([[{ v: '#N/A' }]]);
+  });
+
+  it('fill from them as values too', () => {
+    const s = spill();
+    expect(fillEdits(s, { col: 1, row: 2, width: 1, height: 1 }, { col: 1, row: 2, width: 3, height: 1 })).toEqual([edit('C3', { v: 3 }), edit('D3', { v: 3 })]);
+  });
+});
+
+describe('a cut', () => {
+  it('knows whether the cut cells still hold what was cut', () => {
+    const s = sheet({ A1: { v: 1, fmt: '0.0' }, B1: { f: '=A1' } });
+    const clip = copyRange(s, { col: 0, row: 0, width: 2, height: 1 });
+    expect(clipStillHolds(s, clip)).toBe(true);
+    expect(clipStillHolds(sheet({ A1: { v: 1, fmt: '0.0' }, B1: { f: '=A1+1' } }), clip)).toBe(false);
+    expect(clipStillHolds(sheet({ A1: { v: 1 }, B1: { f: '=A1' } }), clip)).toBe(false);
   });
 });

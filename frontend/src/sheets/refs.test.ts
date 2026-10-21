@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { absoluteRangeText, parseRangeText, rangeText, renameSheetsInFormula, shiftFormula } from './refs';
+import { absoluteRangeText, moveReferences, parseRangeText, rangeText, renameSheetsInFormula, shiftFormula, type CellMove } from './refs';
 
 describe('shiftFormula', () => {
   it('shifts relative references and keeps absolute parts', () => {
@@ -85,5 +85,37 @@ describe('renameSheetsInFormula', () => {
     expect(renameSheetsInFormula('=A!A1+B!A1+"A!A1"', swap)).toBe('=B!A1+A!A1+"A!A1"');
     expect(renameSheetsInFormula('=A1+1', swap)).toBe('=A1+1');
     expect(renameSheetsInFormula('plain', swap)).toBe('plain');
+  });
+});
+
+describe('moveReferences (cut and paste)', () => {
+  // D1:E2 of "Data" moved to D10 (9 rows down) on the same sheet.
+  const down: CellMove = { sheet: 'Data', range: { col: 3, row: 0, width: 2, height: 2 }, toSheet: 'Data', dRow: 9, dCol: 0 };
+  const same = { from: 'Data', to: 'Data' };
+
+  it('makes references inside the moved range follow it, absolute ones too, and leaves the rest', () => {
+    expect(moveReferences('=D1*2+E2+F1', same, down)).toBe('=D10*2+E11+F1');
+    expect(moveReferences('=$D$1+D$2+$E1', same, down)).toBe('=$D$10+D$11+$E10');
+    expect(moveReferences('=SUM(D1:E2)+SUM(D1:E3)+SUM(D:D)', same, down)).toBe('=SUM(D10:E11)+SUM(D1:E3)+SUM(D:D)');
+    expect(moveReferences('="D1"&Data!D1&Other!D1', same, down)).toBe('="D1"&Data!D10&Other!D1');
+    expect(moveReferences('=D1', { from: 'Other', to: 'Other' }, down)).toBe('=D1');
+    expect(moveReferences('=Data!D1+data!E2', { from: 'Other', to: 'Other' }, down)).toBe('=Data!D10+data!E11');
+    expect(moveReferences('plain', same, down)).toBe('plain');
+  });
+
+  it('moves to another sheet: references gain or change their sheet, a moved formula keeps its old neighbours', () => {
+    const across: CellMove = { sheet: 'Data', range: { col: 0, row: 0, width: 1, height: 2 }, toSheet: 'My sheet', dRow: 4, dCol: 1 };
+    // A formula elsewhere on Data, and one on another sheet.
+    expect(moveReferences('=A1+A3', { from: 'Data', to: 'Data' }, across)).toBe("='My sheet'!B5+A3");
+    expect(moveReferences('=Data!A2', { from: 'Summary', to: 'Summary' }, across)).toBe("='My sheet'!B6");
+    // A formula on the destination sheet drops nothing it did not have.
+    expect(moveReferences('=Data!A1', { from: 'My sheet', to: 'My sheet' }, across)).toBe('=B5');
+    // The moved formula itself (A2 = A1 + C1 on Data, now on My sheet): A1 moved with it, C1 stayed on Data.
+    expect(moveReferences('=A1+C1', { from: 'Data', to: 'My sheet' }, across)).toBe('=B5+Data!C1');
+  });
+
+  it('moves named ranges, whose references all name their sheet', () => {
+    expect(moveReferences('=Data!$D$1:$E$2', { from: null, to: null }, down)).toBe('=Data!$D$10:$E$11');
+    expect(moveReferences('=Data!$D$1:$E$9', { from: null, to: null }, down)).toBe('=Data!$D$1:$E$9');
   });
 });

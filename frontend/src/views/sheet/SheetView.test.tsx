@@ -245,6 +245,70 @@ describe('the spreadsheet view', () => {
     expect([after.E2, after.F2.f, after.E3]).toEqual([{ v: 'x' }, '=1+1', { v: 3 }]);
   });
 
+  it('moves cut cells on paste: formulas and named ranges follow, one undo step', async () => {
+    const path = await openGrid();
+    const data = new Map<string, string>();
+    const clipboardData = { setData: (t: string, v: string) => data.set(t, v), getData: (t: string) => data.get(t) ?? '' };
+    const fire = (type: 'cut' | 'paste') => {
+      const e = new Event(type, { cancelable: true }) as ClipboardEvent;
+      Object.defineProperty(e, 'clipboardData', { value: clipboardData });
+      act(() => void window.dispatchEvent(e));
+      return e;
+    };
+    select(1, 3); // B5, =SUM(B2:B4), which the named range Total points at
+    screen.getByTestId('grid').focus();
+    expect(fire('cut').defaultPrevented).toBe(true);
+    expect(data.get('text/plain')).toBe('1937.5');
+    // Nothing moves until the paste; the cut cells are outlined meanwhile.
+    expect((await saved(path)).sheets[0].cells.B5).toEqual({ f: '=SUM(B2:B4)', c: 1937.5 });
+    expect(gridProps().highlightRegions).toEqual([expect.objectContaining({ style: 'dashed', range: { x: 1, y: 3, width: 1, height: 1 } })]);
+    select(3, 5); // D7
+    fire('paste');
+    expect(gridProps().highlightRegions).toBeUndefined();
+    let file = await saved(path);
+    expect(file.sheets[0].cells.B5).toBeUndefined();
+    expect(file.sheets[0].cells.D7).toEqual({ f: '=SUM(B2:B4)', c: 1937.5 });
+    expect(file.named.Total).toBe('Budget!$D$7');
+    expect(file.sheets[0].cells.C2.c).toBeCloseTo(0.748, 3);
+    expect(nameBox().value).toBe('D7');
+    // A second paste copies the moved cell from its new place.
+    select(4, 5); // E7
+    fire('paste');
+    expect((await saved(path)).sheets[0].cells.E7).toEqual({ f: '=SUM(C2:C4)', c: expect.any(Number) });
+    const undo = () => act(() => gridProps().onKeyDown!({ key: 'z', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, cancel: vi.fn(), preventDefault: vi.fn(), stopPropagation: vi.fn(), bounds: undefined, keyCode: 90, rawEvent: undefined, location: undefined }));
+    undo();
+    undo();
+    file = await saved(path);
+    expect(file.sheets[0].cells.B5).toEqual({ f: '=SUM(B2:B4)', c: 1937.5 });
+    expect(file.named.Total).toBe('Budget!$B$5');
+  });
+
+  it('pastes a cut as a copy when the cut cells changed meanwhile, and Escape drops the cut', async () => {
+    const path = await openGrid();
+    const data = new Map<string, string>();
+    const clipboardData = { setData: (t: string, v: string) => data.set(t, v), getData: (t: string) => data.get(t) ?? '' };
+    const fire = (type: 'cut' | 'paste') => {
+      const e = new Event(type, { cancelable: true }) as ClipboardEvent;
+      Object.defineProperty(e, 'clipboardData', { value: clipboardData });
+      act(() => void window.dispatchEvent(e));
+    };
+    select(1, 0); // B2
+    screen.getByTestId('grid').focus();
+    fire('cut');
+    act(() => gridProps().onCellEdited!([1, 0], { kind: 'text', data: '1', displayData: '', allowOverlay: true } as never));
+    select(3, 0); // D2
+    fire('paste');
+    const cells = (await saved(path)).sheets[0].cells;
+    expect(cells.B2).toEqual({ v: 1 });
+    expect(cells.D2).toEqual({ v: 1450 });
+    // Escape in the grid drops a pending cut's outline.
+    select(1, 1);
+    fire('cut');
+    expect(gridProps().highlightRegions).toHaveLength(1);
+    act(() => gridProps().onKeyDown!({ key: 'Escape', ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, cancel: vi.fn(), preventDefault: vi.fn(), stopPropagation: vi.fn(), bounds: undefined, keyCode: 27, rawEvent: undefined, location: undefined }));
+    expect(gridProps().highlightRegions).toBeUndefined();
+  });
+
   it('selects, edits and leaves frozen cells', async () => {
     const path = await openGrid();
     select(0, 2);

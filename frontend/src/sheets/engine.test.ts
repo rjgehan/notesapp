@@ -657,3 +657,84 @@ describe('names that are also Object.prototype members', () => {
     expect(parses(wb)?.named).toEqual({ constructor: '2' });
   });
 });
+
+describe('moving cells (cut and paste)', () => {
+  /** The workbook's model recalculated from scratch: what any device opening the saved file computes. */
+  const fresh = (wb: Workbook) => Workbook.open(file(JSON.parse(wb.serialize()))).file;
+
+  it('moves contents and formats; references to the moved cells follow, other references stay', () => {
+    const wb = workbook([
+      { name: 'Data', cells: { A1: { v: 10 }, B1: { f: '=A1*2', fmt: '0.0' }, C1: { f: '=B1+1' }, D1: { f: '=SUM(A1:B1)' }, A5: { v: 99 } } },
+      { name: 'Other', cells: { A1: { f: '=Data!B1' } } },
+    ], { Doubled: 'Data!$B$1' });
+    wb.moveCells({ sheet: 's1', range: { col: 0, row: 0, width: 2, height: 1 } }, { sheet: 's1', col: 0, row: 4 });
+    const cells = wb.file.sheets[0].cells;
+    expect(cells.A1).toBeUndefined();
+    expect(cells.B1).toBeUndefined();
+    // A5 is overwritten; the moved formula still refers to the moved A1, now A5.
+    expect(cells.A5).toEqual({ v: 10 });
+    expect(cells.B5).toEqual({ f: '=A5*2', c: 20, fmt: '0.0' });
+    expect(cells.C1).toEqual({ f: '=B5+1', c: 21 });
+    expect(cells.D1).toEqual({ f: '=SUM(A5:B5)', c: 30 });
+    expect(wb.file.sheets[1].cells.A1).toEqual({ f: '=Data!B5', c: 20 });
+    expect(wb.file.named).toEqual({ Doubled: 'Data!$B$5' });
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+    // One undo step brings everything back.
+    wb.undo();
+    expect(wb.file.sheets[0].cells).toEqual({ A1: { v: 10 }, B1: { f: '=A1*2', c: 20, fmt: '0.0' }, C1: { f: '=B1+1', c: 21 }, D1: { f: '=SUM(A1:B1)', c: 30 }, A5: { v: 99 } });
+    expect(wb.file.named).toEqual({ Doubled: 'Data!$B$1' });
+    wb.redo();
+    expect(wb.file.sheets[0].cells.C1).toEqual({ f: '=B5+1', c: 21 });
+  });
+
+  it('keeps a moved formula pointing at the cells outside the move', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { v: 10 }, A2: { v: 20 }, C1: { f: '=SUM(A1:A2)' } } }]);
+    wb.moveCells({ sheet: 's1', range: { col: 2, row: 0, width: 1, height: 1 } }, { sheet: 's1', col: 4, row: 5 });
+    expect(wb.file.sheets[0].cells.E6).toEqual({ f: '=SUM(A1:A2)', c: 30 });
+    expect(wb.file.sheets[0].cells.C1).toBeUndefined();
+  });
+
+  it('moves onto an overlapping place', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { v: 1 }, A2: { v: 2 }, A3: { f: '=A1+A2' }, B1: { f: '=SUM(A1:A3)' } } }]);
+    wb.moveCells({ sheet: 's1', range: { col: 0, row: 0, width: 1, height: 3 } }, { sheet: 's1', col: 0, row: 1 });
+    const cells = wb.file.sheets[0].cells;
+    expect([cells.A1, cells.A2, cells.A3, cells.A4]).toEqual([undefined, { v: 1 }, { v: 2 }, { f: '=A2+A3', c: 3 }]);
+    expect(cells.B1).toEqual({ f: '=SUM(A2:A4)', c: 6 });
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+  });
+
+  it('moves to another sheet', () => {
+    const wb = workbook([
+      { name: 'Data', cells: { A1: { v: 7 }, A2: { f: '=A1+C1' }, A3: { f: '=A2' }, C1: { v: 1 } } },
+      { name: 'My sheet', cells: { A1: { f: '=Data!A2' } } },
+    ]);
+    wb.moveCells({ sheet: 's1', range: { col: 0, row: 0, width: 1, height: 2 } }, { sheet: 's2', col: 1, row: 4 });
+    expect(wb.file.sheets[1].cells.B5).toEqual({ v: 7 });
+    expect(wb.file.sheets[1].cells.B6).toEqual({ f: '=B5+Data!C1', c: 8 });
+    expect(wb.file.sheets[1].cells.A1).toEqual({ f: '=B6', c: 8 });
+    expect(wb.file.sheets[0].cells.A3).toEqual({ f: "='My sheet'!B6", c: 8 });
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+  });
+
+  it('moves an array formula with what it spills, and spilled values alone as values', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { f: '=SEQUENCE(3)' }, C1: { f: '=SUM(A1:A3)' } } }]);
+    wb.moveCells({ sheet: 's1', range: { col: 0, row: 0, width: 1, height: 3 } }, { sheet: 's1', col: 1, row: 0 });
+    let cells = wb.file.sheets[0].cells;
+    expect([cells.A1, cells.A2, cells.B1, cells.B2, cells.B3]).toEqual([undefined, undefined, { f: '=SEQUENCE(3)', c: 1 }, { c: 2 }, { c: 3 }]);
+    expect(cells.C1).toEqual({ f: '=SUM(B1:B3)', c: 6 });
+    // Only the spilled cells: they leave as values; the array stays and spills again.
+    wb.moveCells({ sheet: 's1', range: { col: 1, row: 1, width: 1, height: 2 } }, { sheet: 's1', col: 4, row: 1 });
+    cells = wb.file.sheets[0].cells;
+    expect([cells.E2, cells.E3]).toEqual([{ v: 2 }, { v: 3 }]);
+    expect([cells.B1, cells.B2, cells.B3]).toEqual([{ f: '=SEQUENCE(3)', c: 1 }, { c: 2 }, { c: 3 }]);
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+  });
+
+  it('moves a chart of the moved range, and refuses a place beyond the sheet', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { v: 1 }, A2: { v: 2 } } }]);
+    const chart = wb.addChart('s1', { type: 'bar', range: 'A1:A2' });
+    wb.moveCells({ sheet: 's1', range: { col: 0, row: 0, width: 1, height: 2 } }, { sheet: 's1', col: 2, row: 2 });
+    expect(wb.file.sheets[0].charts[chart].range).toBe('C3:C4');
+    expect(() => wb.moveCells({ sheet: 's1', range: { col: 2, row: 2, width: 1, height: 2 } }, { sheet: 's1', col: 0, row: 1048575 })).toThrow(/do not fit/);
+  });
+});

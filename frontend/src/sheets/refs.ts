@@ -1,10 +1,12 @@
 // Cell references inside formulas (DESIGN §6.21.5): moving a formula by some rows and columns, as
 // fill and paste do, shifts its relative references (`A1`, `B$2`, `C:C`, `3:3`) and keeps absolute
 // ones (`$A$1`). Text in strings, quoted sheet names, function names and named ranges never
-// changes. A reference pushed off the sheet becomes `#REF!`, as in Google Sheets and Excel.
+// changes. A reference pushed off the sheet becomes `#REF!`, as in Google Sheets and Excel. Moving
+// cells (a cut and paste) instead makes the references to them follow (`moveReferences`), and
+// renaming sheets renames the references to them (`renameSheetsInFormula`).
 // Pure and engine-free, so the grid uses it without waiting for HyperFormula.
 import { columnIndex, columnLetters, MAX_COLUMNS, MAX_ROWS } from './a1';
-import { formulaSheetName } from './format';
+import { formulaSheetName, sameName } from './format';
 
 /** A rectangle of cells, 0-based and inclusive of `col`/`row`, `width`/`height` at least 1. */
 export interface CellRange {
@@ -83,22 +85,41 @@ function quotedEnd(text: string, from: number): number {
   return text.length;
 }
 
+/** A reference in a formula, as mapReferences() finds it. */
+export interface FormulaRef {
+  /** The sheet prefix as written, with its `!` (`Data!`, `'My data'!`); '' without one. */
+  prefix: string;
+  /** The sheet the prefix names (unquoted), or null without a prefix. */
+  sheet: string | null;
+  kind: 'cell' | 'cells' | 'columns' | 'rows';
+  /** As written after the prefix: one part for a cell (`B$2`), two for a range (`A1`, `C3`; `A`, `C`; `3`, `5`). */
+  parts: string[];
+}
+
 /**
- * `formula` moved by `dRow` rows and `dCol` columns: its relative references follow, absolute
- * ones stay. Anything that is not a formula is returned as it is.
+ * What a reference becomes: its new text, and its new sheet prefix (with `!`, or '' for none) when
+ * that changes; null for `#REF!` (the prefix goes too).
  */
-export function shiftFormula(formula: string, dRow: number, dCol: number): string {
-  if (!formula.startsWith('=') || (dRow === 0 && dCol === 0)) return formula;
-  const cell = shiftCell(dRow, dCol);
-  const column = shiftColumn(dCol);
-  const row = shiftRow(dRow);
+export type RefReplacement = { text: string; prefix?: string } | null;
+
+/**
+ * `formula` with every cell, range, column and row reference replaced by what `map` makes of it.
+ * Strings, quoted sheet names, function names, error literals, numbers and named ranges are copied
+ * as they are. Anything that is not a formula is returned as it is.
+ */
+export function mapReferences(formula: string, map: (ref: FormulaRef) => RefReplacement): string {
+  if (!formula.startsWith('=')) return formula;
   let out = '';
   let i = 0;
-  // A reference that went off the sheet takes its sheet prefix along into #REF!.
-  let prefixStart = -1;
-  const emit = (shifted: string | null) => {
-    out = shifted === null ? (prefixStart >= 0 ? out.slice(0, prefixStart) : out) + '#REF!' : out + shifted;
-    prefixStart = -1;
+  // A sheet prefix just written to `out`, waiting for the reference it qualifies.
+  let pending: { start: number; text: string; name: string } | null = null;
+  const emit = (kind: FormulaRef['kind'], parts: string[]) => {
+    const result = map({ prefix: pending?.text ?? '', sheet: pending?.name ?? null, kind, parts });
+    const before = pending ? out.slice(0, pending.start) : out;
+    if (result === null) out = before + '#REF!';
+    else if (result.prefix === undefined) out += result.text;
+    else out = before + result.prefix + result.text;
+    pending = null;
   };
   while (i < formula.length) {
     const ch = formula[i];
@@ -107,19 +128,20 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
       const end = quotedEnd(formula, i);
       out += formula.slice(i, end);
       i = end;
-      prefixStart = -1;
+      pending = null;
       continue;
     }
     if (ch === "'") {
       const end = quotedEnd(formula, i);
       const start = out.length;
-      out += formula.slice(i, end);
+      const quoted = formula.slice(i, end);
+      out += quoted;
       i = end;
       if (formula[i] === '!') {
         out += '!';
         i++;
-        prefixStart = start;
-      } else prefixStart = -1;
+        pending = { start, text: quoted + '!', name: quoted.slice(1, -1).replace(/''/g, "'") };
+      } else pending = null;
       continue;
     }
     if (ch === '#') {
@@ -127,17 +149,14 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
       const len = m ? m[0].length : 1;
       out += formula.slice(i, i + len);
       i += len;
-      prefixStart = -1;
+      pending = null;
       continue;
     }
     if (/[0-9.]/.test(ch) && !isWordChar(prev)) {
       const rest = formula.slice(i);
       const range = ROW_RANGE.exec(rest);
       if (range && !isWordChar(rest[range[0].length]) && rest[range[0].length] !== '(') {
-        const [a, b] = range[0].split(':');
-        const x = row(a);
-        const y = row(b);
-        emit(x === null || y === null ? null : `${x}:${y}`);
+        emit('rows', range[0].split(':'));
         i += range[0].length;
         continue;
       }
@@ -146,18 +165,14 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
       // A number glued to letters (`1E3` is a number, `2A` is not valid anyway) is copied whole.
       out += rest.slice(0, len);
       i += len;
-      prefixStart = -1;
+      pending = null;
       continue;
     }
     if (ch === '$' && /[0-9]/.test(formula[i + 1] ?? '') && !isWordChar(prev)) {
       // `$3:$5`, an absolute row range.
-      const rest = formula.slice(i);
-      const range = ROW_RANGE.exec(rest);
+      const range = ROW_RANGE.exec(formula.slice(i));
       if (range) {
-        const [a, b] = range[0].split(':');
-        const x = row(a);
-        const y = row(b);
-        emit(x === null || y === null ? null : `${x}:${y}`);
+        emit('rows', range[0].split(':'));
         i += range[0].length;
         continue;
       }
@@ -169,11 +184,11 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
       if (next === '(') {
         out += word;
         i = after;
-        prefixStart = -1;
+        pending = null;
         continue;
       }
       if (next === '!') {
-        prefixStart = out.length;
+        pending = { start: out.length, text: word + '!', name: word };
         out += word + '!';
         i = after + 1;
         continue;
@@ -182,37 +197,93 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
         if (next === ':') {
           const second = readWord(formula, after + 1);
           if (CELL.test(second) && formula[after + 1 + second.length] !== '(' && formula[after + 1 + second.length] !== '!') {
-            const x = cell(word);
-            const y = cell(second);
-            emit(x === null || y === null ? null : `${x}:${y}`);
+            emit('cells', [word, second]);
             i = after + 1 + second.length;
             continue;
           }
         }
-        emit(cell(word));
+        emit('cell', [word]);
         i = after;
         continue;
       }
       if (COLUMN.test(word) && next === ':') {
         const second = readWord(formula, after + 1);
         if (COLUMN.test(second) && formula[after + 1 + second.length] !== '(') {
-          const x = column(word);
-          const y = column(second);
-          emit(x === null || y === null ? null : `${x}:${y}`);
+          emit('columns', [word, second]);
           i = after + 1 + second.length;
           continue;
         }
       }
       out += word;
       i = after;
-      prefixStart = -1;
+      pending = null;
       continue;
     }
     out += ch;
     i++;
-    if (ch !== ' ') prefixStart = -1;
+    if (ch !== ' ') pending = null;
   }
   return out;
+}
+
+/**
+ * `formula` moved by `dRow` rows and `dCol` columns: its relative references follow, absolute
+ * ones stay. Anything that is not a formula is returned as it is.
+ */
+export function shiftFormula(formula: string, dRow: number, dCol: number): string {
+  if (!formula.startsWith('=') || (dRow === 0 && dCol === 0)) return formula;
+  const shifts: Record<FormulaRef['kind'], Shift> = { cell: shiftCell(dRow, dCol), cells: shiftCell(dRow, dCol), columns: shiftColumn(dCol), rows: shiftRow(dRow) };
+  return mapReferences(formula, (ref) => {
+    const parts = ref.parts.map(shifts[ref.kind]);
+    return parts.some((p) => p === null) ? null : { text: parts.join(':') };
+  });
+}
+
+/** Cells moved by a cut and paste: `range` of sheet `sheet` now starts `dRow` rows and `dCol` columns away, on sheet `toSheet`. */
+export interface CellMove {
+  sheet: string;
+  range: CellRange;
+  toSheet: string;
+  dRow: number;
+  dCol: number;
+}
+
+/**
+ * `formula` after `move`, as Excel and Google Sheets update formulas on a cut and paste:
+ * references to cells and ranges that lie within the moved range follow it (absolute ones too), and
+ * every other reference keeps pointing where it did. `home` is the sheet the formula was on and the
+ * one it is on now (they differ for a moved formula; null for a named range, whose references all
+ * name their sheet).
+ */
+export function moveReferences(formula: string, home: { from: string | null; to: string | null }, move: CellMove): string {
+  const r = move.range;
+  const inside = (m: RegExpExecArray | null) => {
+    if (!m) return false;
+    const col = columnIndex(m[2].toUpperCase());
+    const row = Number(m[4]) - 1;
+    return col >= r.col && col < r.col + r.width && row >= r.row && row < r.row + r.height;
+  };
+  return mapReferences(formula, (ref) => {
+    const text = ref.parts.join(':');
+    const target = ref.sheet ?? home.from;
+    const cells = ref.kind === 'cell' || ref.kind === 'cells' ? ref.parts.map((p) => CELL.exec(p)) : [];
+    const follows = target !== null && sameName(target, move.sheet) && cells.length > 0 && cells.every(inside);
+    if (!follows) {
+      // A formula moved to another sheet keeps its own-sheet references on the sheet it came from.
+      if (ref.sheet === null && home.from !== null && home.to !== null && !sameName(home.from, home.to)) return { prefix: formulaSheetName(home.from) + '!', text };
+      return { text };
+    }
+    const shifted = cells
+      .map((m) => {
+        const [, colAbs, col, rowAbs, row] = m as RegExpExecArray;
+        return `${colAbs}${columnLetters(columnIndex(col.toUpperCase()) + move.dCol)}${rowAbs}${Number(row) + move.dRow}`;
+      })
+      .join(':');
+    // A prefix that already names the destination stays as written; one the formula's own sheet makes unnecessary goes.
+    if (ref.sheet !== null && sameName(ref.sheet, move.toSheet)) return { text: shifted };
+    if (home.to !== null && sameName(home.to, move.toSheet)) return ref.sheet === null ? { text: shifted } : { prefix: '', text: shifted };
+    return { prefix: formulaSheetName(move.toSheet) + '!', text: shifted };
+  });
 }
 
 /**
