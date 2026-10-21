@@ -31,6 +31,15 @@ export function eventSpec(e: KeyboardEvent): string | null {
   return [...parts, key.length === 1 ? key.toLowerCase() : key].join('-');
 }
 
+/**
+ * AltGr typing a character: Windows and Linux report AltGr as Ctrl+Alt, so AltGr+T (ț in
+ * Romanian, ₺ in Turkish Q) would match a Mod-Alt-t hotkey. A key that produces a character
+ * other than a plain letter or digit with Ctrl+Alt held is that character, not a hotkey.
+ */
+function isAltGrCharacter(e: KeyboardEvent): boolean {
+  return !isApple && e.ctrlKey && e.altKey && !e.metaKey && e.key.length === 1 && !/^[a-z0-9]$/i.test(e.key);
+}
+
 function inTextInput(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return !!target.closest('.cm-editor, input, textarea, select, [contenteditable="true"]');
@@ -52,6 +61,8 @@ function handle(e: KeyboardEvent, capture: boolean): void {
   // A modal dialog owns the keyboard; only the always-global hotkeys pass through it.
   const inModal = e.target instanceof HTMLElement && !!e.target.closest('[aria-modal="true"]');
   if ((editing || inModal) && !global) return;
+  // Where text is typed, a character typed with AltGr goes to the field.
+  if (editing && isAltGrCharacter(e)) return;
   if (runCommand(command.id, ctx)) {
     e.preventDefault();
     e.stopPropagation();

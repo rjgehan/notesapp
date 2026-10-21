@@ -1930,7 +1930,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 
 | Context | Keys |
 |---|---|
-| Global | The command hotkeys above. `Esc` closes the topmost overlay or the drawer. `Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,` and `Mod-Alt-←/→` work even while the editor has focus, and so do commands registered with `globalHotkey` (quick add, `Mod-Alt-T`, §6.22). |
+| Global | The command hotkeys above. `Esc` closes the topmost overlay or the drawer. `Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,` and `Mod-Alt-←/→` work even while the editor has focus, and so do commands registered with `globalHotkey` (quick add, `Mod-Alt-T`, §6.22). Off Apple platforms AltGr arrives as Ctrl+Alt: in a text field, a key that types a character with it (AltGr+T is ț in Romanian) types that character rather than running a hotkey. |
 | Task list page | `Enter` or `Space` on a task opens its inline editor (`Esc` or Done closes it); `Alt-↑/↓` move it among its siblings; `Alt-→` makes it a subtask of the task above, `Alt-←` moves it out of its parent (§6.22) |
 | Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`. **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. |
 | Explorer (focused) | `↑/↓` move; `←/→` collapse and expand; `Enter` opens; `F2` renames; `Delete` deletes (with confirmation); `Mod-Alt-N` creates a new note in the focused folder |
