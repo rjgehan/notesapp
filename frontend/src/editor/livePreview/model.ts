@@ -4,7 +4,7 @@
 // the cursor rules all derive from it, and decorations never change the document.
 import { syntaxTree } from '@codemirror/language';
 import type { EditorSelection, EditorState, Line } from '@codemirror/state';
-import type { SyntaxNode } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 
 /**
  * How the cursor treats a replaced range (DESIGN §6.6.1):
@@ -325,9 +325,11 @@ function draftFor(state: EditorState, node: SyntaxNode): Draft | null {
   }
 }
 
-/** The Live Preview elements of the syntax tree that overlap `ranges`, each once, in document order. */
-export function collectElements(state: EditorState, ranges: readonly { from: number; to: number }[]): LiveElement[] {
-  const tree = syntaxTree(state);
+/**
+ * The Live Preview elements of the syntax tree that overlap `ranges`, each once, in document order.
+ * `tree` defaults to the state's (which may not reach past the viewport yet).
+ */
+export function collectElements(state: EditorState, ranges: readonly { from: number; to: number }[], tree: Tree = syntaxTree(state)): LiveElement[] {
   const seen = new Set<string>();
   const out: LiveElement[] = [];
   for (const { from, to } of ranges) {

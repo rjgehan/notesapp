@@ -1,7 +1,7 @@
 import { undo } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { destroyEditors, marked, noteEditor, press, typeText } from '../test/noteEditor';
+import { destroyEditors, marked, noteEditor, parsed, press, typeText } from '../test/noteEditor';
 import { cycleHeading, hasFormat, inLink, pendingFormats, toggleBulletList, toggleFormat, toggleHeading, toggleLink, toggleNumberedList, toggleQuote, type InlineFormat } from './formatting';
 import { collectElements } from './livePreview/model';
 
@@ -114,6 +114,42 @@ describe('formatting keys on a selection (ROADMAP 10a)', () => {
     view = noteEditor('**in‸side**');
     expect(hasFormat(view.state, view.state.selection.main, 'strong')).toBe(true);
     expect(hasFormat(view.state, view.state.selection.main, 'emphasis')).toBe(false);
+  });
+
+  it('formats a whole long note at once, and takes it off again, without slowing down', () => {
+    const lines = Array.from({ length: 5000 }, (_, i) => (i % 2 ? '' : `- item ${i} has **bold**, *it*, \`code\` and [[Note]]`));
+    const view = noteEditor(lines.join('\n'));
+    view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+    let started = performance.now();
+    press(view, 'b', { ctrlKey: true });
+    expect(performance.now() - started).toBeLessThan(3000);
+    const out = view.state.doc.toString().split('\n');
+    expect(out[0]).toBe('- **item 0 has bold, *it*, `code` and [[Note]]**');
+    expect(out.filter((l) => l !== '').every((l) => l.startsWith('- **') && l.endsWith('**'))).toBe(true);
+    // All of it is bold now (the selection stays on it): the same key takes it off everywhere.
+    parsed(view);
+    expect(hasFormat(view.state, view.state.selection.main, 'strong')).toBe(true);
+    started = performance.now();
+    press(view, 'b', { ctrlKey: true });
+    expect(performance.now() - started).toBeLessThan(3000);
+    expect(view.state.doc.toString().split('\n')[0]).toBe('- item 0 has bold, *it*, `code` and [[Note]]');
+    expect(view.state.doc.toString()).not.toContain('**');
+  });
+
+  it('sees formatting that runs over a line break', () => {
+    expect(toggle('a **«b\nc»** d', 'strong')).toBe('a «b\nc» d');
+    // New formatting goes on line by line.
+    expect(toggle('**a\nb** «c\nd»', 'strong')).toBe('**a\nb** **«c**\n**d»**');
+  });
+
+  it('reads the formatting of a selection that reaches past the parsed part of the note', () => {
+    // A new editor state is parsed only to its first few thousand characters; the rest is parsed
+    // in the background. Bold text further down must not be taken for plain text.
+    const lines = Array.from({ length: 3000 }, (_, i) => `**line ${i}**`);
+    const view = noteEditor(`«${lines.join('\n')}»`);
+    expect(hasFormat(view.state, view.state.selection.main, 'strong')).toBe(true);
+    press(view, 'b', { ctrlKey: true });
+    expect(view.state.doc.toString()).toBe(Array.from({ length: 3000 }, (_, i) => `line ${i}`).join('\n'));
   });
 
   it('does nothing in a locked note', () => {
@@ -323,6 +359,14 @@ describe('heading, list and quote commands (palette, toolbars)', () => {
   it('leaves code blocks and frontmatter alone', () => {
     expect(run('«```\ncode\n```»', toggleBulletList)).toBe('```\ncode\n```');
     expect(run('«---\na: 1\n---\ntext»', toggleQuote)).toBe('---\na: 1\n---\n> text');
+    // A blank line in the frontmatter stays blank (a `>` there would break the YAML).
+    expect(run('«---\na: 1\n\nb: 2\n---\ntext»', toggleQuote)).toBe('---\na: 1\n\nb: 2\n---\n> text');
+  });
+
+  it('leaves code blocks alone past the parsed part of a long note', () => {
+    const body = Array.from({ length: 2000 }, (_, i) => `line ${i}`).join('\n');
+    const out = run(`«${body}\n\`\`\`\ncode\n\`\`\`»`, toggleBulletList);
+    expect(out.endsWith('- line 1999\n```\ncode\n```')).toBe(true);
   });
 
   it('formats through the generic command too', () => {

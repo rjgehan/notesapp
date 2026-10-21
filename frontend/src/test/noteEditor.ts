@@ -110,4 +110,6 @@ export function typeText(view: EditorView, text: string): void {
 /** Parses the whole document (tests check the tree right after an edit). */
 export function parsed(view: EditorView): void {
   ensureSyntaxTree(view.state, view.state.doc.length, 5000);
+  // A state's tree is the parse as of its transaction: one more transaction brings the finished one in.
+  view.dispatch({});
 }

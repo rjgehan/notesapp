@@ -3,10 +3,11 @@
 // whole lines. Each writes ordinary Markdown. The formatting already there is read from the Live
 // Preview model (the Lezer tree), so a toggle sees what the editor shows, in Live Preview and in
 // source mode alike.
-import { syntaxTree } from '@codemirror/language';
-import { EditorSelection, Prec, StateEffect, StateField, Transaction, type ChangeSpec, type EditorState, type Extension, type SelectionRange } from '@codemirror/state';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+import { EditorSelection, Prec, StateEffect, StateField, Transaction, type ChangeSpec, type EditorState, type Extension, type SelectionRange, type Text } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type Command } from '@codemirror/view';
-import type { SyntaxNode } from '@lezer/common';
+import { Tree, type SyntaxNode } from '@lezer/common';
+import { toast } from '../state/toasts';
 import { collectElements, type ElementKind, type LiveElement } from './livePreview/model';
 
 export type InlineFormat = 'strong' | 'emphasis' | 'strikethrough' | 'highlight' | 'code';
@@ -72,11 +73,24 @@ const BLOCK_PREFIX = /^[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])[ \t]+(?:
 const HEADING_CLOSE = /[ \t]+#+[ \t]*$/;
 
 /** The name of the raw block (code, frontmatter, …) or table the line at `pos` is in, if any. */
-function blockAt(state: EditorState, pos: number): string | null {
-  for (let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1); node; node = node.parent) {
+function blockAt(state: EditorState, pos: number, tree: Tree = syntaxTree(state)): string | null {
+  for (let node: SyntaxNode | null = tree.resolveInner(pos, 1); node; node = node.parent) {
     if (RAW_BLOCKS.has(node.name) || node.name === 'Table') return node.name;
   }
   return null;
+}
+
+/**
+ * The syntax tree parsed at least to `to`, or null when that takes too long. The state's own tree
+ * may stop at the viewport (the rest is parsed in the background), and formatting a selection
+ * that reaches past it must not take formatted text for plain text.
+ */
+function treeTo(state: EditorState, to: number): Tree | null {
+  // The parse may be further along than the state's tree (it moves on between transactions).
+  const tree = ensureSyntaxTree(state, to, 2000);
+  if (tree) return tree;
+  // No language (nothing to read), or the parse took too long.
+  return syntaxTree(state) === Tree.empty ? Tree.empty : null;
 }
 
 /**
@@ -84,7 +98,7 @@ function blockAt(state: EditorState, pos: number): string | null {
  * block markup (in a table, each cell's text), without blanks at the ends. Code blocks,
  * frontmatter, comments and HTML blocks are left out.
  */
-function textSegments(state: EditorState, from: number, to: number): Span[] {
+function textSegments(state: EditorState, from: number, to: number, tree: Tree = syntaxTree(state)): Span[] {
   const out: Span[] = [];
   const add = (a: number, b: number) => {
     const s = trim(state, Math.max(a, from), Math.min(b, to));
@@ -92,9 +106,9 @@ function textSegments(state: EditorState, from: number, to: number): Span[] {
   };
   for (let pos = from; ; ) {
     const line = state.doc.lineAt(pos);
-    const block = line.length > 0 ? blockAt(state, line.from) : null;
+    const block = line.length > 0 ? blockAt(state, line.from, tree) : null;
     if (block === 'Table') {
-      syntaxTree(state).iterate({
+      tree.iterate({
         from: line.from,
         to: line.to,
         enter(node) {
@@ -115,8 +129,8 @@ function textSegments(state: EditorState, from: number, to: number): Span[] {
 }
 
 /** The Live Preview elements on the lines of `from`..`to`. */
-function elementsAround(state: EditorState, from: number, to: number): LiveElement[] {
-  return collectElements(state, [{ from: state.doc.lineAt(from).from, to: state.doc.lineAt(to).to }]);
+function elementsAround(state: EditorState, from: number, to: number, tree: Tree = syntaxTree(state)): LiveElement[] {
+  return collectElements(state, [{ from: state.doc.lineAt(from).from, to: state.doc.lineAt(to).to }], tree);
 }
 
 // ---------- inline formats ----------
@@ -133,6 +147,37 @@ function markersFor(format: InlineFormat, text: string): { open: string; close: 
   return format === 'code' ? codeMarkers(text) : { open: FORMAT_MARKERS[format], close: FORMAT_MARKERS[format] };
 }
 
+/**
+ * Spans (elements, selected text) by the lines they are on, so the ones around a span are found
+ * without going through all of them: a whole long note can be selected and formatted.
+ */
+class LineIndex<T extends Span> {
+  private readonly lines = new Map<number, T[]>();
+  private readonly doc: Text;
+
+  constructor(doc: Text, items: readonly T[]) {
+    this.doc = doc;
+    for (const item of items) {
+      const last = doc.lineAt(item.to).number;
+      for (let n = doc.lineAt(item.from).number; n <= last; n++) {
+        const list = this.lines.get(n);
+        if (list) list.push(item);
+        else this.lines.set(n, [item]);
+      }
+    }
+  }
+
+  /** The items on the lines of `from`..`to`, each once. */
+  around(from: number, to: number): T[] {
+    const first = this.doc.lineAt(from).number;
+    const last = this.doc.lineAt(to).number;
+    if (first === last) return this.lines.get(first) ?? [];
+    const seen = new Set<T>();
+    for (let n = first; n <= last; n++) for (const item of this.lines.get(n) ?? []) seen.add(item);
+    return [...seen];
+  }
+}
+
 /** Whether every non-blank character of `span` is inside one of `elements` (its markup or its text). */
 function covered(state: EditorState, span: Span, elements: readonly LiveElement[]): boolean {
   const merged = mergeSpans(elements.map((e) => ({ from: e.from, to: e.to })));
@@ -142,31 +187,42 @@ function covered(state: EditorState, span: Span, elements: readonly LiveElement[
   return true;
 }
 
+/** Whether all of `segments` have `format`. */
+function allFormatted(state: EditorState, segments: readonly Span[], format: InlineFormat, index: LineIndex<LiveElement>): boolean {
+  return segments.every((s) =>
+    covered(
+      state,
+      s,
+      index.around(s.from, s.to).filter((e) => e.kind === format),
+    ),
+  );
+}
+
+/** Formatting that new inline code takes off, as code shows its markers as text. */
+const CODE_STRIPS: ReadonlySet<ElementKind> = new Set(['strong', 'emphasis', 'strikethrough', 'highlight']);
+
 /**
  * The changes that apply `format` to `segments` (selected text), merging with the same format around
  * them: the markers that go, and the markers that come, both in the positions of `state`.
  */
-function formatChanges(state: EditorState, segments: readonly Span[], format: InlineFormat, elements: readonly LiveElement[]): { removals: ChangeSpec[]; inserts: ChangeSpec[] } {
-  const own = elements.filter((e) => e.kind === format);
-  const atomic = elements.filter((e) => ATOMIC.has(e.kind) && e.kind !== format);
+function formatChanges(state: EditorState, segments: readonly Span[], format: InlineFormat, index: LineIndex<LiveElement>): { removals: Span[]; inserts: ChangeSpec[] } {
   // A range takes in the atomic elements it cuts into, and the same format it overlaps or touches.
   const extended = mergeSpans(
     segments.map((s) => {
       const x = { ...s };
       for (let changed = true; changed; ) {
         changed = false;
-        for (const e of atomic) {
-          if (e.from < x.from && x.from < e.to) {
-            x.from = e.from;
-            changed = true;
-          }
-          if (e.from < x.to && x.to < e.to) {
-            x.to = e.to;
-            changed = true;
-          }
-        }
-        for (const e of own) {
-          if (e.to >= x.from && e.from <= x.to && (e.from < x.from || e.to > x.to)) {
+        for (const e of index.around(x.from, x.to)) {
+          if (ATOMIC.has(e.kind) && e.kind !== format) {
+            if (e.from < x.from && x.from < e.to) {
+              x.from = e.from;
+              changed = true;
+            }
+            if (e.from < x.to && x.to < e.to) {
+              x.to = e.to;
+              changed = true;
+            }
+          } else if (e.kind === format && e.to >= x.from && e.from <= x.to && (e.from < x.from || e.to > x.to)) {
             x.from = Math.min(x.from, e.from);
             x.to = Math.max(x.to, e.to);
             changed = true;
@@ -176,16 +232,17 @@ function formatChanges(state: EditorState, segments: readonly Span[], format: In
       return x;
     }),
   );
-  const removed: Span[] = [];
-  const changes: ChangeSpec[] = [];
+  const removals: Span[] = [];
+  const inserts: ChangeSpec[] = [];
   for (const x of extended) {
-    // The same format inside goes (it merges into this one); so does other formatting inside new code, whose text is literal.
+    const elements = index.around(x.from, x.to);
+    // The same format inside goes (it merges into this one); so does other formatting inside new code.
+    const removed: Span[] = [];
     for (const e of elements) {
       if (e.from < x.from || e.to > x.to) continue;
-      if (e.kind === format || (format === 'code' && (e.kind === 'strong' || e.kind === 'emphasis' || e.kind === 'strikethrough' || e.kind === 'highlight'))) {
-        removed.push({ from: e.from, to: e.textFrom }, { from: e.textTo, to: e.to });
-      }
+      if (e.kind === format || (format === 'code' && CODE_STRIPS.has(e.kind))) removed.push({ from: e.from, to: e.textFrom }, { from: e.textTo, to: e.to });
     }
+    removals.push(...removed);
     // Formatting whose edge the range crosses splits it, so the Markdown stays nested.
     const gaps: Span[] = [];
     for (const e of elements) {
@@ -196,21 +253,25 @@ function formatChanges(state: EditorState, segments: readonly Span[], format: In
     for (const piece of subtract(x, gaps)) {
       const p = trim(state, piece.from, piece.to);
       if (p.to <= p.from) continue;
-      const text = subtract(p, removed).map((r) => state.sliceDoc(r.from, r.to)).join('');
+      const text = subtract(p, removed)
+        .map((r) => state.sliceDoc(r.from, r.to))
+        .join('');
       if (text.trim() === '') continue;
       const { open, close } = markersFor(format, text);
-      changes.push({ from: p.from, insert: open }, { from: p.to, insert: close });
+      inserts.push({ from: p.from, insert: open }, { from: p.to, insert: close });
     }
   }
-  return { removals: mergeSpans(removed).filter((r) => r.to > r.from), inserts: changes };
+  return { removals: mergeSpans(removals).filter((r) => r.to > r.from), inserts };
 }
 
 /** The changes that take `format` off `segments`, splitting formatting that is selected only in part. */
-function unformatChanges(state: EditorState, segments: readonly Span[], format: InlineFormat, elements: readonly LiveElement[]): ChangeSpec[] {
+function unformatChanges(state: EditorState, segments: readonly Span[], format: InlineFormat, index: LineIndex<LiveElement>): ChangeSpec[] {
+  const selected = new LineIndex(state.doc, segments);
+  const own = new Set<LiveElement>();
+  for (const s of segments) for (const e of index.around(s.from, s.to)) if (e.kind === format) own.add(e);
   const changes: ChangeSpec[] = [];
-  for (const e of elements) {
-    if (e.kind !== format) continue;
-    const hits = segments.filter((s) => s.to > e.from && s.from < e.to);
+  for (const e of own) {
+    const hits = selected.around(e.from, e.to).filter((s) => s.to > e.from && s.from < e.to);
     if (hits.length === 0) continue;
     let a = Math.max(e.textFrom, Math.min(...hits.map((s) => s.from)));
     let b = Math.min(e.textTo, Math.max(...hits.map((s) => s.to)));
@@ -220,10 +281,10 @@ function unformatChanges(state: EditorState, segments: readonly Span[], format: 
       continue;
     }
     // Taking the format off part of a nested element takes it off all of it.
+    const nested = index.around(e.from, e.to).filter((n) => n !== e && n.from >= e.textFrom && n.to <= e.textTo);
     for (let changed = true; changed; ) {
       changed = false;
-      for (const n of elements) {
-        if (n === e || n.from < e.textFrom || n.to > e.textTo) continue;
+      for (const n of nested) {
         if (n.from < a && a < n.to) {
           a = n.from;
           changed = true;
@@ -269,9 +330,10 @@ export function hasFormat(state: EditorState, range: SelectionRange, format: Inl
     if (pending && pending.pos === range.head) return pending.formats.includes(format);
     return elementsAround(state, range.head, range.head).some((e) => e.kind === format && e.textFrom <= range.head && range.head <= e.textTo);
   }
-  const segments = textSegments(state, range.from, range.to);
-  const own = elementsAround(state, range.from, range.to).filter((e) => e.kind === format);
-  return segments.length > 0 && segments.every((s) => covered(state, s, own));
+  const tree = treeTo(state, state.doc.lineAt(range.to).to);
+  if (!tree) return false;
+  const segments = textSegments(state, range.from, range.to, tree);
+  return segments.length > 0 && allFormatted(state, segments, format, new LineIndex(state.doc, elementsAround(state, range.from, range.to, tree)));
 }
 
 /** Whether `range` is inside a link (a Markdown link, wikilink or web address). */
@@ -441,12 +503,18 @@ export function toggleFormat(format: InlineFormat): Command {
       view.dispatch(state.update(tr, { userEvent: 'input.format', scrollIntoView: true, effects: pending !== undefined ? setPending.of(pending) : [] }));
       return true;
     }
-    const segments = ranges.flatMap((r) => textSegments(state, r.from, r.to));
+    const tree = treeTo(state, state.doc.lineAt(ranges.reduce((m, r) => Math.max(m, r.to), 0)).to);
+    if (!tree) {
+      toast('This note is still being read; try again in a moment');
+      return true;
+    }
+    const segments = ranges.flatMap((r) => textSegments(state, r.from, r.to, tree));
     if (segments.length === 0) return true;
-    const elements = elementsAround(state, Math.min(...segments.map((s) => s.from)), Math.max(...segments.map((s) => s.to)));
-    const own = elements.filter((e) => e.kind === format);
-    const off = segments.every((s) => covered(state, s, own));
-    const { removals, inserts } = off ? { removals: [], inserts: unformatChanges(state, segments, format, elements) } : formatChanges(state, segments, format, elements);
+    const from = segments.reduce((m, s) => Math.min(m, s.from), state.doc.length);
+    const to = segments.reduce((m, s) => Math.max(m, s.to), 0);
+    const index = new LineIndex(state.doc, elementsAround(state, from, to, tree));
+    const off = allFormatted(state, segments, format, index);
+    const { removals, inserts } = off ? { removals: [], inserts: unformatChanges(state, segments, format, index) } : formatChanges(state, segments, format, index);
     // Markers merged away go first, then the new ones: a selection starting where an old opening
     // marker was then starts after the new one.
     const removed = state.changes(removals);
@@ -532,14 +600,25 @@ interface LineMarkup {
   blank: boolean;
 }
 
-/** The lines a line command changes: those of the selection (blank ones only when nothing else is selected), outside code and tables. */
-function targetLines(state: EditorState): LineMarkup[] {
+/** The syntax tree over the selection's lines, or null (with a toast) when the parse takes too long. */
+function selectionTree(state: EditorState): Tree | null {
+  const tree = treeTo(state, state.doc.lineAt(state.selection.ranges.reduce((m, r) => Math.max(m, r.to), 0)).to);
+  if (!tree) toast('This note is still being read; try again in a moment');
+  return tree;
+}
+
+/**
+ * The lines a line command changes: those of the selection (blank ones only when nothing else is
+ * selected), outside code and tables. Null when the note is not parsed that far yet.
+ */
+function targetLines(state: EditorState, tree: Tree | null = selectionTree(state)): LineMarkup[] | null {
+  if (!tree) return null;
   const lines = new Map<number, LineMarkup>();
   for (const r of state.selection.ranges) {
     const last = state.doc.lineAt(r.to);
     for (let n = state.doc.lineAt(r.from).number; n <= last.number; n++) {
       const line = state.doc.line(n);
-      if (lines.has(line.from) || (line.length > 0 && blockAt(state, line.from) !== null)) continue;
+      if (lines.has(line.from) || (line.length > 0 && blockAt(state, line.from, tree) !== null)) continue;
       const m = LINE_MARKUP.exec(line.text)!;
       lines.set(line.from, { from: line.from, textFrom: line.from + m[0].length, keep: m[1], list: m[2] ?? '', heading: m[3] ?? '', blank: line.text.trim() === '' });
     }
@@ -553,8 +632,10 @@ function targetLines(state: EditorState): LineMarkup[] {
 function rewriteLines(view: EditorView, markup: (line: LineMarkup, index: number) => { list: string; heading: string } | null): boolean {
   const { state } = view;
   if (state.readOnly) return false;
+  const lines = targetLines(state);
+  if (!lines) return true;
   const changes: ChangeSpec[] = [];
-  targetLines(state).forEach((line, i) => {
+  lines.forEach((line, i) => {
     const next = markup(line, i);
     if (!next || (next.list === line.list && next.heading === line.heading)) return;
     changes.push({ from: line.from + line.keep.length, to: line.textFrom, insert: next.list + next.heading });
@@ -578,13 +659,16 @@ export function setHeading(view: EditorView, level: number): boolean {
 export function toggleHeading(level: number): Command {
   return (view) => {
     const lines = targetLines(view.state);
+    if (!lines) return true;
     return setHeading(view, lines.length > 0 && lines.every((l) => headingLevel(l) === level) ? 0 : level);
   };
 }
 
 /** The phone toolbar's heading button: plain text, heading 1, 2, 3, then plain text again. */
 export const cycleHeading: Command = (view) => {
-  const first = targetLines(view.state)[0];
+  const lines = targetLines(view.state);
+  if (!lines) return true;
+  const first = lines[0];
   const level = first ? headingLevel(first) : 0;
   return setHeading(view, level === 0 ? 1 : level >= 3 ? 0 : level + 1);
 };
@@ -595,6 +679,7 @@ const ORDERED = /^(\d{1,9})[.)][ \t]+$/;
 /** Toggles a bulleted list: lines that all are bullets become plain text; otherwise each becomes `- `. */
 export const toggleBulletList: Command = (view) => {
   const lines = targetLines(view.state);
+  if (!lines) return true;
   const all = lines.length > 0 && lines.every((l) => BULLET.test(l.list));
   return rewriteLines(view, (line) => ({ list: all ? '' : BULLET.test(line.list) ? line.list : '- ', heading: '' }));
 };
@@ -603,6 +688,7 @@ export const toggleBulletList: Command = (view) => {
 export const toggleNumberedList: Command = (view) => {
   const { state } = view;
   const lines = targetLines(state);
+  if (!lines) return true;
   const all = lines.length > 0 && lines.every((l) => ORDERED.test(l.list));
   let start = 1;
   const first = lines[0];
@@ -619,13 +705,15 @@ export const toggleNumberedList: Command = (view) => {
 export const toggleQuote: Command = (view) => {
   const { state } = view;
   if (state.readOnly) return false;
+  const tree = selectionTree(state);
+  if (!tree) return true;
   const lines = new Map<number, string>();
   for (const r of state.selection.ranges) {
     const last = state.doc.lineAt(r.to).number;
     for (let n = state.doc.lineAt(r.from).number; n <= last; n++) {
       const line = state.doc.line(n);
-      // Any block can be quoted, except the frontmatter.
-      if (line.length === 0 || blockAt(state, line.from) !== 'Frontmatter') lines.set(line.from, line.text);
+      // Any block can be quoted, except the frontmatter (blank lines in it included).
+      if (blockAt(state, line.from, tree) !== 'Frontmatter') lines.set(line.from, line.text);
     }
   }
   if (lines.size === 0) return true;
