@@ -181,6 +181,11 @@ public class FileIndexer {
 		}
 	}
 
+	/** True when a {@link DocumentIndexer} supports this name: a document, or a note it supplements. */
+	public boolean hasDocumentIndexer(String path) {
+		return documentIndexer(path) != null;
+	}
+
 	private @Nullable DocumentIndexer documentIndexer(String path) {
 		for (DocumentIndexer indexer : this.documents) {
 			if (indexer.supports(path)) {

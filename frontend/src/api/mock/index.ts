@@ -81,6 +81,9 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     commitHistory: () => call(() => vault.commitNow()),
     pushMirror: () => call(() => vault.pushMirror()),
     getTemplates: () => call(() => vault.getTemplates()),
+    getBookmarks: () => call(() => vault.getBookmarks()),
+    putBookmarks: (req) => call(() => vault.putBookmarks(req, clientId)),
+    renameHeading: (req) => call(() => vault.renameHeading(req, clientId)),
     rawUrl: (entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>) =>
       blobUrl(`file:${entry.path}:${entry.size}:${entry.mtime}`, vault.rawBytes(entry.path), entry.path),
     trashRawUrl: (id) => {

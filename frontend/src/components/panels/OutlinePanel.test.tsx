@@ -11,6 +11,7 @@ afterEach(() => {
 describe('OutlinePanel (FE-11)', () => {
   it('scrolls by line: a repeated click scrolls again, and duplicate or "#" headings reach the exact one', async () => {
     const content = '# Notes\n\nfirst\n\n## C# tips\n\nx\n\n# Notes\n\nsecond\n';
+    vi.spyOn(api, 'getBookmarks').mockResolvedValue({ version: 'b0', items: [] });
     vi.spyOn(api, 'readFile').mockImplementation(async (path) => ({ path, kind: 'note', content, version: 'v1', size: content.length, mtime: '2026-10-16T10:00:00.000Z', lossy: false }));
     render(<OutlinePanel activePath="Outline test.md" />);
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Notes' })).toHaveLength(2));

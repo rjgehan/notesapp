@@ -214,6 +214,12 @@ export class DocumentSession {
     return this.remoteChanges;
   }
 
+  /**
+   * The same count for hooks: text that came from the server or from outside the view never
+   * counts as typing (heading rename offers, DESIGN §6.24).
+   */
+  getRemoteChangeCount = (): number => this.remoteChanges;
+
   private makeSnapshot(): SessionSnapshot {
     return {
       path: this.path,

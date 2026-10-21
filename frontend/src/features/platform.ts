@@ -35,6 +35,10 @@ export function keyLabel(spec: string): string {
           return '←';
         case 'ArrowRight':
           return '→';
+        case 'ArrowUp':
+          return '↑';
+        case 'ArrowDown':
+          return '↓';
         default:
           return part.length === 1 ? part.toUpperCase() : part;
       }

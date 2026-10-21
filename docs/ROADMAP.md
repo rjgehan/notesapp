@@ -658,6 +658,14 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 
 ### 12. Bookmarks (starred) and a recent-files pane
 
+**Status:** built (wave 2) on `feat/bookmarks`: DESIGN §5.21 and §6.23, API.md §21. Choices beyond this spec, and why:
+
+- **Obsidian's format, Obsidian's types.** Files, headings (and `#^block` references), folders, searches and nested groups, with `ctime` and `title`; Obsidian's `url` and `graph` bookmarks and unknown fields are kept untouched. A vault without `.notesapp/bookmarks.json` shows the bookmarks of `.obsidian/bookmarks.json` until the first change (read only), so a vault moved over from Obsidian keeps them.
+- **Bookmarks follow their targets on the server**, like links: a move or rename through the app re-keys them (a folder's bookmark and everything under it too), and a trash restore to another path brings them along. A deleted target leaves its bookmark in place, dimmed, until it comes back; external moves are not followed, as for links.
+- **One list, saved whole** with the version protocol, as the settings are; each change is re-applied on top of another device's after a conflict, so neither is lost.
+- **Recent files are per device** (they were already kept for the quick switcher), now with the time each was opened, in their own pane; the switcher's empty state marks bookmarked files with a star.
+- **On the phone** both panes are drawer tabs, and ⋯ has Bookmark. Headings are starred from the Outline; searches from the search panel or page.
+
 **One line:** star notes, headings and searches, and see recently opened files in a sidebar pane.
 
 | Value | Effort | Depends on |
@@ -754,6 +762,8 @@ Results update through SSE.
 
 ### 21. Update heading links when a heading is renamed
 
+**Status:** built (with item 12, on `feat/bookmarks`): DESIGN §5.22 and §6.24, API.md §22. Typing a new heading text offers, once the text rests, to update the links that pointed at the old one (the offer counts them with a dry run, and says nothing when there are none); **Rename heading and update links to it…** in the palette does it on purpose. Every link form follows (wiki with display or as an embed, nested `#H1#H2`, markdown with a percent-encoded or angle-bracket destination, same-note `[[#H]]`, frontmatter), only the subpath is rewritten, heading bookmarks follow too, and the rewrite is one commit, like a move's link update.
+
 **One line:** when you change a heading's text, offer to update every `[[Note#Old heading]]` across the vault. Obsidian does not do this.
 
 | Value | Effort | Depends on |
@@ -849,6 +859,8 @@ Plugs into the view registry. `.canvas` is already a text kind.
 | M | M | |
 
 ### 29. Customizable hotkeys and per-device preferences
+
+**Status:** built (with items 12 and 21, on `feat/bookmarks`): DESIGN §6.25. Settings has a **Hotkeys** section listing every command with its key on this device: change (record the next key), remove, reset, reset all, and a filter. A key another command uses can be taken over (that command loses it); keys the browser keeps (`Ctrl+T`, `Ctrl+W`, …) and editing keys (`Ctrl+Z`, `Ctrl+C`, …) are refused. Chosen keys work everywhere, in the editor too, and an editor default (`Ctrl+B`, `Ctrl+S`, …) steps aside once its command has another key. The palette, ribbon and header tooltips show each device's keys. The other per-device preferences (theme, spell check, autocorrect, remote images) were already kept per device; recent files and collapsed bookmark groups now are too (item 12).
 
 **One line:** rebind any command, with conflict detection. Bindings are stored per device.
 

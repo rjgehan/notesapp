@@ -5,10 +5,14 @@ import type {
   AlertTestResult,
   AttachmentResult,
   BacklinksResponse,
+  BookmarksResponse,
+  BookmarksUpdateRequest,
   CommitResult,
   CreateFileRequest,
   FileEntry,
   FolderResult,
+  HeadingRenameRequest,
+  HeadingRenameResult,
   HistoryContent,
   HistoryResponse,
   HistoryRestoreRequest,
@@ -96,6 +100,9 @@ export interface Endpoints {
   commitHistory(): Promise<CommitResult>;
   pushMirror(): Promise<MirrorStatus>;
   getTemplates(): Promise<TemplatesResponse>;
+  getBookmarks(): Promise<BookmarksResponse>;
+  putBookmarks(req: BookmarksUpdateRequest): Promise<BookmarksResponse>;
+  renameHeading(req: HeadingRenameRequest): Promise<HeadingRenameResult>;
   /** Content-addressed raw URL (API.md §9.1). */
   rawUrl(entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>, opts?: { download?: boolean }): string;
   trashRawUrl(id: string): string;
@@ -150,6 +157,9 @@ export const httpEndpoints: Endpoints = {
   commitHistory: () => apiFetch('/api/history/commit', { method: 'POST' }),
   pushMirror: () => apiFetch('/api/mirror/push', { method: 'POST' }),
   getTemplates: () => apiFetch('/api/templates'),
+  getBookmarks: () => apiFetch('/api/bookmarks'),
+  putBookmarks: (req) => apiFetch('/api/bookmarks', { method: 'PUT', json: req }),
+  renameHeading: (req) => apiFetch('/api/notes/rename-heading', { method: 'POST', json: req }),
   rawUrl: (entry, opts) =>
     '/api/files/raw?path=' +
     encodeURIComponent(entry.path) +

@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import com.rjgehan.notes.bookmarks.BookmarkService;
 import com.rjgehan.notes.config.JsonConfig;
 import com.rjgehan.notes.config.NotesProperties;
 import com.rjgehan.notes.drawings.ExcalidrawDocumentIndexer;
@@ -37,6 +38,7 @@ import com.rjgehan.notes.vault.AttachmentService;
 import com.rjgehan.notes.vault.FileKinds;
 import com.rjgehan.notes.vault.FileService;
 import com.rjgehan.notes.vault.FolderService;
+import com.rjgehan.notes.vault.HeadingRenameService;
 import com.rjgehan.notes.vault.MoveLog;
 import com.rjgehan.notes.vault.MoveService;
 import com.rjgehan.notes.vault.NameRules;
@@ -103,6 +105,8 @@ public final class TestVault implements AutoCloseable {
 
 	public final SettingsService settings;
 
+	public final BookmarkService bookmarks;
+
 	public final TrashStore trashStore;
 
 	public final LargeFiles largeFiles;
@@ -112,6 +116,8 @@ public final class TestVault implements AutoCloseable {
 	public final MoveService moves;
 
 	public final AttachmentService attachments;
+
+	public final HeadingRenameService headings;
 
 	private TestVault(Path root, Map<String, String> overrides, Function<NotesProperties, VaultFs> fsFactory) {
 		this.root = root;
@@ -141,11 +147,14 @@ public final class TestVault implements AutoCloseable {
 		this.builder = new IndexBuilder(this.fs, this.indexer, this.index);
 		this.nameRules = new NameRules(this.kinds);
 		this.settings = new SettingsService(this.fs, this.batcher, this.hub, this.clock, JSON);
+		this.bookmarks = new BookmarkService(this.fs, this.index, this.batcher, this.hub, this.clock, JSON);
 		this.trash = new TrashService(this.paths, this.fs, this.locks, this.index, this.files, this.trashStore,
-				this.reconciler, this.batcher, this.hub);
+				this.reconciler, this.batcher, this.hub, this.bookmarks);
 		this.moves = new MoveService(this.paths, this.fs, this.locks, this.index, this.files, this.indexer,
-				this.reconciler, this.batcher, this.hub, this.moveLog, this.settings);
+				this.reconciler, this.batcher, this.hub, this.moveLog, this.settings, this.bookmarks);
 		this.attachments = new AttachmentService(this.paths, this.nameRules, this.files, this.index, this.settings);
+		this.headings = new HeadingRenameService(this.paths, this.fs, this.locks, this.index, this.files,
+				this.indexer, this.reconciler, this.batcher, this.hub, this.bookmarks);
 	}
 
 	/** Prepares the vault, opens git and builds the index, like the startup sequence. */

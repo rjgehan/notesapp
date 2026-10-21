@@ -8,7 +8,9 @@ import java.util.List;
 
 import com.rjgehan.notes.api.dto.BacklinkGroup;
 import com.rjgehan.notes.api.dto.FailedReason;
+import com.rjgehan.notes.api.dto.HeadingRenameResult;
 import com.rjgehan.notes.api.dto.MoveResult;
+import com.rjgehan.notes.api.dto.OnConflict;
 import com.rjgehan.notes.api.dto.SearchHit;
 import com.rjgehan.notes.api.error.ErrorCode;
 import com.rjgehan.notes.api.error.NotesException;
@@ -211,6 +213,44 @@ class DocumentIndexersTest {
 		this.vault.moves.move("Tasks/Home.excalidraw", "Tasks/Home.tasks", null, false, TestVault.ALICE, CLIENT);
 		assertThat(found("leak")).containsExactly("Tasks/Home.tasks");
 		assertThat(sources("Projects/Plan.md")).containsExactly("Tasks/Home.tasks");
+	}
+
+	@Test
+	void aHeadingRenameRewritesTheListAndTheMarkdownDrawingAndReportsWhatOnlyJsonHolds() throws IOException {
+		String list = """
+				{"type": "notesapp-tasks", "version": 1, "list": {"id": "WORK", "name": "Work", "order": "b0"},
+				 "tasks": [{"id": "W1", "title": "Read [[Plan#Goals]]", "notes": "See [the goals](/Projects/Plan.md#Goals)"}]}
+				""";
+		String board = HOUSE.replace("Ask [[Plumber]] about the roof #home", "Discuss [[Plan#Goals]]");
+		String wall = SHED.replace("Fix the shed with [[Plumber]] ^Ab12Cd34", "Pin [[Plan#Goals]] ^Ab12Cd34")
+			.replace("\"rawText\": \"Fix the shed with [[Plumber]]\"", "\"rawText\": \"Pin [[Plan#Goals]]\"")
+			.replace("Paint the shed with [[Painter]] #shed", "Also [[Plan#Goals]]");
+		this.vault.files.createText("Tasks/Work.tasks", list, OnConflict.FAIL, TestVault.ALICE, CLIENT);
+		this.vault.files.createText("Drawings/Board.excalidraw", board, OnConflict.FAIL, TestVault.ALICE, CLIENT);
+		this.vault.files.createText("Drawings/Wall.excalidraw.md", wall, OnConflict.FAIL, TestVault.ALICE, CLIENT);
+		String version = this.vault.index.file("Projects/Plan.md").version();
+		this.vault.files.saveText("Projects/Plan.md", "# Plan\n\n## Aims\n", version, false, TestVault.ALICE, CLIENT);
+
+		HeadingRenameResult dryRun = this.vault.headings.rename("Projects/Plan.md", "Goals", "Aims", true,
+				TestVault.ALICE, CLIENT);
+		HeadingRenameResult renamed = this.vault.headings.rename("Projects/Plan.md", "Goals", "Aims", false,
+				TestVault.ALICE, CLIENT);
+		for (HeadingRenameResult result : List.of(dryRun, renamed)) {
+			assertThat(result.linkUpdates()).extracting((u) -> u.path() + " " + u.links())
+				.containsExactlyInAnyOrder("Tasks/Work.tasks 2", "Drawings/Wall.excalidraw.md 1");
+			assertThat(result.failed()).extracting((f) -> f.path() + " " + f.reason())
+				.containsExactlyInAnyOrder("Drawings/Board.excalidraw " + FailedReason.NOT_REWRITABLE,
+						"Drawings/Wall.excalidraw.md " + FailedReason.NOT_REWRITABLE);
+		}
+		// The list is rewritten through its indexer: still a valid list, its task updated.
+		String rewritten = read("Tasks/Work.tasks");
+		assertThat(rewritten).contains("Read [[Plan#Aims]]", "(/Projects/Plan.md#Aims)", "\"updatedAt\"")
+			.doesNotContain("Goals");
+		assertThat(found("Read")).contains("Tasks/Work.tasks");
+		// The Markdown drawing's sections are spliced like a note's; its JSON, and the JSON drawing, stay.
+		assertThat(read("Drawings/Wall.excalidraw.md")).isEqualTo(wall.replace("Pin [[Plan#Goals]] ^Ab12Cd34",
+				"Pin [[Plan#Aims]] ^Ab12Cd34"));
+		assertThat(read("Drawings/Board.excalidraw")).isEqualTo(board);
 	}
 
 }

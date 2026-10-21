@@ -1,7 +1,9 @@
 // Explorer row menu items (DESIGN §6.15): new note/folder here and the views' create items,
 // rename, move, delete, copy link, file history and download.
-import { Copy, Download, FilePlus, FolderInput, FolderPlus, History, Pencil, Trash } from 'lucide-react';
+import { Copy, Download, FilePlus, FolderInput, FolderPlus, History, Pencil, Star, StarOff, Trash } from 'lucide-react';
 import type { FileEntry } from '../../api/types';
+import { findFolderBookmarks } from '../../features/bookmarks';
+import { currentBookmarks, isFileBookmarked, toggleFileBookmark, toggleFolderBookmark } from '../../features/bookmarkStore';
 import { copyLink, createFolder, createNote, deleteEntry, downloadFile, validateNewName } from '../../features/fileOps';
 import { activePath, openPath } from '../../features/navigation';
 import { displayName, folderOf } from '../../features/paths';
@@ -64,6 +66,13 @@ export function rowMenuItems(row: RowTarget, startRename: () => void): MenuEntry
     { id: 'rename', label: 'Rename', icon: <Pencil size={16} />, run: startRename },
     { id: 'move', label: 'Move to…', icon: <FolderInput size={16} />, run: () => useUi.getState().setMoveTarget({ path: row.path, type: row.kind }) },
   ];
+  const starred = row.kind === 'file' ? isFileBookmarked(currentBookmarks(), row.path) : findFolderBookmarks(currentBookmarks(), row.path).length > 0;
+  items.push({
+    id: 'bookmark',
+    label: starred ? 'Remove bookmark' : 'Bookmark',
+    icon: starred ? <StarOff size={16} /> : <Star size={16} />,
+    run: () => void (row.kind === 'file' ? toggleFileBookmark(row.path) : toggleFolderBookmark(row.path)),
+  });
   if (row.kind === 'file') {
     items.push(
       { id: 'copy-link', label: 'Copy link', icon: <Copy size={16} />, run: () => void copyLink(row.path, activePath()) },

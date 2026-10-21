@@ -4,6 +4,7 @@ import { CalendarDays, Command as CommandIcon, FilePlus, FileSearch, LayoutTempl
 import { menuPages, pageRoute, useExtensionsVersion } from '../../extensions';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
 import { activePath, navigateTo } from '../../features/navigation';
+import { effectiveHotkey, useHotkeyOverrides } from '../../features/hotkeyPrefs';
 import { keyLabel } from '../../features/platform';
 import { resolvedTheme, usePrefs } from '../../state/prefs';
 import { toggleSidebar } from './showPanel';
@@ -23,9 +24,11 @@ const BOTTOM: Array<[string, LucideIcon]> = [
 ];
 
 function RibbonButton({ id, icon: Icon }: { id: string; icon: LucideIcon }) {
+  const overrides = useHotkeyOverrides();
   const command = getCommand(id);
   if (!command) return null;
-  const label = command.name + (command.hotkey ? ` (${keyLabel(command.hotkey)})` : '');
+  const key = effectiveHotkey(command, overrides);
+  const label = command.name + (key ? ` (${keyLabel(key)})` : '');
   return (
     <button type="button" className="ribbon-button" aria-label={command.name} title={label} onClick={() => runCommand(id, { activePath: activePath() })}>
       <Icon size={18} aria-hidden />

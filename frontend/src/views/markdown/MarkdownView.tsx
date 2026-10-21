@@ -17,6 +17,7 @@ import { flashBlock, highlightTermsIn } from '../../render/searchHits';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import type { FileViewProps } from '../registry';
 import { NoteHeader } from './NoteHeader';
+import { useHeadingRenameOffers } from './useHeadingRenameOffers';
 
 function decodeHash(hash: string): string | null {
   if (!hash || hash === '#') return null;
@@ -78,6 +79,8 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
 
   // A note that never loaded has no buffer to show (its error panel offers Try again).
   const ready = snapshot.loaded;
+  // Renaming a heading by typing offers to update the links to it (DESIGN §6.24).
+  useHeadingRenameOffers(session, ready && mode === 'edit');
 
   const scrollToTarget = useCallback(() => {
     const modeLine = targetLine.current;

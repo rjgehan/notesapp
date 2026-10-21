@@ -18,6 +18,7 @@ import com.rjgehan.notes.api.dto.RestoreResult;
 import com.rjgehan.notes.api.dto.TrashEntry;
 import com.rjgehan.notes.api.error.ErrorCode;
 import com.rjgehan.notes.api.error.NotesException;
+import com.rjgehan.notes.bookmarks.BookmarkService;
 import com.rjgehan.notes.events.EventHub;
 import com.rjgehan.notes.events.FileDeletedEvent;
 import com.rjgehan.notes.events.FileEvent;
@@ -70,8 +71,11 @@ public class TrashService {
 
 	private final EventHub hub;
 
+	private final BookmarkService bookmarks;
+
 	public TrashService(VaultPaths paths, VaultFs fs, VaultLocks locks, VaultIndex index, FileService files,
-			TrashStore store, VaultReconciler reconciler, CommitBatcher batcher, EventHub hub) {
+			TrashStore store, VaultReconciler reconciler, CommitBatcher batcher, EventHub hub,
+			BookmarkService bookmarks) {
 		this.paths = paths;
 		this.fs = fs;
 		this.locks = locks;
@@ -81,6 +85,7 @@ public class TrashService {
 		this.reconciler = reconciler;
 		this.batcher = batcher;
 		this.hub = hub;
+		this.bookmarks = bookmarks;
 	}
 
 	/** {@code DELETE /api/files}: any kind of file, including names that break the new-name rules. */
@@ -254,6 +259,8 @@ public class TrashService {
 			this.files.publishFolders(folders, origin);
 			entries.forEach((entry) -> this.hub.publish(FileEvent.created(entry, origin)));
 		}
+		// Bookmarks of the original path follow an entry restored elsewhere, when nothing took that path meanwhile.
+		this.bookmarks.restored(restored.item().originalPath(), target.nfc(), restored.item().type(), identity);
 		this.hub.publish(new TrashChangedEvent());
 		logger.info("RESTORE {} from trash files={} client={} user={}", target.nfc(), entries.size(), origin,
 				identity.login());

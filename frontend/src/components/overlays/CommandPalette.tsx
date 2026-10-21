@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { availableCommands, recentCommandIds, runCommand, useCommandsVersion, type Command } from '../../features/commands';
 import { fuzzyRank } from '../../features/fuzzy';
+import { effectiveHotkey, useHotkeyOverrides } from '../../features/hotkeyPrefs';
 import { activePath } from '../../features/navigation';
 import { keyLabel } from '../../features/platform';
 import { useUi } from '../../state/ui';
@@ -20,6 +21,7 @@ function rankCommands(query: string, commands: Command[], recent: string[]): Com
 
 export function CommandPalette() {
   useCommandsVersion();
+  const overrides = useHotkeyOverrides();
   const [query, setQuery] = useState('');
   const [ctx] = useState(() => ({ activePath: activePath() }));
   const [recent] = useState(recentCommandIds);
@@ -36,12 +38,13 @@ export function CommandPalette() {
       items={items}
       itemKey={(c) => c.id}
       renderItem={(c) => {
+        const key = effectiveHotkey(c, overrides);
         return (
           <>
             <span className="picker-item-text">
               <span className="picker-item-label">{c.name}</span>
             </span>
-            {(c.hotkey ?? c.editorHotkey) && <kbd className="picker-kbd">{keyLabel((c.hotkey ?? c.editorHotkey)!)}</kbd>}
+            {key && <kbd className="picker-kbd">{keyLabel(key)}</kbd>}
           </>
         );
       }}

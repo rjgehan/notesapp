@@ -86,3 +86,37 @@ describe('MockVault version protocol (API.md §4)', () => {
     expect(v.readFile('Other.md').content).toBe('See [[Roadmap#Goals|the plan]] and [x](Roadmap.md).');
   });
 });
+
+describe('MockVault bookmarks (API.md §21)', () => {
+  it('follows the version protocol and re-keys bookmarks after a move and a restore elsewhere', () => {
+    const v = new MockVault(false);
+    v.createFile({ path: 'Plan.md', content: '# Plan' }, 'c1');
+    const empty = v.getBookmarks();
+    const saved = v.putBookmarks({ items: [{ type: 'file', ctime: 1, path: 'Plan.md', subpath: '#Plan' }], baseVersion: empty.version }, 'c1');
+    expect(saved.version).not.toBe(empty.version);
+    expect(problemCode(() => v.putBookmarks({ items: [], baseVersion: empty.version }, 'c2'))).toBe('version-conflict');
+    v.move({ from: 'Plan.md', to: 'Projects/Plan.md' }, 'c1');
+    expect(v.getBookmarks().items[0]).toMatchObject({ path: 'Projects/Plan.md', subpath: '#Plan' });
+    const entry = v.deleteFile('Projects/Plan.md', 'c1');
+    expect(v.getBookmarks().items[0].path).toBe('Projects/Plan.md');
+    v.restoreTrash(entry.id, { to: 'Archive/Plan.md' }, 'c1');
+    expect(v.getBookmarks().items[0].path).toBe('Archive/Plan.md');
+  });
+});
+
+describe('MockVault heading renames (API.md §22)', () => {
+  it('previews, then rewrites wiki and markdown links to the renamed heading and its bookmarks', () => {
+    const v = new MockVault(false);
+    v.createFile({ path: 'Plan.md', content: '# Plan\n## Aims\n' }, 'c1');
+    v.createFile({ path: 'Notes.md', content: 'See [[Plan#Goals|goals]], [[Plan#Other]] and [x](Plan.md#Goals).' }, 'c1');
+    v.putBookmarks({ items: [{ type: 'file', ctime: 1, path: 'Plan.md', subpath: '#goals' }], baseVersion: v.getBookmarks().version }, 'c1');
+    const preview = v.renameHeading({ path: 'Plan.md', from: 'Goals', to: 'Aims', dryRun: true }, 'c1');
+    expect(preview).toMatchObject({ dryRun: true, linkUpdates: [{ path: 'Notes.md', links: 2, version: null }], bookmarks: 1 });
+    expect(v.readFile('Notes.md').content).toContain('[[Plan#Goals|goals]]');
+    const done = v.renameHeading({ path: 'Plan.md', from: 'Goals', to: 'Aims' }, 'c1');
+    expect(done.linkUpdates[0].version).toEqual(expect.any(String));
+    expect(v.readFile('Notes.md').content).toBe('See [[Plan#Aims|goals]], [[Plan#Other]] and [x](Plan.md#Aims).');
+    expect(v.getBookmarks().items[0].subpath).toBe('#Aims');
+    expect(problemCode(() => v.renameHeading({ path: 'Plan.md', from: 'Aims', to: 'Goals' }, 'c1'))).toBe('bad-request');
+  });
+});

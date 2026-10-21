@@ -63,6 +63,7 @@ const ALL_KEYS = [
   queryKeys.history('Other.md'),
   queryKeys.status(),
   queryKeys.settings(),
+  queryKeys.bookmarks(),
 ];
 
 function invalidated(): string[] {
@@ -210,6 +211,8 @@ describe('applyEvent (DESIGN §6.3)', () => {
     expect(invalidated()).not.toContain('history:Other.md');
     applyEvent(target, 'settings.changed', { version: 'v', origin: null });
     expect(invalidated()).toContain('settings');
+    applyEvent(target, 'bookmarks.changed', { version: 'v', origin: null });
+    expect(invalidated()).toContain('bookmarks');
   });
 
   it('a truncated history.committed invalidates every history', () => {

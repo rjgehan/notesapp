@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -103,7 +103,7 @@ version = lowercase_hex( SHA1( "blob " + decimal(byteLength) + "\0" + bytes ) )
 
 Besides notes, the server indexes the content of some structured text files (DESIGN §6.8, the `DocumentIndexer` extension point). Such a **document** is not a note, but it is searched, linked and tagged like one.
 
-| Files | What is indexed | Links a move rewrites (§10.3) |
+| Files | What is indexed | Links a move (§10.3) or a heading rename (§22) rewrites |
 |---|---|---|
 | `.tasks` lists (§20.9) | The list's name; each task's title, tags, related notes (`links`) and notes | Those in titles and notes, and each path in `links` |
 | `.excalidraw` drawings (DESIGN §6.8.1) | Each text element's text, each element link (web links excluded), each image stored as a vault attachment, frame names | None: the drawing is reported as `not-rewritable` |
@@ -112,7 +112,7 @@ Besides notes, the server indexes the content of some structured text files (DES
 - `GET /api/search` (§12.1) can return a document; its `matches` are lines of the indexed text, never of the file's JSON.
 - The links and embeds in a document make it a backlink source (§11.2), and its tags count in `GET /api/tags` (§12.2) and `tag:` search. Positions (`line`, `from`, `to`) refer to the indexed text, not to the file.
 - A document is not a note: `GET /api/notes/meta` answers `409 type-mismatch`, it never appears in unlinked mentions, and it does not count in `/api/status` `vault.notes`.
-- A move rewrites the links in a document where its type can write them back; otherwise the document is left as it is and reported in `MoveResult.failed` with `not-rewritable`.
+- A move or a heading rename rewrites the links in a document where its type can write them back; otherwise the document is left as it is and reported in `MoveResult.failed` with `not-rewritable`.
 
 ---
 
@@ -1504,6 +1504,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `trash.changed` | `TrashChangedEvent` (`{}`) | yes | The trash list changed |
 | `history.committed` | `HistoryCommittedEvent` | yes | A commit was made. `paths` has at most 100 entries, and `truncated` is true when there were more. Not sent when an operation had nothing to commit. |
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
+| `bookmarks.changed` | `BookmarksChangedEvent` | no | The bookmarks were saved (§21). After a move or a trash restore the server re-keys them itself and sends this with `origin: null`, so it reaches every client, the mover's included. Refetch `GET /api/bookmarks`. |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 | `task.created`, `task.changed` | `TaskEvent` | no | A task was created or changed through the task API (§20.8) |
@@ -1812,6 +1813,17 @@ export interface BacklinksResponse { path: VaultPath; linked: BacklinkGroup[]; u
 export interface ResolveRequest { source: VaultPath; targets: string[] }
 export interface ResolvedLink { path: VaultPath | null; createPath: VaultPath | null }
 export interface ResolveResponse { resolved: Record<string, ResolvedLink> }
+export interface HeadingRenameRequest { path: VaultPath; from: string; to: string; dryRun?: boolean }   // §22
+export interface HeadingRenameResult {
+  dryRun: boolean;
+  path: VaultPath;
+  from: string;
+  to: string;
+  linkUpdates: LinkUpdate[];      // notes whose links were (or, in a dry run, would be) updated; version null in a dry run
+  failed: FailedUpdate[];
+  bookmarks: number;              // heading bookmarks of the note that were (or would be) updated
+  commitId: string | null;
+}
 
 // ---------- search / tags (§12) ----------
 export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
@@ -1887,6 +1899,26 @@ export interface CommitResult { commitId: string | null }
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
 
+// ---------- bookmarks (§21) ----------
+/**
+ * One bookmark, in Obsidian's bookmarks.json format: `type` is 'file' (a note or any file; with `subpath`
+ * '#Heading' or '#^blockid' for part of a note), 'folder', 'search' or 'group'. Other types Obsidian writes
+ * ('url', 'graph') pass through unchanged. Fields that do not apply are absent rather than null, and fields this
+ * build does not know are kept.
+ */
+export interface BookmarkItem {
+  type: string;
+  ctime?: number;                 // when it was bookmarked, epoch milliseconds
+  title?: string;                 // a display name; groups show theirs
+  path?: VaultPath;               // file and folder
+  subpath?: string;               // file: '#Heading' or '#^blockid'
+  query?: string;                 // search
+  items?: BookmarkItem[];         // group
+  [field: string]: unknown;
+}
+export interface BookmarksResponse { version: Version; items: BookmarkItem[] }
+export interface BookmarksUpdateRequest { items: BookmarkItem[]; baseVersion: Version }
+
 // ---------- SSE (§16) ----------
 export interface HelloEvent {
   bootId: string;
@@ -1912,6 +1944,7 @@ export interface HistoryCommittedEvent {
   truncated: boolean;
 }
 export interface SettingsChangedEvent { version: Version; origin: string | null }
+export interface BookmarksChangedEvent { version: Version; origin: string | null }   // origin null: re-keyed by the server after a move or restore
 export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' | 'mirror' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
 
@@ -1927,13 +1960,15 @@ export interface VaultEventMap {
   'trash.changed': TrashChangedEvent;
   'history.committed': HistoryCommittedEvent;
   'settings.changed': SettingsChangedEvent;
+  'bookmarks.changed': BookmarksChangedEvent;
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
-  'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
+  'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'bookmarks.changed', 'status.changed',
+  'resync',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
 
@@ -2113,6 +2148,9 @@ export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task
 | PATCH | `/api/tasks/lists/{id}/sections/{sectionId}` | `SectionRequest` | 200 `TaskListWriteResult` | 20.5 |
 | DELETE | `/api/tasks/lists/{id}/sections/{sectionId}` | | 200 `TaskListWriteResult` | 20.5 |
 | POST | `/api/tasks/lists/{id}/sections/reorder` | `ReorderRequest` | 200 `TaskListWriteResult` | 20.5 |
+| GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
+| PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
+| POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -2142,7 +2180,9 @@ export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
-| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
+| `BookmarksResponse`, `BookmarksUpdateRequest` | Same | `BookmarkItem` is not a record: items stay JSON objects (`ObjectNode`; `JsonNode` in the request), so fields from Obsidian or a newer build survive; `BookmarkCodec` checks the fields it knows (§21.2) |
+| `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
+| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 | `Task`, `TaskList`, `TaskSection`, `TaskRecurrence`, `TaskReminder`, `TaskFileProblem`, `TasksResponse`, `TaskListsResponse`, `TaskWriteResult`, `TaskListWriteResult`, `CompleteTaskRequest`, `ReorderTasksRequest`, `ReorderRequest`, `CreateTaskListRequest`, `SectionRequest` | Same | Enums `TaskStatus`, `TaskView` and `RecurrenceFrom` (for `TaskRecurrence.from`); `Task.priority` is an `int`. `CompleteTaskRequest.base` is a `JsonNode`. |
 | `CreateTaskRequest`, `UpdateTaskRequest`, `UpdateTaskListRequest`, `TaskFields`, `TaskListFields` | `POST /api/tasks` takes a `JsonNode`; both `PATCH`es take the record `UpdateTaskRequest(JsonNode changes, JsonNode base)` | Kept as JSON trees, because an omitted field (unchanged) and `null` (cleared) differ |
@@ -2338,3 +2378,119 @@ Every night (`notes.tasks.archive-cron`, 03:20), tasks closed more than 90 days 
 
 - **A link to one task** is a link to its list's file with the task's id as an Obsidian block reference: `[[Inbox.tasks#^01JC4M3A0QY1T9X2W4E6R8T0U2|Pay rent]]` (or `[Pay rent](Tasks/Inbox.tasks#%5E01JC4M3A0QY1T9X2W4E6R8T0U2)`). It makes the note a backlink source of the list file, follows the file when the list is renamed (§10.3), and stays a link to the file in Obsidian. The web client opens the task by its id (§20.3), so the link keeps working after the task moved to another list. **Convert checkbox to task** writes such a link in place of the `- [ ]` line it turned into a task: it creates the task with `POST /api/tasks` without a list (so in the Inbox, created when needed) and edits the note only afterwards, through §8 like any edit.
 - **An embedded list** is `![[Home.tasks]]`: the web client shows the list there, live, and checking a task completes it through §20.4. `![[Home.tasks#Errands]]` shows one section (by name, case-insensitive) and `![[Home.tasks#^<task id>]]` one task with its subtasks.
+
+---
+
+## 21. Bookmarks (ROADMAP item 12)
+
+Bookmarks are stored in `.notesapp/bookmarks.json`, in the format of Obsidian's `.obsidian/bookmarks.json` (`{"items": [...]}`), so a list can be copied between the two apps. They sync like the settings: a version token, the conflict protocol of §4, and a `bookmarks.changed` event. DESIGN §5.21 has the server's side and §6.23 the client's. Recent files are not part of the API: they are kept per device by the client.
+
+### 21.1 `GET /api/bookmarks`
+
+`200 BookmarksResponse`:
+
+```json
+{
+  "version": "3f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
+  "items": [
+    { "type": "file", "ctime": 1760616202120, "path": "Projects/Plan.md" },
+    { "type": "file", "ctime": 1760616230411, "path": "Projects/Plan.md", "subpath": "#Goals" },
+    { "type": "folder", "ctime": 1760616251002, "path": "Projects" },
+    { "type": "search", "ctime": 1760616270930, "query": "tag:#work -path:Archive" },
+    { "type": "group", "ctime": 1760616290000, "title": "Reading",
+      "items": [ { "type": "file", "ctime": 1760616301234, "path": "Books/Dune.md", "title": "Dune (reread)" } ] }
+  ]
+}
+```
+
+| `type` | Fields | Meaning |
+|---|---|---|
+| `file` | `path` (required), `subpath`, `title` | A file of any kind; with `subpath` (`#Heading`, or `#^blockid`) a part of a note |
+| `folder` | `path` (required), `title` | A folder; opening it reveals it in the explorer |
+| `search` | `query` (required), `title` | A search (§12.1 syntax) |
+| `group` | `title`, `items` (required) | A named, nestable list of bookmarks |
+| anything else | kept as it is | Obsidian's `url` and `graph` bookmarks, or a type from a newer build |
+
+- Every item may have `ctime` (when it was bookmarked, epoch milliseconds, which Obsidian writes) and `title` (a display name; without one, the client shows the target's name, the heading, or the query).
+- Items are **passed through** in Obsidian's shape: a field that does not apply is absent, not `null`, and fields this build does not know are kept, at the item and at the top level of the file.
+- Without the file, the response lists the bookmarks of `.obsidian/bookmarks.json` when Obsidian left one (it is only ever read), or none. `version` is then the blob id of the document NotesApp would write, so a `PUT` with it creates the file.
+- Items in the file that break the rules of §21.2 (a hand edit) are left out of the response and logged, so a client never receives an item it could not send back. A file that is not JSON at all reads as no bookmarks; the next save keeps it beside the new one as `bookmarks.json.bak-<timestamp>`.
+- The file is read on every request, so a hand edit or a pull is seen at once.
+
+### 21.2 `PUT /api/bookmarks`
+
+Request `BookmarksUpdateRequest`: `{"items": [ ...the whole list... ], "baseVersion": "<version from GET>"}`.
+
+| Status | Body |
+|---|---|
+| `200` | `BookmarksResponse` with the new version. Other clients get `bookmarks.changed` with this client as `origin`. Saving a list equal to the stored one writes nothing and sends no event, whatever `baseVersion` says. |
+| `400 bad-request` | `errors[]`, with fields such as `items[2].path` or `items[4].items[0].query` |
+| `409 version-conflict` | `currentVersion`, and `currentContent` (the file's JSON) |
+
+**Validation.**
+
+| Field | Rule |
+|---|---|
+| `items` | Required; a list of objects; at most 5,000 bookmarks in all, groups nested at most 8 deep |
+| `type` | Required; 1 to 64 characters |
+| `ctime` | Optional; a non-negative integer |
+| `title` | Optional; text of at most 1,024 characters |
+| `path` (`file`, `folder`) | Required; a vault path that passes the safety rules (§1.3); it need not exist. NFC-normalized. |
+| `subpath` (`file`) | Optional; starts with `#`; at most 1,024 characters |
+| `query` (`search`) | Required; 1 to 1,024 characters, not blank |
+| `items` (`group`) | Required; a list, checked with the same rules |
+| `baseVersion` | Required |
+
+Clients apply each change to the latest list: on a `409` they fetch the bookmarks again, apply the same change, and retry, so two devices bookmarking different notes never lose either (DESIGN §6.23).
+
+### 21.3 Bookmarks follow their targets
+
+| What happens to the target | Bookmarks |
+|---|---|
+| Moved or renamed through the app (§10.3) | Re-keyed, like links: a file's bookmarks (headings included) follow it; a folder's bookmark and every bookmark under the folder follow it. Paths match ignoring case, as link resolution does, unless an entry with the bookmark's exact path still exists. One `bookmarks.changed` with `origin: null` follows the move's other content events. |
+| Moved to the trash | Kept. The client shows them as missing (their target is not in the tree), with a Remove action. Restoring the entry to its original path brings them back as they were. |
+| Restored to another path (`to`, or a free name) | Bookmarks of the original path follow it when nothing else has taken that path, with `bookmarks.changed` (`origin: null`). |
+| Moved, renamed or deleted outside the app (watcher) | Unchanged, as links are (DESIGN §5.9). They show as missing until the target comes back. |
+
+The file is committed with the normal batch, like the settings (`Update .notesapp/bookmarks.json`).
+
+---
+
+## 22. Heading links after a heading is renamed (ROADMAP item 21)
+
+### `POST /api/notes/rename-heading`
+
+Request `HeadingRenameRequest`: `{"path": "Projects/Plan.md", "from": "Goals", "to": "Aims for 2026", "dryRun": false}`.
+
+The client renames the heading in the note and **saves the note first**; the server then rewrites every link in the vault that resolves to `path` and names `from` in a `#` segment of its subpath, so `[[Plan#Goals]]`, `[[Plan#Goals|our goals]]`, `![[Plan#Goals]]`, `[[Plan#Plan#Goals]]`, `[x](Plan.md#Goals)`, `[x](<Plan.md#Goals>)` and same-note `[[#Goals]]` all follow. Headings compare as heading targets do: case-insensitively, with whitespace collapsed. Only the subpath is rewritten; the target, the display text, the style and the embed mark are kept. In a plain markdown destination the new heading is percent-encoded like a path (`Aims%20for%202026`). Heading bookmarks of the note (§21) follow too.
+
+`200 HeadingRenameResult`:
+
+```json
+{
+  "dryRun": false,
+  "path": "Projects/Plan.md",
+  "from": "Goals",
+  "to": "Aims for 2026",
+  "linkUpdates": [ { "path": "Welcome.md", "links": 2, "version": "0b9e8d7c6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c" } ],
+  "failed": [ { "path": "Notes/Odd.md", "reason": "not-rewritable" } ],
+  "bookmarks": 1,
+  "commitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `dryRun` | `true` computes the answer without writing (the client's offer, DESIGN §6.24): `version` is `null` and `commitId` is `null` |
+| `linkUpdates` | Notes, and indexed documents (§1.8), whose links were (would be) rewritten, with the number of links and the new version. **The calling client applies these itself**, as for a move (§10.3). |
+| `failed` | As for a move: `not-utf8`, `not-rewritable` (a frontmatter link that cannot be spliced, a document whose links the server cannot write back (§1.8), such as an `.excalidraw` drawing or a link only an `.excalidraw.md` drawing's JSON holds, or a new heading the link's syntax cannot hold: `\|`, `#`, `[`, `]` in a wikilink, `<`, `>`, `#` in angle brackets), `span-mismatch`, `io-error` |
+| `bookmarks` | Heading bookmarks of the note that were (would be) updated |
+| `commitId` | The commit of the rewritten notes (`Update links after renaming heading “Goals” → “Aims for 2026” in Projects/Plan.md (1 note)`), or `null` |
+
+| Errors |
+|---|
+| `400 bad-request`: `path`, `from` or `to` missing; a heading over 1,024 characters or not one line; `to` equal to `from` ignoring case and spacing; the note has no heading `to`, or still has a heading `from` (`errors[]` names the field) |
+| `400 invalid-path`, `403 reserved-path`, `404 not-found` |
+| `409 type-mismatch` (`expected: "note"`) for a file that is not a note |
+
+Events to other clients: `file.changed` for each rewritten note, then `bookmarks.changed` (`origin: null`) when heading bookmarks changed, then `history.committed`.
