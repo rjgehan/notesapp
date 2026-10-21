@@ -71,6 +71,23 @@ public final class TagIndex {
 		}
 	}
 
+	/** The display forms of a note's tags, sorted case-insensitively. */
+	public List<String> tagsOf(String path) {
+		Set<String> keys = this.noteTags.get(path);
+		if (keys == null) {
+			return List.of();
+		}
+		List<String> shown = new ArrayList<>(keys.size());
+		for (String key : keys) {
+			TagInfo info = this.tags.get(key);
+			if (info != null) {
+				shown.add(info.display);
+			}
+		}
+		shown.sort(String.CASE_INSENSITIVE_ORDER.thenComparing(Comparator.naturalOrder()));
+		return shown;
+	}
+
 	/** Notes tagged {@code tag} (any casing) or, with {@code nested}, any {@code tag/...} descendant. */
 	public Set<String> notesWithTag(String tag, boolean nested) {
 		String key = PathNames.lower(tag);

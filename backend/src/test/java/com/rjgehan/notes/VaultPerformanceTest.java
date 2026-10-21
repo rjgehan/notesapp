@@ -139,6 +139,14 @@ class VaultPerformanceTest {
 
 			report("GET /api/tree (median)", median(sample(3, 9, () -> api.get("/api/tree").ok(200))), 150);
 
+			// The graph view (ROADMAP item 16): the whole graph, and the "nothing changed" answer of a refresh.
+			JsonNode graph = api.get("/api/graph").ok(200);
+			assertThat(graph.get("nodes").size()).isGreaterThan(NOTES);
+			report("GET /api/graph (median)", median(sample(3, 9, () -> api.get("/api/graph").ok(200))), 150);
+			String graphVersion = graph.get("version").asString();
+			report("GET /api/graph?since= unchanged (median)",
+					median(sample(3, 9, () -> api.get("/api/graph?since=" + Api.enc(graphVersion)).ok(200))), 10);
+
 			String path = notePath(4242);
 			String[] version = { api.get("/api/files?path=" + Api.enc(path)).ok(200).get("version").asString() };
 			int[] n = { 0 };

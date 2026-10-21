@@ -900,6 +900,40 @@ Request `ResolveRequest`:
 
 `source` need not exist; it is used only for its folder.
 
+### 11.4 `GET /api/graph[?since={version}]`
+
+`200 GraphResponse`: the link graph behind the graph view (ROADMAP item 16, DESIGN §5.5.12, §6.21), in one compact response.
+
+```json
+{
+  "version": "mgbx3k2a-418-0",
+  "unchanged": false,
+  "nodes": [
+    { "path": "Attachments/pic.png", "type": "attachment", "tags": [] },
+    { "path": "Plan.md", "type": "note", "tags": ["project", "project/alpha"] },
+    { "path": "Welcome.md", "type": "note", "tags": [] },
+    { "path": "Someday", "type": "unresolved", "tags": [] }
+  ],
+  "edges": [1, 0, 1, 1, 2, 2, 2, 1, 1, 2, 3, 1]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `nodes` | Every visible file in path order, `type` `note` for notes and `attachment` for every other kind, then one `unresolved` node per unresolved link target. Unresolved targets are grouped case-insensitively without a final `.md`; `path` is the target as first written (`[[Someday]]`, `[[someday.md]]` → `Someday`). |
+| `tags` | A note's distinct tags (inline and frontmatter) in display casing, without `#`, sorted case-insensitively. `[]` for other nodes. |
+| `edges` | Flat triples `[source, target, count]` of indexes into `nodes`, one per (source, target) pair, sorted. `count` is the number of links and embeds from source to target. Same-note links are left out. In the example: Plan → pic.png once, Plan → Welcome twice, Welcome → Plan once, Welcome → Someday once. |
+| `version` | Opaque. It changes when a node, an edge or a note's tags change, or when `excludedPaths` changes, and not on edits that keep a note's links and tags. |
+| `unchanged` | `true` when `since` equals `version`: `nodes` and `edges` are then empty and the client keeps the graph it has. Always `false` without `since`. |
+
+- Files matching `settings.files.excludedPaths` are left out, with their edges, as in Obsidian's graph.
+- Tag nodes, orphans, folders and the local graph are computed by the client from this response (DESIGN §6.21).
+- The client refreshes it with `since` after tree changes; it is never pushed over SSE.
+
+| Errors |
+|---|
+| `403` |
+
 ---
 
 ## 12. Search and tags
@@ -1782,6 +1816,20 @@ export interface ResolveRequest { source: VaultPath; targets: string[] }
 export interface ResolvedLink { path: VaultPath | null; createPath: VaultPath | null }
 export interface ResolveResponse { resolved: Record<string, ResolvedLink> }
 
+// ---------- graph (§11.4) ----------
+export type GraphNodeType = 'note' | 'attachment' | 'unresolved';
+export interface GraphNode {
+  path: VaultPath;   // the file; for 'unresolved', the link target as first written, without '.md'
+  type: GraphNodeType;
+  tags: string[];    // notes only: display casing, without '#', sorted case-insensitively
+}
+export interface GraphResponse {
+  version: string;     // opaque; changes when a node, an edge or a note's tags change
+  unchanged: boolean;  // `since` equals `version`: nodes and edges are empty, keep the graph you have
+  nodes: GraphNode[];
+  edges: number[];     // flat triples [source, target, count, ...]: node indexes, links from source to target
+}
+
 // ---------- search / tags (§12) ----------
 export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
 export interface SearchHit {
@@ -1934,6 +1982,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | GET | `/api/notes/meta?path=` | | 200 `NoteMeta` | 11.1 |
 | GET | `/api/notes/backlinks?path=&unlinked=` | | 200 `BacklinksResponse` | 11.2 |
 | POST | `/api/links/resolve` | `ResolveRequest` | 200 `ResolveResponse` | 11.3 |
+| GET | `/api/graph?since=` | | 200 `GraphResponse` | 11.4 |
 | GET | `/api/search?q=&limit=&sort=&prefix=` | | 200 `SearchResponse` | 12.1 |
 | GET | `/api/tags` | | 200 `TagsResponse` | 12.2 |
 | GET | `/api/trash` | | 200 `TrashListResponse` | 13.1 |
@@ -1972,6 +2021,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `TextFile`, `CreateFileRequest`, `SaveFileRequest`, `WriteResult`, `AttachmentResult` | Same | `SaveFileRequest.baseVersion` is a `@Nullable String` (missing and `null` both mean "create"). `flushHistory` is `@Nullable Boolean` (default false). |
 | `CreateFolderRequest`, `FolderResult`, `MoveRequest`, `MovedFile`, `LinkUpdate`, `FailedUpdate`, `MoveResult` | Same | `MoveRequest.updateLinks` and `dryRun` are `@Nullable Boolean`. `FailedUpdate.reason` is the enum `FailedReason` |
 | `HeadingInfo`, `OutgoingLink`, `NoteMeta`, `Mention`, `BacklinkGroup`, `BacklinksResponse`, `ResolveRequest`, `ResolvedLink`, `ResolveResponse` | Same | `NoteMeta.frontmatter` is `@Nullable Map<String, Object>` |
+| `GraphNode`, `GraphResponse` | Same | `GraphNode.type` is the enum `GraphNodeType` (`note`, `attachment`, `unresolved`); `GraphResponse.edges` is an `int[]` |
 | `SearchMatch`, `SearchHit`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | |
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |
