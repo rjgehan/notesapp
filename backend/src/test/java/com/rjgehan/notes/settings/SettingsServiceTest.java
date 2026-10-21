@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -126,6 +127,39 @@ class SettingsServiceTest {
 		assertThatThrownBy(() -> service().update(missingGroup, service().get().version(), TestVault.ALICE, "c-1234567"))
 			.isInstanceOfSatisfying(NotesException.class, (ex) -> assertThat(ex.getMessage()).contains("dailyNotes"));
 		assertThat(this.vault.hub.published).isEmpty();
+	}
+
+	@Test
+	void folderTemplatesAreOptionalValidatedAndSaved() throws Exception {
+		service().load();
+		// Settings written before folder templates existed have no such field: not an error.
+		ObjectNode old = body(Settings.defaults());
+		((ObjectNode) old.get("templates")).remove("folderTemplates");
+		SettingsResponse saved = service().update(old, service().get().version(), TestVault.ALICE, "client-a1");
+		assertThat(saved.settings().templates().folderTemplates()).isEmpty();
+
+		ObjectNode tree = body(Settings.defaults());
+		ArrayNode rules = ((ObjectNode) tree.get("templates")).putArray("folderTemplates");
+		rules.addObject().put("folder", "Meetings").put("template", "Templates/Meeting.md");
+		rules.addObject().put("folder", "").put("template", "");
+		saved = service().update(tree, saved.version(), TestVault.ALICE, "client-a1");
+		assertThat(saved.settings().templates().folderTemplates()).containsExactly(
+				new TemplatesSettings.FolderTemplate("Meetings", "Templates/Meeting.md"),
+				new TemplatesSettings.FolderTemplate("", ""));
+		JsonNode onDisk = TestVault.JSON.readTree(Files.readString(this.file));
+		assertThat(onDisk.get("templates").get("folderTemplates").get(0).get("template").asString())
+			.isEqualTo("Templates/Meeting.md");
+
+		rules.addObject().put("folder", "Meetings").put("template", "Templates/Other.md");
+		rules.addObject().put("folder", "../up").put("template", "x.md");
+		String version = saved.version();
+		assertThatThrownBy(() -> service().update(tree, version, TestVault.ALICE, "client-a1"))
+			.isInstanceOfSatisfying(NotesException.class, (ex) -> {
+				@SuppressWarnings("unchecked")
+				List<FieldError> errors = (List<FieldError>) ex.getBody().getProperties().get("errors");
+				assertThat(errors).extracting(FieldError::field)
+					.containsExactly("settings.templates.folderTemplates[2].folder");
+			});
 	}
 
 	@Test
