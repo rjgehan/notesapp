@@ -61,7 +61,7 @@ function ExcludedNote({ excluded }: { excluded: HistoryExclusion }) {
       <HardDrive size={16} aria-hidden />
       <p>
         This file is {formatBytes(excluded.size)}, larger than the {formatLimit(excluded.limitBytes)} limit for history, so its versions are not
-        kept in git. The file itself stays in the vault and in backups, and replacing it moves the old one to the trash.
+        kept in git. The file itself stays in the vault and in backups, and replacing it in NotesApp moves the old one to the trash.
       </p>
     </div>
   );

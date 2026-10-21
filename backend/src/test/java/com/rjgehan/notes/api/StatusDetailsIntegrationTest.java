@@ -60,6 +60,7 @@ class StatusDetailsIntegrationTest {
 		IntegrationProperties.register(registry, () -> vault,
 				Map.of("notes.secrets-dir", secrets.toString(), "notes.backup.status-file",
 						data.resolve("status.json").toString(), "notes.git.large-file-threshold", "1KB",
+						"notes.limits.max-text-size", "1KB",
 						"notes.welcome-note", "false", "notes.allowed-hosts", "localhost"));
 	}
 

@@ -51,7 +51,7 @@ class MirrorAndLargeFilesIntegrationTest {
 			throw new IllegalStateException(ex);
 		}
 		IntegrationProperties.register(registry, () -> vault, Map.of("notes.git.large-file-threshold", "1KB",
-				"notes.welcome-note", "false",
+				"notes.limits.max-text-size", "1KB", "notes.welcome-note", "false",
 				"notes.mirror.url", bare.toUri().toString()));
 	}
 

@@ -35,6 +35,7 @@ import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffConfig;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.dircache.DirCache;
+import org.eclipse.jgit.dircache.DirCacheIterator;
 import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
@@ -59,8 +60,12 @@ import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
 import org.eclipse.jgit.treewalk.EmptyTreeIterator;
+import org.eclipse.jgit.treewalk.FileTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.WorkingTreeIterator;
+import org.eclipse.jgit.treewalk.filter.AndTreeFilter;
 import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
+import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.eclipse.jgit.util.FS;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -76,8 +81,10 @@ import org.springframework.stereotype.Component;
  * are always the repo-relative on-disk paths, mapped back to NFC on output.
  * <p>
  * Every commit first applies the large-file policy ({@link LargeFiles}): the managed section of {@code info/exclude}
- * is brought up to date from the index, and a large file the commit touches is removed from git's index ({@code rm
- * --cached}) before anything is staged, so no version of it above the threshold ever becomes a git object.
+ * is brought up to date from the index and from the disk under the paths the commit stages (the whole working tree
+ * for {@link #commitAll}), so hidden files and ignored names the index never sees are covered too, and a large file
+ * the commit touches is removed from git's index ({@code rm --cached}) before anything is staged, so no version of it
+ * above the threshold ever becomes a git object.
  */
 @Component
 public class GitStore implements DisposableBean {
@@ -170,6 +177,12 @@ public class GitStore implements DisposableBean {
 
 	/** The {@code info/exclude} content last written; guarded by {@code gitLock}. */
 	private @Nullable String writtenExclude;
+
+	/**
+	 * Large files found on disk that the index does not list as large, by on-disk path: hidden files and ignored names
+	 * the index never sees, and files that grew before the index caught up. Guarded by {@code gitLock}.
+	 */
+	private final Map<String, LargeFiles.Entry> foundLarge = new LinkedHashMap<>();
 
 	public GitStore(VaultFs fs, NotesProperties properties, Clock clock, LargeFiles largeFiles) {
 		this.root = fs.root();
@@ -326,7 +339,7 @@ public class GitStore implements DisposableBean {
 		Git current = requireGit();
 		this.gitLock.lock();
 		try {
-			List<LargeFiles.Entry> large = syncLargeFilesLocked(present);
+			List<LargeFiles.Entry> large = syncLargeFilesLocked(current.getRepository(), present);
 			Set<String> untracked = untrackLarge(current, large, present);
 			if (!present.isEmpty()) {
 				// A large file that is not tracked is ignored through info/exclude, so add skips it.
@@ -354,14 +367,14 @@ public class GitStore implements DisposableBean {
 
 	/**
 	 * Stages the whole working tree (additions, modifications and deletions) and commits it; null when clean. Every
-	 * tracked large file stops being tracked in the same commit.
+	 * tracked large file, hidden or not, stops being tracked in the same commit.
 	 */
 	public @Nullable Commit commitAll(Function<List<Change>, Message> message, Author author)
 			throws IOException, GitAPIException {
 		Git current = requireGit();
 		this.gitLock.lock();
 		try {
-			List<LargeFiles.Entry> large = syncLargeFilesLocked(List.of());
+			List<LargeFiles.Entry> large = syncLargeFilesLocked(current.getRepository(), null);
 			Set<String> untracked = untrackLarge(current, large, null);
 			current.add().addFilepattern(".").setRenormalize(false).call();
 			current.add().addFilepattern(".").setUpdate(true).setRenormalize(false).call();
@@ -379,29 +392,17 @@ public class GitStore implements DisposableBean {
 	// ---------------------------------------------------------------- large files
 
 	/**
-	 * Rewrites the managed large-file section of {@code info/exclude} from the index when it changed. Called at
-	 * startup once the index is built; every commit does it too.
+	 * Rewrites the managed large-file section of {@code info/exclude} from the index and a walk of the whole working
+	 * tree when it changed. Called at startup once the index is built; every commit does it too.
 	 */
 	public void syncLargeFiles() throws IOException {
-		if (this.git == null) {
+		Git current = this.git;
+		if (current == null) {
 			return;
 		}
 		this.gitLock.lock();
 		try {
-			syncLargeFilesLocked(List.of());
-		}
-		finally {
-			this.gitLock.unlock();
-		}
-	}
-
-	/** True when git still tracks a file that is now over the threshold (an imported or older repository). */
-	public boolean tracksLargeFiles() throws IOException {
-		Git current = requireGit();
-		this.gitLock.lock();
-		try {
-			DirCache index = current.getRepository().readDirCache();
-			return this.largeFiles.current().files().stream().anyMatch((file) -> index.findEntry(file.disk()) >= 0);
+			syncLargeFilesLocked(current.getRepository(), null);
 		}
 		finally {
 			this.gitLock.unlock();
@@ -409,29 +410,128 @@ public class GitStore implements DisposableBean {
 	}
 
 	/**
-	 * The large files: the index's, plus any of the commit's own {@code present} files that are over the threshold on
-	 * disk right now (a file still growing under an external copy may not be reindexed yet). Writes the exclude
-	 * section for them.
+	 * True when git still tracks a file that is now over the threshold (an imported or older repository, a lowered
+	 * threshold, or a hidden file that grew while the app was stopped).
 	 */
-	private List<LargeFiles.Entry> syncLargeFilesLocked(Collection<ApiPath> present) throws IOException {
+	public boolean tracksLargeFiles() throws IOException {
+		Git current = requireGit();
+		this.gitLock.lock();
+		try {
+			DirCache index = current.getRepository().readDirCache();
+			return Stream.concat(this.largeFiles.current().files().stream(), this.foundLarge.values().stream())
+				.anyMatch((file) -> index.findEntry(file.disk()) >= 0);
+		}
+		finally {
+			this.gitLock.unlock();
+		}
+	}
+
+	/**
+	 * The large files, and the exclude section for them. The index's list misses the files it never sees (dot-files,
+	 * dot-folders, ignored names such as {@code *.part}) and a file still growing under an external copy, so the disk
+	 * is checked too: the commit's own {@code present} files, a walk of its {@code present} folders, or a walk of the
+	 * whole working tree when {@code scope} is null. What the disk adds is remembered in {@code foundLarge} while it
+	 * stays large, so a later commit that walks less keeps it excluded.
+	 */
+	private List<LargeFiles.Entry> syncLargeFilesLocked(Repository repository, @Nullable Collection<ApiPath> scope)
+			throws IOException {
 		if (!this.largeFiles.enabled()) {
+			this.foundLarge.clear();
 			writeExclude(List.of());
 			return List.of();
 		}
-		Map<String, LargeFiles.Entry> large = new LinkedHashMap<>();
-		this.largeFiles.current().files().forEach((file) -> large.put(file.disk(), file));
-		for (ApiPath path : present) {
-			if (path.disk().isEmpty() || large.containsKey(path.disk())) {
+		long limit = this.largeFiles.limit();
+		Map<String, LargeFiles.Entry> found = new LinkedHashMap<>();
+		for (LargeFiles.Entry file : this.foundLarge.values()) {
+			BasicFileAttributes attributes = VaultFs.attributes(this.root.resolve(file.disk()));
+			if (attributes != null && attributes.isRegularFile() && attributes.size() > limit) {
+				found.put(file.disk(), new LargeFiles.Entry(file.path(), file.disk(), attributes.size()));
+			}
+		}
+		boolean wholeTree = scope == null;
+		List<String> folders = new ArrayList<>();
+		for (ApiPath path : (scope != null) ? scope : List.<ApiPath>of()) {
+			if (path.disk().isEmpty()) {
+				wholeTree = true;
 				continue;
 			}
 			BasicFileAttributes attributes = VaultFs.attributes(this.root.resolve(path.disk()));
-			if (attributes != null && attributes.isRegularFile() && attributes.size() > this.largeFiles.limit()) {
-				large.put(path.disk(), new LargeFiles.Entry(path.nfc(), path.disk(), attributes.size()));
+			if (attributes == null) {
+				continue;
+			}
+			if (attributes.isDirectory()) {
+				folders.add(path.disk());
+			}
+			else if (attributes.isRegularFile() && attributes.size() > limit) {
+				found.put(path.disk(), new LargeFiles.Entry(path.nfc(), path.disk(), attributes.size()));
 			}
 		}
+		if (wholeTree || !folders.isEmpty()) {
+			walkLarge(repository, wholeTree ? null : folders, limit, found);
+		}
+		Map<String, LargeFiles.Entry> large = new LinkedHashMap<>();
+		this.largeFiles.current().files().forEach((file) -> large.put(file.disk(), file));
+		found.keySet().removeAll(large.keySet());
+		this.foundLarge.clear();
+		this.foundLarge.putAll(found);
+		large.putAll(found);
 		List<LargeFiles.Entry> files = List.copyOf(large.values());
 		writeExclude(files);
 		return files;
+	}
+
+	/**
+	 * Adds to {@code found} every regular file over {@code limit} that {@code git add} could stage under
+	 * {@code folders} (the whole working tree when null): tracked files, and untracked ones no ignore rule matches.
+	 * Folders git ignores and does not track, such as {@code .trash/}, are not entered. Reads sizes only, never content.
+	 */
+	private static void walkLarge(Repository repository, @Nullable List<String> folders, long limit,
+			Map<String, LargeFiles.Entry> found) throws IOException {
+		try (TreeWalk walk = new TreeWalk(repository)) {
+			walk.addTree(new FileTreeIterator(repository));
+			walk.addTree(new DirCacheIterator(repository.readDirCache()));
+			walk.setRecursive(true);
+			walk.setFilter((folders == null) ? StageableFilter.INSTANCE
+					: AndTreeFilter.create(PathFilterGroup.createFromStrings(folders), StageableFilter.INSTANCE));
+			while (walk.next()) {
+				WorkingTreeIterator file = walk.getTree(0, WorkingTreeIterator.class);
+				FileMode mode = walk.getFileMode(0);
+				if (file == null || !(FileMode.REGULAR_FILE.equals(mode) || FileMode.EXECUTABLE_FILE.equals(mode))) {
+					continue;
+				}
+				long size = file.getEntryLength();
+				if (size > limit) {
+					String disk = walk.getPathString();
+					found.putIfAbsent(disk, new LargeFiles.Entry(toNfc(disk), disk, size));
+				}
+			}
+		}
+	}
+
+	/** The working-tree entries {@code git add} could stage: tracked ones, and untracked ones no ignore rule matches. */
+	private static final class StageableFilter extends TreeFilter {
+
+		static final StageableFilter INSTANCE = new StageableFilter();
+
+		@Override
+		public boolean include(TreeWalk walker) throws IOException {
+			WorkingTreeIterator disk = walker.getTree(0, WorkingTreeIterator.class);
+			if (disk == null) {
+				return false;
+			}
+			return walker.getTree(1, DirCacheIterator.class) != null || !disk.isEntryIgnored();
+		}
+
+		@Override
+		public boolean shouldBeRecursive() {
+			return false;
+		}
+
+		@Override
+		public TreeFilter clone() {
+			return this;
+		}
+
 	}
 
 	/**

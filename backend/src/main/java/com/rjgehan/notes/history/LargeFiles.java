@@ -8,12 +8,17 @@ import com.rjgehan.notes.index.VaultIndex;
 import org.jspecify.annotations.Nullable;
 
 import org.springframework.stereotype.Component;
+import org.springframework.util.unit.DataSize;
 
 /**
  * The large-file policy (DESIGN §5.8, ROADMAP item 23): files larger than {@code notes.git.large-file-threshold}
  * stay in the vault, and in backups, but out of git history, so the repository stays small (and under GitHub's file
- * limit, for the mirror). The set is always derived from the index; {@link GitStore} turns it into the managed
- * section of {@code info/exclude} before every commit and stops tracking such a file when a commit touches it.
+ * limit, for the mirror). The set listed here is derived from the index; {@link GitStore} adds the large files the
+ * index never sees (hidden files, ignored names) from the disk, turns both into the managed section of
+ * {@code info/exclude} before every commit, and stops tracking such a file when a commit touches it.
+ * <p>
+ * The threshold is 0 (off) or at least the largest text size limit: text saves keep no copy of the version they
+ * replace, so every file the app can save as text must stay small enough to be versioned.
  */
 @Component
 public class LargeFiles {
@@ -32,7 +37,30 @@ public class LargeFiles {
 
 	public LargeFiles(VaultIndex index, NotesProperties properties) {
 		this.index = index;
-		this.limit = Math.max(0, properties.git().largeFileThreshold().toBytes());
+		this.limit = threshold(properties);
+	}
+
+	/**
+	 * The configured threshold in bytes.
+	 * @throws IllegalStateException when it is below the largest text size limit, which would leave notes between the
+	 * two without versions while saves overwrite them
+	 */
+	static long threshold(NotesProperties properties) {
+		long limit = Math.max(0, properties.git().largeFileThreshold().toBytes());
+		NotesProperties.Limits limits = properties.limits();
+		long text = limits.textSizeOverrides()
+			.values()
+			.stream()
+			.mapToLong(DataSize::toBytes)
+			.reduce(limits.maxTextSize().toBytes(), Math::max);
+		if (limit > 0 && limit < text) {
+			throw new IllegalStateException("notes.git.large-file-threshold (" + describe(limit)
+					+ ") is below the largest text size limit (" + describe(text)
+					+ ", notes.limits.max-text-size and notes.limits.text-size-overrides): notes up to that size "
+					+ "would not be versioned, and saving them keeps no copy of the old version. Set it to 0 or to at "
+					+ "least " + describe(text) + ".");
+		}
+		return limit;
 	}
 
 	/** False when the threshold is 0: every file is versioned. */

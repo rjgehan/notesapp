@@ -38,7 +38,9 @@ class LargeFilePolicyTest {
 
 	private static final String CLIENT = "client-a1";
 
-	private static final Map<String, String> ONE_KB = Map.of("notes.git.large-file-threshold", "1KB");
+	/** A 1 KB threshold; the text limit must not exceed it (LargeFiles.threshold). */
+	private static final Map<String, String> ONE_KB = Map.of("notes.git.large-file-threshold", "1KB",
+			"notes.limits.max-text-size", "1KB");
 
 	@TempDir
 	Path dir;
@@ -297,6 +299,108 @@ class LargeFilePolicyTest {
 		assertThat(this.vault.git.tracksLargeFiles()).isFalse();
 		assertThat(this.vault.git.isDirty()).isFalse();
 		assertThat(Files.readAllBytes(this.dir.resolve("big.bin"))).isEqualTo(big);
+	}
+
+	private void bootstrap() {
+		GitBootstrap bootstrap = new GitBootstrap(this.vault.git, this.vault.batcher, this.vault.hub,
+				this.vault.properties);
+		this.vault.batcher.beginImport();
+		bootstrap.run();
+	}
+
+	@Test
+	void largeFilesTheIndexNeverSeesStayOutOfTheStartupCommit() throws Exception {
+		start(ONE_KB);
+		this.vault.files.createText("note.md", "n", OnConflict.FAIL, TestVault.ALICE, CLIENT);
+		this.vault.flush();
+		this.vault.close();
+		// Written while the app is stopped: a visible file, a file in a dot-folder, and an ignored name (*.part).
+		byte[] visible = bytes(5000, 30);
+		byte[] hidden = bytes(6000, 31);
+		byte[] partial = bytes(7000, 32);
+		byte[] trashed = bytes(8000, 33);
+		Files.createDirectories(this.dir.resolve("Attachments"));
+		Files.createDirectories(this.dir.resolve(".obsidian/plugins/smart"));
+		Files.createDirectories(this.dir.resolve(".trash"));
+		Files.write(this.dir.resolve("Attachments/video.bin"), visible);
+		Files.write(this.dir.resolve(".obsidian/plugins/smart/cache.json"), hidden);
+		Files.write(this.dir.resolve("Attachments/download.mp4.part"), partial);
+		Files.writeString(this.dir.resolve(".obsidian/app.json"), "{}");
+		Files.write(this.dir.resolve(".trash/old.bin"), trashed);
+		start(ONE_KB);
+		// Excluded from the start, before the bootstrap commit runs.
+		assertThat(exclude()).contains("/Attachments/video.bin\n", "/.obsidian/plugins/smart/cache.json\n",
+				"/Attachments/download.mp4.part\n");
+		bootstrap();
+
+		assertThat(lastCommit().getShortMessage()).isEqualTo("Changes made while NotesApp was stopped");
+		assertThat(inGit(visible)).isFalse();
+		assertThat(inGit(hidden)).as("a large file in a dot-folder").isFalse();
+		assertThat(inGit(partial)).as("a large file with an ignored name").isFalse();
+		assertThat(inGit(trashed)).isFalse();
+		assertThat(this.vault.git.readAt(this.vault.git.head(), ".obsidian/app.json")).isNotNull();
+		// .trash/ is ignored as a whole, so nothing in it needs a line of its own.
+		assertThat(exclude()).doesNotContain(".trash/old.bin");
+		assertThat(this.vault.git.isDirty()).isFalse();
+		assertThat(this.vault.git.tracksLargeFiles()).isFalse();
+
+		// The next ordinary commit, which walks nothing, keeps them excluded.
+		this.vault.files.createText("later.md", "l", OnConflict.FAIL, TestVault.ALICE, CLIENT);
+		this.vault.flush();
+		assertThat(exclude()).contains("/.obsidian/plugins/smart/cache.json\n", "/Attachments/download.mp4.part\n");
+		assertThat(this.vault.git.isDirty()).isFalse();
+
+		// A restart (the nightly backup's): the section written by the last run must not hide them from the walk.
+		this.vault.close();
+		start(ONE_KB);
+		assertThat(exclude()).contains("/.obsidian/plugins/smart/cache.json\n", "/Attachments/download.mp4.part\n");
+		assertThat(this.vault.git.isDirty()).isFalse();
+		assertThat(this.vault.git.tracksLargeFiles()).isFalse();
+		bootstrap();
+		assertThat(inGit(hidden)).isFalse();
+		assertThat(inGit(partial)).isFalse();
+	}
+
+	@Test
+	void startupStopsTrackingHiddenLargeFilesAnOlderRepositoryHas() throws Exception {
+		byte[] big = bytes(3000, 34);
+		try (Git git = Git.init().setDirectory(this.dir.toFile()).setInitialBranch("main").call()) {
+			Files.createDirectories(this.dir.resolve(".obsidian"));
+			Files.write(this.dir.resolve(".obsidian/big.json"), big);
+			Files.writeString(this.dir.resolve("a.md"), "a");
+			git.add().addFilepattern(".").call();
+			PersonIdent someone = new PersonIdent("Someone", "someone@example.com");
+			git.commit().setMessage("Seed").setAuthor(someone).setCommitter(someone).call();
+		}
+		start(ONE_KB);
+		assertThat(this.vault.git.tracksLargeFiles()).isTrue();
+		bootstrap();
+		assertThat(lastCommit().getShortMessage()).isEqualTo("Stop versioning .obsidian/big.json (larger than 1 KB)");
+		assertThat(this.vault.git.tracksLargeFiles()).isFalse();
+		assertThat(this.vault.git.isDirty()).isFalse();
+		assertThat(Files.readAllBytes(this.dir.resolve(".obsidian/big.json"))).isEqualTo(big);
+	}
+
+	@Test
+	void movingAFolderKeepsTheHiddenLargeFilesInItOutOfHistory() throws Exception {
+		start(ONE_KB);
+		this.vault.files.createText("A/n.md", "n", OnConflict.FAIL, TestVault.ALICE, CLIENT);
+		this.vault.flush();
+		byte[] hidden = bytes(4000, 35);
+		byte[] partial = bytes(4500, 36);
+		Files.createDirectories(this.dir.resolve("A/.cache"));
+		Files.write(this.dir.resolve("A/.cache/big.bin"), hidden);
+		Files.write(this.dir.resolve("A/clip.mp4.part"), partial);
+		this.vault.moves.move("A", "B", false, false, TestVault.ALICE, CLIENT);
+		assertThat(this.vault.git.readAt(this.vault.git.head(), "B/n.md")).isNotNull();
+		assertThat(inGit(hidden)).isFalse();
+		assertThat(inGit(partial)).isFalse();
+		assertThat(exclude()).contains("/B/.cache/big.bin\n", "/B/clip.mp4.part\n");
+		// Removed from disk: its line goes with the next commit.
+		Files.delete(this.dir.resolve("B/clip.mp4.part"));
+		this.vault.files.createText("other.md", "o", OnConflict.FAIL, TestVault.ALICE, CLIENT);
+		this.vault.flush();
+		assertThat(exclude()).contains("/B/.cache/big.bin\n").doesNotContain("clip.mp4.part");
 	}
 
 	@Test
