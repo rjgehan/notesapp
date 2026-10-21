@@ -11,6 +11,7 @@ import { queryKeys } from '../../api/queryKeys';
 import { el, scene } from '../../test/drawings';
 import type { FileEntry } from '../../api/types';
 import type { SceneElement } from './format';
+import { sourceFiles } from '../../test/sources';
 import ExcalidrawView from './ExcalidrawView';
 
 // ---------- Excalidraw, as far as the view uses it ----------
@@ -21,6 +22,7 @@ interface CapturedProps {
   viewModeEnabled: boolean;
   aiEnabled: boolean;
   validateEmbeddable: boolean;
+  libraryReturnUrl: string;
   UIOptions: { canvasActions: Record<string, unknown> };
   generateIdForFile: (file: File) => Promise<string>;
   excalidrawAPI: (api: unknown) => void;
@@ -113,6 +115,11 @@ describe('ExcalidrawView', () => {
     expect(props.validateEmbeddable).toBe(false);
     expect(props.UIOptions.canvasActions).toMatchObject({ loadScene: false, saveToActiveFile: false });
     expect(props.generateIdForFile).toBeTypeOf('function');
+    // "Browse libraries" would send the page address (the tailnet host and the drawing's path) to
+    // libraries.excalidraw.com: it is hidden, and its return address names no path.
+    const viewCss = (await sourceFiles('views/excalidraw/excalidraw.css'))['views/excalidraw/excalidraw.css'];
+    expect(viewCss.replace(/\/\*[\s\S]*?\*\//g, '')).toMatch(/\.excalidraw \.library-menu-browse-button\s*\{\s*display:\s*none\s*!important;\s*\}/);
+    expect(props.libraryReturnUrl).toBe(`${window.location.origin}/`);
 
     // The theme follows the app's (also when it follows the OS).
     act(() => document.documentElement.setAttribute('data-theme', 'light'));

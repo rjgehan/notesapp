@@ -55,3 +55,9 @@
     margin-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* "Browse libraries" would send this page's address (the tailnet host and the drawing's path) to
+   libraries.excalidraw.com, and the library it offers could not come back here anyway. */
+.excalidraw .library-menu-browse-button {
+  display: none !important;
+}

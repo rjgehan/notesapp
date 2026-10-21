@@ -187,6 +187,8 @@ function DrawingEditor({ session, snapshot, props }: { session: DocumentSession;
           name={displayName(session.path)}
           aiEnabled={false}
           validateEmbeddable={false}
+          // The library link is hidden (excalidraw.css); should it show, it names no vault path.
+          libraryReturnUrl={`${window.location.origin}/`}
           UIOptions={{
             canvasActions: {
               loadScene: false,
