@@ -27,7 +27,12 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 
 	public static final String BUILD_HEADER = "X-Notes-Build";
 
-	static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; "
+	/**
+	 * {@code 'wasm-unsafe-eval'} lets the app compile its own WebAssembly (PDF.js's JPEG 2000, JBIG2 and colour
+	 * decoders, DESIGN §6.8.2); it allows no JavaScript {@code eval}, and the modules can only come from
+	 * {@code 'self'}.
+	 */
+	static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; "
 			+ "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; "
 			+ "font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; "
 			+ "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'";
