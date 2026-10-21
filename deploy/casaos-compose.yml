@@ -5,7 +5,7 @@
 # Data lives under /DATA/AppData/notesapp:
 #   data/vault       your notes (plain Markdown + git history), editable over SSH as uid 1000
 #   data/secrets/    optional, outside the vault: ntfy.json (app alerts), mirror-token (GitHub mirror),
-#                    anthropic-key (Ask your vault, Claude)
+#                    claude-token or anthropic-key (Ask your vault, Claude)
 #   tailscale/       Tailscale node identity + HTTPS certs (never delete)
 #   backup/          only with the optional NotesApp Backup app (casaos-backup-compose.yml)
 #
@@ -88,7 +88,8 @@ services:
       NOTES_MIRROR_URL: ""
       NOTES_MIRROR_TOKEN_FILE: /data/secrets/mirror-token
       # App alerts are on once /DATA/AppData/notesapp/data/secrets/ntfy.json exists (docs/CASAOS.md).
-      # Ask your vault (Claude) reads its API key from /DATA/AppData/notesapp/data/secrets/anthropic-key and stays
+      # Ask your vault (Claude) runs Claude Code with your subscription, using the token (claude setup-token) in
+      # /DATA/AppData/notesapp/data/secrets/claude-token (or an API key in .../anthropic-key), and stays
       # off until switched on in Settings › Ask and summaries (docs/CASAOS.md "Ask your vault").
     volumes:
       - /DATA/AppData/notesapp/data:/data
