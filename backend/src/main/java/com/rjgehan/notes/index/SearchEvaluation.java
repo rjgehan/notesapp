@@ -226,10 +226,28 @@ final class SearchEvaluation {
 	/** The matching documents. Throws {@link SearchRegex.TimeoutException} when the budget runs out. */
 	BitSet evaluate() {
 		Node root = this.query.root();
-		if (root == null || isNeutral(root)) {
+		if (root == null) {
+			return new BitSet();
+		}
+		// Fill the per-node caches on this thread: the parallel steps below only read them.
+		precompute(root);
+		if (isNeutral(root)) {
 			return new BitSet();
 		}
 		return eval(root, this.all);
+	}
+
+	private void precompute(Node node) {
+		isNeutral(node);
+		isExpensive(node);
+		switch (node) {
+			case Leaf leaf -> {
+			}
+			case And and -> and.children().forEach(this::precompute);
+			case Or or -> or.children().forEach(this::precompute);
+			case Not not -> precompute(not.child());
+			case Scoped scoped -> precompute(scoped.child());
+		}
 	}
 
 	/** The documents of {@code restrict} that match {@code node}; {@code restrict} is never changed. */
