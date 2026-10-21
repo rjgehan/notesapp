@@ -1096,10 +1096,12 @@ Obsidian's date formats are moment.js tokens, and "today" must be in the *user's
 **Placeholder grammar.** This is binding and is implemented in `frontend/src/features/templates.ts`.
 
 ```
-placeholder := "{{" WS* name ( ":" format )? WS* "}}"
-name        := "title" | "date" | "time"                 (case-insensitive)
+placeholder := "{{" WS* ( name ( ":" format )? | "cursor" | "prompt:" question ( "|" default )? ) WS* "}}"
+name        := "title" | "date" | "time"                 (case-insensitive, as are "cursor" and "prompt")
 format      := any chars except "}"                      (a moment.js format string, rendered with dayjs)
-regex       := /\{\{\s*(title|date|time)(?::([^}]*))?\s*\}\}/gi
+question    := any chars except "}" and "|", not blank   (trimmed)
+default     := any chars except "}"                      (trimmed)
+regex       := /\{\{\s*(?:(title|date|time)(?::([^}]*))?|(cursor)|prompt:([^}|]*)(?:\|([^}]*))?)\s*\}\}/gi
 ```
 
 | Placeholder | Renders to |
@@ -1108,7 +1110,11 @@ regex       := /\{\{\s*(title|date|time)(?::([^}]*))?\s*\}\}/gi
 | `{{date}}` | `now` formatted with `settings.templates.dateFormat` (default `YYYY-MM-DD`) |
 | `{{time}}` | `now` formatted with `timeFormat` (default `HH:mm`) |
 | `{{date:FMT}}` / `{{time:FMT}}` | `now` formatted with `FMT` |
+| `{{cursor}}` | Nothing; the first one marks where the caret goes (ROADMAP item 30) |
+| `{{prompt:Question}}` / `{{prompt:Question\|default}}` | The answer the user gave to `Question` (§6.12), or `default` (or nothing) when nobody answers |
 | Any other `{{...}}` | Left untouched |
+
+The first three are Obsidian's core Templates plugin and render exactly as before; `cursor` and `prompt` are this app's (there are no JavaScript templates). Rendering is one pass over the LF text, so an answer or a title that contains `{{…}}` is never rendered again. The server renders the same grammar for a capture that creates the daily note (API.md §8.5), where prompts take their defaults and `{{cursor}}` is removed.
 
 The date token mapping table (moment, dayjs, and java.time for future server-side use) is in §6.12.
 
@@ -1142,6 +1148,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | `templates` | `folder` | `Templates` |
 | | `dateFormat` | `YYYY-MM-DD` |
 | | `timeFormat` | `HH:mm` |
+| | `folderTemplates` | `[]` (a list of `{folder, template}`; optional in the file, ROADMAP item 30) |
 | `editor` | `defaultMode` | `edit` |
 | | `readableLineLength` | `true` |
 | | `strictLineBreaks` | `false` (as in Obsidian, a single newline renders as a line break in reading view) |
@@ -2300,21 +2307,28 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 1. `name = dayjs().format(settings.dailyNotes.format)`. A `/` in the result creates subfolders.
 2. `path = join(folder, name + '.md')`.
 3. If the tree has the path (case-insensitive), open it.
-4. Otherwise render the template, if one is configured, with `title` set to the last segment of `name`.
-5. `POST /api/files {path, content, onConflict:"fail"}`. Both 201 and 409 lead to opening the note.
+4. Otherwise render the template, if one is configured, with `title` set to the last segment of `name`, after asking its questions (cancelling creates nothing).
+5. `POST /api/files {path, content, onConflict:"fail"}`. Both 201 and 409 lead to opening the note; a note it created opens with the caret at the template's `{{cursor}}`.
 
 **Insert template** (palette, ribbon, mobile ⋯):
 
 1. A picker over `GET /api/templates` (fuzzy).
-2. Fetch the template content and render the placeholders (§5.11), with `title` set to the current note's basename.
+2. Fetch the template content, ask its questions (below; cancelling inserts nothing) and render the placeholders (§5.11), with `title` set to the current note's basename.
 3. **Frontmatter merge** with the `yaml` Document API, which keeps comments and formatting:
    - template keys missing from the note are appended;
    - when both values are lists, the result is their union in note order then template order, compared case-insensitively for `tags`, `aliases` and `cssclasses`;
    - otherwise the note's scalar wins.
 4. The body is inserted at the `EditorState`'s **selection**, which CodeMirror keeps after blur. On the phone, Template is reached through ⋯, which always blurs the editor, so this is what puts the template where the cursor was, as in Obsidian. In reading mode it goes to the last selection from edit mode, or at the end if the note was never edited in this page load.
-5. All of this is **one** CodeMirror transaction, so it is a single undo step.
+5. All of this is **one** CodeMirror transaction, so it is a single undo step. The caret ends at the template's first `{{cursor}}` in the body, otherwise after the inserted body.
 
-**New note from template** creates `Untitled.md` in the default new-note location (with `onConflict:"rename"` and an `Idempotency-Key`) using the rendered template, then focuses the inline title with the same optimistic flow as New note (§6.15). The template is read once and rendered at one fixed time: with the title `Untitled` for the create, then again with the note's final name (the server's free name, or the title the user commits), whose differing lines (`{{title}}`) replace the first render's as one ordinary edit.
+**New note from template** creates `Untitled.md` in the default new-note location (with `onConflict:"rename"` and an `Idempotency-Key`) using the rendered template, then focuses the inline title with the same optimistic flow as New note (§6.15). The template is read once and rendered at one fixed time: with the title `Untitled` for the create, then again with the note's final name (the server's free name, or the title the user commits), whose differing lines (`{{title}}`) replace the first render's as one ordinary edit. It is in every folder's explorer menu too (**New note from template here**), which creates the note in that folder.
+
+**Templates v2** (ROADMAP item 30, 2026-10-21; `features/templates.ts`, `features/folderTemplates.ts`):
+
+- **Questions.** A template's `{{prompt:Question|default}}` placeholders are asked in **one dialog** (`promptFields`, the dialog stack's "fields" kind) titled with the template's name: one labelled field per distinct question, in order, pre-filled with its default, the first one focused and selected. On the phone the keyboard's **Next** moves to the next field and **Done** (Enter in the last) answers; answers may be empty. **Cancel** (or Esc) inserts or creates nothing: a new note's pending view goes away and no file is created. The answers and "now" are fixed once, so the second render of a new note (its final title) uses the same answers.
+- **Caret.** `{{cursor}}` marks where the caret goes. Insert template selects it in the same transaction. A new note (from a template, a folder template, or today's daily note) gets it through `DocumentSession.select` once the note is loaded, only if its text is still exactly the rendered template (nothing typed yet); the `{{title}}` retitle edit then maps it like any selection. Focus stays where the new-note flow puts it (the inline title), and Enter there continues at the caret. CodeMirror is configured without multiple selections, so a second `{{cursor}}` is only removed (no tab stops).
+- **Folder templates.** Settings › Templates › **Folder templates** lists `{folder, template}` rows (add, edit, remove; an empty folder means every folder, an empty template is an unused row; one row per folder, at most 100). A note the app creates in a folder (New note, a view's "New note here", the quick switcher's create, a link to a missing note) starts from the template of the **deepest** rule whose folder contains it, with its questions and caret as above. Notes created inside the templates folder get none, and so do explicit choices: New note from template, today's daily note (its own template) and other views' files (drawings, spreadsheets). A folder template that does not exist shows a toast and the note starts empty.
+- **Compatibility.** Obsidian's core `{{title}}`, `{{date[:FMT]}}` and `{{time[:FMT]}}` render exactly as before. Templates are rendered on LF text, so a template saved with CRLF line breaks creates notes with LF ones. There are no JavaScript templates.
 
 **Date tokens.** These are rendered by dayjs with the plugins `advancedFormat`, `customParseFormat`, `weekOfYear`, `isoWeek`, `weekYear` and `localizedFormat`, registered once in `features/dates.ts`. The examples are for Fri 2026-10-16 14:03:09 in locale `en`. The java.time column is for future server-side use only (roadmap item 7, capture to the daily note); note that Java's `YYYY` and `DD` mean something else.
 
