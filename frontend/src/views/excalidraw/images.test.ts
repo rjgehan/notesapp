@@ -34,6 +34,15 @@ describe('imageFor', () => {
     expect(await imageFor('nothing', r, e, 'Plan.excalidraw')).toBeNull();
   });
 
+  it('never fetches a URL stored in place of embedded data', async () => {
+    const r = refs({ web: { id: 'web', mimeType: 'image/png', dataURL: 'https://tracker.example/pixel.png' } });
+    const e = env();
+    const web = await imageFor('web', r, e, 'Plan.excalidraw');
+    expect(web!.dataURL).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(decode(web!.dataURL!)).toContain('tracker.example');
+    expect(e.loadAttachment).not.toHaveBeenCalled();
+  });
+
   it('shows a missing or failing attachment as a placeholder', async () => {
     const r = refs({ gone: { id: 'gone', mimeType: 'image/png', path: 'Attachments/gone.png' } });
     expect(decode((await imageFor('gone', r, env(), 'P.excalidraw'))!.dataURL!)).toContain('Missing image');

@@ -60,6 +60,11 @@ async function attachment(id: string, path: string, env: ImageEnv, source: strin
   return placeholder(id, 'Missing image', path);
 }
 
+/** A `data:` URL, the only kind of image a drawing's file may carry inline. */
+export function isDataUrl(url: string): boolean {
+  return /^data:/i.test(url);
+}
+
 function nameOf(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
@@ -67,7 +72,11 @@ function nameOf(path: string): string {
 /** The image for file `id` of the drawing at `source`, or null when nothing references it. */
 export async function imageFor(id: string, refs: ImageRefs, env: ImageEnv, source: string, box?: Box): Promise<LiveFile | null> {
   const stored = refs.stored.get(id);
-  if (stored?.dataURL) return { id, mimeType: stored.mimeType, dataURL: stored.dataURL, created: stored.created };
+  if (stored?.dataURL) {
+    // Only embedded data: a URL in its place is never fetched (a web image, a tracker).
+    if (isDataUrl(stored.dataURL)) return { id, mimeType: stored.mimeType, dataURL: stored.dataURL, created: stored.created };
+    return placeholder(id, 'Web image (not loaded here)', stored.dataURL.slice(0, 200));
+  }
   const path = stored?.path ?? refs.vault?.get(id)?.path;
   if (path) return attachment(id, path, env, source);
   const ref = refs.section.get(id);

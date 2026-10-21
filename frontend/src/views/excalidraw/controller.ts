@@ -11,9 +11,11 @@
 // - Images are vault attachments (files.ts). A Markdown drawing's text elements get 8-character
 //   ids in the file (the Obsidian plugin's block ids); the scene keeps Excalidraw's own ids, and
 //   the controller maps between them, so undo history and selection never see a rename.
+// - Excalidraw is given only what is safe to show: no generated HTML of `iframe` elements, no
+//   images by URL; the file keeps both.
 import type { DocumentSession } from '../../sync/DocumentSession';
 import { dataUrlToBlob, EMBED_LIMIT, fileIdFor, filesToStore, referencedFileIds, type LiveFile } from './files';
-import { imageBoxes, imageFor, type ImageEnv } from './images';
+import { imageBoxes, imageFor, isDataUrl, type ImageEnv } from './images';
 import {
   EXPORTED_APP_STATE,
   isLiveText,
@@ -95,6 +97,15 @@ function exportElement(e: SceneElement): SceneElement {
   return e.type === 'arrow' || e.type === 'line' ? { ...e, lastCommittedPoint: null } : e;
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** The HTML a magic frame (`iframe` element) generated, which Excalidraw would render as a page. */
+function generatedHtml(e: SceneElement): { has: boolean; data: unknown } {
+  return e.type === 'iframe' && isRecord(e.customData) && 'generationData' in e.customData ? { has: true, data: e.customData.generationData } : { has: false, data: undefined };
+}
+
 function busyIds(appState: AppStateLike): Set<string> {
   const ids = new Set<string>();
   for (const e of [appState.editingTextElement, appState.newElement, appState.resizingElement, appState.multiElement]) if (e?.id) ids.add(e.id);
@@ -140,6 +151,8 @@ export class DrawingController {
   private inverse = new Map<string, string>();
   /** Markdown source and original text of each text element as last loaded. */
   private rawTexts = new Map<string, { raw: string; originalText: unknown }>();
+  /** The generated HTML of `iframe` elements, by id: kept in the file, never shown. */
+  private iframeData = new Map<string, unknown>();
   private readonly listeners = new Set<() => void>();
 
   /** Created once the session has loaded. */
@@ -176,7 +189,7 @@ export class DrawingController {
     if (!result.ok) return { generation, mode: { kind: 'fallback', reason: result.reason, message: result.message }, initial: null };
     this.adopt(result.drawing);
     const files: LiveFile[] = [];
-    for (const f of this.stored.values()) if (f.dataURL) files.push({ id: f.id, mimeType: f.mimeType, dataURL: f.dataURL, created: f.created });
+    for (const f of this.stored.values()) if (f.dataURL && isDataUrl(f.dataURL)) files.push({ id: f.id, mimeType: f.mimeType, dataURL: f.dataURL, created: f.created });
     return {
       generation,
       mode: { kind: 'drawing' },
@@ -203,6 +216,11 @@ export class DrawingController {
     this.stored = new Map(Object.entries(drawing.scene.files));
     this.sectionRefs = new Map((drawing.markdown?.embedded ?? []).map((e) => [e.id, e.ref]));
     this.rawTexts = new Map();
+    this.iframeData = new Map();
+    for (const e of drawing.scene.elements) {
+      const html = generatedHtml(e);
+      if (html.has) this.iframeData.set(e.id, html.data);
+    }
     if (drawing.markdown) {
       const originals = new Map(drawing.scene.elements.filter(isLiveText).map((e) => [e.id, e.originalText ?? e.text]));
       for (const t of drawing.markdown.texts) if (originals.has(t.id)) this.rawTexts.set(t.id, { raw: t.raw, originalText: originals.get(t.id) });
@@ -211,7 +229,28 @@ export class DrawingController {
 
   /** File elements as the scene holds them (Markdown text ids mapped back to the scene's). */
   private toScene(elements: readonly SceneElement[]): SceneElement[] {
-    return this.format === 'markdown' ? renameElementIds(elements, this.inverse) : [...elements];
+    return (this.format === 'markdown' ? renameElementIds(elements, this.inverse) : elements).map((e) => this.forDisplay(e));
+  }
+
+  /**
+   * What Excalidraw is given of an element: an `iframe` without its generated HTML (Excalidraw
+   * would render it as a page, unsanitized).
+   */
+  private forDisplay(e: SceneElement): SceneElement {
+    if (this.iframeData.has(e.id) && generatedHtml(e).has) {
+      const custom = { ...(e.customData as Record<string, unknown>) };
+      delete custom.generationData;
+      return { ...e, customData: custom };
+    }
+    return e;
+  }
+
+  /** An element as the file stores it: the generated HTML put back. */
+  private forFile(e: SceneElement): SceneElement {
+    if (e.type === 'iframe' && this.iframeData.has(e.id) && !generatedHtml(e).has) {
+      return { ...e, customData: { ...(isRecord(e.customData) ? e.customData : {}), generationData: this.iframeData.get(e.id) } };
+    }
+    return e;
   }
 
   private signature(elements: readonly SceneElement[], appState: AppStateLike): string {
@@ -259,7 +298,7 @@ export class DrawingController {
     });
     const scene: Scene = {
       ...drawing.scene,
-      elements: elements.map(exportElement),
+      elements: elements.map((e) => exportElement(this.forFile(e))),
       appState: { ...drawing.scene.appState, ...exportedAppState(latest.appState) },
       files,
     };

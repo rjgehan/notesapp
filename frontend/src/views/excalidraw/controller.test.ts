@@ -334,6 +334,27 @@ describe('merging with what Excalidraw normalized on load', () => {
   });
 });
 
+describe('what Excalidraw is never given', () => {
+  it('the generated HTML of a magic frame, which the file keeps', async () => {
+    const html = { status: 'done', html: '<h1>Sign in again</h1>' };
+    const { canvas, saved } = await setup('Plan.excalidraw', json(scene([el('frame', { type: 'iframe', customData: { generationData: html, note: 1 } })])));
+    expect(canvas.elements[0].customData).toEqual({ note: 1 });
+    canvas.change('frame', { x: 5 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements[0]).toMatchObject({ x: 5, customData: { generationData: html, note: 1 } });
+  });
+
+  it('an image by URL in place of embedded data: a placeholder, never fetched, and the file keeps it', async () => {
+    const files = { w: { id: 'w', mimeType: 'image/png', created: 1, dataURL: 'https://tracker.example/pixel.png' } };
+    const { canvas, vault } = await setup('Plan.excalidraw', json(scene([el('i', { type: 'image', fileId: 'w' })], { files })));
+    expect(canvas.files.w.dataURL).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(atob(canvas.files.w.dataURL!.split(',')[1])).toContain('tracker.example');
+    canvas.change('i', { x: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(JSON.parse(vault.readFile('Plan.excalidraw').content).files).toEqual(files);
+  });
+});
+
 describe('Obsidian Excalidraw (.excalidraw.md)', () => {
   const path = 'Drawings/Map.excalidraw.md';
   const file = markdownDrawing({
