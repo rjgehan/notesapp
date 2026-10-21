@@ -672,3 +672,71 @@ export interface TaskEventMap {
 }
 export type TaskEventName = keyof TaskEventMap;
 export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task.changed', 'task.deleted', 'list.changed'];
+// ---------- Flashcards (API.md §34, ROADMAP item 34) ----------
+export type FlashcardRating = 'again' | 'hard' | 'good' | 'easy' | 'reset';
+export type FlashcardPhase = 'new' | 'learning' | 'review' | 'relearning';
+export interface FlashcardConfig {
+  tags: string[];               // without '#'; nested tags count too
+  foldersAsDecks: boolean;      // decks are folders, and every note with cards counts
+  newPerDay: number;
+  reviewsPerDay: number;
+  retention: number;            // FSRS desired retention, 0.7 to 0.99
+  maximumInterval: number;      // days
+  learningSteps: string[];      // '1m', '10m', '1d'
+  relearningSteps: string[];
+  fuzz: boolean;
+  dayStartsAt: number;          // local hour when a new study day starts
+}
+export interface FlashcardCardState {
+  due: IsoInstant;
+  stability: number;
+  difficulty: number;
+  scheduledDays: number;
+  learningSteps: number;
+  reps: number;
+  lapses: number;
+  phase: FlashcardPhase;
+  lastReview: IsoInstant | null;
+  n: number;                    // the number of reviews this state was computed from
+}
+export interface FlashcardCard {
+  note: VaultPath | null;
+  front: string | null;
+  state: FlashcardCardState | null;
+  reviews: string[];            // "<instant> <rating>[ <ms>]", oldest first
+}
+export interface FlashcardsResponse { config: FlashcardConfig; cards: Record<string, FlashcardCard>; version: Version | null }
+export interface FlashcardReview {
+  card: string;
+  at: IsoInstant;
+  rating: FlashcardRating;
+  ms?: number;
+  note?: VaultPath;
+  front?: string;
+  state?: FlashcardCardState;
+  from?: string;                // the card's previous id, when its text was edited
+}
+export interface FlashcardReviewRequest { reviews: FlashcardReview[] }
+export interface FlashcardUndoRequest { card: string; at: IsoInstant; state?: FlashcardCardState }
+export interface FlashcardPruneRequest { cards: string[] }
+export interface FlashcardConfigUpdateRequest { config: Partial<{ [K in keyof FlashcardConfig]: FlashcardConfig[K] | null }> }
+export interface FlashcardWriteResult { cards: Record<string, FlashcardCard | null>; version: Version }
+export interface FlashcardNote { path: VaultPath; version: Version; content: string }
+export interface FlashcardNotesResponse { config: FlashcardConfig; notes: FlashcardNote[] }
+export interface FlashcardsChangedEvent {
+  cards: Record<string, FlashcardCard | null> | null;   // null: too many changed, refetch
+  config: FlashcardConfig | null;
+  version: Version;
+  origin: string | null;
+}
+
+// ---------- Habits (API.md §35, ROADMAP item 35) ----------
+export interface HabitNote { path: VaultPath; version: Version; properties: Record<string, unknown> }   // the frontmatter
+export interface DailyNoteValues { path: VaultPath; values: Record<string, boolean | number | string> }
+export interface HabitsResponse {
+  folder: VaultPath;            // where new habits go: 'Habits'
+  tag: string;                  // 'habit': notes with #habit anywhere are habits too
+  habits: HabitNote[];
+  dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
+  daily: DailyNoteValues[];     // daily notes with simple frontmatter values
+}

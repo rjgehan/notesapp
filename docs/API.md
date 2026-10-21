@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -1798,6 +1798,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `searches.changed` | `SavedSearchesChangedEvent` | no | The saved searches were saved (§12.4); refetch them |
 | `bookmarks.changed` | `BookmarksChangedEvent` | no | The bookmarks were saved (§21). After a move or a trash restore the server re-keys them itself and sends this with `origin: null`, so it reaches every client, the mover's included. Refetch `GET /api/bookmarks`. |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
+| `flashcards.changed` | `FlashcardsChangedEvent` | no | Flashcard review records or settings changed (§34.7). Not in `VAULT_EVENT_NAMES`: the flashcards feature registers it with `registerEventHandler`. |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 | `task.created`, `task.changed` | `TaskEvent` | no | A task was created or changed through the task API (§20.8) |
 | `task.deleted` | `TaskDeletedEvent` | no | A task was deleted through the task API |
@@ -2515,6 +2516,74 @@ export interface TaskEventMap {
 }
 export type TaskEventName = keyof TaskEventMap;
 export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task.changed', 'task.deleted', 'list.changed'];
+// ---------- Flashcards (API.md §34, ROADMAP item 34) ----------
+export type FlashcardRating = 'again' | 'hard' | 'good' | 'easy' | 'reset';
+export type FlashcardPhase = 'new' | 'learning' | 'review' | 'relearning';
+export interface FlashcardConfig {
+  tags: string[];               // without '#'; nested tags count too
+  foldersAsDecks: boolean;      // decks are folders, and every note with cards counts
+  newPerDay: number;
+  reviewsPerDay: number;
+  retention: number;            // FSRS desired retention, 0.7 to 0.99
+  maximumInterval: number;      // days
+  learningSteps: string[];      // '1m', '10m', '1d'
+  relearningSteps: string[];
+  fuzz: boolean;
+  dayStartsAt: number;          // local hour when a new study day starts
+}
+export interface FlashcardCardState {
+  due: IsoInstant;
+  stability: number;
+  difficulty: number;
+  scheduledDays: number;
+  learningSteps: number;
+  reps: number;
+  lapses: number;
+  phase: FlashcardPhase;
+  lastReview: IsoInstant | null;
+  n: number;                    // the number of reviews this state was computed from
+}
+export interface FlashcardCard {
+  note: VaultPath | null;
+  front: string | null;
+  state: FlashcardCardState | null;
+  reviews: string[];            // "<instant> <rating>[ <ms>]", oldest first
+}
+export interface FlashcardsResponse { config: FlashcardConfig; cards: Record<string, FlashcardCard>; version: Version | null }
+export interface FlashcardReview {
+  card: string;
+  at: IsoInstant;
+  rating: FlashcardRating;
+  ms?: number;
+  note?: VaultPath;
+  front?: string;
+  state?: FlashcardCardState;
+  from?: string;                // the card's previous id, when its text was edited
+}
+export interface FlashcardReviewRequest { reviews: FlashcardReview[] }
+export interface FlashcardUndoRequest { card: string; at: IsoInstant; state?: FlashcardCardState }
+export interface FlashcardPruneRequest { cards: string[] }
+export interface FlashcardConfigUpdateRequest { config: Partial<{ [K in keyof FlashcardConfig]: FlashcardConfig[K] | null }> }
+export interface FlashcardWriteResult { cards: Record<string, FlashcardCard | null>; version: Version }
+export interface FlashcardNote { path: VaultPath; version: Version; content: string }
+export interface FlashcardNotesResponse { config: FlashcardConfig; notes: FlashcardNote[] }
+export interface FlashcardsChangedEvent {
+  cards: Record<string, FlashcardCard | null> | null;   // null: too many changed, refetch
+  config: FlashcardConfig | null;
+  version: Version;
+  origin: string | null;
+}
+
+// ---------- Habits (API.md §35, ROADMAP item 35) ----------
+export interface HabitNote { path: VaultPath; version: Version; properties: Record<string, unknown> }   // the frontmatter
+export interface DailyNoteValues { path: VaultPath; values: Record<string, boolean | number | string> }
+export interface HabitsResponse {
+  folder: VaultPath;            // where new habits go: 'Habits'
+  tag: string;                  // 'habit': notes with #habit anywhere are habits too
+  habits: HabitNote[];
+  dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
+  daily: DailyNoteValues[];     // daily notes with simple frontmatter values
+}
 ```
 
 ---
@@ -2586,6 +2655,13 @@ export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task
 | GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
 | PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
 | POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
+| GET | `/api/flashcards` | | 200 `FlashcardsResponse` | 34.3 |
+| GET | `/api/flashcards/notes` | | 200 `FlashcardNotesResponse` | 34.2 |
+| POST | `/api/flashcards/reviews` | `FlashcardReviewRequest` | 200 `FlashcardWriteResult` | 34.4 |
+| POST | `/api/flashcards/undo` | `FlashcardUndoRequest` | 200 `FlashcardWriteResult` | 34.5 |
+| POST | `/api/flashcards/prune` | `FlashcardPruneRequest` | 200 `FlashcardWriteResult` | 34.5 |
+| PUT | `/api/flashcards/config` | `FlashcardConfigUpdateRequest` | 200 `FlashcardConfig` | 34.6 |
+| GET | `/api/habits` | | 200 `HabitsResponse` | 35.1 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -2629,6 +2705,9 @@ export const TASK_EVENT_NAMES: readonly TaskEventName[] = ['task.created', 'task
 | `Task`, `TaskList`, `TaskSection`, `TaskRecurrence`, `TaskReminder`, `TaskFileProblem`, `TasksResponse`, `TaskListsResponse`, `TaskWriteResult`, `TaskListWriteResult`, `CompleteTaskRequest`, `ReorderTasksRequest`, `ReorderRequest`, `CreateTaskListRequest`, `SectionRequest` | Same | Enums `TaskStatus`, `TaskView` and `RecurrenceFrom` (for `TaskRecurrence.from`); `Task.priority` is an `int`. `CompleteTaskRequest.base` is a `JsonNode`. |
 | `CreateTaskRequest`, `UpdateTaskRequest`, `UpdateTaskListRequest`, `TaskFields`, `TaskListFields` | `POST /api/tasks` takes a `JsonNode`; both `PATCH`es take the record `UpdateTaskRequest(JsonNode changes, JsonNode base)` | Kept as JSON trees, because an omitted field (unchanged) and `null` (cleared) differ |
 | `TaskEvent`, `TaskDeletedEvent`, `ListChangedEvent` | Same names in `com.rjgehan.notes.events` | Content events: `origin` is serialized and drives echo suppression. `TaskEvent` covers `task.created` and `task.changed`. |
+| `FlashcardConfig`, `FlashcardCardState`, `FlashcardCard`, `FlashcardsResponse`, `FlashcardReview`, `FlashcardReviewRequest`, `FlashcardUndoRequest`, `FlashcardPruneRequest`, `FlashcardConfigUpdateRequest`, `FlashcardWriteResult`, `FlashcardNote`, `FlashcardNotesResponse` | Same (§34) | `FlashcardCardState.phase` is the enum `FlashcardPhase`; `FlashcardConfigUpdateRequest.config` is a `JsonNode`, validated field by field; `FlashcardReview` and `FlashcardUndoRequest` take `at` as a string, parsed as an ISO-8601 instant |
+| `HabitNote`, `DailyNoteValues`, `HabitsResponse` | Same (§35) | `HabitNote.properties` is a `Map<String, @Nullable Object>` (the frontmatter as parsed, §5.5.3 of DESIGN); `DailyNoteValues.values` holds `Boolean`, `Number` and `String` values only |
+| `FlashcardsChangedEvent` | Same name in `com.rjgehan.notes.events` | An extension event (§34.7): it echoes `origin` like a content event, and `cards` maps removed records to `null` |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
@@ -2936,3 +3015,110 @@ The client renames the heading in the note and **saves the note first**; the ser
 | `409 type-mismatch` (`expected: "note"`) for a file that is not a note |
 
 Events to other clients: `file.changed` for each rewritten note, then `bookmarks.changed` (`origin: null`) when heading bookmarks changed, then `history.committed`.
+
+---
+
+## 34. Flashcards (ROADMAP item 34)
+
+Sections 34 and 35 are numbered after their ROADMAP items, so branches built in parallel do not collide. Cards live in notes, in the Obsidian Spaced Repetition plugin's syntax, and are parsed and scheduled (FSRS) by the client (DESIGN §6.34). The server stores what notes do not hold: each card's answers and a cached FSRS state, plus the flashcard settings, in `.notesapp/srs.json` (DESIGN §5.34).
+
+### 34.1 Review records
+
+A card is identified by a string of 1 to 64 characters from `[A-Za-z0-9_-]` that the client derives from the card's question (DESIGN §6.34). Its record (`FlashcardCard`):
+
+| Field | Meaning |
+|---|---|
+| `reviews` | The answers, oldest first, as `"<instant> <rating>[ <ms>]"`: the time in §1.5 form, `again`, `hard`, `good`, `easy` or `reset`, and optionally how long the answer took in milliseconds (0 to 86,400,000). **The answers are a set keyed by their instant**: an answer with an instant already present is a duplicate and is ignored. |
+| `state` | The FSRS state after the first `n` answers, as the answering client computed it (`FlashcardCardState`). It is a cache: the server keeps it only while `n` equals the number of answers and `lastReview` is the instant of the last one, and otherwise stores `null`. Clients use a current state as is and replay the answers otherwise. |
+| `note`, `front` | Hints from the last answer: the note the card was in, and the start of its question on one line (at most 200 characters). Clients use them to keep the record of a card whose question was edited (§34.4 `from`). |
+
+### 34.2 `GET /api/flashcards/notes`
+
+The notes that may hold cards, with their text: `{config, notes: [{path, version, content}]}`, sorted by path.
+
+- With tags (the default), every note with one of `config.tags` or a tag nested under one (`#flashcards/spanish`), inline or in the frontmatter.
+- With `config.foldersAsDecks`, every note whose text contains `::`, `==`, or a line that is only `?` or `??`.
+- Drawings (`.excalidraw.md`) are left out. `content` is the indexed text, which is `TextFile.content` (§8.1).
+
+### 34.3 `GET /api/flashcards`
+
+`FlashcardsResponse`: the effective settings (every field, with defaults filled in), every record by card id, and `version`, the blob id of `srs.json` (`null` before the first write).
+
+| Setting | Default | Range |
+|---|---|---|
+| `tags` | `["flashcards"]` | 1 to 20 tags without spaces; a leading `#` is dropped |
+| `foldersAsDecks` | `false` | |
+| `newPerDay` | 20 | 0 to 9,999 |
+| `reviewsPerDay` | 200 | 0 to 99,999 |
+| `retention` | 0.9 | 0.7 to 0.99 |
+| `maximumInterval` | 36,500 days | 1 to 36,500 |
+| `learningSteps` | `["1m", "10m"]` | at most 10 of `<number><m\|h\|d>` |
+| `relearningSteps` | `["10m"]` | as above |
+| `fuzz` | `true` | |
+| `dayStartsAt` | 4 | local hour, 0 to 23 |
+
+### 34.4 `POST /api/flashcards/reviews`
+
+`{reviews: FlashcardReview[]}` with 1 to 1,000 answers, applied in order under one lock. Answers in the same request may be for different cards. For each answer:
+
+1. With `from` (the card's previous id) naming another record, that record's answers are united with this card's record and the old record is removed (it appears as `null` in the result).
+2. The answer is added unless its instant is already there (a retried request changes nothing).
+3. `note` and `front` replace the hints when given (`front` is collapsed to one line and cut to 200 characters).
+4. `state` is stored when it covers every answer of the record after step 2; otherwise the state already stored is kept if it still does, else the record's state becomes `null`. Two devices answering the same card at once therefore both keep their answer, and the card's state is recomputed by the next client that reads it.
+
+Answer: `FlashcardWriteResult`, the records this request changed and the file's new `version`. Errors: `400 bad-request` with `errors[]` naming every invalid field (`reviews[i].card`, `.at`, `.rating`, `.ms`, `.note`, `.from`, `.state`); an `at` more than 24 hours ahead of the server's clock is refused.
+
+### 34.5 `POST /api/flashcards/undo` and `POST /api/flashcards/prune`
+
+- **Undo** `{card, at, state?}` removes the answer at `at` (a missing answer is not an error). `state` is the card's state before that answer and is stored when it covers the remaining answers. A record left without answers is removed (`null` in the result).
+- **Prune** `{cards: string[]}` (1 to 10,000 ids) removes those records; ids without a record are ignored. Clients prune the records of cards that are in no note (DESIGN §6.34); the removed history stays in the vault's git history.
+
+### 34.6 `PUT /api/flashcards/config`
+
+`{config: {...}}` with the settings to change. Fields that are absent keep their value, so two devices changing different settings never overwrite each other; `null` resets a field to its default; unknown fields are ignored. Answer: the effective `FlashcardConfig`. Errors: `400 bad-request` with `errors[]` (`config.<field>`).
+
+### 34.7 `flashcards.changed`
+
+Published after every write that changed the file, before the lock is released, and not delivered to the connection whose client made the change (like a content event, §16.4):
+
+```json
+{"cards":{"c3k9…":{"note":"Spanish.md","front":"hola","state":null,"reviews":["2026-10-21T16:57:47.431Z easy"]}},"config":null,"version":"f8f79e…","origin":"c-9a8b7c6d5e4f"}
+```
+
+`cards` lists the changed records (`null` for a removed one); with more than 20 it is `null` and clients refetch §34.3. `config` is set when the settings changed.
+
+---
+
+## 35. Habits (ROADMAP item 35)
+
+Habits are notes, and check-ins are edits of notes through the text API (§8.3): there is no habit store. A **habit** is a note in the `Habits` folder (at any depth, matched ignoring case) or a note anywhere with the tag `#habit` (nested tags included). Notes under the templates folder are not habits. Its frontmatter is the shape of Obsidian's Habit Tracker 21 plugin, plus a schedule (DESIGN §6.35):
+
+```yaml
+---
+title: Morning workout      # optional; the note's name otherwise
+color: "#4CAF50"            # optional
+schedule: mon, wed, fri     # daily (default), weekdays, weekends, days, or "3/week"
+property: exercise          # the daily-note property that checks it in (default: the name, lower case, dashes for spaces)
+maxGap: 1                   # missed days a streak survives
+created: 2026-10-21
+archived: true              # optional: kept, but not listed
+entries:                    # the days it was done
+  - 2026-10-20
+---
+```
+
+A **daily note** (a note in the daily-notes folder whose name parses with the daily-note format, §15.2) checks a habit in with the habit's property: `exercise: true`, or `yes`, `y`, `done`, `x`, `✓`, `✔`, `✅`, or a number above 0. A day is done when either source says so.
+
+### 35.1 `GET /api/habits`
+
+`HabitsResponse`, in one request whatever the number of daily notes:
+
+| Field | Meaning |
+|---|---|
+| `folder` | Where new habits go: the `Habits` folder as it is in the vault, else `Habits` |
+| `tag` | `habit` |
+| `habits` | Every habit note, sorted by path, with its `version` and its frontmatter as parsed (YAML 1.2 core schema, so dates are strings); `{}` without frontmatter |
+| `dailyFolder` | The daily-notes folder (`settings.dailyNotes.folder`), as it is in the vault |
+| `daily` | Every note at any depth under `dailyFolder` (habit notes excepted) with at least one frontmatter value that is a boolean, a number, or a string of at most 100 characters, under a key of at most 64; only those values are listed. The client maps paths to days with the daily-note format. |
+
+**Writes.** A check-in adds or removes the day in the habit note's `entries`; undoing a day that a daily note checked sets that note's property to `false`. Clients edit only those properties' lines (`PUT /api/files` with `baseVersion`, re-applying the edit after a `409 version-conflict`), so the rest of each note stays byte for byte. New habits are `POST /api/files` in `folder`. Other devices learn of them through the usual `file.*` events (§16.4).

@@ -967,6 +967,14 @@ Needs `Permissions-Policy: microphone=(self)`.
 
 ### 34. Flashcards and spaced repetition
 
+**Status:** built (wave 3). Cards are read from notes in the Spaced Repetition plugin's syntax (`Q::A`, `Q:::A`, `?` and `??` paragraphs, `==cloze==` deletions with `^[hints]` and numbered groups; decks from `#flashcards` tags, deck lines and question-specific tags, or from folders) and scheduled with FSRS (`ts-fsrs` 5.4.2, MIT). `/x/flashcards` has the decks with today's counts, a phone-first review session with keyboard shortcuts, statistics and settings (DESIGN §5.34, §6.34; API.md §34). Deviations and additions:
+
+- **Nothing is written into notes.** A card is identified by a hash of its question, and its answers live in `.notesapp/srs.json` as the ROADMAP said: a set of answers per card (the truth) and the FSRS state computed from them (a cache, kept only while it covers every answer). Two devices reviewing at once both keep their answers, and a retry is stored once. An edited question keeps its history when the new text is close to the old one in the same note; the records of deleted cards can be pruned from the statistics page.
+- **The plugin's `<!--SR:…-->` schedules are ignored**, not imported: they are SM-2 numbers. Cards they follow start as new.
+- **Settings** (tags, folder decks, daily limits, desired retention, maximum interval, learning steps, fuzz, the hour a day starts) live in the same file and change field by field.
+- **Offline answers** wait in an outbox in `localStorage` and are sent when the server is back.
+- **Left for later:** cramming (studying cards that are not due), sibling burying across days, Anki-style `{{c1::…}}` clozes, `**bold**` clozes, and optimizing the FSRS weights from the review history.
+
 **One line:** review cards written in notes (Obsidian Spaced Repetition plugin syntax: `Q::A`, `?` blocks, `#flashcards`) with FSRS scheduling.
 
 | Value | Effort | Depends on |
@@ -976,6 +984,13 @@ Needs `Permissions-Policy: microphone=(self)`.
 Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.json`.
 
 ### 35. Habit tracker
+
+**Status:** built (wave 3), on daily-note properties (the "13" of "4 or 13"), without tasks. A habit is a note in `Habits/` or tagged `#habit`; its check-ins are the `entries` list in its frontmatter, the format of Obsidian's Habit Tracker 21 plugin (`title`, `color` and `maxGap` too), and a daily note checks a habit in with a property such as `exercise: true`. `/x/habits` has one-tap check-ins for today, the last week to check in late, streaks, a 30-day rate and calendar heatmaps for each habit and for all of them; the Habits panel checks in from the daily note in view (DESIGN §5.35, §6.35; API.md §35). Deviations and additions:
+
+- **Schedules:** every day, weekdays, weekends, chosen days, or N times a week (streaks then count weeks), with Habit Tracker 21's `maxGap` gap tolerance.
+- **Edits touch only the property they change**, through an open note's session when there is one, and re-apply after a version conflict. Live sync is the notes' own `file.*` events.
+- **Tasks later:** a habit note may name a recurring task (item 4) whose completions would count as check-ins; not built.
+- **Left for later:** rendering Habit Tracker 21's `habittracker` code block in notes (it needs a code-block renderer in the reading view), goals for quantities (today any number above 0, such as `water: 6`, counts as done; a goal of 8 would not be met), and reminders (item 9).
 
 **One line:** track habits as recurring tasks (item 4) or as daily-note properties (`exercise: true`), with streaks and a heatmap, and one-tap check-off on the phone.
 

@@ -204,6 +204,7 @@ NotesApp/                              (monorepo; branch main)
 | `.notesapp/bookmarks.json` | Bookmarks (§5.21), in Obsidian's `bookmarks.json` format | hidden | committed, like the settings |
 | `.notesapp/searches.json` | Saved searches (§5.5.10, API.md §12.4) | hidden | committed, so they sync and have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
+| `.notesapp/srs.json` | Flashcard answers, their cached FSRS state and the flashcard settings (§5.34) | hidden | committed |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
 | `.notesapp/cache/` | Derived caches: `search-text/` holds the extracted text of PDFs (§5.5.10) | hidden | excluded |
 | `.trash/` | Deleted items, stored **flat**: each trashed file or folder is one top-level entry, `.trash/<name>`, with ` 1`, ` 2`, ... on collisions. The original path is kept only in `trash.json`. | hidden; shown only in the Trash view | excluded |
@@ -1556,6 +1557,45 @@ An existing Obsidian vault is imported by copying it into the vault directory be
   Callouts, Mermaid and math render since ROADMAP item 3 (§6.7.1), and `.excalidraw`/`.excalidraw.md` drawings open in the drawing editor (item 5), so they are not findings; the plugin table likewise reports bookmarks, Excalidraw, the Tasks plugin and QuickAdd by what items 12, 5, 4 and 7 built.
   Fenced code and code spans are skipped, so a note that *shows* such syntax is not reported. Each finding has a severity (`error`: data NotesApp cannot use; `warning`: shown wrong or not at all; `info`: works differently), the roadmap item that will handle it, an exact count, and at most 200 occurrences (path, 0-based line, text). The rules for rendering that a roadmap item adds (callouts, Mermaid and math with item 3) are removed when it lands.
 
+### 5.34 Flashcard review records (ROADMAP item 34)
+
+Sections 5.34 and 6.34 (and 5.35 and 6.35) are numbered after their ROADMAP items, so branches built in parallel do not collide.
+
+Cards are written in notes and parsed by the client (§6.34); nothing is ever written into a note. What the notes do not hold, each card's answers and the flashcard settings, lives in **`.notesapp/srs.json`**, owned by `flashcards.FlashcardService` (API.md §34). It is a vault file like `settings.json`: committed with the vault's history (batched like autosaves, author from the identity), hidden from the tree, and never served by the file API.
+
+```json
+{
+  "schemaVersion": 1,
+  "config": {
+    "newPerDay": 15
+  },
+  "cards": {
+    "c1k1sjm8rzcy": {
+      "note": "Cards/Biology.md",
+      "front": "The [...] is the powerhouse of the cell.",
+      "state": {"due":"2026-10-21T16:58:20.316Z","stability":0.212,"difficulty":6.4133,"scheduledDays":0,"learningSteps":0,"reps":1,"lapses":0,"phase":"learning","lastReview":"2026-10-21T16:57:20.316Z","n":1},
+      "reviews": [
+        "2026-10-21T16:57:20.316Z again 3082"
+      ]
+    }
+  }
+}
+```
+
+- **The answers are the truth; the state is a cache.** A card's answers are a set keyed by their instant, so merging two devices' answers is a union: it commutes, and a retried request changes nothing. The FSRS state is what the answering client computed; the server keeps it only while it covers every answer (`n` and `lastReview`), and otherwise stores `null` for clients to recompute by replaying the answers (§6.34). Replaying every card on every load would cost about 30 µs per answer on a desktop (a second for 2,000 cards of 20 answers), so the cache matters on the phone.
+- **Server-owned operations, not file saves.** Every change (an answer, an undo, a prune, a settings change) is applied under one lock to the file as it is on disk, so two devices reviewing at once never meet a version conflict, and a client sends a few hundred bytes per answer instead of the whole file. The settings change field by field for the same reason. A write that changes nothing (a duplicate) is not written, committed or announced.
+- **Layout.** Written by hand for stable bytes: cards sorted by id, one answer per line, a card's state on one line, the settings sorted by key with only the fields that were set. An answer adds one line and changes one, so git diffs stay readable. Fields this build does not know are kept at every level; an entry that cannot be read is skipped with a WARN.
+- **Reads.** The parsed file is cached with its blob id and read again when the bytes on disk differ (a hand edit, a history restore). `flashcards.changed` (API.md §34.7) carries the changed records, so an open page on another device updates without a refetch.
+- **Source notes.** `GET /api/flashcards/notes` takes the notes from the index: by tag (`TagIndex.notesWithTag`, nested tags included), or, with folder decks, every note with a card marker. Only the client parses them: it alone schedules, and one parser keeps the syntax in one language.
+- **Why not in the notes.** The Spaced Repetition plugin writes `<!--SR:!2026-10-25,3,250-->` after each card. Writing into notes from a review on the phone would put an open copy of the note on another device into conflict while the user types there, and those numbers are SM-2's, not FSRS's. Such comments in an imported vault are ignored (and hidden from the cards); their schedule is not imported.
+
+### 5.35 Habits (ROADMAP item 35)
+
+Habits keep no data of their own on the server: a habit is a note, and its check-ins are in its frontmatter (`entries`, the shape of Obsidian's Habit Tracker 21 plugin) or in daily notes' frontmatter (`exercise: true`). `habits.HabitService` only reads the index, for `GET /api/habits` (API.md §35): the habit notes (in `Habits/` at any depth, or tagged `#habit`; not under the templates folder) with their frontmatter as parsed, and, in the same answer, the simple frontmatter values of every note under the daily-notes folder. One request then serves a page whatever the number of daily notes, and the server does not need the daily-note date format (a moment.js format, which only the client parses, §5.11).
+
+- **Why notes, not a store.** Check-ins in plain frontmatter are diffable, show in Obsidian (Habit Tracker 21 reads `entries`; Dataview and Tracker read daily-note properties), and need nothing new for history, trash, sync or conflicts: they are note edits (§6.35).
+- **Item 4 later.** ROADMAP item 35 depends on "4 or 13": this builds on daily-note properties (13's territory) and works without tasks. A habit note may later name a recurring task (`task: <id>`) whose completions count as check-ins, read by the same endpoint; nothing here would change.
+
 ---
 
 ## 6. Frontend design
@@ -1575,6 +1615,7 @@ These versions were verified on 2026-10-16. The lockfile pins them.
 | Editor | CodeMirror 6: state 6.7.6, view 6.43.14, commands, language, lang-markdown 6.5.2, language-data, lang-yaml, autocomplete, search, merge 6.12.2; `@lezer/markdown` 1.8.0, `@lezer/highlight`, `@lezer/common` |
 | Reading view | markdown-it 15.0.3 (bundled types), `@mdit/plugin-tasklist` 1.1.3, `@mdit/plugin-footnote` 1.1.2, `@mdit/plugin-mark` (same @mdit release line; exact version pinned at scaffold), dompurify 3.4.17. Rich Markdown (ROADMAP item 3, §6.7.1), pinned exactly: `@mdit/plugin-tex` 1.1.2 (math parsing only), katex 0.19.0, mermaid 12.2.0 |
 | Utilities | dayjs 1.11.23 (+ plugins), fuzzysort 4.0.2 (always `threshold: 0`), `yaml` 2.9.1 for client-side frontmatter merge |
+| Flashcards (ROADMAP item 34) | `ts-fsrs` 5.4.2 (MIT, no dependencies), pinned exactly, in the flashcards page's lazy chunk (§6.34) |
 | Drawings (ROADMAP item 5) | `@excalidraw/excalidraw` 0.18.1 (MIT; peer React 17–19; a lazy chunk with self-hosted fonts, §6.8.1), `lz-string` 1.5.0 (MIT) for Obsidian Excalidraw's compressed-json blocks. Both pinned exactly. |
 | Tasks (ROADMAP item 4, §6.22) | `chrono-node` 2.10.2 (MIT, no dependencies) for dates in quick add; `rrule` 2.8.1 (BSD-3-Clause, with `tslib` 2.8.1, 0BSD) for `every …` and readable rules. Both are pinned exactly and load only in lazy chunks. |
 | Spreadsheets | `hyperformula` 3.4.0, pinned exactly; GPL-3.0-only with `licenseKey: 'gpl-v3'`; a lazy chunk (§6.21). `@glideapps/glide-data-grid` 6.0.4-alpha24, pinned exactly (MIT), the grid of the `sheet` view's lazy chunk (§6.21.5) |
@@ -1633,6 +1674,10 @@ frontend/src/
 │   └── clientId.ts           per-page-load id (crypto.randomUUID, getRandomValues fallback)
 ├── extensions/               EXTENSION POINTS (§6.8): registerView, registerPage, registerPanel, registerCommand,
 │   │                         registerEventHandler; builtins.ts registers every v1 view, panel and command through them
+├── flashcards/               ROADMAP item 34 (§6.34): parse.ts, ids.ts, reviews.ts, schedule.ts (ts-fsrs), deck.ts,
+│                             session.ts, stats.ts, store.ts (records, outbox), register.ts, ui/ (the /x/flashcards page)
+├── habits/                   ROADMAP item 35 (§6.35): model.ts, progress.ts, frontmatterEdit.ts, write.ts, actions.ts,
+│                             useHabits.ts, register.ts, ui/ (the /x/habits page and the Habits panel)
 ├── views/                    FILE-TYPE → VIEW REGISTRY (§6.8)
 │   ├── registry.ts
 │   ├── excalidraw/           drawings (§6.8.1): register.ts (descriptors, eager), format.ts and merge.ts (pure, eager),
@@ -3002,6 +3047,65 @@ Two views over the same data, both lazy chunks registered in `extensions/builtin
 - **Graph view**: when `graph.json` has options, **Use them on this device** turns them into graph options (`optionsFromObsidian`: colors `{a, rgb}` become `#rrggbb`, unknown keys are dropped) for this device (§6.28).
 - **Plugins**: the enabled core and community plugins, with *Supported*, *Partly*, *Planned* (and the roadmap item), *Not supported* or *Unknown*, and a one-line note.
 - **Findings** in three sections (syntax and plugins in notes, links, files), each a collapsed card with its severity icon, count, file count and roadmap item; expanded, it explains the finding and lists the occurrences, each opening the note at its line (`/n/<path>?line=N`, §6.4). Under 768 px the settings table stacks each row; occurrences are 44 px tall on touch screens.
+
+### 6.34 Flashcards (ROADMAP item 34)
+
+The code is in `frontend/src/flashcards/`. The pure parts are `parse.ts` (cards in notes), `ids.ts` (identity), `reviews.ts` and `schedule.ts` (answers and FSRS), `deck.ts` (decks and counts), `session.ts` (a review session), `stats.ts` and `store.ts` (records and the outbox); `ui/` has the page. `register.ts` registers the page, the commands and the event handlers (§6.8). ts-fsrs 5.4.2 (MIT) loads with the page's lazy chunk, never in the main bundle.
+
+**Syntax** (the Obsidian Spaced Repetition plugin's, so a vault works in both apps):
+
+| Written | Cards |
+|---|---|
+| `Question::Answer` | One; a leading list marker or checkbox is dropped |
+| `Question:::Answer` | Two, one each way (siblings) |
+| Lines, a line `?`, lines | One. The question and the answer form a paragraph: it ends at a blank line (fenced code in the answer may hold blank lines). |
+| Lines, a line `??`, lines | Two, one each way |
+| `==deletion==` in a paragraph | One per deletion, with the others shown. `==x==^[hint]` shows the hint in the blank; `==x==[^1]` asks every deletion with the same number together (the plugin's classic clozes). Paragraphs with `::` cards are not read for clozes. |
+
+- **Decks** are flashcard tags (`config.tags`, default `#flashcards`, matched case-insensitively, nested tags included): the note's frontmatter tags first, then each line of tags sets the deck for the cards after it, and tags at the start of a card's first line apply to that card only (the plugin's question-specific tags). Cards before any such line take the note's first flashcard tag. With `foldersAsDecks` the deck is the note's folder (`''` shows as "Vault root"). A deck's counts include its sub-decks.
+- **Ignored:** fenced code, `$$` math, `%%` comments, HTML comments (the plugin's way to suspend a card), `::` and `==` inside inline code or a wikilink, and the plugin's `<!--SR:…-->` comments. The headings above a card are kept as its context ("Trivia › Capitals").
+- **Identity.** A card's id is `c` plus a 53-bit hash (cyrb53) of its kind and its normalized question (white space collapsed, SR comments dropped). A forward card has the same id written on one line or on several; a reverse card hashes its own question; a cloze hashes the paragraph's plain text with the deletion's text and occurrence (or its group number), so adding a deletion keeps the other deletions' ids. Nothing is written into the note, moving or renaming the note keeps every id, and the same card written in two notes is one card.
+- **Edited questions.** Editing a question makes a new id. Adoption keeps the history: a card without a record takes the record of a card that is gone from the same note when its `front` hint is at least 75 % similar (Levenshtein), and the card's next answer carries `from`, so the server moves the record (API.md §34.4). The records of cards in no note can be pruned from the statistics page.
+
+**Scheduling.** FSRS through ts-fsrs with the vault's settings (desired retention, maximum interval, learning and relearning steps, fuzz; short-term steps on). A card's FSRS card is its stored state when that covers its answers, else the replay of its answers in order (cached per record); a `reset` answer starts the card over as new. ts-fsrs seeds its fuzz with the review time and the card, so a replay on another device gives the same due date. The study day starts at `dayStartsAt` local time (Anki's 4 a.m.): a review card is due when it falls due before the next study day starts, a learning card when it is due within 20 minutes (learning ahead). New cards count against `newPerDay` and reviews against `reviewsPerDay`, across every device, from the day's answers.
+
+**Records on the device** (`store.ts`). The server's records are the `['flashcards', 'state']` query, and this device's answers not yet confirmed are laid over them, so the page never waits for the network. Answers and undos go through an **outbox** kept in `localStorage` (a few hundred bytes each). It sends them in order, consecutive answers in one request, and retries with backoff (2, 4, 8, 16, 30 s) after transient and storage failures, and at once when the event stream has caught up or the browser is back online; an operation the server refuses is dropped with a toast. Undoing an answer still in the outbox removes it there; one already sent is undone on the server. `flashcards.changed` patches the query. Note events (`file.*`, `entry.moved`, `folder.deleted`) refetch the source notes a second later, only while the page is open; parsed notes are cached by version.
+
+**The page** (`/x/flashcards`, one ribbon and drawer entry; `?view=review|stats|settings`, `&deck=`, `&note=`):
+
+- **Decks.** Today's count and **Study now** on top, then the deck tree with new, learning and due counts (blue, orange and green, as in Anki), capped by what today's limits leave. A row studies its deck. Without cards, the page shows the syntax.
+- **Review.** Built for the iPhone. The card fills the workspace below a 48 px bar (back, the deck, the remaining counts, undo, and a ⋯ menu with Edit in note, Skip for now and Reset progress) and a progress line. A tap on the card shows the answer; **Show answer**, then the four answer buttons (each with the interval it would schedule), sit at the bottom, 56 px tall, clear of the home indicator. A basic card shows the answer under the question; a cloze replaces its blank with the highlighted deletion. Cards render through the reading-view pipeline (§6.7), so links, tags, images and embeds work, and a link opens its note.
+- **The queue** has learning cards due now first, then reviews (most overdue first) with new cards (in note order) spread evenly among them; siblings are never shown back to back. A card answered *again* comes back in the session when due; when only such a card is left, the session waits for it, or shows it on request. Answers on other devices and edited notes reach the queue when the next card is picked; the card on screen never changes under the thumb.
+- **Keys:** Space or Enter show the answer, then answer Good; 1 to 4 answer Again, Hard, Good, Easy; U or Mod-Z undo; E edits; S skips; Escape ends the session.
+- **Statistics.** Today (answers, time, share of *again*), the day streak, retention over 30 days (review answers that were not *again*, young and mature apart at Anki's 21 days), the cards by stage, and two single-series bar charts: answers per day for 30 days, and cards due in the next 30 days.
+- **Settings.** The fields of API.md §34.3; only the changed fields are sent.
+- **Commands:** Open Flashcards, Review flashcards, Review flashcards in this note (all its due and new cards, without daily limits), Show flashcard statistics.
+
+### 6.35 Habits (ROADMAP item 35)
+
+The code is in `frontend/src/habits/`: `model.ts` (habits from notes, schedules), `progress.ts` (streaks, rates, calendars), `frontmatterEdit.ts` and `write.ts` (note edits), `actions.ts` (check-ins, new habits, changes), `useHabits.ts`, `register.ts`, and `ui/` (the page and the panel).
+
+**A habit** is a note in `Habits/` or tagged `#habit` (API.md §35 has the frontmatter). Its name is `title` or the note's name; its colour is `color`, else one of the charts' eight categorical hues picked from its path, so every device shows the same. Its daily-note property is `property`, else the name in lower case with dashes. A day is done when the note's `entries` list it or that day's daily note has the property set to `true`, `yes`, `done`, `x`, a check mark or a number above 0.
+
+**Schedules** (`schedule`): `daily` (the default), `weekdays`, `weekends`, a list of days (`mon, wed, fri`, also as a YAML list), or `N/week` (also "3 times a week"). Anything unreadable is daily.
+
+**Progress** (local days, `YYYY-MM-DD`):
+
+- **Streaks.** For a day schedule, the current streak counts done days back from today (from yesterday while today is still open); a scheduled day that was missed ends it once more than `maxGap` such days follow each other (Habit Tracker 21's gap tolerance), and days the schedule skips neither count nor break it, though a done day still counts. An N-a-week habit counts weeks (Monday to Sunday) that met the target; the current week counts once met.
+- **Rate.** The share of scheduled days done over the last 30 days (four full weeks, each capped at its target, for N a week), from the habit's start: its `created` date, else its first check-in.
+- **Calendar.** 53 weeks, Monday on top, the latest week on the right (a phone opens on it and scrolls back). For one habit a day is done (the habit's colour), missed (an outline), not scheduled (faint), or before the start. For all habits each day has one of five levels of one hue: the share of the habits due that day that were done. Days have no tap targets of their own: a tap or focus on a day shows it in a readout above the grid, with **Mark done** or **Mark not done** for one habit.
+
+**Writes** (`write.ts`, `frontmatterEdit.ts`). A check-in adds the day to `entries`, sorted, in block style as Obsidian writes lists; undoing it removes the day, and when a daily note checked the day its property becomes `false`. Only that property's lines change: the YAML is parsed with `yaml`'s Document API for the property's exact range, the lines are replaced (a missing property is appended, a note without frontmatter gets one), and every other byte, comment and quoting stays. Broken YAML is never rewritten (a toast says why). A note that has a session on this device (open in a view, or cached) is edited through it, so the editor, drafts and autosave stay in charge; a note in conflict there is left alone with a toast. Any other note is read, edited and saved with its version, and a `409 version-conflict` re-applies the edit to the newer text (up to four times): the edits are set operations, so re-applying is always right. Edits of one note run one after another. The page shows a check-in at once (the query is patched) and refetches once it is written.
+
+**The page** (`/x/habits`; `?day=`, `?habit=`, `?view=new|edit`), phone first:
+
+- **Today.** A row per habit, 68 px tall, with a 48 px round check button in the habit's colour (filled when done), the name, the schedule (or "2 of 3 this week"), the streak and the last seven days as dots. Habits due that day come first; archived habits are behind a link. Above, the last seven days as a strip of 56 px buttons with each day's count, to check in late. Below, all habits on one calendar.
+- **A habit.** Today's check button and status, edit and open-note buttons, tiles for the current and longest streak, the rate and the total, and its calendar.
+- **New and edit.** Name (the note is `Habits/<name>.md`; a title is written only when the name has characters a file name cannot hold), how often (segments, day toggles, or times a week), colour swatches, the daily-note property, the missed days a streak survives, and Archived. Only changed properties are written.
+
+**Check-ins from daily notes:** the property in the note itself (in source mode, or the properties editor of item 13 once built), and the **Habits** panel (`registerPanel`, right side; the bottom sheet on phones), which lists the habits for the day of the daily note in view (today for any other note) with check buttons. A `habittracker` code block, Habit Tracker 21's way to show a grid in a note, is not rendered yet: the reading view has no code-block renderer registry (item 3 adds code-block rendering on another branch).
+
+**Live sync.** Habits and check-ins are notes, so other devices' changes arrive as `file.*` and `entry.moved` events; the page's query is refetched half a second after a note event (not for attachments), only while a page or the panel is open.
 
 ---
 

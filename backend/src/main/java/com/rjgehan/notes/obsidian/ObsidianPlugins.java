@@ -78,7 +78,7 @@ final class ObsidianPlugins {
 			Map.entry("obsidian-style-settings", k("Style Settings", Support.UNSUPPORTED, "Themes and CSS snippets are not used.")),
 			Map.entry("obsidian-minimal-settings", k("Minimal Theme Settings", Support.UNSUPPORTED, "Themes and CSS snippets are not used.")),
 			Map.entry("obsidian-hider", k("Hider", Support.UNSUPPORTED, "Themes and CSS snippets are not used.")),
-			Map.entry("obsidian-spaced-repetition", k("Spaced Repetition", Support.PLANNED, "Flashcards are planned.", 34)),
+			Map.entry("obsidian-spaced-repetition", k("Spaced Repetition", Support.PARTIAL, "Cards in the plugin's syntax and its tag decks work on the Flashcards page, scheduled with FSRS; the plugin's <!--SR:...--> review dates are not imported, so cards start as new.", 34)),
 			Map.entry("obsidian-reminder-plugin", k("Reminder", Support.PLANNED, "Reminders are planned.", 9)),
 			Map.entry("obsidian-linter", k("Linter", Support.UNSUPPORTED, "Not offered.")),
 			Map.entry("obsidian-icon-folder", k("Iconize", Support.UNSUPPORTED, "Folder icons are not shown.")),
