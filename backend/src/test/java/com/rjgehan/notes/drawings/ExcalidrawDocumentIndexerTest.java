@@ -1,5 +1,6 @@
 package com.rjgehan.notes.drawings;
 
+import java.time.Duration;
 import java.util.List;
 
 import com.rjgehan.notes.index.DocumentIndexer;
@@ -12,6 +13,7 @@ import static com.rjgehan.notes.drawings.DrawingFixtures.PLUGIN_SECTIONS;
 import static com.rjgehan.notes.drawings.DrawingFixtures.element;
 import static com.rjgehan.notes.drawings.DrawingFixtures.excalidraw;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class ExcalidrawDocumentIndexerTest {
 
@@ -104,6 +106,19 @@ class ExcalidrawDocumentIndexerTest {
 		String file = PLUGIN_HEAD + "## Text Elements\nHello [[World]] ^Ab12Cd34\n\n%%\n# Drawing\n```json\n" + json
 				+ "```\n%%\n";
 		assertThat(blocks("A.excalidraw.md", file)).containsExactly("Only in [[Json]]", "[[Target]]");
+	}
+
+	@Test
+	void aCraftedFileOfUnclosedBlocksIsScannedInLinearTime() {
+		String crafted = PLUGIN_HEAD + "## Drawing\n```json\n".repeat(60_000);
+		assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+			assertThat(MarkdownDrawing.parse(crafted)).isNull();
+			assertThat(this.indexer.index("A.excalidraw.md", crafted)).isNull();
+		});
+		// The nearest closing fence after the last heading still closes it.
+		MarkdownDrawing closed = MarkdownDrawing.parse(crafted + "{\"elements\": []}\n```\n");
+		assertThat(closed).isNotNull();
+		assertThat(closed.json()).isEqualTo("{\"elements\": []}");
 	}
 
 	@Test

@@ -52,19 +52,21 @@ public record MarkdownDrawing(String json, Map<String, String> texts, Set<String
 		int heading = -1;
 		int close = -1;
 		boolean compressed = false;
-		// The last Drawing heading followed by a json block: the plugin writes it at the end.
+		// The last Drawing heading followed by a json block: the plugin writes it at the end. The walk back keeps the
+		// nearest closing fence, so that a crafted file of unclosed blocks is scanned in linear time.
+		int nearestClose = -1;
 		for (int i = lines.length - 2; i >= 0 && heading < 0; i--) {
-			Matcher fence = FENCE_OPEN.matcher(lines[i + 1]);
-			if (!DRAWING_HEADING.matcher(lines[i]).matches() || !fence.matches()) {
+			if (i + 2 < lines.length && FENCE_CLOSE.matcher(lines[i + 2]).matches()) {
+				nearestClose = i + 2;
+			}
+			if (nearestClose < 0 || !DRAWING_HEADING.matcher(lines[i]).matches()) {
 				continue;
 			}
-			for (int j = i + 2; j < lines.length; j++) {
-				if (FENCE_CLOSE.matcher(lines[j]).matches()) {
-					heading = i;
-					close = j;
-					compressed = "compressed-json".equals(fence.group(1));
-					break;
-				}
+			Matcher fence = FENCE_OPEN.matcher(lines[i + 1]);
+			if (fence.matches()) {
+				heading = i;
+				close = nearestClose;
+				compressed = "compressed-json".equals(fence.group(1));
 			}
 		}
 		if (heading < 0) {

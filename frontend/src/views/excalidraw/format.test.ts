@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { el, markdownDrawing, PLUGIN_HEAD, scene, text } from '../../test/drawings';
+import { el, lzBomb, markdownDrawing, PLUGIN_HEAD, scene, text } from '../../test/drawings';
 import {
   compressDrawing,
   decompressDrawing,
@@ -184,6 +184,34 @@ describe('.excalidraw.md (Obsidian Excalidraw)', () => {
     expect(parseDrawing('markdown', badCompression)).toMatchObject({ ok: false, reason: 'malformed' });
   });
 
+  it('finds the drawing block in linear time, also in a crafted file of unclosed fences', () => {
+    const crafted = '---\nexcalidraw-plugin: parsed\n---\n' + '## Drawing\n```json\n'.repeat(40_000);
+    const started = performance.now();
+    expect(markdownParts(crafted).drawing).toBeNull();
+    expect(parseDrawing('markdown', crafted)).toMatchObject({ ok: true });
+    expect(performance.now() - started).toBeLessThan(2000);
+    // The nearest closing fence after the last heading still closes it.
+    const closed = crafted + '```\n';
+    expect(markdownParts(closed).drawing).toMatchObject({ encoding: 'json', range: { from: closed.length - 4, to: closed.length - 4 } });
+  });
+
+  it('reads crafted sections and texts in linear time too', () => {
+    const spaces = ' '.repeat(100_000);
+    const crafted = [
+      markdownDrawing({ links: [['Ab12Cd34', `${spaces}[[x]]${spaces}`], ['Ef56Gh78', `a${spaces}b`]], scene: scene([]) }),
+      markdownDrawing({ texts: [['Ab12Cd34', '[['.repeat(30_000) + '[a](b'.repeat(30_000) + '[[a|'.repeat(30_000)]], scene: scene([text('Ab12Cd34', 'x', { rawText: 'y', link: '[[y]]' })]) }),
+      '---\n' + 'excalidraw-plugin? no\n'.repeat(100_000),
+    ];
+    const started = performance.now();
+    expect(parsed('markdown', crafted[0]).markdown!.links).toEqual([
+      { id: 'Ab12Cd34', link: '[[x]]' },
+      { id: 'Ef56Gh78', link: `a${spaces}b` },
+    ]);
+    expect(parsed('markdown', crafted[1]).scene.elements[0]).toMatchObject({ link: '[[y]]' });
+    expect(parseDrawing('markdown', crafted[2])).toMatchObject({ ok: false, reason: 'not-a-drawing' });
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
   it('parses text entries like the plugin, with multi-line texts', () => {
     expect(parseTextEntries('One ^aaaaaaaa\n\nTwo\nlines ^bbbbbbbb\n\nLast ^cccccccc')).toEqual([
       { id: 'aaaaaaaa', raw: 'One' },
@@ -285,6 +313,14 @@ describe('LZ-String blocks', () => {
     expect(decompressDrawing(block)).toBe(json);
     expect(decompressDrawing(block.replace(/\n/g, '\r\n'))).toBe(json);
     expect(decompressDrawing('')).toBeNull();
+  });
+
+  it('reports a block that would decompress past the bound as unreadable, without decompressing it', () => {
+    // About 13 KB of crafted codes that would expand to 18 million characters.
+    const huge = lzBomb(6000);
+    expect(decompressDrawing(huge)).toBeNull();
+    const file = `${PLUGIN_HEAD}%%\n## Drawing\n\`\`\`compressed-json\n${huge}\n\`\`\`\n%%`;
+    expect(parseDrawing('markdown', file)).toMatchObject({ ok: false, reason: 'malformed' });
   });
 });
 

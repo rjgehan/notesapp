@@ -8,8 +8,9 @@
 // drawing replaces only the drawing block, the text-elements and element-links sections and, for
 // images added here, appends to the embedded-files section; every other byte of the file stays as
 // it was.
-import { compressToBase64, decompressFromBase64 } from 'lz-string';
+import { compressToBase64 } from 'lz-string';
 import { parseWikiBody } from '../../features/syntax';
+import { decompressFromBase64 } from './lzString';
 
 export type DrawingFormat = 'excalidraw' | 'markdown';
 
@@ -190,10 +191,23 @@ export function compressDrawing(json: string): string {
   return chunks.join('\n\n');
 }
 
-/** The JSON of a compressed-json block (line breaks ignored), or null when it does not decompress. */
+/**
+ * Larger blocks are not decompressed: crafted input can expand quadratically, and a real drawing
+ * this size would be far past the text size limit as plain JSON (the server has the same bound).
+ */
+export const MAX_DRAWING_JSON = 16 * 1024 * 1024;
+
+/**
+ * The JSON of a compressed-json block (line breaks ignored), or null when it does not decompress
+ * or would be longer than MAX_DRAWING_JSON characters.
+ */
 export function decompressDrawing(data: string): string | null {
-  const json = decompressFromBase64(data.replace(/\s+/g, ''));
-  return json ? json : null;
+  try {
+    return decompressFromBase64(data, MAX_DRAWING_JSON) || null;
+  } catch {
+    // Out of memory or past the engine's longest string: unreadable, like any broken block.
+    return null;
+  }
 }
 
 // ---------- `.excalidraw.md` structure ----------
@@ -225,7 +239,7 @@ const TEXT_HEADING = /^#{1,2} Text Elements[ \t]*$/;
 const EMBEDDED_HEADING = /^#{1,2} Embedded [Ff]iles[ \t]*$/;
 const LINKS_HEADING = /^#{1,2} Element Links[ \t]*$/;
 /** An Element Links line: the plugin reads `^(.{8}):\s*(.*)$`. */
-const LINK_LINE = /^([^\s:]{8}):[ \t]*(.*?)[ \t]*$/;
+const LINK_LINE = /^([^\s:]{8}):/;
 const TEXT_SECTION_END = /^#{1,2} (Element Links|Embedded [Ff]iles|Drawing)[ \t]*$/;
 const COMMENT_LINE = /^%%[ \t]*$/;
 const ANY_HEADING = /^#{1,6} /;
@@ -265,7 +279,13 @@ function parseLinkEntries(body: string): LinkEntry[] {
   const entries: LinkEntry[] = [];
   for (const line of body.split('\n')) {
     const m = LINK_LINE.exec(line);
-    if (m && m[2] !== '') entries.push({ id: m[1], link: m[2] });
+    if (!m) continue;
+    // The value without the spaces and tabs around it, trimmed by hand (a pattern for it backtracks).
+    let from = m[0].length;
+    let to = line.length;
+    while (from < to && (line[from] === ' ' || line[from] === '\t')) from++;
+    while (to > from && (line[to - 1] === ' ' || line[to - 1] === '\t')) to--;
+    if (to > from) entries.push({ id: m[1], link: line.slice(from, to) });
   }
   return entries;
 }
@@ -284,19 +304,14 @@ export function markdownParts(text: string): MarkdownParts {
   const lines = linesOf(text);
   let drawingLine = -1;
   let drawing: MarkdownParts['drawing'] = null;
-  // The last `## Drawing` heading followed by a json block: the plugin writes it at the end.
+  // The last `## Drawing` heading followed by a json block: the plugin writes it at the end. The
+  // walk back remembers the nearest closing fence, so crafted input stays linear.
+  let close = -1;
   for (let i = lines.length - 2; i >= 0; i--) {
-    if (!DRAWING_HEADING.test(lines[i].text)) continue;
+    if (i + 2 < lines.length && FENCE_CLOSE.test(lines[i + 2].text)) close = i + 2;
+    if (close < 0 || !DRAWING_HEADING.test(lines[i].text)) continue;
     const fence = FENCE_OPEN.exec(lines[i + 1].text);
     if (!fence) continue;
-    let close = -1;
-    for (let j = i + 2; j < lines.length; j++) {
-      if (FENCE_CLOSE.test(lines[j].text)) {
-        close = j;
-        break;
-      }
-    }
-    if (close < 0) continue;
     drawingLine = i;
     drawing = { range: { from: lines[i + 2].from, to: lines[close].from }, encoding: fence[1] as 'json' | 'compressed-json' };
     break;
