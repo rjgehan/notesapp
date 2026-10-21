@@ -1,5 +1,6 @@
 import { HyperFormula } from 'hyperformula';
 import { describe, expect, it, vi } from 'vitest';
+import { shownCell } from './display';
 import { ENGINE_ID, Workbook, type WorkbookChange } from './engine';
 import { cellValue, parseSheet, serializeSheet, SHEET_ENGINE, type SheetFile } from './format';
 import { loadSheetEngine } from './loadEngine';
@@ -736,5 +737,52 @@ describe('moving cells (cut and paste)', () => {
     wb.moveCells({ sheet: 's1', range: { col: 0, row: 0, width: 1, height: 2 } }, { sheet: 's1', col: 2, row: 2 });
     expect(wb.file.sheets[0].charts[chart].range).toBe('C3:C4');
     expect(() => wb.moveCells({ sheet: 's1', range: { col: 2, row: 2, width: 1, height: 2 } }, { sheet: 's1', col: 0, row: 1048575 })).toThrow(/do not fit/);
+  });
+});
+
+describe('formats a formula’s result implies', () => {
+  const typed = (wb: Workbook, ref: string, f: string) => wb.setCells([{ sheet: 's1', ref, content: { f } }], { implyFormats: true });
+
+  it('gives dates, times and percentages from the engine’s types a format, as one undo step with the entry', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { v: 46312, fmt: 'm/d/yyyy' }, F1: { v: 0.1, fmt: '0%' }, P1: { v: 5, fmt: '$#,##0.00' } } }]);
+    typed(wb, 'C1', '=TODAY()');
+    typed(wb, 'D1', '=DATE(2026,12,25)');
+    typed(wb, 'E1', '=EDATE(A1,1)');
+    typed(wb, 'G1', '=NOW()');
+    typed(wb, 'H1', '=TIME(14,30,0)');
+    typed(wb, 'I1', '=5%');
+    const cells = wb.file.sheets[0].cells;
+    expect([cells.C1.fmt, cells.D1.fmt, cells.E1.fmt, cells.G1.fmt, cells.H1.fmt, cells.I1.fmt]).toEqual(['yyyy-mm-dd', 'yyyy-mm-dd', 'yyyy-mm-dd', 'yyyy-mm-dd h:mm', 'h:mm:ss AM/PM', '0.00%']);
+    expect(shownCell(wb.file.sheets[0], 3, 0).text).toBe('2026-12-25');
+    wb.undo();
+    expect(wb.file.sheets[0].cells.I1).toBeUndefined();
+  });
+
+  it('takes the format of the one cell plain arithmetic works on', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { v: 46312, fmt: 'm/d/yyyy' }, F1: { v: 0.1, fmt: '0%' }, P1: { v: 5, fmt: '$#,##0.00' }, N1: { v: 3 } } }]);
+    typed(wb, 'B1', '=A1+7');
+    typed(wb, 'G1', '=F1*2');
+    typed(wb, 'Q1', '=P1*1.2');
+    typed(wb, 'B2', '=A1*2');
+    typed(wb, 'B3', '=A1-A1');
+    typed(wb, 'B4', '=N1+1');
+    typed(wb, 'B5', '=YEAR(A1)');
+    const cells = wb.file.sheets[0].cells;
+    expect(cells.B1.fmt).toBe('m/d/yyyy');
+    expect(shownCell(wb.file.sheets[0], 1, 0).text).toBe('10/24/2026');
+    expect(cells.G1.fmt).toBe('0%');
+    expect(shownCell(wb.file.sheets[0], 6, 0).text).toBe('20%');
+    expect(cells.Q1.fmt).toBe('$#,##0.00');
+    // A date times two, a date minus a date, plain numbers and other functions stay Automatic.
+    expect([cells.B2.fmt, cells.B3.fmt, cells.B4.fmt, cells.B5.fmt]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it('leaves a cell that has a format, and edits without implyFormats, alone', () => {
+    const wb = workbook([{ name: 'S', cells: { A1: { v: 1, fmt: '0.0' } }, cols: { C: { fmt: '0.00' } } }]);
+    typed(wb, 'A1', '=TODAY()');
+    typed(wb, 'C1', '=TODAY()');
+    wb.setCells([{ sheet: 's1', ref: 'D1', content: { f: '=TODAY()' } }]);
+    const cells = wb.file.sheets[0].cells;
+    expect([cells.A1.fmt, cells.C1.fmt, cells.D1.fmt]).toEqual(['0.0', undefined, undefined]);
   });
 });

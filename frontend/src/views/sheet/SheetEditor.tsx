@@ -221,8 +221,8 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
 
   const select = (sel: SheetSelection, id = sheet.id) => setSelections((m) => new Map(m).set(id, sel));
 
-  const setCells = (edits: CellEdit[]) => {
-    if (edits.length > 0) run(() => workbook.setCells(edits));
+  const setCells = (edits: CellEdit[], opts: { implyFormats?: boolean } = {}) => {
+    if (edits.length > 0) run(() => workbook.setCells(edits, opts));
   };
 
   /** The text the formula bar edits for a cell: its formula, or its value as typed (dates as dates). */
@@ -235,8 +235,8 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   const commit = (target: EditTarget, text: string, move: Move) => {
     const s = sheetById(workbook.file, target.sheet);
     if (!s) return;
-    // Typed input brings the format it implies (`10%`) into a cell without one.
-    if (text !== editText(s, target)) run(() => workbook.setCells([typedEdit(s, target.col, target.row, text)]));
+    // Typed input brings the format it implies (`10%`, `=TODAY()`) into a cell without one.
+    if (text !== editText(s, target)) run(() => workbook.setCells([typedEdit(s, target.col, target.row, text)], { implyFormats: true }));
     if (move === 'none' || s.id !== sheet.id) return;
     const next = step(target, move);
     select(cellSelection(next.col, next.row));
@@ -562,7 +562,8 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
         lastClip = { ...clip, cut: undefined };
       }
       const { edits, range } = pasteEdits(s, sel.range, text, lastClip);
-      apply(edits);
+      // Text from elsewhere is typed input: its formulas imply formats as typed ones do.
+      apply(edits, { implyFormats: lastClip?.text !== text });
       choose({ active: { col: range.col, row: range.row }, range });
     };
     window.addEventListener('copy', onCopy);

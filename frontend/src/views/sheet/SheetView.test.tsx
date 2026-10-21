@@ -535,6 +535,14 @@ describe('number formats, charts, import and export (6b, 6c)', () => {
     expect(screen.getByTestId('cell-D0')).toHaveTextContent('12.5%');
     select(3, 0);
     expect(formulaInput().value).toBe('12.5%');
+    // A typed formula whose result is a date shows as one (and keeps showing its formula to edit).
+    select(0, 2); // A4
+    fireEvent.focus(formulaInput());
+    fireEvent.change(formulaInput(), { target: { value: '=DATE(2026,12,25)' } });
+    fireEvent.keyDown(formulaInput(), { key: 'Enter' });
+    expect(screen.getByTestId('cell-A2')).toHaveTextContent('2026-12-25');
+    select(0, 2);
+    expect(formulaInput().value).toBe('=DATE(2026,12,25)');
     // Whole columns take a column format, and their cells lose their own.
     const { CompactSelection } = await import('@glideapps/glide-data-grid');
     fireEvent.pointerDown(screen.getByTestId('grid'), { clientY: 500, pointerType: 'mouse' });

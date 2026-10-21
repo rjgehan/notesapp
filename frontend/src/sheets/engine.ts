@@ -11,6 +11,7 @@
 // This module is a lazy chunk (loadEngine.ts): HyperFormula is about 800 kB minified.
 import {
   CellType,
+  CellValueDetailedType,
   DetailedCellError,
   ExportedCellChange,
   HyperFormula,
@@ -21,6 +22,7 @@ import {
   type SimpleCellAddress,
 } from 'hyperformula';
 import { MAX_COLUMNS, MAX_ROWS, parseA1, toA1 } from './a1';
+import { effectiveFormat } from './display';
 import {
   emptySheet,
   isCellError,
@@ -32,6 +34,7 @@ import {
   sameName,
   serializeSheet,
   sheetById,
+  sheetByName,
   sheetNameProblem,
   type CachedValue,
   type ChartProps,
@@ -44,7 +47,8 @@ import {
   type SheetCell,
   type SheetFile,
 } from './format';
-import { moveReferences, parseRangeText, rangeText, type CellMove, type CellRange } from './refs';
+import { formatKind, isGeneral } from './numfmt';
+import { mapReferences, moveReferences, parseRangeText, rangeText, type CellMove, type CellRange, type FormulaRef } from './refs';
 
 /** The engine identity written to `engine`. A config change that alters results must change it too. */
 export const ENGINE_ID = `hyperformula@${HyperFormula.version}`;
@@ -215,6 +219,42 @@ function cacheStale(file: SheetFile, computed: SheetFile): boolean {
   return a.size !== b.size || [...a].some((k) => !b.has(k));
 }
 
+// ---------- formats a formula's result implies ----------
+
+/** The formats of the result types the engine tells apart, as Google Sheets shows them by default. */
+const TYPE_FORMATS: Partial<Record<string, string>> = {
+  [CellValueDetailedType.NUMBER_DATE]: 'yyyy-mm-dd',
+  [CellValueDetailedType.NUMBER_DATETIME]: 'yyyy-mm-dd h:mm',
+  [CellValueDetailedType.NUMBER_TIME]: 'h:mm:ss AM/PM',
+  [CellValueDetailedType.NUMBER_PERCENT]: '0.00%',
+  [CellValueDetailedType.NUMBER_CURRENCY]: '$#,##0.00',
+};
+
+/**
+ * For a formula of plain arithmetic on one cell (`=A1+7`, `=F1*2`), the format its result reads in:
+ * that cell's percent or currency format, or its date or time format when the formula only adds
+ * or subtracts (a date plus days is a date; a date times two is not).
+ */
+function referencedFormat(file: SheetFile, sheet: Sheet, formula: string): string | undefined {
+  // Strings and quoted sheet names aside, a parenthesis after a name is a function call.
+  const bare = formula.replace(/"(?:[^"]|"")*"/g, '""').replace(/'(?:[^']|'')*'/g, 'S');
+  if (/[A-Za-z_][A-Za-z0-9_.]*\s*\(/.test(bare)) return undefined;
+  const refs: FormulaRef[] = [];
+  mapReferences(formula, (r) => {
+    refs.push(r);
+    return { text: r.parts.join(':') };
+  });
+  if (refs.length !== 1 || refs[0].kind !== 'cell') return undefined;
+  const target = refs[0].sheet === null ? sheet : sheetByName(file, refs[0].sheet);
+  const at = parseA1(refs[0].parts[0].replace(/\$/g, '').toUpperCase());
+  if (!target || !at) return undefined;
+  const fmt = effectiveFormat(target, at.col, at.row);
+  const kind = formatKind(fmt);
+  if (kind === 'percent' || kind === 'currency') return fmt;
+  if ((kind === 'date' || kind === 'datetime' || kind === 'time') && !/[*/^]/.test(bare)) return fmt;
+  return undefined;
+}
+
 // ---------- the workbook ----------
 
 export interface WorkbookChange {
@@ -309,6 +349,19 @@ export class Workbook {
     return sheetById(this.model, sheetId)?.cells[ref];
   }
 
+  /**
+   * The number format a formula's result implies, or undefined: dates, times, percentages and
+   * amounts as the engine types them (`=TODAY()`, `=DATE(…)`, `=EDATE(…)`, `=5%`), or the format of
+   * the one cell plain arithmetic works on (`=A1+7` on a date, `=F1*2` on a percentage).
+   */
+  impliedFormat(sheetId: string, ref: string): string | undefined {
+    const sheet = sheetById(this.model, sheetId);
+    const cell = sheet?.cells[ref];
+    const at = this.address(sheetId, ref);
+    if (!sheet || cell?.f === undefined || typeof cell.c !== 'number' || !at) return undefined;
+    return TYPE_FORMATS[this.engine.getCellValueDetailedType(at)] ?? referencedFormat(this.model, sheet, cell.f);
+  }
+
   /** The engine's explanation of an error result (for a tooltip), or null. */
   errorMessage(sheetId: string, ref: string): string | null {
     const at = this.address(sheetId, ref);
@@ -333,8 +386,27 @@ export class Workbook {
     this.setCells([{ sheet: sheetId, ref, content }]);
   }
 
-  /** Several cells as one undo step (a paste, a fill, clearing a selection). */
-  setCells(edits: CellEdit[]): void {
+  /**
+   * Several cells as one undo step (a paste, a fill, clearing a selection). With `implyFormats`
+   * (typed input), a formula entered in a cell without a number format gives it the format its
+   * result implies (`impliedFormat`), as Excel and Google Sheets show `=TODAY()` as a date.
+   */
+  setCells(edits: CellEdit[], opts: { implyFormats?: boolean } = {}): void {
+    if (opts.implyFormats) {
+      this.transact(() => {
+        this.setCells(edits);
+        const formats: FormatEdit[] = [];
+        for (const e of edits) {
+          const sheet = sheetById(this.model, e.sheet);
+          const at = parseA1(e.ref);
+          if (e.content?.f === undefined || e.fmt !== undefined || !sheet || !at || !isGeneral(effectiveFormat(sheet, at.col, at.row))) continue;
+          const fmt = this.impliedFormat(e.sheet, e.ref);
+          if (fmt !== undefined) formats.push({ sheet: e.sheet, ref: e.ref, fmt });
+        }
+        this.setFormats(formats);
+      });
+      return;
+    }
     const patch: Patch = [];
     for (const { sheet: id, ref, content: next, fmt } of edits) {
       const sheet = this.requireSheet(id);
