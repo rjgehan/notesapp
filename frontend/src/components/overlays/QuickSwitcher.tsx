@@ -1,9 +1,11 @@
 // Quick switcher (DESIGN §6.13, Mod-O): notes, aliases and other files ranked with fuzzysort
 // (notes +0.05), recent files for an empty query, and a Create row when nothing matches exactly.
 // Phones show it as a full-screen sheet with a "Search in notes" row.
-import { FilePlus, FileText, Forward, Search } from 'lucide-react';
+import { FilePlus, FileText, Forward, Search, Star } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTree } from '../../api/hooks';
+import { flattenItems } from '../../features/bookmarks';
+import { useBookmarks } from '../../features/bookmarkStore';
 import { createNamedNote } from '../../features/fileOps';
 import { afterOpen } from '../../features/focus';
 import { activePath, openPath, openSearch } from '../../features/navigation';
@@ -14,7 +16,7 @@ import { viewFor } from '../../views/registry';
 import { useBreakpoint } from '../layout/useBreakpoint';
 import { Picker } from './Picker';
 
-function ItemRow({ item }: { item: SwitcherItem }) {
+function ItemRow({ item, starred }: { item: SwitcherItem; starred: boolean }) {
   const Icon = item.kind === 'create' ? FilePlus : item.kind === 'search' ? Search : item.kind === 'alias' ? Forward : item.entry ? viewFor(item.entry).icon : FileText;
   return (
     <>
@@ -23,6 +25,7 @@ function ItemRow({ item }: { item: SwitcherItem }) {
         <span className="picker-item-label">{item.label}</span>
         {item.detail && <span className="picker-item-detail">{item.detail}</span>}
       </span>
+      {starred && <Star size={13} className="picker-item-star" aria-label="Bookmarked" />}
       {item.kind === 'create' && <kbd className="picker-kbd">⇧↵</kbd>}
     </>
   );
@@ -33,6 +36,11 @@ export function QuickSwitcher() {
   const phone = useBreakpoint() === 'phone';
   const [query, setQuery] = useState('');
   const [recent] = useState(recentPaths);
+  const { items: bookmarks } = useBookmarks();
+  const starred = useMemo(
+    () => new Set(flattenItems(bookmarks).flatMap(({ item }) => (item.type === 'file' && !item.subpath && typeof item.path === 'string' ? [item.path.toLowerCase()] : []))),
+    [bookmarks],
+  );
   const items = useMemo(() => (tree ? switcherItems(tree, query, recent, phone) : []), [tree, query, recent, phone]);
   const close = () => useUi.getState().setOverlay(null);
 
@@ -67,7 +75,7 @@ export function QuickSwitcher() {
       onQuery={setQuery}
       items={items}
       itemKey={(i) => i.key}
-      renderItem={(i) => <ItemRow item={i} />}
+      renderItem={(i) => <ItemRow item={i} starred={(i.kind === 'note' || i.kind === 'file') && starred.has(i.path.toLowerCase())} />}
       onPick={pick}
       onClose={close}
       empty={query.trim() === '' ? 'No recently opened files.' : null}

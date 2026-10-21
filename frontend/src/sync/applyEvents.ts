@@ -119,6 +119,9 @@ export function applyEvent(t: SyncTarget, name: string, data: unknown): void {
     case 'settings.changed':
       invalidate(qc, queryKeys.settings());
       return;
+    case 'bookmarks.changed':
+      invalidate(qc, queryKeys.bookmarks());
+      return;
     case 'status.changed':
       invalidate(qc, queryKeys.status());
       return;

@@ -1,10 +1,12 @@
 // Full-text search (DESIGN §6.4, API.md §12.1), shared by the desktop panel (query in zustand,
 // never in the route) and the phone search page (`/search?q=`). Input is debounced by 200 ms.
-import { ArrowDownWideNarrow, FileText, Search, X } from 'lucide-react';
+import { ArrowDownWideNarrow, FileText, Search, Star, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { errorMessage } from '../../api/client';
 import { useSearch } from '../../api/hooks';
 import type { SearchHit } from '../../api/types';
+import { findSearchBookmarks } from '../../features/bookmarks';
+import { toggleSearchBookmark, useBookmarks } from '../../features/bookmarkStore';
 import { afterOpen, isKeyboardClick } from '../../features/focus';
 import { navigateTo } from '../../features/navigation';
 import { folderOf, noteRoute } from '../../features/paths';
@@ -76,6 +78,9 @@ export function SearchView({ query, onQuery, autoFocus }: Props) {
   const debounced = useDebounced(query);
   const search = useSearch(debounced.trim(), sort);
   const focusRequest = useUi((s) => s.searchFocus);
+  const { items: bookmarks } = useBookmarks();
+  const trimmed = query.trim();
+  const starred = trimmed !== '' && findSearchBookmarks(bookmarks, trimmed).length > 0;
 
   useLayoutEffect(() => {
     if (autoFocus) input.current?.focus();
@@ -119,6 +124,18 @@ export function SearchView({ query, onQuery, autoFocus }: Props) {
         <span className="search-count" aria-live="polite">
           {empty ? '' : search.isError ? '' : data ? `${data.total} ${data.total === 1 ? 'result' : 'results'}${data.total > data.results.length ? ` · showing ${data.results.length}` : ''}` : 'Searching…'}
         </span>
+        {trimmed !== '' && (
+          <button
+            type="button"
+            className={`icon-button search-star${starred ? ' is-on' : ''}`}
+            aria-pressed={starred}
+            aria-label={starred ? 'Remove the bookmark for this search' : 'Bookmark this search'}
+            title={starred ? 'Remove bookmark' : 'Bookmark this search'}
+            onClick={() => void toggleSearchBookmark(trimmed)}
+          >
+            <Star size={14} fill={starred ? 'currentColor' : 'none'} />
+          </button>
+        )}
         <label className="search-sort" title="Sort results">
           <ArrowDownWideNarrow size={14} aria-hidden />
           <select value={sort} onChange={(e) => setSort(e.target.value as 'relevance' | 'mtime')} aria-label="Sort results">

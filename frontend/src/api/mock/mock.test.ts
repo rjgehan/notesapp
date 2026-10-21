@@ -86,3 +86,20 @@ describe('MockVault version protocol (API.md §4)', () => {
     expect(v.readFile('Other.md').content).toBe('See [[Roadmap#Goals|the plan]] and [x](Roadmap.md).');
   });
 });
+
+describe('MockVault bookmarks (API.md §21)', () => {
+  it('follows the version protocol and re-keys bookmarks after a move and a restore elsewhere', () => {
+    const v = new MockVault(false);
+    v.createFile({ path: 'Plan.md', content: '# Plan' }, 'c1');
+    const empty = v.getBookmarks();
+    const saved = v.putBookmarks({ items: [{ type: 'file', ctime: 1, path: 'Plan.md', subpath: '#Plan' }], baseVersion: empty.version }, 'c1');
+    expect(saved.version).not.toBe(empty.version);
+    expect(problemCode(() => v.putBookmarks({ items: [], baseVersion: empty.version }, 'c2'))).toBe('version-conflict');
+    v.move({ from: 'Plan.md', to: 'Projects/Plan.md' }, 'c1');
+    expect(v.getBookmarks().items[0]).toMatchObject({ path: 'Projects/Plan.md', subpath: '#Plan' });
+    const entry = v.deleteFile('Projects/Plan.md', 'c1');
+    expect(v.getBookmarks().items[0].path).toBe('Projects/Plan.md');
+    v.restoreTrash(entry.id, { to: 'Archive/Plan.md' }, 'c1');
+    expect(v.getBookmarks().items[0].path).toBe('Archive/Plan.md');
+  });
+});

@@ -1,7 +1,10 @@
 // Every v1 view, panel and command, registered through the public extension points (DESIGN §6.8).
 import { openSearchPanel } from '@codemirror/search';
 import {
+  Bookmark,
+  BookmarkPlus,
   CalendarDays,
+  Clock,
   Command as CommandIcon,
   FileBraces,
   FileImage,
@@ -29,8 +32,11 @@ import SearchPanel from '../components/panels/SearchPanel';
 import { confirmDelete, promptNewFolder } from '../components/explorer/rowActions';
 import { activeEditor } from '../editor/activeEditor';
 import { insertWikilink } from '../editor/completion';
+import { headingsFromState } from '../editor/outline';
 import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, toggleItalic } from '../editor/editorCommands';
 import { pickAndInsertAttachments } from '../features/attachments';
+import { currentBookmarks, isFileBookmarked, promptNewGroup, toggleFileBookmark, toggleSearchBookmark } from '../features/bookmarkStore';
+import { findSearchBookmarks } from '../features/bookmarks';
 import { getCommand, setViewCommandSource } from '../features/commands';
 import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../features/daily';
 import { toastError } from '../features/errors';
@@ -178,7 +184,9 @@ export function registerBuiltins(): void {
   registerPanel({ id: 'files', side: 'left', title: 'Files', icon: Files, load: () => import('../components/panels/FilesPanel') });
   // Eager: Mod-Shift-F focuses its field inside the key press.
   registerPanel({ id: 'search', side: 'left', title: 'Search', icon: Search, component: SearchPanel, load: () => Promise.resolve({ default: SearchPanel }) });
+  registerPanel({ id: 'bookmarks', side: 'left', title: 'Bookmarks', icon: Bookmark, load: () => import('../components/panels/BookmarksPanel') });
   registerPanel({ id: 'tags', side: 'left', title: 'Tags', icon: Tags, load: () => import('../components/panels/TagsPanel') });
+  registerPanel({ id: 'recent', side: 'left', title: 'Recent files', icon: Clock, load: () => import('../components/panels/RecentPanel') });
   registerPanel({ id: 'backlinks', side: 'right', title: 'Backlinks', icon: Link2, load: () => import('../components/panels/BacklinksPanel') });
   registerPanel({ id: 'outline', side: 'right', title: 'Outline', icon: ListTree, load: () => import('../components/panels/OutlinePanel') });
   registerPanel({ id: 'history', side: 'right', title: 'History', icon: History, load: () => import('../components/panels/HistoryPanel') });
@@ -267,12 +275,51 @@ export function registerBuiltins(): void {
   registerCommand({ id: 'daily.next', name: 'Open next daily note', when: (c) => isDailyNote(c.activePath), run: (c) => openAdjacentDailyNote(c.activePath!, 1) });
   registerCommand({ id: 'templates.insert', name: 'Insert template', icon: LayoutTemplate, when: hasNote, run: () => useUi.getState().setOverlay('templates') });
 
+  // ---------- bookmarks (ROADMAP item 12) ----------
+  const bookmarked = (c: { activePath: string | null }) => c.activePath !== null && isFileBookmarked(currentBookmarks(), c.activePath);
+  registerCommand({ id: 'bookmarks.add', name: 'Bookmark current file', icon: BookmarkPlus, when: (c) => hasFile(c) && !bookmarked(c), run: (c) => toggleFileBookmark(c.activePath!) });
+  registerCommand({ id: 'bookmarks.remove', name: 'Remove bookmark for current file', icon: Bookmark, when: (c) => hasFile(c) && bookmarked(c), run: (c) => toggleFileBookmark(c.activePath!) });
+  registerCommand({
+    id: 'bookmarks.heading',
+    name: 'Bookmark heading at cursor',
+    icon: BookmarkPlus,
+    when: (c) => hasNote(c) && activeEditor() !== null,
+    run: (c) => {
+      const view = activeEditor();
+      if (!view || !c.activePath) return;
+      const line = view.state.doc.lineAt(view.state.selection.main.head).number - 1;
+      const heading = headingsFromState(view.state)
+        .filter((h) => h.line <= line)
+        .pop();
+      if (!heading || !heading.text) {
+        toast('Put the cursor in a section with a heading to bookmark it');
+        return;
+      }
+      const subpath = '#' + heading.text;
+      if (isFileBookmarked(currentBookmarks(), c.activePath, subpath)) {
+        toast(`“${heading.text}” is already bookmarked`);
+        return;
+      }
+      void toggleFileBookmark(c.activePath, subpath);
+    },
+  });
+  registerCommand({
+    id: 'bookmarks.search',
+    name: 'Bookmark current search',
+    icon: BookmarkPlus,
+    when: () => useUi.getState().searchQuery.trim() !== '' && findSearchBookmarks(currentBookmarks(), useUi.getState().searchQuery).length === 0,
+    run: () => toggleSearchBookmark(useUi.getState().searchQuery),
+  });
+  registerCommand({ id: 'bookmarks.newGroup', name: 'Create new bookmark group', run: () => promptNewGroup() });
+
   // ---------- layout ----------
   registerCommand({ id: 'view.toggleLeft', name: 'Toggle left sidebar', run: () => toggleSidebar('left') });
   registerCommand({ id: 'view.toggleRight', name: 'Toggle right sidebar', run: () => toggleSidebar('right') });
   registerCommand({ id: 'view.files', name: 'Show files', run: () => showPanel('left', 'files') });
   registerCommand({ id: 'view.search', name: 'Show search', run: () => showPanel('left', 'search') });
   registerCommand({ id: 'view.tags', name: 'Show tags', run: () => showPanel('left', 'tags') });
+  registerCommand({ id: 'view.bookmarks', name: 'Show bookmarks', icon: Bookmark, run: () => showPanel('left', 'bookmarks') });
+  registerCommand({ id: 'view.recent', name: 'Show recent files', icon: Clock, run: () => showPanel('left', 'recent') });
   registerCommand({ id: 'view.backlinks', name: 'Show backlinks', run: () => showPanel('right', 'backlinks') });
   registerCommand({ id: 'view.outline', name: 'Show outline', run: () => showPanel('right', 'outline') });
   registerCommand({ id: 'view.history', name: 'Show file history', run: () => showPanel('right', 'history') });

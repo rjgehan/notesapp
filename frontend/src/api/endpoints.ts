@@ -4,6 +4,8 @@ import { apiFetch, query } from './client';
 import type {
   AttachmentResult,
   BacklinksResponse,
+  BookmarksResponse,
+  BookmarksUpdateRequest,
   CommitResult,
   CreateFileRequest,
   FileEntry,
@@ -90,6 +92,8 @@ export interface Endpoints {
   restoreHistory(req: HistoryRestoreRequest): Promise<HistoryRestoreResult>;
   commitHistory(): Promise<CommitResult>;
   getTemplates(): Promise<TemplatesResponse>;
+  getBookmarks(): Promise<BookmarksResponse>;
+  putBookmarks(req: BookmarksUpdateRequest): Promise<BookmarksResponse>;
   /** Content-addressed raw URL (API.md §9.1). */
   rawUrl(entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>, opts?: { download?: boolean }): string;
   trashRawUrl(id: string): string;
@@ -141,6 +145,8 @@ export const httpEndpoints: Endpoints = {
   restoreHistory: (req) => apiFetch('/api/history/restore', { method: 'POST', json: req }),
   commitHistory: () => apiFetch('/api/history/commit', { method: 'POST' }),
   getTemplates: () => apiFetch('/api/templates'),
+  getBookmarks: () => apiFetch('/api/bookmarks'),
+  putBookmarks: (req) => apiFetch('/api/bookmarks', { method: 'PUT', json: req }),
   rawUrl: (entry, opts) =>
     '/api/files/raw?path=' +
     encodeURIComponent(entry.path) +

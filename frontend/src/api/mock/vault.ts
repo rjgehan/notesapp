@@ -1,6 +1,7 @@
 // In-memory vault behind the dev mock. It follows the server's rules closely enough that the UI
 // can be built and exercised without the backend: version protocol (API.md §4), name rules,
 // case policy, trash, link rewriting on move, backlinks, search, tags, history and events.
+import { flattenItems as flattenBookmarkItems, rekeyBookmarks } from '../../features/bookmarks';
 import { buildLinkIndex, createPath, linkText, linkTextRaw, resolve, type LinkIndex } from '../../features/links';
 import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, newPathError, pathSafetyError, rebasePath, stripMd } from '../../features/paths';
 import { splitWikiBody } from '../../features/syntax';
@@ -9,6 +10,9 @@ import type {
   AttachmentResult,
   BacklinkGroup,
   BacklinksResponse,
+  BookmarkItem,
+  BookmarksResponse,
+  BookmarksUpdateRequest,
   ChangeType,
   CommitResult,
   CreateFileRequest,
@@ -150,6 +154,8 @@ export class MockVault {
   private idempotency = new Map<string, unknown>();
   private settings: Settings = structuredClone(DEFAULT_SETTINGS);
   private settingsVersion = '';
+  private bookmarks: BookmarkItem[] = [];
+  private bookmarksVersion = blobId(encoder.encode(JSON.stringify([])));
   private readonly startedAt = Date.now();
 
   constructor(seed = true) {
@@ -325,6 +331,43 @@ export class MockVault {
     this.settingsVersion = blobId(encoder.encode(JSON.stringify(this.settings)));
     this.hub.publish('settings.changed', { version: this.settingsVersion, origin }, origin);
     return this.getSettings();
+  }
+
+  // ---------- bookmarks (API.md §21) ----------
+
+  getBookmarks(): BookmarksResponse {
+    return { version: this.bookmarksVersion, items: structuredClone(this.bookmarks) };
+  }
+
+  putBookmarks(req: BookmarksUpdateRequest, origin: string): BookmarksResponse {
+    const nextVersion = blobId(encoder.encode(JSON.stringify(req.items)));
+    if (nextVersion === this.bookmarksVersion) return this.getBookmarks();
+    if (req.baseVersion !== this.bookmarksVersion) {
+      fail('version-conflict', 'Bookmarks changed on the server', {
+        path: '.notesapp/bookmarks.json',
+        currentVersion: this.bookmarksVersion,
+        currentContent: JSON.stringify({ items: this.bookmarks }),
+        currentMtime: isoMs(Date.now()),
+        movedTo: null,
+      });
+    }
+    for (const { item } of flattenBookmarkItems(req.items)) {
+      if (typeof item.path === 'string' && pathSafetyError(item.path)) fail('bad-request', 'Invalid bookmarks', { errors: [{ field: 'items', message: 'invalid path' }] });
+    }
+    this.setBookmarks(req.items, origin);
+    return this.getBookmarks();
+  }
+
+  private setBookmarks(items: BookmarkItem[], origin: string | null): void {
+    this.bookmarks = structuredClone(items);
+    this.bookmarksVersion = blobId(encoder.encode(JSON.stringify(this.bookmarks)));
+    this.hub.publish('bookmarks.changed', { version: this.bookmarksVersion, origin }, origin);
+  }
+
+  /** Bookmarks follow a move or a restore elsewhere, as the server re-keys them (origin null: every client hears). */
+  private rekeyBookmarks(from: string, to: string, type: 'file' | 'folder'): void {
+    const next = rekeyBookmarks(this.bookmarks, from, to, type, (p) => this.files.has(p) || this.folders.has(p));
+    if (next) this.setBookmarks(next, null);
   }
 
   getStatus(): StatusResponse {
@@ -607,6 +650,7 @@ export class MockVault {
     this.publishFolders(createdFolders, origin);
     if (restored.length > 50) this.hub.publish('resync', { reason: 'bulk-change' }, origin, false);
     else for (const file of restored) this.hub.publish('file.created', { file, origin }, origin);
+    if (target !== original && !this.files.has(original) && !this.folders.has(original)) this.rekeyBookmarks(original, target, item.entry.type);
     this.hub.publish('trash.changed', {}, origin, false);
     const commitId = this.commit(
       `Restore ${target}`,
@@ -724,6 +768,7 @@ export class MockVault {
       update.version = file.version;
       this.hub.publish('file.changed', { file, origin }, origin);
     }
+    this.rekeyBookmarks(from, to, isFolder ? 'folder' : 'file');
     if (rewrites.length) {
       commitId = this.commit(
         `Update links after renaming ${from} → ${to} (${rewrites.length} notes)`,

@@ -269,6 +269,26 @@ export interface CommitResult { commitId: string | null }
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
 
+// ---------- bookmarks (§21) ----------
+/**
+ * One bookmark, in Obsidian's bookmarks.json format: `type` is 'file' (a note or any file; with `subpath`
+ * '#Heading' or '#^blockid' for part of a note), 'folder', 'search' or 'group'. Other types Obsidian writes
+ * ('url', 'graph') pass through unchanged. Fields that do not apply are absent rather than null, and fields this
+ * build does not know are kept.
+ */
+export interface BookmarkItem {
+  type: string;
+  ctime?: number;                 // when it was bookmarked, epoch milliseconds
+  title?: string;                 // a display name; groups show theirs
+  path?: VaultPath;               // file and folder
+  subpath?: string;               // file: '#Heading' or '#^blockid'
+  query?: string;                 // search
+  items?: BookmarkItem[];         // group
+  [field: string]: unknown;
+}
+export interface BookmarksResponse { version: Version; items: BookmarkItem[] }
+export interface BookmarksUpdateRequest { items: BookmarkItem[]; baseVersion: Version }
+
 // ---------- SSE (§16) ----------
 export interface HelloEvent {
   bootId: string;
@@ -294,6 +314,7 @@ export interface HistoryCommittedEvent {
   truncated: boolean;
 }
 export interface SettingsChangedEvent { version: Version; origin: string | null }
+export interface BookmarksChangedEvent { version: Version; origin: string | null }   // origin null: re-keyed by the server after a move or restore
 export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
 
@@ -309,12 +330,14 @@ export interface VaultEventMap {
   'trash.changed': TrashChangedEvent;
   'history.committed': HistoryCommittedEvent;
   'settings.changed': SettingsChangedEvent;
+  'bookmarks.changed': BookmarksChangedEvent;
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
-  'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
+  'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'bookmarks.changed', 'status.changed',
+  'resync',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).

@@ -1,10 +1,17 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+import { api } from '../api/endpoints';
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
+});
+
+// Components that show bookmark stars load the bookmarks; without a server they are empty (tests that
+// need some mock the endpoint themselves).
+beforeEach(() => {
+  if (!vi.isMockFunction(api.getBookmarks)) vi.spyOn(api, 'getBookmarks').mockResolvedValue({ version: 'b0', items: [] });
 });
 
 // jsdom lacks layout APIs that CodeMirror and the UI touch; give them inert implementations.

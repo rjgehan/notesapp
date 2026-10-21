@@ -17,6 +17,7 @@ export const queryKeys = {
   me: () => ['me'] as const,
   status: () => ['status'] as const,
   templates: () => ['templates'] as const,
+  bookmarks: () => ['bookmarks'] as const,
 };
 
 export const STALE = {
@@ -33,4 +34,5 @@ export const STALE = {
   me: Infinity,
   status: 10_000,
   templates: 60_000,
+  bookmarks: Infinity,
 } as const;

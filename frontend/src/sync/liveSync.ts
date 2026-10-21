@@ -5,6 +5,7 @@ import { api } from '../api/endpoints';
 import { currentSettings, refetchTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
 import { dispatchExtensionEvent, eventHandlerNames, onExtensionsChanged } from '../extensions';
+import { prefetchBookmarks } from '../features/bookmarkStore';
 import { announceOrphanDrafts } from '../features/draftRecovery';
 import { activePath, openPath } from '../features/navigation';
 import { rebasePath } from '../features/paths';
@@ -67,6 +68,8 @@ export async function startLiveSync(): Promise<void> {
     // Unreachable for now: hello will ask for a resync once the stream connects.
   }
   eventStream.start(eventId);
+  // Commands and menus tell what is bookmarked from the cache (DESIGN §6.23).
+  prefetchBookmarks();
   // Drafts of notes renamed or deleted while no tab was open can only be found against the tree.
   if (eventId !== null) void announceOrphanDrafts();
 }

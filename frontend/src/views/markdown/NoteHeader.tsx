@@ -4,6 +4,7 @@
 // buttons around a centred breadcrumb, as Obsidian's view header does.
 import { ArrowLeft, ArrowRight, BookOpen, Pencil } from 'lucide-react';
 import { runCommand } from '../../features/commands';
+import { BookmarkToggle } from '../../components/BookmarkToggle';
 import { SaveStatus } from '../../components/SaveStatus';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
 import { displayName, folderOf } from '../../features/paths';
@@ -64,6 +65,7 @@ export function NoteHeader({ path, snapshot, mode, modes, onToggleMode, editable
           </span>
           <span className="note-header-actions">
             {snapshot && <SaveStatus snapshot={snapshot} />}
+            <BookmarkToggle path={path} />
             {modes.length > 1 && breakpoint === 'desktop' && <ModeToggle mode={mode} onToggle={onToggleMode} />}
           </span>
         </div>

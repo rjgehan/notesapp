@@ -1,10 +1,11 @@
 // Phone and tablet top bar (DESIGN §6.16): ☰, the note title with the connection dot,
 // switcher/search, mode toggle and ⋯ (palette, panels, file actions, template, today, reload).
 // On tablets it also toggles the right sidebar overlay.
-import { CalendarDays, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
+import { CalendarDays, Command as CommandIcon, Ellipsis, Star, StarOff, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
+import { isFileBookmarked, toggleFileBookmark, useBookmarks } from '../../features/bookmarkStore';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
 import { setNoteMode, useNoteMode } from '../../features/noteMode';
 import { navigateOverOverlays, useOverlayHistory } from '../../features/overlayHistory';
@@ -26,6 +27,7 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
   const ref = useRef<HTMLDivElement>(null);
   const historyWarning = useHistoryWarning();
   const hasFile = useTree().data?.byPath.has(path ?? '') ?? false;
+  const starred = isFileBookmarked(useBookmarks().items, path ?? '');
   useOverlayHistory(true, onClose);
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
@@ -70,6 +72,7 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
       {note && item('Outline', <ListTree size={16} />, () => showPanel('right', 'outline'))}
       {hasFile && item('History', <History size={16} />, () => showPanel('right', 'history'))}
       {hasFile && <div className="menu-separator" role="separator" />}
+      {hasFile && path !== null && item(starred ? 'Remove bookmark' : 'Bookmark', starred ? <StarOff size={16} /> : <Star size={16} />, () => void toggleFileBookmark(path))}
       {hasFile && command('file.rename', 'Rename', <Pencil size={16} />)}
       {hasFile && command('file.move', 'Move to…', <FolderInput size={16} />)}
       {hasFile && command('file.delete', 'Delete', <Trash size={16} />)}
