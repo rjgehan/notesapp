@@ -875,6 +875,15 @@ Plugs into the view registry. `.canvas` is already a text kind.
 
 ### 33. Voice notes with transcription
 
+**Status:** built (wave 3). **Record voice note** (palette, and the microphone on the phone's editing toolbar) records with MediaRecorder (AAC in MP4 on the iPhone and where Chrome can, else Opus in WebM or Ogg), saves `Recording <date>.<ext>` as an attachment and embeds it at the cursor; it plays inline. Transcription is an optional sidecar, off by default: whisper-asr-webservice (faster-whisper, MIT) as the `whisper` service of `deploy/docker-compose.yml` (profile `transcription`) or the second CasaOS app `deploy/casaos-whisper-compose.yml`, enabled with `NOTES_TRANSCRIPTION_URL`; the transcript goes under the embed as a quote, so search finds it. Design in DESIGN §5.20 and §6.21, API in API.md §20, setup in DEPLOY.md *Voice notes* and CASAOS.md *Voice note transcription*. Deviations and additions:
+
+- **Two protocols.** Besides the sidecar's, any OpenAI-compatible `/v1/audio/transcriptions` server works (`NOTES_TRANSCRIPTION_API=openai`: whisper.cpp's server, speaches, LocalAI, or OpenAI itself with a key in a file under `/data/secrets/`, never in the vault or an environment variable).
+- **The client writes the transcript**, not the server: the place is an upload widget that follows edits made while recording and transcribing, so the server never edits a note behind the user's back and no conflict arises. The server keeps the last transcripts in memory, so a phone that slept through the answer retries for free.
+- **Transcribe recording on this line** (palette) transcribes older recordings, or ones made before the service existed; a failed transcription has a Retry.
+- **Per-device switch** for transcripts (Settings › This device and the recording panel).
+- **A WebM recording plays as audio**: `.webm` is a video kind, so its embed switches to an audio player once it shows no picture.
+- **The microphone is allowed for the app only** (`Permissions-Policy: microphone=(self)`), as planned.
+
 **One line:** record audio in the app on the iPhone (MediaRecorder) as an attachment, and optionally transcribe it with a local Whisper service on homeserver. The transcript is appended under the embed.
 
 | Value | Effort | Depends on |

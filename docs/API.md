@@ -169,6 +169,9 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `busy` | 503 | Busy, retry | A lock timed out (5 s) | Header `Retry-After: 1` |
 | `history-unavailable` | 503 | History unavailable | Git is disabled, the repo is unusable (detached `HEAD`, merge in progress, git-lfs), the startup import is still running, or a commit that must happen before an overwrite failed (§4) | `reason`: `"disabled"`, `"unusable: <detail>"`, `"importing"` or `"commit-failed"` |
 | `insufficient-storage` | 507 | Insufficient storage | An upload would leave less than 1 GiB free | `limit` (bytes that must stay free) |
+| `not-audio` | 415 | Not an audio or video file | A transcription of a file that is not `audio` or `video` (§20.2) | `path` |
+| `transcription-off` | 409 | Transcription is off | No transcription service is configured (§20) | |
+| `transcription-failed` | 503 | Transcription failed | The transcription service failed, could not be reached, took longer than its timeout, or was busy with other recordings for that long (§20.2). Never 502, which clients take for the proxy during a deploy | |
 
 ```ts
 export interface FieldError { field: string; message: string }   // e.g. {"field":"settings.files.newNoteFolder","message":"invalid path"}
@@ -1549,7 +1552,8 @@ export type ErrorCode =
   | 'already-exists' | 'case-collision' | 'type-mismatch' | 'version-conflict' | 'settings-read-only'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
-  | 'busy' | 'history-unavailable' | 'insufficient-storage';
+  | 'busy' | 'history-unavailable' | 'insufficient-storage'
+  | 'not-audio' | 'transcription-off' | 'transcription-failed';
 
 export interface FieldError { field: string; message: string }
 
@@ -1857,6 +1861,20 @@ export interface CommitResult { commitId: string | null }
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
 
+// ---------- voice notes (§20) ----------
+export interface TranscriptionStatus {
+  enabled: boolean;
+  service: string | null;   // "whisper-asr at http://notesapp-whisper:9000"; never credentials
+  language: string | null;  // the configured language; null = detected per recording
+  maxBytes: number;         // larger recordings are not sent
+}
+export interface TranscriptionResult {
+  path: VaultPath;
+  text: string;             // "" when no speech was recognized
+  language: string | null;
+  millis: number;           // the service's time; 0 for a transcript the server had kept
+}
+
 // ---------- SSE (§16) ----------
 export interface HelloEvent {
   bootId: string;
@@ -1948,6 +1966,8 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | POST | `/api/history/restore` | `HistoryRestoreRequest` | 200 `HistoryRestoreResult` | 14.4 |
 | POST | `/api/history/commit` | | 200 `CommitResult` | 14.5 |
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
+| GET | `/api/transcription` | | 200 `TranscriptionStatus` | 20.1 |
+| POST | `/api/transcriptions` | `TranscribeRequest` | 200 `TranscriptionResult` | 20.2 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -1977,9 +1997,61 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
+| `TranscriptionStatus`, `TranscriptionResult` | Same; the request is `TranscribeRequest(String path)` | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
 **Nullability.** Every TypeScript `T | null` is a `@Nullable` component that is always serialized, including when null. An optional request field (`?`) is a `@Nullable` component; the server applies the documented default.
+
+---
+
+## 20. Voice notes
+
+Recording happens in the browser; the recording is uploaded like any attachment (§9.3) and embedded in the note by the client (DESIGN §6.21). Transcription (ROADMAP item 33) is optional: the server forwards a recording to the speech-to-text service it is configured with (`notes.transcription.*`, DESIGN §5.20) and returns the text, which the client adds to the note under the recording's embed. The server writes nothing and keeps no audio or text beyond a small in-memory cache.
+
+### 20.1 `GET /api/transcription`
+
+Whether transcription is available. Side-effect free.
+
+```json
+{ "enabled": true, "service": "whisper-asr at http://notesapp-whisper:9000", "language": null, "maxBytes": 26214400 }
+```
+
+| Field | Meaning |
+|---|---|
+| `enabled` | False while `notes.transcription.url` (`NOTES_TRANSCRIPTION_URL`) is empty, the default |
+| `service` | The protocol and the service's scheme, host and port; never credentials, a path or a query. `null` when off |
+| `language` | The configured language (`NOTES_TRANSCRIPTION_LANGUAGE`); `null` when the service detects it per recording |
+| `maxBytes` | Recordings larger than this are not sent (`notes.transcription.max-size`, 25 MiB) |
+
+### 20.2 `POST /api/transcriptions`
+
+Transcribes a recording in the vault. The request can take minutes (the service's time, up to `notes.transcription.timeout`, 10 minutes, plus waiting for other recordings: one is transcribed at a time). It needs `X-Client-Id` like every non-GET request (§2); it changes nothing, so it takes no `Idempotency-Key`.
+
+```json
+{ "path": "Attachments/Recording 20261021143005.m4a" }
+```
+
+`200 TranscriptionResult`:
+
+```json
+{ "path": "Attachments/Recording 20261021143005.m4a", "text": "Call the plumber about the leak.", "language": "en", "millis": 4210 }
+```
+
+- `text` is trimmed; `""` when no speech was recognized.
+- `language` is the service's detected (or the configured) language, when it reports one.
+- A second request for the same version of a file (same path, size and mtime) while the first runs waits for it; a later one is answered from the server's memory of the last 32 transcripts with `millis: 0`. A changed file is transcribed again.
+- The service gets the bytes as `recording.<ext>`, never the vault's file name.
+
+| Errors |
+|---|
+| `400 bad-request` (missing or blank `path`), `400 invalid-path`, `403 reserved-path` |
+| `404 not-found` |
+| `409 transcription-off` |
+| `413 too-large` (`limit`: `maxBytes`) |
+| `415 not-audio` (`path`): only `audio` and `video` kinds (DESIGN §4.2) |
+| `503 transcription-failed`: `detail` says why, e.g. `The transcription service failed: cannot connect to http://notesapp-whisper:9000`, `… the service answered HTTP 500 (Model base could not be loaded)` or `… no answer within 600 s` |
+
+No events: the client's edit of the note is an ordinary save (§8.3).

@@ -204,7 +204,7 @@ NotesApp/                              (monorepo; branch main)
 | `.obsidian/` | Obsidian desktop config, if the user ever opens the vault there. Never touched. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
-**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties.
+**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), an optional transcription API key (item 33, §5.20), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties.
 
 ### 4.2 File kinds
 
@@ -1115,7 +1115,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | `X-Frame-Options` | `DENY` |
 | `Cross-Origin-Opener-Policy` | `same-origin` |
 | `Cross-Origin-Resource-Policy` | `same-origin` |
-| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` |
+| `Permissions-Policy` | `camera=(), microphone=(self), geolocation=(), payment=()`. The microphone is the app's own, for voice notes (ROADMAP item 33, §6.21); no frame it shows gets it |
 | `Cache-Control` | `no-store` for every `/api/**` response, except the raw endpoints (item 6 sets their own) and `/api/events` (`no-cache, no-transform`). Note text then never persists in the disk cache of `mac` or `beach`, and back/forward navigation never shows stale JSON. |
 | `X-Notes-Build` | The running `buildSha`. The client compares it with the build it loaded (§6.18). |
 
@@ -1184,6 +1184,7 @@ public record NotesProperties(
     @DefaultValue TailscaleWatchdog tailscaleWatchdog,
     @DefaultValue Mirror mirror /* ROADMAP item 2, §5.8 "Mirror" */,
     @DefaultValue Alerts alerts /* ROADMAP item 38, §5.18.1 */, @DefaultValue Backup backup /* the status page, §7.10 */,
+    @DefaultValue Transcription transcription /* voice notes, ROADMAP item 33, §5.20 */,
     @DefaultValue("/data/secrets") Path secretsDir /* NOTES_SECRETS_DIR: ntfy.json and other secrets the app holds (§4.1) */,
     @DefaultValue({"md","markdown","txt","json","canvas","excalidraw","sheet","tasks","csv","tsv","yaml","yml"}) List<String> textExtensions,
     @DefaultValue("true") boolean welcomeNote,
@@ -1204,6 +1205,12 @@ public record NotesProperties(
                        @DefaultValue("10") int maxPerHour) {}
   public record Backup(@DefaultValue("/backup-state/status.json") Path statusFile /* mounted read-only (§7.2) */,
                        @DefaultValue("36h") Duration staleAfter) {}
+  public record Transcription(@DefaultValue("") String url /* NOTES_TRANSCRIPTION_URL; empty = off */,
+                              @DefaultValue("whisper-asr") TranscriptionApi api /* or openai */,
+                              @DefaultValue("whisper-1") String model /* openai only */,
+                              @DefaultValue("") String language /* empty = detected */,
+                              @DefaultValue("") String apiKeyFile /* openai only; a file outside the vault */,
+                              @DefaultValue("10m") Duration timeout, @DefaultValue("25MB") DataSize maxSize) {}
   public record Watcher(@DefaultValue("true") boolean enabled,
                         @DefaultValue("400ms") Duration debounce,
                         @DefaultValue("5m") Duration rescanInterval) {}
@@ -1369,6 +1376,30 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
 
+### 5.20 Transcription (ROADMAP item 33)
+
+Voice notes are recorded in the browser and saved as attachments (§6.21); the server's only part is the optional transcription, `POST /api/transcriptions` (API.md §20), in the `transcribe` package. It is **off by default**: nothing is configured, and nothing runs, until `notes.transcription.url` (`NOTES_TRANSCRIPTION_URL`) names a speech-to-text service. DEPLOY.md *Voice notes* and CASAOS.md *Voice note transcription* set up the sidecar.
+
+**The service** is a separate container, never part of the image: [whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice) (MIT; faster-whisper on the CPU, ffmpeg for any input format) as the optional `whisper` service of `deploy/docker-compose.yml` (profile `transcription`) and the second CasaOS app `deploy/casaos-whisper-compose.yml` (which joins NotesApp's network). Neither publishes a port: only the app reaches it, from the Tailscale container's network namespace, by its service or container name. It keeps no audio. A different engine works through the second protocol.
+
+**`HttpTranscriptionEngine`** (the `TranscriptionEngine` bean; tests replace it) sends the file as `multipart/form-data`, streamed from disk, named `recording.<ext>` (the service needs the format, not the vault's name), over HTTP/1.1, with no redirects followed:
+
+| `notes.transcription.api` | Request | Answer |
+|---|---|---|
+| `whisper-asr` (default) | `POST <url>/asr?task=transcribe&output=json&encode=true&vad_filter=true[&language=…]`, the file in `audio_file` | `{"text", "language", "segments"}` |
+| `openai` | `POST <url>/v1/audio/transcriptions` (the URL is used as is when it already ends in `/audio/transcriptions`) with `model`, `response_format=json`, `[language]` and `file`; `Authorization: Bearer <key>` when `api-key-file` names a file | `{"text"}` |
+
+The `openai` protocol covers whisper.cpp's `whisper-server` (`--convert --inference-path /v1/audio/transcriptions`), speaches, LocalAI and OpenAI's own API. A key is read from its file (in `/data/secrets/`, outside the vault, §4.1) before every request, so it can be rotated without a restart, and never appears in logs, the status or errors. `vad_filter` drops silence before decoding, where Whisper would otherwise invent text. A non-2xx answer becomes an error naming the status and a one-line excerpt of the service's message (FastAPI's `detail`, OpenAI's `error.message`).
+
+**`TranscriptionService`**:
+
+- **Checks.** The path is opened like a raw read (`FileService.openRaw`: path rules, reserved paths, symlinks, `404`); only `audio` and `video` kinds (§4.2) are sent (`415 not-audio`), up to `max-size`, 25 MiB by default, about 50 minutes at the app's 64 kbit/s (`413 too-large`).
+- **One at a time.** The service is a CPU on the same small server, so a fair semaphore lets one recording through; others wait up to the timeout.
+- **Retries are cheap.** A request for the version (path, size, mtime) of a file that is being transcribed joins that run; the last 32 transcripts stay in memory, so the phone retrying after it slept through the answer gets the text at once (`millis: 0`). A changed file is transcribed again; failures are not kept. Nothing is stored on disk: the client puts the text into the note (§6.21), which makes it searchable like anything typed, versioned and synced.
+- **Errors** are `503 transcription-failed` with the reason (`cannot connect to http://whisper:9000`, `no answer within 600 s`, the service's own message), and `409 transcription-off` without a URL. Never `502` or `503 busy`: clients take those for the proxy during a deploy (API.md §3) and would show the app as offline. A failure is logged as `TRANSCRIBE_FAILED` (not an app-error alert marker, §5.18.1: the user sees it at once); a success as `TRANSCRIBE <path> <bytes> in <ms>`, never the text.
+
+`GET /api/transcription` reports `enabled`, the service (protocol, scheme, host and port only), the configured language and `maxBytes`; the client shows it in Settings › This device and uses it to decide whether a new recording is transcribed.
+
 ---
 
 ## 6. Frontend design
@@ -1477,6 +1508,8 @@ frontend/src/
 │   ├── fuzzy.ts              fuzzysort wrappers
 │   ├── recent.ts             MRU list (localStorage)
 │   ├── mirror.ts, largeFiles.ts  the mirror's warning, summary and "push now"; the large-file threshold (§6.11, §6.18)
+│   ├── voice/                voice notes (§6.21): recorder.ts (MediaRecorder, formats, level, wake lock), voiceNotes.ts
+│   │                         (the panel's state, saving, transcripts)
 │   └── paths.ts              join, folderOf, basename, extension, encodeRoutePath, decodeRoutePath
 ├── components/
 │   ├── layout/               AppShell (hosts the app-level file input), TopBar, Ribbon, LeftSidebar, RightSidebar, StatusBar,
@@ -1665,7 +1698,7 @@ The pipeline is `render/render.ts` from the research, verified:
    | Embed target | Rendering |
    |---|---|
    | image | `<img src="/api/files/raw?path=…&v=<size>-<mtimeMillis>" loading="lazy">`, built from the tree entry, so the URL is content-addressed and the server marks it immutable (§5.14). `\|W` or `\|WxH` sets the size; otherwise the box reserves space (a minimum height, then the image's `aspect-ratio` once known) so later images never make the page jump. Remote `https:` images become click-to-load placeholders when the per-device `loadRemoteImages` preference is off. |
-   | audio or video | `<audio controls>` / `<video controls playsinline>` |
+   | audio or video | `<audio controls>` / `<video controls playsinline>`; a video file without a picture (a voice note recorded as WebM, §6.21) becomes an `<audio>` once its metadata says so |
    | pdf | The PDF view's `loadEmbed` (PDF.js, §6.8.2): the pages in a box of the note at page width, scrolled to `#page=N`; the height from `#height=` (or a `WxH` size), otherwise 600 px; a header names the file and opens it at the page shown. v1 used an `<iframe>`, which iOS shows as the first page only. |
    | note (`![[Note]]`, `![[Note#Heading]]`) | Transclusion box showing the rendered note or just that heading's section, **one level deep**. Nested embeds render as links. A cycle guard prevents loops. Header links to the note. |
    | `![[Note#^block]]` | A link (block transclusion is roadmap item 20) |
@@ -2118,7 +2151,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 - **MobileToolbar.** The last grid row, so it sits right above the keyboard, on `(pointer: coarse)`.
   - It is **always mounted**; a CSS class shows it from a debounced (150 ms) "editor focused or toolbar in use" state. Unmounting it on blur would remove a button before its click is delivered.
   - Every button has `tabIndex={-1}` and `onPointerDown={e => e.preventDefault()}`, so tapping it never moves focus: the editor keeps focus, the keyboard stays open, and the button dispatches straight to the `EditorView`.
-  - Buttons: `[[ ]]`, `#`, checkbox, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, and hide keyboard (`blur`).
+  - Buttons: `[[ ]]`, `#`, checkbox, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, **Record voice note** (§6.21; it puts the keyboard away for the recording panel), and hide keyboard (`blur`).
   - The image button triggers the **app-level** hidden `<input type=file accept="image/*" multiple>` hosted by `AppShell`. The selection to insert at is remembered before the picker opens, because opening the picker blurs the editor; an input inside the toolbar would be lost with its `change` event.
 - **Typography and targets.** Editor and input font size is at least **16 px**, so iOS does not zoom on focus. Every tap target is at least **44×44 px**. `touch-action: manipulation` removes the tap delay.
 - **No hover-only UI.** Tree rows open their menu with long-press or `⋯` (§6.15).
@@ -2219,6 +2252,26 @@ On recovery, any `resync` is processed, the replay countdown reaches `caughtUp` 
 - `settings-read-only`: "Settings were written by a newer version of NotesApp and are read-only here."
 
 Any other error shows the problem's `detail`. 5xx problem errors show a toast with the `incidentId` for log lookup. Transient failures (§6.9) never show an error toast; they show the Offline state. An unexpected render error is caught by an `ErrorBoundary` per view, which offers **Reload view**.
+
+### 6.21 Voice notes (ROADMAP item 33)
+
+Record in the app, save the audio as an attachment, embed it where the cursor was, and, when the server has a transcription service (§5.20), put the transcript under the embed. The code is in `features/voice/` (`recorder.ts`, `voiceNotes.ts`) and `components/overlays/VoiceRecorderPanel.tsx`.
+
+**Starting.** **Record voice note** (command palette, `when` a Markdown note is open) and the microphone of the phone's editing toolbar (§6.16, which then puts the keyboard away so the panel has the room) call `startVoiceNote(session)` inside the tap: iOS lets the level meter's `AudioContext` run only when it is created in the gesture. A note can have one recording at a time. Without `MediaRecorder` or `getUserMedia` (an insecure origin), the toast says why; a refused microphone says where to allow it.
+
+**Recording** (`VoiceRecorder`). `getUserMedia({audio})` with echo cancellation, noise suppression and automatic gain; `MediaRecorder` at 64 kbit/s with a 1-second timeslice, so a recording cut short by the phone keeps what it had. The format is the first the browser supports of AAC in MP4 (iOS Safari, and Chrome where it can: plays on every device), Opus in WebM, Opus in Ogg, then the browser's default. The file is `Recording YYYYMMDDHHmmss.<ext>` in local time, as Obsidian's audio recorder names it: `.m4a` for MP4, `.webm`, `.ogg`. A screen wake lock keeps the phone awake while recording (where the browser has the API). When the microphone goes away by itself (another app takes it, the phone locks), the recording ends and what was recorded is saved, with a toast.
+
+**The place.** At the start, an upload widget (§6.6 #10, verb "Recording") marks the cursor (after a selection, which stays). It is a position in the editor state, never text, so it follows every edit made while recording, on this device or another; a note never shown in an editor during this page load gets the recording at its end. The note's session is held until the recording and its transcript are in, so autosave, drafts and conflicts work whatever the user opens meanwhile, and a recording in progress counts as unsaved work (the `beforeunload` prompt).
+
+**The panel** floats above the workspace and the phone's toolbar: the time (pauses excluded), a level meter, *Into <note>*, a **Transcribe** checkbox (shown when the server can; per device, also in Settings › This device), and **Discard** (asks first after 10 seconds), **Pause**/**Resume** and **Done**. Toasts move above it.
+
+**Saving.** **Done** stops the recorder; the mark's position becomes two widgets, "Uploading Recording …" and, when transcribing, "Transcribing Recording …". The audio goes up as an attachment (`POST /api/attachments`, source = the note); its `markdown` replaces the first widget on a line of its own, and the second widget moves after it (the batch order of §6.6 #10). A failed upload keeps the recording in memory: the toast's **Retry** sends it again, at the cursor.
+
+**Transcribing.** `POST /api/transcriptions` with the attachment's path. The text replaces its widget as a quote, `> ` on every line, starting on a new line and ending a block: a blank line follows unless the next line already is one (Markdown would otherwise draw the next line into the quote). The quote is ordinary note text, so search finds the recording by its words, the outline and history see it, and Obsidian shows it too. No speech recognized: a toast, nothing inserted. A failure (`503 transcription-failed`, the server unreachable) shows the server's reason with **Retry**, which finds the recording's embed in the note again wherever the text moved it. **Transcribe recording on this line** (palette) transcribes any audio or video embed on the cursor's line, for recordings made before the service existed or synced from elsewhere.
+
+**Playback** is the reading view's (§6.7): `<audio controls>` for `.m4a` and `.ogg`; a `.webm` (a `video` kind, §4.2) starts as `<video>` and becomes `<audio>` once its metadata shows no picture, in embeds and in the media view.
+
+**Server side** is §5.20; the `Permissions-Policy` allows the microphone for the app's own origin (§5.14).
 
 ---
 
@@ -2797,6 +2850,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 14. Importing a vault whose `.git` has a `post-commit` hook that writes a marker file: after several commits, the marker does not exist.
 15. A save is not delayed by more than a few ms while a slow upload (a body trickled over 5 s) is in progress.
 16. `/api/status` reports `git.largeFiles` and `mirror` (off by default, `POST /api/mirror/push` then gives `400`); a large upload is counted and its history says `excluded`; with a local bare repository as the mirror, `POST /api/mirror/push` answers `202` and the mirror receives `HEAD`; the push needs `X-Client-Id` like every mutation.
+17. Voice-note transcription (ROADMAP item 33, the engine replaced by a fake through `@TestBean`): `GET /api/transcription` without the URL's credentials; recordings uploaded as attachments are transcribed, a retry gets the kept transcript (`millis` 0), a changed file is sent again; `.webm` counts as audio; notes (`415 not-audio`), missing files, traversal, reserved paths, a blank path and recordings over `max-size` (`413`) are never sent; a failing or unreachable service is `503 transcription-failed` with the reason and nothing is kept; a second request for a running recording joins it; the client id is required. Off by default (`TranscriptionOffIntegrationTest`: `409 transcription-off`). `HttpTranscriptionEngineTest` drives both protocols against an in-process HTTP server: the exact multipart body (`recording.m4a`, streamed bytes), the query or fields, the key read from its file for every request, base URLs with or without their path, the status's URL without credentials, error excerpts, non-JSON answers, and the timeout. `SecurityIntegrationTest`: `microphone=(self)`, `'wasm-unsafe-eval'`, and the PDF.js worker and `.wasm` served with their types (item 32).
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
@@ -2814,6 +2868,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - Mirror and large files (ROADMAP items 2 and 23): `features/mirror.ts` (the warning texts for `failing` and `diverged`, none while `ready` or `disabled`, the About summary, the push command shown only with a configured mirror, its toasts); `features/largeFiles.ts` (the threshold format, strictly-larger rule, policy off); `HistoryPanel` (the note replaces "No history" for an excluded file and older versions are still listed); `StatusBar` (the warning button with the error as its tooltip, and a click that calls `POST /api/mirror/push`).
 - Drawings (item 5, `views/excalidraw/*.test.ts*`): both file formats with byte-identical round trips (Text Elements, Element Links, Embedded Files), the three-way merge (a rename's rewritten link survives an edit of the same element), the controller against a fake Excalidraw (edits, remote text, images, ids), the static images of the plugin's extras, the image sources, the SVG export (fonts used and inlined, dark-theme filters) with a mocked `exportToSvg`, and the embed (sizes, theme, live updates, released URLs, empty and unreadable drawings). `render/embeds.test.tsx`: `|W`/`|WxH` reach a view's embed, and a note another view shows embeds at any depth.
 - PDFs (item 32, `views/pdf/*.test.ts*`, with a fake PDF.js in `test/pdf.ts`): the controller (the initial and remembered page, page and scale state, find through the event bus with its counts, pinch and Ctrl+wheel steps of at least one percent around the fingers, no pinch in embeds, the password prompt, error messages, unmount destroying the document and a late document never reaching a new viewer, presets refitted on resize); subpath parsing (encoded route hashes too); the pinch tracker, wheel factors and the scale accumulator's limits; remembered pages (the 100-file limit, garbage ignored) and dark pages; the thumbnail queue (two at a time, newest waiting first, cancel, URLs revoked); the view (link page, typed page, zoom menu, find bar with Escape, thumbnails, dark pages per theme, errors, PDF.js failing to load) and its commands (copy page link in the link style); the embed (page, heights, lazy loading near the screen, errors, dark theme). `render/embeds.test.tsx`: PDF embeds go through the view's `loadEmbed` with their subpath, never an iframe.
+- Voice notes (item 33, `features/voice/*.test.ts`, `VoiceRecorderPanel.test.tsx`): the recorder against a fake `MediaRecorder` (format preference, `.m4a`/`.webm`/`.ogg` names, the 1-second timeslice, pauses excluded from the time, audio of the recorded type, cancel and a microphone granted after cancelling released, a microphone that goes away keeping the audio, the level meter, refusals); the embed and transcript insertions (a quote ending its block); finding an audio embed on the cursor's line; the whole flow with a fake recorder (a mark that follows edits, the upload and transcript widgets in order, retries that find the embed again, empty recordings, one recording at a time, transcripts off per device); the panel's controls and the discard confirmation; the toolbar's microphone; Settings › This device; a picture-less WebM played as audio in embeds and the media view.
 
 ### 8.3 Browser smoke checklist
 
@@ -2847,6 +2902,7 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 26. Large files (ROADMAP item 23): drop a file over 25 MB onto a folder: it opens and downloads, its History panel shows the note, Settings › About counts it, `git -C /srv/notes/data/vault check-ignore -v <path>` names the `info/exclude` line, and replacing it with another upload puts the old one in the trash.
 27. Drawings (item 5): `![[Diagram.excalidraw]]`, `![[Diagram.excalidraw|300]]` and an Obsidian `.excalidraw.md` render in the reading view in both themes (photos keep their colours in the dark theme) and at phone width; a tap opens the editor; an edit on the other device updates the embed. An Obsidian drawing that embeds a note, a LaTeX formula and another drawing shows them as static images. Search finds a drawing's text; its `[[links]]` show in the target's backlinks; the browser console shows no CSP violations.
 28. PDFs (item 32): a 300-page PDF opens on the iPhone at once and scrolls smoothly to the end; pinch zooms around the fingers and the pages sharpen when the fingers rest, without Safari zooming the page; text can be selected and copied; find shows "n of m" and the keyboard opens with the tap; thumbnails jump to their page; `[[file.pdf#page=5]]` opens page 5; `![[file.pdf#page=3]]` shows page 3 in the note; a scanned PDF (JPEG 2000 or JBIG2) renders; dark pages invert in the dark theme and the moon turns them off; the console shows no CSP violations.
+29. Voice notes (item 33): on the iPhone, the toolbar's microphone asks for the microphone once, records with the screen on, and **Done** embeds `Recording <date>.m4a` at the cursor, even after typing elsewhere meanwhile; it plays inline in the reading view and on the PC; a PC recording (`.webm` or `.m4a`) plays on the iPhone. With the whisper service set up, *Transcribing…* turns into a quote under the embed within about the recording's length, and search finds its words; with the service stopped, the toast's Retry works once it is back. Lock the phone mid-recording: what was recorded is saved.
 
 ---
 
