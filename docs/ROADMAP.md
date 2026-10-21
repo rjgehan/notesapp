@@ -732,6 +732,14 @@ Stored in `.notesapp/bookmarks.json`, in a format compatible with Obsidian's `bo
 
 ### 16. Graph view *(declined for v1)*
 
+**Status:** built (wave 3, branch `feat/graph-import`). The global graph is the page `/x/graph` (ribbon, drawer, *Open Graph*); the local graph is a right-sidebar panel (*Open local graph*, the phone ⋯ menu and bottom sheet) with a depth of 1 to 5. Filters (search, tags as nodes, attachments, existing files only, orphans, folder, tag), color groups, display (arrows, text fade, node size, link thickness) and forces (center, repel, link force, link distance) follow Obsidian's `graph.json`. Hover highlights a node's neighbours; click or tap opens it; pinch and drag work on the iPhone; live updates arrive through SSE. Design in DESIGN §5.5.12 and §6.28, API in API.md §11.4. Deviations and additions:
+
+- **Renderer: d3-force 3.0.0 (ISC) and an own canvas renderer**, not `force-graph`. The layout runs in a Web Worker, so a 10,000-note graph never blocks the page, and the renderer batches all links and every node color into a handful of canvas calls (about 4 ms per frame at 10,000 notes). It is one lazy chunk.
+- **Refreshes are cheap.** `GET /api/graph` has a version that changes only when links, tags or files change, and `?since=` answers "unchanged" with an empty body, so the graph refreshes after every save without moving.
+- **Filters match names, paths, aliases and tags, not note text**, with the search grammar (`tag:`, `path:`, `file:`, `-`, phrases). They are instant, and they work on attachments, unresolved links and tags too. A folder and a tag filter are added to Obsidian's.
+- **Graph settings are per device** (`localStorage`), like the theme; an imported vault's `.obsidian/graph.json` can be applied from the compatibility report (item 24).
+- **Excluded files** (`settings.files.excludedPaths`) are left out of the graph, as in Obsidian.
+
 **One line:** an interactive global and local (1–2 hop) graph of notes and links, filterable by folder and tag.
 
 | Value | Effort | Depends on |
@@ -836,6 +844,14 @@ Results update through SSE.
 A managed section of `info/exclude` holds the exclusions, and `/api/status` shows the repo size.
 
 ### 24. Obsidian vault import and compatibility kit
+
+**Status:** built (wave 3, branch `feat/graph-import`). Copy the vault into the data folder before the first start (DEPLOY.md and CASAOS.md *Import an Obsidian vault*, over SSH or CasaOS's Files app); the first start takes its settings from `.obsidian/` (attachment folder, new notes, link format, excluded files, line breaks, default view, daily notes, templates), and `/x/compat`, the **Compatibility report** (ribbon, drawer, palette, Settings › About), lists what does not carry over. Design in DESIGN §5.23 and §6.29, API in API.md §11.5. Deviations and additions:
+
+- **The report is a page with actions, not a file.** Each Obsidian setting is shown next to NotesApp's; *Apply Obsidian's settings* saves them on an installation that already had settings, and *Use them on this device* takes `graph.json`'s graph settings (item 16). Plugins are listed with what NotesApp offers instead and the roadmap item that adds it.
+- **Findings go beyond syntax**: links to missing files, headings and `^blocks` (and, as information, notes that do not exist yet), notes NotesApp cannot read (frontmatter, UTF-8, size, skipped names), Excalidraw files, canvases and bases. Each finding lists up to 200 places, each opening the note at its line. Code is never reported.
+- **Seeding happens once.** Only a vault without `.notesapp/settings.json` takes Obsidian's settings; afterwards the report proposes them. Unusable values (a regular expression in *Excluded files*, a nested attachment subfolder) are reported, not applied.
+- **`.obsidian/` is never written**, stays hidden from the app, and is versioned except `workspace*.json`, so the same vault keeps working in Obsidian.
+- **For the integrator:** the callout, Mermaid and math findings (item 3), block references (item 20), Dataview (items 17 and 40) and the plugin table (`ObsidianPlugins`) describe this branch's renderer; drop or update them as those items merge.
 
 **One line:** importing an existing Obsidian vault seeds NotesApp settings from `.obsidian/` (`app.json`, `daily-notes.json`, `templates.json`) and produces a compatibility report listing the syntax and plugins NotesApp does not render yet.
 

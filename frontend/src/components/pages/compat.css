@@ -1,0 +1,330 @@
+/* Compatibility report (/x/compat, ROADMAP item 24, DESIGN §6.29). Loaded with its lazy chunk. */
+
+.compat-page {
+  max-width: calc(728px + 2 * var(--content-gutter));
+}
+
+.compat-text {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.compat-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-ui-small);
+}
+
+.compat-summary li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+}
+
+.compat-summary .is-error {
+  color: var(--text-error);
+}
+
+.compat-summary .is-warning {
+  color: var(--text-warning);
+}
+
+.compat-summary .is-ok {
+  color: var(--text-success);
+}
+
+.compat-summary .is-muted {
+  border-color: transparent;
+  color: var(--text-faint);
+}
+
+.compat-problems {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  color: var(--text-warning);
+  font-size: var(--font-ui-small);
+}
+
+.compat-problems li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compat-section {
+  margin: 24px 0;
+}
+
+.compat-section-title {
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: 1.1em;
+  font-weight: 600;
+}
+
+.compat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.compat-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+.compat-badge.is-ok,
+.compat-badge.is-supported {
+  background: rgba(68, 207, 110, 0.15);
+  color: var(--text-success);
+}
+
+.compat-badge.is-partial,
+.compat-badge.is-planned,
+.compat-badge.is-roadmap {
+  background: rgba(138, 92, 245, 0.15);
+  color: var(--link);
+}
+
+.compat-badge.is-unsupported {
+  background: rgba(224, 172, 0, 0.14);
+  color: var(--text-warning);
+}
+
+.compat-badge.is-muted,
+.compat-badge.is-unknown {
+  color: var(--text-faint);
+}
+
+/* ---------- settings table ---------- */
+
+.compat-table-wrap {
+  overflow-x: auto;
+}
+
+.compat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-ui-small);
+}
+
+.compat-table th,
+.compat-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.compat-table thead th {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.compat-table tbody th {
+  font-weight: normal;
+}
+
+.compat-table code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+.compat-setting-value,
+.compat-setting-note {
+  margin-top: 2px;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.compat-proposed {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+/* ---------- plugins ---------- */
+
+.compat-plugins {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compat-plugin {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.compat-plugin-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.compat-plugin-name {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.compat-plugin-kind {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.compat-plugin-note {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+/* ---------- issues ---------- */
+
+.compat-issue {
+  margin: 6px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.compat-issue-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap-target, 32px);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.compat-issue-icon {
+  flex: none;
+}
+
+.compat-issue.is-error .compat-issue-icon {
+  color: var(--text-error);
+}
+
+.compat-issue.is-warning .compat-issue-icon {
+  color: var(--text-warning);
+}
+
+.compat-issue.is-info .compat-issue-icon {
+  color: var(--text-faint);
+}
+
+.compat-issue-title {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.compat-issue-count {
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+}
+
+.compat-issue-detail {
+  margin: 0 12px 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.compat-occurrences {
+  margin: 0;
+  padding: 0 4px 8px;
+  list-style: none;
+}
+
+.compat-occurrence {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  color: inherit;
+  text-decoration: none;
+}
+
+.compat-occurrence:hover,
+.compat-occurrence:focus-visible {
+  background: var(--background-modifier-hover);
+}
+
+.compat-occurrence-path {
+  color: var(--link);
+  font-size: var(--font-ui-small);
+  overflow-wrap: anywhere;
+}
+
+.compat-occurrence-line {
+  color: var(--text-faint);
+}
+
+.compat-occurrence-text {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.compat-more {
+  margin: 0 12px 10px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.compat-clean {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-success);
+}
+
+@media (pointer: coarse) {
+  .compat-occurrence {
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 767px) {
+  .compat-table thead {
+    display: none;
+  }
+
+  .compat-table tr {
+    display: block;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+
+  .compat-table th,
+  .compat-table td {
+    display: block;
+    padding: 2px 0;
+    border: 0;
+  }
+}

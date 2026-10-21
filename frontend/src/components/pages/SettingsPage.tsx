@@ -571,6 +571,7 @@ function AboutSection() {
         </>
       )}
       {item('Status page', <Link to="/x/status">Uptime, history, disk, backups and alerts</Link>)}
+      {item('Compatibility report', <Link to="/x/compat">Obsidian settings, plugins and syntax this vault uses</Link>)}
     </dl>
   );
 }

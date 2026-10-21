@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 import com.rjgehan.notes.api.dto.FileEntry;
 import com.rjgehan.notes.api.dto.FileKind;
 import com.rjgehan.notes.api.dto.FolderEntry;
+import com.rjgehan.notes.api.dto.GraphResponse;
 import com.rjgehan.notes.api.dto.LinkStyle;
 import com.rjgehan.notes.api.dto.SkippedEntry;
 import com.rjgehan.notes.settings.LinkFormat;
@@ -100,6 +101,12 @@ public class VaultIndex {
 	private final SearchIndex search = new SearchIndex();
 
 	private final AtomicLong generation = new AtomicLong();
+
+	/** Bumped when the link graph changes: a file appears, leaves or moves, or a note's links or tags change. */
+	private final AtomicLong graphGeneration = new AtomicLong();
+
+	/** Makes graph versions of different boots differ. */
+	private final String instanceId = Long.toString(System.currentTimeMillis(), 36);
 
 	private final AtomicInteger nextDocId = new AtomicInteger();
 
@@ -408,6 +415,21 @@ public class VaultIndex {
 		});
 	}
 
+	/**
+	 * Every note with its links as resolved now, in path order: a consistent snapshot for whole-vault scans (the
+	 * compatibility report, ROADMAP item 24), which then run without the lock. Records are immutable.
+	 */
+	public List<NoteView> noteViews() {
+		return read(() -> {
+			List<NoteView> views = new ArrayList<>(this.notes.size());
+			for (NoteRecord note : this.notes.values()) {
+				views.add(new NoteView(note, this.links.outgoing(note.path())));
+			}
+			views.sort(Comparator.comparing((view) -> view.note().path()));
+			return views;
+		});
+	}
+
 	/** A note linking to some target, with its mtime and the links that resolve there. */
 	public record Backlink(NoteRecord source, Instant mtime, List<LinkOcc> links) {
 	}
@@ -618,6 +640,34 @@ public class VaultIndex {
 		});
 	}
 
+	/**
+	 * The link graph of {@code GET /api/graph} (API.md §11.4), without the files for which {@code excluded} holds.
+	 * {@code exclusionKey} identifies that predicate, so a change of the excluded paths changes the version. When
+	 * {@code since} equals the current version, nothing is built and the response says {@code unchanged}.
+	 */
+	public GraphResponse graph(Predicate<String> excluded, String exclusionKey, @Nullable String since) {
+		return read(() -> {
+			String version = this.instanceId + "-" + this.graphGeneration.get() + "-" + exclusionKey;
+			if (version.equals(since)) {
+				return new GraphResponse(version, true, List.of(), new int[0]);
+			}
+			return GraphBuilder.build(version, this.files.values(), this.links, this.tags, excluded);
+		});
+	}
+
+	/** The parts of a file that the link graph shows: its links' targets and its tags. */
+	private List<String> graphSignature(String path) {
+		List<String> signature = new ArrayList<>();
+		for (LinkGraph.Resolved link : this.links.outgoing(path)) {
+			signature.add((link.target() != null) ? "=" + link.target() : "?" + link.occ().target());
+		}
+		signature.sort(null);
+		for (String tag : this.tags.tagsOf(path)) {
+			signature.add("#" + tag);
+		}
+		return signature;
+	}
+
 	public List<TagIndex.TagStat> tagStats() {
 		return read(this.tags::stats);
 	}
@@ -826,6 +876,7 @@ public class VaultIndex {
 				this.tags.setNote(note.path(), note.parse().distinctTags());
 			}
 			this.skipped = List.copyOf(newSkipped);
+			this.graphGeneration.incrementAndGet();
 			return null;
 		});
 	}
@@ -842,6 +893,7 @@ public class VaultIndex {
 	private void putLocked(IndexedFile file) {
 		String path = file.path();
 		boolean added = !this.files.containsKey(path);
+		List<String> graphBefore = added ? List.of() : graphSignature(path);
 		addFolderLocked(PathNames.parentOf(path), PathNames.parentOf(file.disk()));
 		storeLocked(file);
 		NoteRecord note = this.notes.get(path);
@@ -852,6 +904,9 @@ public class VaultIndex {
 		else {
 			this.links.removeNote(path);
 			this.tags.removeNote(path);
+		}
+		if (!added && !graphBefore.equals(graphSignature(path))) {
+			this.graphGeneration.incrementAndGet();
 		}
 		if (added) {
 			this.links.reresolveKeys(List.of(LinkResolver.fileNameKey(path)), this.lookup);
@@ -923,6 +978,9 @@ public class VaultIndex {
 				listener.extractable(file.record());
 			}
 		}
+		if (previous == null || previous.kind() != file.record().kind()) {
+			this.graphGeneration.incrementAndGet();
+		}
 		if (previous != null) {
 			this.totalBytes -= previous.size();
 		}
@@ -963,6 +1021,7 @@ public class VaultIndex {
 		if (removed == null) {
 			return null;
 		}
+		this.graphGeneration.incrementAndGet();
 		this.totalBytes -= removed.size();
 		removeFromList(this.byLowerPath, PathNames.lower(path), path);
 		removeFromList(this.byLowerName, PathNames.lower(PathNames.nameOf(path)), path);

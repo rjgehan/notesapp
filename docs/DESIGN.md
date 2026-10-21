@@ -208,7 +208,7 @@ NotesApp/                              (monorepo; branch main)
 | `.notesapp/cache/` | Derived caches: `search-text/` holds the extracted text of PDFs (§5.5.10) | hidden | excluded |
 | `.trash/` | Deleted items, stored **flat**: each trashed file or folder is one top-level entry, `.trash/<name>`, with ` 1`, ` 2`, ... on collisions. The original path is kept only in `trash.json`. | hidden; shown only in the Trash view | excluded |
 | `.git/` | JGit repository | hidden, never served | n/a |
-| `.obsidian/` | Obsidian desktop config, if the user ever opens the vault there. Never touched. | hidden | committed except `workspace*.json` |
+| `.obsidian/` | Obsidian's settings, from an imported vault or if the vault is ever opened in Obsidian. Read for the import and the compatibility report (§5.23), never written. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
 **Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties.
@@ -433,6 +433,7 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `LinkResolver` | The resolution algorithm (§5.5.6) and `createPath` computation. |
 | | `LinkTextGenerator` | Link text for the new-link formats `shortest`, `relative` and `absolute`, in wiki or markdown style (§5.5.7). |
 | | `LinkGraph` | Outgoing resolved links, incoming backlinks, target-name buckets for re-resolution, and unresolved links. |
+| | `GraphBuilder` | The compact link graph of `GET /api/graph` (ROADMAP item 16, §5.5.12). |
 | | `TagIndex` | Tag to notes, display casing, nested totals. |
 | | `SearchIndex`, `Tokenizer`, `SearchQuery`, `SearchQueryParser`, `SearchEvaluation`, `SearchRegex`, `Fuzzy`, `SnippetBuilder`, `SearchService` | Full-text search (§5.5.10): the query tree, its three-step evaluation, regular-expression time budgets and typo tolerance. |
 | | `PdfText`, `PdfTextIndexer` | PDF text for search: PDFBox extraction within limits, the background queue and the text cache (§5.5.10). |
@@ -463,7 +464,7 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `VaultEvent` | Sealed interface with one record per event type, matching API.md §16. |
 | | `EventIds` | Formats and parses `bootId.seq`. |
 | `search` | `SavedSearchService` | Saved searches in `.notesapp/searches.json`, with a version token (API.md §12.4). |
-| `settings` | `Settings` (+ nested records), `SettingsService` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12). |
+| `settings` | `Settings` (+ nested records), `SettingsService`, `SettingsSeed` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12); a missing file starts from the defaults plus every `SettingsSeed` (§5.23). |
 | `bookmarks` | `BookmarkService`, `BookmarkCodec` | Load, check and save `.notesapp/bookmarks.json` with a version token; re-key bookmarks after moves and trash restores (§5.21). |
 | `vault` | `HeadingRenameService` | Rewrites `[[Note#Heading]]` links (and heading bookmarks) after a heading is renamed (§5.22). |
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
@@ -471,12 +472,15 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
 | `notify` | `NtfyConfig`, `NtfyConfigFile` | `ntfy.json` in `notes.secrets-dir`: the server, the default topic, an optional token and the `alerts` section; read again when it changes (§5.18.1). Shared with the reminders of ROADMAP item 9. |
 | | `NtfyClient` | Publishes one message as JSON to the server's root URL, with the token as `Authorization: Bearer`; never follows a redirect. |
+| `obsidian` | `ObsidianConfigReader`, `ObsidianConfig` | Reads `.obsidian/` (never writes it): app, daily-notes, templates, graph and plugin files (ROADMAP item 24, §5.23). |
+| | `ObsidianSettings` | Obsidian's settings in NotesApp terms; the `SettingsSeed` of a first start. |
+| | `CompatScanner`, `CompatService`, `ObsidianPlugins` | The compatibility report of `GET /api/compat`. |
 | `ops` | `AlertMarker` | The stable log markers of §5.18, each with its alert's fixed title, text and priority. |
 | | `AlertLogBridge` | A Logback appender on the root logger: hands each WARN or ERROR whose message pattern starts with a marker to `AppAlerts` (§5.18.1). |
 | | `AppAlerts` | Counts the markers; deduplicates, rate-limits and sends them to ntfy on its own thread (§5.18.1). |
 | | `BackupStatusReader` | Reads the backup run's `status.json` for the status page (§7.10). |
 | | `RuntimeInfo` | The JVM's version and heap, and whether it uses the AOT cache (§7.1). |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `SavedSearchController`, `TagController`, `TrashController`, `HistoryController`, `TimelineController`, `TemplateController`, `SettingsController`, `BookmarkController`, `HeadingController`, `MeController`, `StatusController`, `StatusDetailsController`, `AlertsController`, `MirrorController`, `EventController`, `TaskController`, `TaskListController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `SavedSearchController`, `TagController`, `TrashController`, `HistoryController`, `TimelineController`, `TemplateController`, `SettingsController`, `BookmarkController`, `HeadingController`, `MeController`, `StatusController`, `StatusDetailsController`, `AlertsController`, `MirrorController`, `GraphController`, `CompatController`, `EventController`, `TaskController`, `TaskListController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -816,6 +820,15 @@ Tokens are maximal runs of `[\p{L}\p{N}]`, except that each Han, Hiragana or Kat
   - `total` is the number of distinct notes with this tag or any descendant.
 - Sorted case-insensitively.
 
+#### 5.5.12 Link graph for the graph view (ROADMAP item 16)
+
+`GET /api/graph` (API.md §11.4, `GraphController`) serves the whole link graph in one compact response, built by `GraphBuilder` from `VaultIndex` under its read lock. Nothing new is stored: it reads the files map, `LinkGraph.outgoing` and `TagIndex.tagsOf`.
+
+- **Nodes:** every visible file in path order, typed `note` (kind `note`) or `attachment` (every other kind), then one `unresolved` node per unresolved link target, grouped case-insensitively without `.md` and named with the casing first seen (`[[Ideas]]`, `[[ideas.md]]` and `[[IDEAS]]` are one node `Ideas`). Notes carry their tags in display casing. Files under `settings.files.excludedPaths` are left out with their edges, as Obsidian's graph does.
+- **Edges:** one per (source, target) pair as a flat `[source, target, count]` triple, `count` being the links and embeds between them; same-note links are left out. Directions stay apart, the client merges them. Indexed documents (§6.8: task lists, drawings, spreadsheets) are `attachment` nodes whose links are edges like a note's, so a drawing or a list that links notes sits among them; their tags are not node tags.
+- **Version.** `VaultIndex` keeps a graph generation, bumped when a file appears, leaves, moves or changes kind, and when a save changes a note's *graph signature* (its resolved targets, unresolved targets and tags), not on every save. The version is `<instance>-<generation>-<hash of excludedPaths>`. With `?since=<version>` equal to the current one, the server answers `unchanged: true` with empty lists without building anything, so the client can refresh after every change cheaply.
+- **Cost.** About 20 ms and 1.1 MB of JSON (170 KB gzipped) for 10,000 notes and 24,000 links; the unchanged answer is a few bytes (perf test in `VaultPerformanceTest`).
+
 ### 5.6 Rename and move with link rewriting
 
 This is `MoveService.move(from, to, updateLinks, dryRun, identity, origin)`. `updateLinks` defaults to `settings.files.autoUpdateLinks`, which is `true`.
@@ -1100,7 +1113,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 
 ### 5.12 Settings
 
-- The settings live in `.notesapp/settings.json`. They are read at startup. A missing file is created with defaults. A file that is not valid JSON at all is renamed to `settings.json.bak-<ts>` and replaced with defaults.
+- The settings live in `.notesapp/settings.json`. They are read at startup. A missing file is created with defaults, plus the settings of an imported Obsidian vault's `.obsidian/` (ROADMAP item 24, §5.23). A file that is not valid JSON at all is renamed to `settings.json.bak-<ts>` and replaced with defaults.
 - **Rollback safety.** If the file's `schemaVersion` is newer than this build supports, or a known schema version fails validation (for example an enum value that a newer build added), the app does **not** reset it. It uses every field it can read, fills the rest with defaults in memory, and marks settings **read-only**: `GET /api/settings` reports `readOnly: true`, `PUT /api/settings` returns `409 settings-read-only`, `/api/status` shows `settings.readOnly` with the reason, the settings page shows a banner, and the file is never rewritten. Rolling back a release therefore never destroys settings. Rule for future builds: adding a field needs no bump; adding an enum value or changing a meaning bumps `schemaVersion`.
 - **Unknown fields are preserved.** `SettingsService` keeps the file's raw JSON tree and merges the known fields into it on write, so an older build never drops fields a newer build added.
 - Writes go through `PUT /api/settings` with a `baseVersion` (the file's blob id): validate, `atomicWrite`, `markDirty`, then publish `settings.changed`.
@@ -1433,6 +1446,7 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | SSE fan-out to 5 clients | < 50 ms |
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
+| `GET /api/graph` (ROADMAP item 16) | < 150 ms; `?since=` unchanged < 10 ms |
 
 The search p95 covers the item 22 forms too (`OR`, groups, typo tolerance, `line:`, `section:`, and a regular expression narrowed by words). A regular expression alone reads every note (about 50 MB) and is measured separately (about 40 ms in parallel on a desktop CPU; target < 1 s).
 
@@ -1512,6 +1526,36 @@ A real task manager whose data lives in the vault as JSON, not as `- [ ]` lines.
    - **Documents** (§6.8; added when items 4, 5 and 21 met). A backlink source that is not a note (a `.tasks` list, an `.excalidraw` drawing) is never scanned as Markdown: the links it was indexed with say whether one names `from`, and its `DocumentIndexer` then rewrites the file as a whole, as for a move, with a `LinkRewriter` whose `markdown` applies the rules above to each fragment (scanned with `scanFragment`) and whose `path` changes nothing. The new text is written under the same lock and listed with the number of links changed; an indexer that cannot rewrite (a drawing, or a list the task API would not write) leaves the file, reported as `not-rewritable`. A note an indexer supplements (an `.excalidraw.md` drawing) is read from disk even in a dry run, because its indexed text is more than the file, and a supplement link that names `from` makes it `not-rewritable` too.
 3. **Write** (not in a dry run). Pending edits are committed first, then each note is spliced from the end backwards, with the move's guards: a link that no longer reads as planned skips the note (`span-mismatch`), invalid UTF-8 is never rewritten (`not-utf8`), and a frontmatter that would stop parsing or change its links skips it (`not-rewritable`). The BOM is kept. One commit, `Update links after renaming heading “Old” → “New” in Plan.md (3 notes)`, then `file.changed` per rewritten note (with the caller as origin; the caller applies `linkUpdates` like a move's), then heading bookmarks of the note that name `from` take `to` (`BookmarkService.headingRenamed`, `bookmarks.changed` with `origin: null`).
 
+### 5.23 Obsidian vault import (ROADMAP item 24)
+
+An existing Obsidian vault is imported by copying it into the vault directory before the first start (DEPLOY.md *Import an Obsidian vault*, CASAOS.md). The package `obsidian` makes the result behave like the vault did in Obsidian, without ever writing `.obsidian/`, so the vault stays usable there.
+
+- **`.obsidian/` is read, never written.** `ObsidianConfigReader` reads `app.json`, `daily-notes.json`, `templates.json`, `graph.json`, `core-plugins.json` (an object of switches, or the older array; `core-plugins-migration.json` as a fallback) and `community-plugins.json` with each enabled plugin's `plugins/<id>/manifest.json` for its name. It does not follow symbolic links, skips files over 1 MiB, accepts a BOM, and reports unreadable files instead of failing. The folder stays hidden from the tree, the index and the API (§4.5: `403 reserved-path`), and is versioned except `workspace*.json` (§4.6).
+- **First start: the settings come from Obsidian.** `SettingsService.load()` creates a missing `settings.json` from the defaults passed through every `SettingsSeed` bean; `ObsidianSettings` is the one seed, and a seed whose result fails validation is ignored with a WARN. The mapping:
+
+| Obsidian | NotesApp |
+|---|---|
+| `app.json` `attachmentFolderPath`: `""` or `/`, `./`, `./sub`, `Folder` | `files.attachmentLocation` `root`, `current`, `subfolder` with `attachmentSubfolder: sub` (a single name), `folder` with `attachmentFolder` |
+| `newFileLocation` (`root`, `current`, `folder`) and `newFileFolderPath` | `files.newNoteLocation`, `newNoteFolder` (`folder` with an empty path is the root) |
+| `newLinkFormat`, `useMarkdownLinks` | `files.newLinkFormat`, `useWikilinks` (inverted) |
+| `alwaysUpdateLinks: true` | `files.autoUpdateLinks: true` (`false` means "ask" in Obsidian; NotesApp's Move dialog always shows the updates, so it is left alone) |
+| `userIgnoreFilters` | `files.excludedPaths` (paths only; `/regex/` entries are reported, not used) |
+| `strictLineBreaks`, `readableLineLength`, `defaultViewMode` (`source`, `preview`) | `editor.strictLineBreaks`, `readableLineLength`, `defaultMode` (`edit`, `read`) |
+| `daily-notes.json` `format` (empty is `YYYY-MM-DD`), `folder`, `template` (`.md` added), `autorun` | `dailyNotes.format`, `folder`, `template`, `openOnStartup` |
+| `templates.json` `folder`, `dateFormat`, `timeFormat` (empty is the default) | `templates.*` |
+
+  Folders are NFC-normalized and stripped of slashes; a value NotesApp cannot use (a dot-folder, a nested subfolder, an unknown enum value) is reported and the current setting kept. A later start never re-reads them: an existing `settings.json` wins.
+- **The compatibility report** (`GET /api/compat`, API.md §11.5, `CompatService`). Computed on request, nothing stored: what `.obsidian/` holds; one row per Obsidian setting with the NotesApp setting, its current value and Obsidian's (`same`, `different`, `unsupported`), and `proposedSettings` with `settingsVersion`, which the client saves with `PUT /api/settings` to apply them to an existing installation; the graph options of `graph.json` the graph view understands (§6.28); the enabled core and community plugins with what NotesApp offers instead (`ObsidianPlugins`, a table that roadmap items update); and the findings of `CompatScanner`, which runs over a snapshot of the index (`VaultIndex.noteViews()`) outside its lock:
+
+| Category | Findings |
+|---|---|
+| Syntax | Dataview (```` ```dataview ````, ```` ```dataviewjs ````, inline `` `= …` ``), Tasks queries, embedded searches (```` ```query ````), other plugin blocks (```` ```ad-… ````, ```` ```chart ```` …), Templater `<% … %>`, block references (`#^id`), `obsidian://` links, HTML the sanitizer removes, Kanban boards (`kanban-plugin` property) |
+| Links | Embeds and attachment links that lead nowhere; links to missing headings (matched as the client does, §6.4) or missing `^block-ids`; links to notes that do not exist yet (informational: following them creates the note) |
+| Files | Names the index skips (`/api/status` `vault.skipped`), notes over the text limit, invalid UTF-8, frontmatter that does not parse, notes with `excalidraw-plugin` properties not named `.excalidraw.md` (which open as Markdown), canvases, bases |
+
+  Callouts, Mermaid and math render since ROADMAP item 3 (§6.7.1), and `.excalidraw`/`.excalidraw.md` drawings open in the drawing editor (item 5), so they are not findings; the plugin table likewise reports bookmarks, Excalidraw, the Tasks plugin and QuickAdd by what items 12, 5, 4 and 7 built.
+  Fenced code and code spans are skipped, so a note that *shows* such syntax is not reported. Each finding has a severity (`error`: data NotesApp cannot use; `warning`: shown wrong or not at all; `info`: works differently), the roadmap item that will handle it, an exact count, and at most 200 occurrences (path, 0-based line, text). The rules for rendering that a roadmap item adds (callouts, Mermaid and math with item 3) are removed when it lands.
+
 ---
 
 ## 6. Frontend design
@@ -1537,7 +1581,7 @@ These versions were verified on 2026-10-16. The lockfile pins them.
 | Tests | Vitest 5.0.5, jsdom 30.1.3, Testing Library (react 16.3.3, dom 10.4.2, user-event 14.6.8, jest-dom 7.0.1), `fake-indexeddb` (dev only; version pinned at scaffold) for the drafts store |
 | Lint | ESLint 10.13 flat config generated by `npm create vite@latest frontend -- --template react-ts --eslint` (typescript-eslint 8.71.2, react-hooks 7.1.1, react-refresh 0.5.7) |
 
-The `package.json` dependency set is exactly the research list plus `"yaml": "^2.9.1"`, `@mdit/plugin-mark` and (dev) `fake-indexeddb`. Drawings (ROADMAP item 5) added `@excalidraw/excalidraw` and `lz-string`, and spreadsheets (item 6) `hyperformula` and `@glideapps/glide-data-grid` (§6.21), pinned exactly. `package.json` declares `"license": "GPL-3.0-only"`. No virtualization, DOM-morphing or IndexedDB wrapper library is added; the small amounts of code they would replace are written by hand (§6.7, §6.9, §6.15). The scripts are `dev`, `build` (`tsc -b && vite build`), `lint` (`eslint .`), `test` (`vitest run`) and `preview`.
+The `package.json` dependency set is exactly the research list plus `"yaml": "^2.9.1"`, `@mdit/plugin-mark` and (dev) `fake-indexeddb`. Drawings (ROADMAP item 5) added `@excalidraw/excalidraw` and `lz-string`, and spreadsheets (item 6) `hyperformula` and `@glideapps/glide-data-grid` (§6.21), pinned exactly. The graph view (item 16, §6.28) added `d3-force` 3.0.0 (ISC; with `d3-dispatch`, `d3-quadtree` and `d3-timer` 3.0.1, ISC) and (dev) `@types/d3-force` 3.0.10 (MIT). `package.json` declares `"license": "GPL-3.0-only"`. No virtualization, DOM-morphing or IndexedDB wrapper library is added; the small amounts of code they would replace are written by hand (§6.7, §6.9, §6.15). The scripts are `dev`, `build` (`tsc -b && vite build`), `lint` (`eslint .`), `test` (`vitest run`) and `preview`.
 
 **Lockfile.** `package-lock.json` is generated from a clean tree (delete `node_modules` and any lockfile, then `npm install`). Vite 8's Rolldown and Oxc are native binaries installed through optional per-platform packages, and npm can otherwise keep only the platform packages of the machine that wrote the lockfile (npm/cli#4828). CI asserts that the Linux binding is present (§7.5).
 
@@ -1674,6 +1718,8 @@ frontend/src/
 | `['trash']`, `['settings']`, `['me']`, `['status']`, `['templates']` | | 60 s / Infinity / Infinity / 10 s / 60 s | |
 | `['tasks', 'view', params]`, `['tasks', 'lists']`, `['tasks', 'task', id]` | `GET /api/tasks…` (API.md §20) | Infinity | Load into the task store (§6.22); the data is only the response's metadata. Invalidated by the resync like every query, and by the task feature's own refetch rules. |
 | `['bookmarks']` | `GET /api/bookmarks` | Infinity | Refreshed on `bookmarks.changed`; this tab's unsaved edits are laid over it (§6.23). Read through the page's own client, so components outside a provider can show stars. |
+| `['compat']` | `GET /api/compat` | 0 | The compatibility page only (ROADMAP item 24, §6.29) |
+| `['graph']` | `GET /api/graph` | Infinity | Graph views only (ROADMAP item 16, §6.28): refreshed with `since` at most every 800 ms after `['tree']` or `['settings']` change while one is mounted |
 
 There is no `['resolve']` query: link resolution runs on the client over the tree (§6.6).
 
@@ -2928,6 +2974,35 @@ Capture a thought, a link or a photo into `Inbox.md` (vault root) or today's dai
 
 **Risk.** The server remembers idempotency keys for an hour within one run; a capture whose response was lost just before a restart could, when retried, be appended twice. It is a visible duplicate line, never a loss.
 
+### 6.28 Graph view (ROADMAP item 16)
+
+Two views over the same data, both lazy chunks registered in `extensions/builtins.ts`:
+
+- **Global graph** `/x/graph`: `registerPage({route: 'graph', title: 'Graph', icon: GitFork})`, so it has a ribbon button, a drawer entry and *Open Graph* in the palette. The page fills the workspace (`.graph-page` is absolutely positioned in `WorkspaceScroll`, above the desktop status bar).
+- **Local graph**: `registerPanel({id: 'graph', side: 'right', title: 'Local graph'})`, a right-sidebar tab (the bottom sheet on phones, also in the phone ⋯ menu), and the command *Open local graph*. It follows the open note; a depth slider (1–5) and a settings popover (incoming, outgoing and neighbour links, tags, attachments, existing files only, arrows) sit above it, and a button opens the global graph.
+
+**Data** (`features/graph/`). `useGraphData()` reads `['graph']` (`GET /api/graph`, API.md §11.4). The tree query is patched by every SSE event and every own write (§6.3), so the hook subscribes to the query cache while a graph view is mounted and, when `['tree']` or `['settings']` changes, invalidates `['graph']` at most every 800 ms. The refetch sends `since`, and an `unchanged` answer returns the cached object, so an edit that changed no link re-renders nothing. `model.ts` turns the response into nodes with stable ids (the path, `?` + lower target for unresolved links, `#` + lower tag for tags) and builds a **view**: notes filtered by folder, tag and the search filter; attachments, unresolved links and tags as nodes on request (tags linked to their notes); orphans hidden on request; for the local graph a breadth-first walk to the chosen depth along the allowed directions (tags both ways), without links between nodes at the same depth unless *neighbour links* is on. Both directions of a pair become one link with direction bits, which the arrows use.
+
+**Queries** (`query.ts`) use the search grammar of API.md §12.1 (words, phrases, `tag:`, `path:`, `file:`, `-`), evaluated on the device against names, paths, aliases and tags, accent- and case-insensitively. Note text is not searched, so filters and color groups are instant and apply to attachments, unresolved links and tag nodes too. A node takes the color of the first group whose query matches it, as in Obsidian.
+
+**Options** (`options.ts`, `store.ts`) use the names and ranges of Obsidian's `.obsidian/graph.json` (`search`, `showTags`, `showAttachments`, `hideUnresolved`, `showOrphans`, `colorGroups`, `showArrow`, `textFadeMultiplier`, `nodeSizeMultiplier`, `lineSizeMultiplier`, `centerStrength`, `repelStrength`, `linkStrength`, `linkDistance`) plus a folder and a tag filter, so an imported vault's settings carry over (ROADMAP item 24, §6.29). They are per-device preferences in `localStorage` (`notesapp:graph`, `notesapp:local-graph`), saved 400 ms after the last change; the local graph uses the global graph's groups, display and forces. The settings panel has Obsidian's four collapsible sections (Filters, Groups, Display, Forces) and *Restore defaults* (which keeps the groups); on phones it is a bottom sheet over the graph, closed by default.
+
+**Layout** (`forces.ts`, `runner.ts`, `layout.worker.ts`, `layoutClient.ts`). d3-force 3.0.0 (ISC) with Obsidian's four forces: many-body repulsion (Barnes–Hut, θ 0.9, looser above 2,000 and 5,000 nodes, bounded range), link springs (d3's 1/smaller-degree strength times the slider), and x/y centering. It runs in a **module Web Worker** in time slices and posts positions as transferable `Float32Array`s tagged with a graph generation, so stale positions of a previous view are ignored. Without workers (tests, a worker that fails to load) the same runner runs on the page. Nodes keep their position by id when the view changes (a filter, a live update); a new node starts next to a placed neighbour. Graphs above 3,000 nodes settle in about 150 ticks instead of 300.
+
+**Rendering** (`components/graph/renderer.ts`, `GraphCanvas.tsx`). A 2D canvas at up to 2× device pixels. Each frame is one path for all links of a style, one path per node color, and labels in screen space; off-screen nodes and links are skipped. Node radius grows with the square root of the degree; labels fade in with the zoom (moved by *text fade threshold*) and are capped at 600 per frame, the highest-degree ones first; the hovered node and its neighbours are always labelled. A 10,000-note frame draws in about 4 ms. Positions and the view transform live in refs and are drawn on animation frames, so React does not re-render per frame. Colors come from CSS variables on `.graph-view` (`--graph-node`, `--graph-line`, …) for both themes, read again when the theme changes.
+
+**Interaction.** Wheel and trackpad pinch zoom around the pointer; dragging the background pans; dragging a node holds it in the layout; hovering (or pressing, on touch) highlights the node, its links and its neighbours and dims the rest; a click or tap opens it: a file opens, an unresolved link creates its note as following the link would (`openLink` from a note that links to it), a tag opens the search for it. Touch uses pointer events: one finger pans or drags a node, two fingers pinch-zoom around their midpoint (Safari's own gesture events are cancelled), `touch-action: none` on the canvas. Zoom in, zoom out and fit buttons are 44 px on touch screens; the canvas is focusable, with `+`, `-`, `0` (fit) and the arrow keys. Until the user moves the view, the graph is re-fitted as it settles. The canvas reports its zoom and hovered node in `data-zoom` and `data-hover`, for tests.
+
+### 6.29 Compatibility report (ROADMAP item 24)
+
+`/x/compat` (`components/pages/CompatPage.tsx`), registered with `registerPage({route: 'compat', title: 'Compatibility report', icon: FileCheck})` and linked from Settings › About. It reads `['compat']` (`GET /api/compat`, API.md §11.5) on every visit, with a *Check again* button; nothing refreshes it live.
+
+- **Summary**: errors, warnings and notices (occurrence counts), the vault's size, when it was checked; whether `.obsidian/` exists (and that it is never changed), and the files there that could not be read.
+- **Obsidian settings**: one row per Obsidian setting (file › key and value, the NotesApp setting, its current value, and *In effect*, Obsidian's value, or *Not used* with the reason). When a row differs, **Apply Obsidian's settings** saves `proposedSettings` with `PUT /api/settings` and `baseVersion: settingsVersion`; a `409` (the settings changed since the report) refreshes the report and asks to check it again. Disabled while the settings are read-only.
+- **Graph view**: when `graph.json` has options, **Use them on this device** turns them into graph options (`optionsFromObsidian`: colors `{a, rgb}` become `#rrggbb`, unknown keys are dropped) for this device (§6.28).
+- **Plugins**: the enabled core and community plugins, with *Supported*, *Partly*, *Planned* (and the roadmap item), *Not supported* or *Unknown*, and a one-line note.
+- **Findings** in three sections (syntax and plugins in notes, links, files), each a collapsed card with its severity icon, count, file count and roadmap item; expanded, it explains the finding and lists the occurrences, each opening the note at its line (`/n/<path>?line=N`, §6.4). Under 768 px the settings table stacks each row; occurrences are 44 px tall on touch screens.
+
 ---
 
 ## 7. Infrastructure
@@ -3494,6 +3569,8 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 | `DocumentIndexersTest` (items 4, 5, 6 and 21 together) | Over a `TestVault` with the three indexers: search, `tag:` and backlinks see a `.tasks` list, an `.excalidraw` and an `.excalidraw.md` drawing and a `.sheet`, and never a document's JSON; the list, the `.excalidraw` drawing and the sheet are not notes. Renaming a note they all link to rewrites the list (titles and notes) and the Markdown drawing's sections, in the dry run's counts too, and reports the `.excalidraw` drawing and the sheet as `not-rewritable`, untouched. A list renamed to a drawing's name is read by the drawing indexer (listed, not indexed), and is a list again when renamed back. A heading rename rewrites the list (a wikilink title and a percent-encoded Markdown link in notes) and the Markdown drawing's Text Elements, in the dry run too, and reports the `.excalidraw` drawing and the Markdown drawing's JSON-only link as `not-rewritable`. |
 | `BookmarkServiceTest` | No file: no bookmarks and nothing written by a `GET`; a save writes Obsidian's format, bumps the version, publishes `bookmarks.changed` and is committed in the batch; equal content is a no-op whatever the base; a stale base is a conflict with the server copy; every invalid field is named (`items[7].items[0].query`); unknown types and fields survive and paths are NFC-normalized; invalid items in the file are left out and a broken file is kept as `.bak-` before it is replaced; Obsidian's bookmarks show until the first change and `.obsidian/` is never written; a file move, a folder move (prefix, case-insensitive, groups included) and a restore elsewhere re-key, with `origin: null`; a move touching no bookmark writes nothing; a case-variant duplicate keeps its bookmark; a delete keeps the bookmark. |
 | `HeadingRenameServiceTest` | Every link form (wiki with display, embed, nested `#H1#Old`, markdown percent-encoded, angle, with a title) is rewritten and nothing else (another note's heading, a longer heading, code spans); a dry run writes nothing; same-note and frontmatter links; a heading a wikilink cannot hold is `not-rewritable` while a markdown link takes it encoded; the note must have the new heading and not the old one; a non-note and a missing note; an external edit not yet seen is kept; a lossy note is skipped; heading bookmarks follow; subpath spans of every form. |
+| `GraphBuilderTest` (ROADMAP item 16) | Every file a node, links counted per pair, embeds counted, same-note links left out; unresolved targets grouped case-insensitively without `.md`; excluded paths left out with their edges; the version stays on text edits and changes on a new link, a retag, a created, moved or removed file. |
+| `ObsidianConfigReaderTest`, `ObsidianSettingsTest`, `CompatScannerTest` (ROADMAP item 24, the fixture vault `src/test/resources/vaults/obsidian`) | What `.obsidian/` holds, invalid and oversized files reported, both core-plugin formats; every settings mapping, unusable values reported and not applied, a second mapping proposing nothing; every finding at the right line, nothing reported inside code, 200 occurrences listed of 250 counted. |
 
 **Integration tests** (classes named `*IntegrationTest`; `@SpringBootTest(webEnvironment = RANDOM_PORT)` + `@AutoConfigureRestTestClient`, `@TempDir` vault, `notes.watcher.enabled=false`, short git periods, `notes.allowed-hosts=localhost`, `notes.identity.allow-default=true`, `notes.security.require-tailscale-interface=false`):
 
@@ -3518,6 +3595,8 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 19. Heading links (`HeadingLinksIntegrationTest`): a dry run of `POST /api/notes/rename-heading` previews without writing; the real call rewrites the link, makes its own commit (pending edits are committed before it) and sends `file.changed` to other clients; a heading the note does not have gives `400`, a reserved path `403`.
 20. Quick capture (`CaptureIntegrationTest`, items 7 and 8): the first capture creates `Inbox.md` and later ones append; "today" is the device's day; a new daily note starts from its template, an existing one is found ignoring case; appends keep the file's bytes and line endings; other clients see the change and retries are idempotent; a Shortcut needs its own client id; invalid captures are `400`; a captured file is stored as an attachment and embedded; `/capture` is a client route and a lost share lands there.
 21. Installable app (`PwaIntegrationTest`): `sw.js` is always revalidated and may control the origin, the manifest has its media type and is revalidated, and API responses stay `no-store`.
+22. `GET /api/graph` (ROADMAP item 16): nodes, edges and tags over HTTP; `?since=` answers `unchanged` until a save adds a link; excluded paths leave the graph.
+23. Obsidian import (ROADMAP item 24, `ObsidianImportIntegrationTest`): the fixture vault started once takes its settings from `.obsidian/`, keeps `.obsidian/` byte-for-byte, out of the tree and its `workspace.json` out of git; `GET /api/compat` reports every setting in effect, the plugins and the findings, and a changed setting as `different`; a second start keeps the changed settings.
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
@@ -3534,6 +3613,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - `drafts.ts` (with `fake-indexeddb`): write, restore, re-key, ownership by live tabs over a mocked `BroadcastChannel`, the quota-failure warning.
 - `applyEvents`: each event's cache patch, including `removeQueries(['file', …])` and the own-mutation invalidations. `events.ts`: `lastEventId` tracking; **an idle stream that receives only pings for 2 minutes stays Live and never reconnects**; `onerror` with `readyState` `CLOSED` recreates the stream with backoff; the `replayed` countdown sets `caughtUp`; resync buffering drops buffered events with `seq` at or below the tree's `eventId`; a `buildSha` mismatch reloads when all sessions are clean and shows the banner when one is dirty.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
+- Graph view (ROADMAP item 16): the query grammar on names, paths, aliases and tags; views with tags, attachments, unresolved links, orphans, folder and tag filters, the local graph by depth and direction; first-match color groups; options from storage and from Obsidian's `graph.json`; the force layout keeping positions by id and holding a dragged node; the runner's generations; renderer geometry (zoom around a point, fit, hit test) and batched drawing; the page and panel with their filters, groups, depth and the refresh after a tree change. The compatibility page (item 24): summary, settings rows, Apply with `baseVersion`, the conflict path, graph settings for this device, findings opening their line.
 - Mirror and large files (ROADMAP items 2 and 23): `features/mirror.ts` (the warning texts for `failing` and `diverged`, none while `ready` or `disabled`, the About summary, the push command shown only with a configured mirror, its toasts); `features/largeFiles.ts` (the threshold format, strictly-larger rule, policy off); `HistoryPanel` (the note replaces "No history" for an excluded file and older versions are still listed); `StatusBar` (the warning button with the error as its tooltip, and a click that calls `POST /api/mirror/push`).
 - Drawings (item 5, `views/excalidraw/*.test.ts*`): both file formats with byte-identical round trips (Text Elements, Element Links, Embedded Files), the three-way merge (a rename's rewritten link survives an edit of the same element), the controller against a fake Excalidraw (edits, remote text, images, ids), the static images of the plugin's extras, the image sources, the SVG export (fonts used and inlined, dark-theme filters) with a mocked `exportToSvg`, and the embed (sizes, theme, live updates, released URLs, empty and unreadable drawings). `render/embeds.test.tsx`: `|W`/`|WxH` reach a view's embed, and a note another view shows embeds at any depth.
 - Extension points (`extensions/index.test.ts`, `tasks/register.test.ts`): pages and their commands (the drawer closes), hidden pages, overlay hosts; drawings, tasks and the status page registered together, each file type with its own view. `features/fileOps.test.ts`: the Move dialog's and toast's reasons, with a task list and a drawing named as such when `not-rewritable`.
@@ -3577,6 +3657,8 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 29. Bookmarks: star a note in its header (rgpc) and a heading in the Outline; on the iPhone they appear in the drawer's Bookmarks tab within a second, and ⋯ › Bookmark stars the open note. Rename the starred note on rgpc: both devices show the new name. Move it to the trash: the bookmark is dimmed; restore it: it lights up. Recent files lists the notes opened on that device only, with times.
 30. Heading links: in a note that others link to by heading, change the heading's text: after a moment a toast offers to update the links; **Update links** rewrites them (and a heading bookmark), and the referencing notes open at the renamed heading. **Rename heading…** in the palette does the same in one step.
 31. Hotkeys: under Settings, Hotkeys, give "Bookmark current file" a key (rgpc), then press it in a note, also while typing in it; give a command a key another command uses and take it over; reset all. The phone keeps its own (default) keys.
+32. Graph view (ROADMAP item 16): `/x/graph` on a vault of a few hundred notes settles within seconds and stays responsive while it does; hover highlights neighbours, a click opens the note, the filters, a color group and the forces change the picture at once; on the iPhone, pinch zooms, one finger pans or drags a node, a tap opens it, and the settings open as a sheet. The local graph follows the open note and its depth slider; an edit that adds a link appears in both graphs within a second.
+33. Obsidian import (ROADMAP item 24): start on a copy of a real Obsidian vault; Settings shows its attachment folder, daily note and template settings; `/x/compat` lists them as in effect, its plugins and findings, and each finding opens its note at the line; `.obsidian/` is unchanged and the vault still opens in Obsidian.
 
 ---
 

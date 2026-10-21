@@ -1,7 +1,7 @@
 // Phone and tablet top bar (DESIGN §6.16): ☰, the note title with the connection dot,
 // switcher/search, mode toggle and ⋯ (palette, panels, file actions, template, today, reload).
 // On tablets it also toggles the right sidebar overlay.
-import { CalendarDays, CloudUpload, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Star, StarOff, Sun, Trash, TriangleAlert } from 'lucide-react';
+import { CalendarDays, CloudUpload, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Star, StarOff, Sun, Trash, TriangleAlert, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { matchPath, useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
@@ -83,6 +83,7 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
       {hasFile && item('Backlinks', <Link2 size={16} />, () => showPanel('right', 'backlinks'))}
       {note && item('Outline', <ListTree size={16} />, () => showPanel('right', 'outline'))}
       {hasFile && item('History', <History size={16} />, () => showPanel('right', 'history'))}
+      {hasFile && item('Local graph', <Waypoints size={16} />, () => showPanel('right', 'graph'))}
       {hasFile && <div className="menu-separator" role="separator" />}
       {hasFile && path !== null && item(starred ? 'Remove bookmark' : 'Bookmark', starred ? <StarOff size={16} /> : <Star size={16} />, () => void toggleFileBookmark(path))}
       {hasFile && command('file.rename', 'Rename', <Pencil size={16} />)}

@@ -25,6 +25,10 @@ export const queryKeys = {
   statusDetails: () => ['status', 'details'] as const,
   templates: () => ['templates'] as const,
   bookmarks: () => ['bookmarks'] as const,
+  /** The link graph (API.md §11.4), refreshed by tree changes while a graph view is open. */
+  graph: () => ['graph'] as const,
+  /** The Obsidian compatibility report (API.md §11.5). */
+  compat: () => ['compat'] as const,
 };
 
 export const STALE = {

@@ -9,6 +9,7 @@ import {
   CloudUpload,
   Command as CommandIcon,
   FileBraces,
+  FileCheck,
   FileImage,
   FilePlay,
   FilePlus,
@@ -17,6 +18,7 @@ import {
   FileSearch,
   FileText,
   Files,
+  GitFork,
   History,
   Inbox,
   LayoutTemplate,
@@ -26,6 +28,7 @@ import {
   Settings as SettingsIcon,
   Tags,
   Trash,
+  Waypoints,
 } from 'lucide-react';
 import { api } from '../api/endpoints';
 import { currentTree } from '../api/hooks';
@@ -202,6 +205,8 @@ export function registerBuiltins(): void {
   registerPanel({ id: 'backlinks', side: 'right', title: 'Backlinks', icon: Link2, load: () => import('../components/panels/BacklinksPanel') });
   registerPanel({ id: 'outline', side: 'right', title: 'Outline', icon: ListTree, load: () => import('../components/panels/OutlinePanel') });
   registerPanel({ id: 'history', side: 'right', title: 'History', icon: History, load: () => import('../components/panels/HistoryPanel') });
+  // ROADMAP item 16: the open note's neighbourhood (DESIGN §6.28).
+  registerPanel({ id: 'graph', side: 'right', title: 'Local graph', icon: Waypoints, load: () => import('../components/panels/LocalGraphPanel') });
 
   // ---------- pages ----------
   // The vault-wide history (ROADMAP item 28): timeline, changes over a period, deleted files.
@@ -351,6 +356,7 @@ export function registerBuiltins(): void {
   registerCommand({ id: 'view.backlinks', name: 'Show backlinks', run: () => showPanel('right', 'backlinks') });
   registerCommand({ id: 'view.outline', name: 'Show outline', run: () => showPanel('right', 'outline') });
   registerCommand({ id: 'view.history', name: 'Show file history', run: () => showPanel('right', 'history') });
+  registerCommand({ id: 'view.localGraph', name: 'Open local graph', icon: Waypoints, run: () => showPanel('right', 'graph') });
 
   // ---------- history, navigation, pages ----------
   registerCommand({
@@ -372,6 +378,10 @@ export function registerBuiltins(): void {
   registerCommand({ id: 'trash.open', name: 'Open trash', icon: Trash, run: () => goTo('/trash') });
   // The server at a glance (ROADMAP item 38, DESIGN §6.18.1): /x/status, a ribbon and drawer entry, and "Open Status".
   registerPage({ route: 'status', title: 'Status', icon: Activity, load: () => import('../components/pages/StatusPage') });
+  // ROADMAP item 16 (DESIGN §6.28): /x/graph, the graph of every note, and "Open Graph".
+  registerPage({ route: 'graph', title: 'Graph', icon: GitFork, load: () => import('../components/pages/GraphPage') });
+  // ROADMAP item 24 (DESIGN §6.29): /x/compat, how an imported Obsidian vault works here.
+  registerPage({ route: 'compat', title: 'Compatibility report', icon: FileCheck, load: () => import('../components/pages/CompatPage') });
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 
