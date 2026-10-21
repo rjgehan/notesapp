@@ -84,6 +84,9 @@ describe('DrawingEmbed', () => {
     expect(fixed).toHaveAttribute('width', '300');
     expect(fixed).toHaveAttribute('height', '200');
     expect(fixed).toHaveClass('is-fixed');
+    // The stylesheet's `height: auto` keeps a box of that shape (also when the column narrows it).
+    expect(fixed.style.aspectRatio).toBe('300 / 200');
+    expect(img.style.aspectRatio).toBe('');
   });
 
   it('follows the theme and the file, and releases replaced images', async () => {

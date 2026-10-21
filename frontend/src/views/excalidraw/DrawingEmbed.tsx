@@ -52,6 +52,8 @@ export default function DrawingEmbed({ path, display, width, height }: EmbedProp
   }, [shown]);
 
   const name = displayName(path);
+  // `|WxH` is a box of that shape (narrower on a narrow column), and the drawing fits inside it.
+  const fixed = width !== undefined && height !== undefined;
   let status: string | null = null;
   if (shown.kind === 'loading') status = file.isError ? 'Could not load this drawing.' : 'Loading drawing…';
   else if (shown.kind === 'empty') status = `${name} is empty.`;
@@ -65,9 +67,9 @@ export default function DrawingEmbed({ path, display, width, height }: EmbedProp
           src={shown.url}
           alt={display ?? name}
           width={width ?? (Math.round(shown.width) || undefined)}
-          height={width !== undefined ? height : undefined}
-          className={height !== undefined && width !== undefined ? 'is-fixed' : undefined}
-          style={theme === 'dark' ? { filter: DARK_FILTER } : undefined}
+          height={fixed ? height : undefined}
+          className={fixed ? 'is-fixed' : undefined}
+          style={fixed || theme === 'dark' ? { ...(fixed ? { aspectRatio: `${width} / ${height}` } : {}), ...(theme === 'dark' ? { filter: DARK_FILTER } : {}) } : undefined}
           draggable={false}
         />
       ) : (
