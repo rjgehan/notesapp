@@ -511,7 +511,7 @@ The first off-site upload can take hours on a slow uplink. NotesApp is already r
 
 #### Monitoring backups
 
-- **ntfy.** A failed run posts *NotesApp backup failed* (high priority) with the steps that failed and the last lines of restic's output. *NotesApp is down after the backup* (urgent) means the app could not be started again: run `docker compose up -d` at once. On Sundays, when the weekly repository check passes, a low-priority *NotesApp backups OK* arrives. **If that Sunday message stops coming, the backups have stopped**, for example because `backup-scheduler` is not running.
+- **ntfy.** A failed run posts *NotesApp backup failed* (high priority) with the steps that failed. restic's output stays on homeserver, because its errors name your notes: the status page and the logs below have it. *NotesApp is down after the backup* (urgent) means the app could not be started again: run `docker compose up -d` at once. On Sundays, when the weekly repository check passes, a low-priority *NotesApp backups OK* arrives. **If that Sunday message stops coming, the backups have stopped**, for example because `backup-scheduler` is not running.
 - **Heartbeat (recommended).** It catches what ntfy cannot: homeserver being off, or the scheduler being gone. Create a check at [healthchecks.io](https://healthchecks.io) (or an Uptime Kuma push monitor) with a period of 1 day and a grace time of 2 hours. Set `NOTES_BACKUP_HEARTBEAT_URL` to its ping URL (`https://hc-ping.com/<uuid>`), run `docker compose up -d`, and let the check notify you, for example through the same ntfy topic. Every successful run pings it.
 - **Status:** the status page's *Backups* card shows the last run's time and result, the snapshot, the off-site result, the last success and the failures, and lists a failed run, or no success for 36 hours, among the problems at the top. The same file from the command line: `docker compose exec backup-scheduler cat /state/status.json`.
 - **Logs:** `docker compose logs --since 48h backup-scheduler` (each run, with restic's output) and `docker compose logs backup`.
@@ -530,9 +530,12 @@ The first off-site upload can take hours on a slow uplink. NotesApp is already r
 
 ```sh
 cd ~/notesapp/deploy
+install -d -m 755 ~/.local/state/notesapp-backup             # the runs' state, owned by you: create it FIRST (below)
 sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=backup-host-cron/' .env
+grep -q '^NOTES_BACKUP_STATE=' .env || echo 'NOTES_BACKUP_STATE=' >> .env
+sed -i "s|^NOTES_BACKUP_STATE=.*|NOTES_BACKUP_STATE=$HOME/.local/state/notesapp-backup|" .env
 docker compose --profile backup rm -s -f backup-scheduler   # if it ran before
-docker compose up -d                                         # the backup sidecar only
+docker compose up -d                                         # the backup sidecar only; notes now mounts that directory
 crontab -e
 ```
 
@@ -541,7 +544,9 @@ crontab -e
 @reboot sleep 120; /bin/sh $HOME/notesapp/deploy/backup/nightly.sh --recover >> $HOME/notesapp-backup.log 2>&1
 ```
 
-The `@reboot` line starts NotesApp again if the server rebooted during a snapshot. Add `NOTES_BACKUP_HEARTBEAT_URL=<url>` before `/bin/sh` in the first line for a heartbeat. The state (`status.json`) is in `~/.local/state/notesapp-backup`, and the log grows by about a kilobyte a night. Monitoring is the same as above. For the status page to see it, mount that directory into the app instead of the scheduler's volume: `echo "NOTES_BACKUP_STATE=$HOME/.local/state/notesapp-backup" >> .env && docker compose up -d` (an absolute path; Compose does not expand `~`).
+The `@reboot` line starts NotesApp again if the server rebooted during a snapshot. Add `NOTES_BACKUP_HEARTBEAT_URL=<url>` before `/bin/sh` in the first line for a heartbeat. The state (`status.json`) is in `~/.local/state/notesapp-backup`, and the log grows by about a kilobyte a night. Monitoring is the same as above.
+
+`NOTES_BACKUP_STATE` mounts that directory into the app instead of the scheduler's volume, so the status page sees the runs. It is an absolute path, since Compose does not expand `~`. **Create the directory before the `docker compose up -d` that mounts it**, as above: Docker creates a missing mount source as root, and the cron job, running as you, could then never write there. Each run would fail with *its state directory … cannot be written* (*"NotesApp backup failed"* in Part 3 has the fix). Finally, run `sh ~/notesapp/deploy/backup/nightly.sh` once by hand, as in step 6 of the setup.
 
 #### Manual backups
 
@@ -716,7 +721,7 @@ docker compose up -d                            # recreates notes with the secre
 docker compose logs notes | grep -i mirror      # "Git mirror: pushing to https://github.com/... about 10 min after each commit"
 ```
 
-Run **Push history to the mirror now** from the command palette, then look at **Settings › About › Mirror** (or `mirror` in `/api/status`): it shows *last push just now*, and the repository on github.com has your history. From then on the status bar warns if pushes fail (*Mirror is not being updated*) or the mirror has diverged (*Mirror stopped*); failures are retried after 1, 5 and 15 minutes and then every 30 minutes, and logged once as `GIT_MIRROR_FAILED`.
+Run **Push history to the mirror now** from the command palette, then look at **Settings › About › Mirror** (or `mirror` in `/api/status`): it shows *last push just now*, and the repository on github.com has your history. From then on the status bar warns if pushes fail (*Mirror is not being updated*), the mirror has diverged (*Mirror stopped*) or its settings cannot be used (*Mirror is off: …*); failures are retried after 1, 5 and 15 minutes and then every 30 minutes, and logged once as `GIT_MIRROR_FAILED`.
 
 **Rotate the token** before it expires: generate a new one as in step 2, replace the content of `secrets/mirror-token`, run `docker compose up -d --force-recreate notes` (the secret is mounted when the container is created), check **Push history to the mirror now** works, then delete the old token on GitHub.
 
@@ -724,13 +729,13 @@ Run **Push history to the mirror now** from the command palette, then look at **
 
 ### Large files
 
-Files larger than **25 MB** stay in the vault, the trash and the nightly backups, but out of git history (ROADMAP item 23, DESIGN §5.8 *Large files*), so `.git` stays small and the mirror stays under GitHub's 100 MB file limit. For such a file:
+Files larger than **25 MB** stay in the vault, the trash and the nightly backups, but out of git history (ROADMAP item 23, DESIGN §5.8 *Large files*), so `.git` stays small and the mirror stays under GitHub's 100 MB file limit. Hidden files count too: a large cache under `.obsidian/plugins/` or a half-finished `*.part` download is kept out like an attachment, though only the files the app shows are counted in **Settings › About** and on the status page. For such a file:
 
 - its History panel says why it has no new versions; the versions from before it grew past 25 MB are kept;
 - replacing it (an upload over it, or restoring an older version) first puts the current file in the **trash**, since history cannot bring it back;
 - `.git/info/exclude` lists it in the section NotesApp manages (`git -C /srv/notes/data/vault check-ignore -v '<path>'` shows the line).
 
-**Settings › About** shows the history size and how many files are kept out of it. To change the threshold, set `NOTES_GIT_LARGE_FILE_THRESHOLD` in `.env` (for example `50MB`; `0` versions every file) and run `docker compose up -d`. At the next start, files now over the threshold stop being versioned (`Stop versioning …` commits) and files now under it are committed. Lowering it does not shrink the history: versions already committed stay. Keep it below 100 MB while the mirror is on.
+**Settings › About** shows the history size and how many files are kept out of it. To change the threshold, set `NOTES_GIT_LARGE_FILE_THRESHOLD` in `.env` (for example `50MB`; `0` versions every file) and run `docker compose up -d`. At the next start, files now over the threshold stop being versioned (`Stop versioning …` commits) and files now under it are committed. Lowering it does not shrink the history: versions already committed stay. Keep it below 100 MB while the mirror is on, and at 5 MB or more, the largest note NotesApp saves (`notes.limits.max-text-size`): a lower threshold would leave large notes without versions while every save overwrites them, so NotesApp refuses to start with it and says why in `docker compose logs notes`.
 
 ### Import an existing Obsidian vault later
 
@@ -854,7 +859,7 @@ Pushes to the GitHub mirror fail. The tooltip of the status-bar warning, **Setti
 - **`connection failed`, timeouts:** homeserver cannot reach github.com (`curl -sI https://github.com` on homeserver). It recovers on its own.
 - **`GH001: Large files detected`, or another refusal by GitHub:** a file over 100 MB is in the history from before the large-file threshold applied, or the threshold is above 100 MB. Lower `NOTES_GIT_LARGE_FILE_THRESHOLD`. Versions already committed stay in the history, so the push keeps failing until that history is rewritten by hand, which NotesApp never does; make a full backup before attempting it.
 
-`mirror.state: disabled` with a `reason` other than *not configured* means the configuration is refused, for example a URL that is not `https://` or that contains credentials. Fix `NOTES_MIRROR_URL` and run `docker compose up -d`.
+**"Mirror is off: …"** (`mirror.state: disabled` with a `reason` other than *not configured*) means the configuration is refused and nothing is pushed: for example the SSH clone URL `git@github.com:…` (*not a valid URL*), an `http://` URL, or a URL with a token in it. The app logs it as `GIT_MIRROR_FAILED` at startup, so it also raises an app alert. Set `NOTES_MIRROR_URL` to the repository's plain `https://github.com/<you>/<repo>.git` URL and run `docker compose up -d`.
 
 ### "Mirror stopped: it has commits this vault does not"
 
@@ -879,7 +884,7 @@ Step 4 was skipped or used other names. Create the volumes as in step 4, then `d
 
 ### "NotesApp backup failed"
 
-The ntfy message names the steps that failed; `docker compose logs --since 24h backup-scheduler` has restic's full output. A failed run never leaves NotesApp stopped on purpose: it starts it again first, and it alerts as *NotesApp is down after the backup* (urgent) when it cannot. Then run `docker compose up -d` and read `docker compose logs notes`.
+The ntfy message names the steps that failed, never restic's output (its errors name your notes, and the topic may be on ntfy.sh). The status page's *Backups* card shows the last lines of each failing step (characters other than plain ASCII as `?`), and `docker compose logs --since 24h backup-scheduler` (with host cron, `~/notesapp-backup.log`) has restic's full output. A failed run never leaves NotesApp stopped on purpose: it starts it again first, and it alerts as *NotesApp is down after the backup* (urgent) when it cannot. Then run `docker compose up -d` and read `docker compose logs notes`.
 
 - **`the local repository ... is not initialized`:** run `docker compose exec backup sh /backup/restic-job.sh init` (setup step 5).
 - **`on the same filesystem as the vault`:** the backup disk is not mounted at `NOTES_BACKUP_LOCAL_REPO`. Check with `findmnt /mnt/backup`, mount it (`sudo mount /mnt/backup`), then `docker compose up -d --force-recreate backup`: a container only sees a disk that was mounted before it started. Do the same after unplugging and re-plugging a USB disk.
@@ -890,6 +895,7 @@ The ntfy message names the steps that failed; `docker compose logs --since 24h b
 - **`the snapshot was cancelled after 1800 s`:** the first snapshot of a large vault, or a very slow disk, took longer than NotesApp may be down. Run it once by hand with more time: `docker compose exec -e NOTES_BACKUP_MAX_STOP_SECONDS=14400 backup-scheduler sh /backup/nightly.sh`.
 - **`off-site copy`:** the bucket, its keys or the network. Test with `docker compose exec backup sh /backup/restic-job.sh snapshots offsite`. The next successful run copies every snapshot that is missing off site, so nothing is lost while it is broken.
 - **`repository check`:** read restic's message in the log. If the local repository is damaged, move its directory aside, run `init` again (it takes the chunker parameters from the off-site repository) and let the next run fill it; the off-site copy keeps the history.
+- **`could not start: its state directory ... cannot be written`:** with host cron, the state directory was created by Docker as root because `NOTES_BACKUP_STATE` was mounted before the first run. Give it back to your user: `sudo chown -R "$(id -u):$(id -g)" ~/.local/state/notesapp-backup` (and `~/.local/state` or `~/.local`, if `ls -ld` shows them owned by root too), then run `sh ~/notesapp/deploy/backup/nightly.sh` once by hand.
 - **`NotesApp backup skipped`:** the previous run was still going, typically the first off-site upload. If no run is going (`docker compose exec backup-scheduler cat /state/run.lock/pid`), `docker compose restart backup-scheduler` clears the lock.
 - **`NotesApp backup interrupted`:** homeserver rebooted or the scheduler was restarted during a snapshot. NotesApp was started again and that snapshot was cancelled; the next night takes a new one.
 
@@ -909,4 +915,4 @@ The JVM could not use the AOT cache built into the image (DESIGN §7.1), usually
 
 ### The status page says "No backup has reported here yet"
 
-The app sees no `status.json`. With `backup-scheduler`, no run has finished yet (run one: *Run, pause or change the backups*). With host cron, set `NOTES_BACKUP_STATE` (*Host cron instead of backup-scheduler*). "No backup for 2 days" instead means the runs have stopped: `docker compose ps backup-scheduler` and its logs.
+The app sees no `status.json`. With `backup-scheduler`, no run has finished yet (run one: *Run, pause or change the backups*). With host cron, set `NOTES_BACKUP_STATE` (*Host cron instead of backup-scheduler*); if the runs then fail with *state directory ... cannot be written*, see *"NotesApp backup failed"* above. "No backup for 2 days" instead means the runs have stopped: `docker compose ps backup-scheduler` and its logs.

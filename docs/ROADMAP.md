@@ -513,6 +513,7 @@ Clicking an embed opens the full editor.
 - **Consistency by a short nightly stop.** The app is stopped for the local snapshot only (seconds after the first run), because a live copy can capture `refs/` ahead of `objects/` in `.git`. The off-site copy is a `restic copy` of the local snapshots and runs with the app up.
 - **Off-site through the S3 API.** Backblaze B2 is reached through its S3-compatible endpoint, which restic recommends over its own B2 backend; Amazon S3 works the same way.
 - **Additions:** failure alerts on ntfy, an optional heartbeat URL, a weekly `restic check` with a low-priority "backups OK" report, and CI tests of the scripts against a fake Docker CLI and a real restic.
+- **Alerts name the failed steps only.** restic's output names vault files, so it goes to `status.json` (the status page) and the log, never to the ntfy topic, which may be on ntfy.sh.
 
 **One line:** automatic nightly snapshots of the `notes-data` volume (vault plus `.git`) and `tailscale-state` to a local disk and to off-site object storage.
 
@@ -533,6 +534,7 @@ Clicking an embed opens the full editor.
 - **Diverged means stop, then a manual retry.** When the mirror has commits the vault lacks, pushing stops (`mirror.state: diverged`, a status-bar warning) until **Push history to the mirror now** (`POST /api/mirror/push`, a new endpoint) is used after fixing the repository. Failures back off 1, 5 and 15 minutes, then every 30 minutes, and log `GIT_MIRROR_FAILED` once per streak.
 - **The secret is always mounted.** Compose cannot create a container whose secret file is missing, so `mirror_token` defaults to an empty file in git (`deploy/mirror/no-token`) and `NOTES_MIRROR_TOKEN_SECRET` points it at `deploy/secrets/mirror-token` when the mirror is set up; existing deploys need no change.
 - **Additions:** `file:` URLs work too (the tests push to a local bare repository); URLs with credentials are refused; the mirror's state is in Settings › About; nothing is pushed at shutdown.
+- **A mirror whose settings cannot be used is a problem, not just "off".** An SSH or `http://` URL, or one with a token in it, is refused; the status bar, the ⋯ menu and the status page then warn "Mirror is off: …", and the startup logs `GIT_MIRROR_FAILED`, which raises an app alert.
 
 **One line:** push the vault repo to a private GitHub repository, debounced to about 10 minutes after commits, for off-site history you can browse on github.com.
 
@@ -739,6 +741,8 @@ Results update through SSE.
 - **The replaced version goes to the trash.** Git cannot bring back a version it never stored, so a raw overwrite or a history restore of a large file first keeps the current file in the trash (a hard link where the filesystem has them, so nothing is copied). Restore it from the Trash page like any deleted file.
 - **Existing repositories are brought in line at startup.** The bootstrap commit stops tracking large files an imported or older repository still tracks; versions already committed stay (history is never rewritten).
 - **Repository size** was already in `/api/status` as `disk.repoBytes` (measured by the rescan); it is now also in Settings › About.
+- **Hidden files are covered too.** The index never sees dot-files, dot-folders or names such as `*.part`, so the server also walks the disk (the whole tree at startup and in the bootstrap commit, the staged folders in a commit) and keeps such files out as well; `/api/status` still counts only the files the app shows.
+- **The threshold cannot be below the text limit** (`notes.limits.max-text-size`, 5 MB): text saves keep no copy of the version they replace, which is safe only while every note the app saves is versioned, so a lower threshold stops the app at startup with an explanation.
 
 **One line:** keep files above a configurable size (for example 25 MB) out of git history so the repo stays small. They stay in the vault and in backups (item 1).
 
@@ -896,7 +900,7 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
 - **The AOT training run stops at context refresh** (`-Dspring.context.exit=onRefresh`), so it covers the startup path, not request handling. It must run on the target architecture: natively a failure fails the build, while under QEMU (arm64) the image ships without the cache rather than blocking the weekly security rebuild. JGit's classes are not cached because its jar is signed. Not measured on JDK 25 here (Docker is not installed on the development machine); a JDK 21 CDS proxy of the same run halved the context's start.
 - **curl is installed** in the runtime image: the JDK 25 Temurin images no longer ship it, and the `HEALTHCHECK` (which the nightly backup waits on) and the restore drill need it.
 - **Alerts carry fixed texts, never the log message,** so no path, error text or note content leaves the server. A marker is sent at most once an hour (repeats are summed up in one follow-up) and at most 10 alerts an hour in all.
-- **Additions:** *Send a test alert* on the status page; an alert after a Tailscale watchdog restart, sent by the restarted app because the exiting one has no network; the backup state mounted read-only into the app (`NOTES_BACKUP_STATE` for host cron) so the status page shows the last backup; the markers logged since start, counted even without ntfy; and `registerPage`'s command now closes the phone drawer, which the first registered page showed staying open.
+- **Additions:** *Send a test alert* on the status page; an alert after a Tailscale watchdog restart, sent by the restarted app because the exiting one has no network; the backup state mounted read-only into the app (`NOTES_BACKUP_STATE` for host cron) so the status page shows the last backup; the markers logged since start, counted even without ntfy; and `registerPage`'s command now closes the phone drawer, which the first registered page showed staying open, and the phone and tablet top bar shows a registered page's title.
 
 **One line:** a JDK 25 runtime image (no virtual-thread pinning, AOT cache for faster start), ntfy alerts for app errors (the v1 ERROR markers pushed directly, not only through logs), and an in-app status page. Watchtower notifications, the `/readyz` probe and Dependabot are already in v1.
 

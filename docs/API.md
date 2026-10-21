@@ -92,7 +92,7 @@ version = lowercase_hex( SHA1( "blob " + decimal(byteLength) + "\0" + bytes ) )
 | Text file content (UTF-8 bytes) | 5 MiB (5,242,880) by default; the server can raise it per extension (`notes.limits.text-size-overrides`). Beyond it `413 too-large`, with `limit` set to the limit that applied. |
 | JSON request body | 16 MiB (`Content-Length` checked before reading); beyond it `413 too-large` |
 | Upload body | 100 MiB (104,857,600); beyond it `413 too-large` |
-| Versioned file size | 25 MiB (26,214,400) by default (`notes.git.large-file-threshold`); a larger file is stored but kept out of git history (§6.2 `git.largeFiles`, §14.1 `excluded`) |
+| Versioned file size | 25 MiB (26,214,400) by default (`notes.git.large-file-threshold`, never below the text file size above); a larger file is stored but kept out of git history (§6.2 `git.largeFiles`, §14.1 `excluded`) |
 | Free disk space after an upload | at least 1 GiB; otherwise `507 insufficient-storage` |
 | Path length | 1024 UTF-16 characters; each existing segment 255 UTF-8 bytes; each **new** segment 240 UTF-8 bytes |
 | `POST /api/links/resolve` targets | 1 to 500 |
@@ -355,11 +355,11 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `watcher.mode` | `inotify`, `polling` (watcher failed; rescans only) or `disabled` |
 | `git.state` | `ready`; `importing` (the startup commit is running after readiness); `failing` (commits fail and are being retried; `lastError` and `failingSince` are set); `disabled` (`enabled` is false) |
 | `git.reason` | Non-null when `enabled` is false, for example `"disabled by configuration"`, `"HEAD is detached"` or `"git-lfs is not supported"` |
-| `git.largeFiles` | The large-file policy (DESIGN §5.8): files larger than `limitBytes` (`notes.git.large-file-threshold`, 25 MiB by default) stay in the vault but out of git history. `files` and `bytes` count them now. `limitBytes` is `null` when the policy is off (threshold 0). |
+| `git.largeFiles` | The large-file policy (DESIGN §5.8): files larger than `limitBytes` (`notes.git.large-file-threshold`, 25 MiB by default) stay in the vault but out of git history. `files` and `bytes` count the files the app lists (§7); hidden files over the threshold are kept out of history too but not counted. `limitBytes` is `null` when the policy is off (threshold 0); otherwise it is at least the largest text size limit (the server refuses to start with a lower threshold). |
 | `disk.repoBytes` | Size of `.git` (the history), measured by the last rescan; `null` before the first one |
 | `settings` | `readOnly` and its `reason` (§5) |
 | `mirror` | The push mirror of the history (§6.4, DESIGN §5.8), a `MirrorStatus` |
-| `mirror.state` | `disabled` (`reason` says why: `"not configured"`, `"history is disabled"`, or a configuration error such as a URL that is not `https://`); `ready` (new commits are pushed about 10 minutes after the last one); `failing` (pushes fail and are retried with backoff; `lastError` and `failingSince` are set); `diverged` (the mirror has commits the vault's history lacks; nothing is pushed until §6.4 is called again, and NotesApp never force-pushes) |
+| `mirror.state` | `disabled` (`reason` says why: `"not configured"`, `"history is disabled"`, or a configuration error such as a URL that is not `https://`; a configuration error is a problem the clients warn about, since such a mirror never pushes); `ready` (new commits are pushed about 10 minutes after the last one); `failing` (pushes fail and are retried with backoff; `lastError` and `failingSince` are set); `diverged` (the mirror has commits the vault's history lacks; nothing is pushed until §6.4 is called again, and NotesApp never force-pushes) |
 | `mirror.remote` | The mirror's URL. It never contains credentials: a URL with any is refused (`disabled`). |
 | `mirror.pushedCommit`, `mirror.lastPushAt` | The last commit the mirror is known to have and when it was pushed, during this server run; `null` until the first push |
 | `mirror.nextPushAt` | When the next push is due (after a failure: the next retry); `null` when the mirror is up to date, disabled or diverged |
