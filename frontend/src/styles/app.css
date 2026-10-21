@@ -15,10 +15,15 @@ body {
   background: var(--background-primary);
   color: var(--text-normal);
   font-family: var(--font-interface);
-  font-size: var(--font-ui-small);
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+/* The UI size is set on body: the root keeps the browser's 16px, which rem-based components
+   (Excalidraw's toolbars, item 5) are designed for. The app's own sizes are px and em. */
+body {
+  font-size: var(--font-ui-small);
 }
 
 #root {
@@ -535,7 +540,7 @@ body.is-resizing {
 }
 
 .error-panel {
-  max-width: 34rem;
+  max-width: 442px;
   margin: 48px auto;
   padding: 20px 24px;
   border: 1px solid var(--background-modifier-border);
