@@ -15,6 +15,8 @@ import { formatBytes, formatDateTime, formatRelative } from '../../features/form
 import { openPath } from '../../features/navigation';
 import { displayName, newNameError, pathSafetyError } from '../../features/paths';
 import { DEFAULT_SETTINGS } from '../../features/settings';
+import { clearOfflineCopies, noteCache } from '../../offline/offlineStore';
+import { setOfflineMedia } from '../../pwa/serviceWorker';
 import { pageBuild } from '../../state/buildCheck';
 import { usePrefs, type ThemePref } from '../../state/prefs';
 import { toast } from '../../state/toasts';
@@ -438,6 +440,55 @@ function DiscardedEdits() {
   );
 }
 
+/** Turns the device's offline copies on or off; off removes them (drafts are kept). */
+function setOfflineCopies(enabled: boolean): void {
+  usePrefs.getState().update({ offlineNotes: enabled });
+  setOfflineMedia(enabled);
+  if (!enabled) void clearOfflineCopies().catch((e: unknown) => toastError(e));
+}
+
+function OfflineCopiesInfo({ enabled }: { enabled: boolean }) {
+  const [kept, setKept] = useState<{ notes: number; chars: number } | null>(null);
+  const [seq, setSeq] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    noteCache.index().then(
+      (list) => !cancelled && setKept({ notes: list.length, chars: list.reduce((n, e) => n + e.chars, 0) }),
+      () => !cancelled && setKept(null),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, seq]);
+  return (
+    <>
+      The last 100 notes you opened, the notes list and note images stay on this device, so they open without a connection; edits made
+      offline sync when it returns.
+      {kept && kept.notes > 0 && (
+        <>
+          {' '}
+          {kept.notes} {kept.notes === 1 ? 'note is' : 'notes are'} kept ({formatBytes(kept.chars)}).{' '}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() =>
+              void clearOfflineCopies().then(
+                () => {
+                  setSeq((n) => n + 1);
+                  toast('Removed the offline copies from this device');
+                },
+                (e: unknown) => toastError(e),
+              )
+            }
+          >
+            Remove them
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+
 function DeviceSection() {
   const prefs = usePrefs();
   const draftsFailing = useUi((s) => s.draftsFailing);
@@ -466,6 +517,9 @@ function DeviceSection() {
       </Row>
       <Row label="Load remote images" description="Off: images from other sites show a placeholder until tapped.">
         <Toggle label="Load remote images" checked={prefs.loadRemoteImages} onChange={(loadRemoteImages) => prefs.update({ loadRemoteImages })} />
+      </Row>
+      <Row label="Keep recent notes for offline reading" description={<OfflineCopiesInfo enabled={prefs.offlineNotes} />}>
+        <Toggle label="Keep recent notes for offline reading" checked={prefs.offlineNotes} onChange={(offlineNotes) => setOfflineCopies(offlineNotes)} />
       </Row>
       <h3 className="settings-subtitle">Recently discarded edits</h3>
       {draftsFailing && (

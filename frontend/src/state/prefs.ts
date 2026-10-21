@@ -8,11 +8,13 @@ export interface Prefs {
   spellcheck: boolean;
   autocorrect: boolean;
   loadRemoteImages: boolean;
+  /** Keep copies of recently opened notes, the tree and note images for offline reading (DESIGN §6.21). */
+  offlineNotes: boolean;
 }
 
 export const PREFS_KEY = 'notesapp:prefs';
 
-export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true };
+export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true };
 
 function load(): Prefs {
   try {
@@ -24,6 +26,7 @@ function load(): Prefs {
       spellcheck: typeof parsed.spellcheck === 'boolean' ? parsed.spellcheck : true,
       autocorrect: typeof parsed.autocorrect === 'boolean' ? parsed.autocorrect : true,
       loadRemoteImages: typeof parsed.loadRemoteImages === 'boolean' ? parsed.loadRemoteImages : true,
+      offlineNotes: typeof parsed.offlineNotes === 'boolean' ? parsed.offlineNotes : true,
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -38,9 +41,9 @@ export const usePrefs = create<PrefsState>()((set, get) => ({
   ...load(),
   update(patch) {
     set(patch);
-    const { theme, spellcheck, autocorrect, loadRemoteImages } = get();
+    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes } = get();
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes }));
     } catch {
       // Private mode or quota: the preference still applies to this page load.
     }

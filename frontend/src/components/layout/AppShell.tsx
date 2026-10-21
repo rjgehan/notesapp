@@ -3,7 +3,7 @@
 // Tablet: icon rail + workspace, both sidebars as overlays. Desktop: ribbon, resizable sidebars,
 // workspace and status bar. Touch devices get the editing toolbar as the last grid row. The shell
 // also hosts the overlays, the app-level file input and the polite live region.
-import { CalendarDays, CloudOff, FilePlus, Moon, RefreshCw, Settings, Sun, Trash, TriangleAlert } from 'lucide-react';
+import { CalendarDays, FilePlus, Moon, RefreshCw, Settings, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { setFilePicker } from '../../features/attachments';
 import { runCommand } from '../../features/commands';
@@ -14,6 +14,7 @@ import { reloadForNewBuild } from '../../state/buildCheck';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
 import { LEFT_WIDTH, RIGHT_WIDTH, useUi } from '../../state/ui';
 import { MoveDialog } from '../explorer/MoveDialog';
+import { OfflineBanners } from '../OfflineBanners';
 import { CommandPalette } from '../overlays/CommandPalette';
 import { Dialogs } from '../overlays/Dialogs';
 import { QuickSwitcher } from '../overlays/QuickSwitcher';
@@ -35,7 +36,6 @@ function Banners() {
   const offline = useUi((s) => s.connection === 'offline');
   const breakpoint = useBreakpoint();
   const showDrafts = draftsFailing && breakpoint !== 'desktop';
-  if (!newBuild && !showDrafts && !offline) return null;
   return (
     <div className="banners">
       {newBuild && (
@@ -46,11 +46,7 @@ function Banners() {
           </button>
         </div>
       )}
-      {offline && (
-        <div className="banner banner-warning" role="status">
-          <CloudOff size={14} aria-hidden /> Offline: edits are saved on this device and will sync when the connection returns.
-        </div>
-      )}
+      <OfflineBanners offline={offline} />
       {showDrafts && (
         <div className="banner banner-warning" role="status">
           <TriangleAlert size={14} aria-hidden /> Unsaved changes are not protected on this device.

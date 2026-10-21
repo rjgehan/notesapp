@@ -3,7 +3,7 @@
 // The registry also owns the page-lifecycle flushes and the shared keepalive budget (§6.9).
 import type { QueryClient } from '@tanstack/react-query';
 import type { Endpoints } from '../api/endpoints';
-import type { FileEntry, WriteResult } from '../api/types';
+import type { FileEntry, TextFile, WriteResult } from '../api/types';
 import { displayName, rebasePath } from '../features/paths';
 import type { SaveSummary } from '../state/ui';
 import { DocumentSession, type Notice, type SessionDeps } from './DocumentSession';
@@ -16,6 +16,10 @@ export const KEEPALIVE_BUDGET = 60 * 1024;
 
 export interface RegistryOptions {
   api: Pick<Endpoints, 'readFile' | 'saveFile'>;
+  /** How a session reads its file when it opens (offline copies, DESIGN §6.21). */
+  loadFile?(path: string): Promise<TextFile>;
+  /** Called with every processed own save, after the cache patches (offline copies). */
+  onSaved?(result: WriteResult, content: string): void;
   drafts: DraftStore;
   moves: MoveMap;
   clientId: string;
@@ -42,12 +46,14 @@ export class DocumentRegistry {
     this.opts = opts;
     this.deps = {
       api: opts.api,
+      loadFile: opts.loadFile,
       drafts: opts.drafts,
       moves: opts.moves,
       clientId: opts.clientId,
       liveDraftOwners: (path) => (opts.tabs ? opts.tabs.liveOwners(path) : Promise.resolve(new Set())),
       onWriteResult: (result: WriteResult, content: string) => {
         if (opts.queryClient) applyWriteResult(opts.queryClient, result, content);
+        opts.onSaved?.(result, content);
       },
       onRekey: (session, from, authoritative) => this.rekeySession(session, from, authoritative),
       onChange: () => this.updateSummary(),

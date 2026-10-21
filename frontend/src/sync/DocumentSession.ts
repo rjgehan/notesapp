@@ -73,6 +73,11 @@ export interface Notice {
 
 export interface SessionDeps {
   api: Pick<Endpoints, 'readFile' | 'saveFile'>;
+  /**
+   * Reads the file when the session opens (DESIGN §6.21): the server, or the device's offline copy
+   * when the server is unreachable. Defaults to `api.readFile`. Revalidations always ask the server.
+   */
+  loadFile?(path: string): Promise<TextFile>;
   drafts: DraftStore;
   moves: MoveMap;
   clientId: string;
@@ -332,10 +337,14 @@ export class DocumentSession {
   private async load(): Promise<void> {
     let file: TextFile;
     try {
-      file = await this.deps.api.readFile(this.path);
+      file = await (this.deps.loadFile ? this.deps.loadFile(this.path) : this.deps.api.readFile(this.path));
     } catch (e) {
       if (this.disposed) return;
-      this.error = isProblem(e, 'too-large') ? 'This file is too large to edit here; download it instead.' : errorMessage(e);
+      this.error = isProblem(e, 'too-large')
+        ? 'This file is too large to edit here; download it instead.'
+        : isTransient(e)
+          ? "Can't reach the server, and this device has no offline copy of this note. It opens when the connection returns."
+          : errorMessage(e);
       const pending = this.deferred;
       this.deferred = null;
       // A transient failure (a deploy, a network blip) is retried with backoff, like a save.
