@@ -214,6 +214,26 @@
   color: var(--text-faint);
 }
 
+/* Math ($…$ and $$ blocks) and callout titles (ROADMAP item 3). */
+.cm-math {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  color: var(--tok-function);
+}
+
+.note-editor .cm-math-line {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+.note-editor .cm-math-line .cm-math {
+  font-size: inherit;
+}
+
+.note-editor .cm-callout-title-line {
+  font-weight: 600;
+}
+
 /* Syntax tokens in fenced code and frontmatter. */
 .cm-tok-property {
   color: var(--tok-property);

@@ -1,10 +1,11 @@
-// The note language (DESIGN §6.6 #6): GFM with frontmatter, lazily loaded fence grammars and the
-// Obsidian nodes. Shared by the editor and by sessions, so headings and links can be read from the
-// Lezer tree even while no editor is mounted.
+// The note language (DESIGN §6.6 #6): GFM with frontmatter, lazily loaded fence grammars, the
+// Obsidian nodes and math (`$…$`, `$$…$$`). Shared by the editor and by sessions, so headings and
+// links can be read from the Lezer tree even while no editor is mounted.
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { yamlFrontmatter } from '@codemirror/lang-yaml';
 import type { LanguageSupport } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
+import { MathSyntax } from './mathSyntax';
 import { ObsidianSyntax } from './obsidianSyntax';
 
 let support: LanguageSupport | null = null;
@@ -14,7 +15,7 @@ export function markdownNoteLanguage(): LanguageSupport {
     content: markdown({
       base: markdownLanguage,
       codeLanguages: languages,
-      extensions: [ObsidianSyntax],
+      extensions: [ObsidianSyntax, MathSyntax],
       completeHTMLTags: false,
     }),
   });
