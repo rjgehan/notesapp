@@ -202,7 +202,7 @@ nano .env
 | `WATCHTOWER_NOTIFICATION_URL` | Optional, recommended: an ntfy URL (below). Empty means no notifications. |
 | `TZ` | Your IANA time zone, for logs and git commit times, e.g. `Europe/Berlin`. |
 
-The blocks after these are optional and can wait: backups (*Backups*, recommended), `NOTES_GIT_LARGE_FILE_THRESHOLD` (*Large files*; the default of 25 MB suits most vaults) and the GitHub mirror (*Mirror to GitHub*).
+The blocks after these are optional and can wait: backups (*Backups*, recommended), `NOTES_GIT_LARGE_FILE_THRESHOLD` (*Large files*; the default of 25 MB suits most vaults), the GitHub mirror (*Mirror to GitHub*) and the Anthropic API key of Ask your vault (*Ask your vault*).
 
 **ntfy (recommended).** With it, Watchtower reports every update session (updated, failed, skipped), which is how you find out that deploys have stopped, for example after the pull token was revoked. Without it, a broken pipeline is silent.
 
@@ -293,7 +293,7 @@ Then from your devices:
 | What | Where |
 |---|---|
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
-| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys and the mirror token, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts, uid 1000, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
+| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts, uid 1000, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
 | Tailscale identity and certificates | volume `tailscale-state` |
 | Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
@@ -739,6 +739,32 @@ Files larger than **25 MB** stay in the vault, the trash and the nightly backups
 
 **Settings › About** shows the history size and how many files are kept out of it. To change the threshold, set `NOTES_GIT_LARGE_FILE_THRESHOLD` in `.env` (for example `50MB`; `0` versions every file) and run `docker compose up -d`. At the next start, files now over the threshold stop being versioned (`Stop versioning …` commits) and files now under it are committed. Lowering it does not shrink the history: versions already committed stay. Keep it below 100 MB while the mirror is on, and at 5 MB or more, the largest note NotesApp saves (`notes.limits.max-text-size`): a lower threshold would leave large notes without versions while every save overwrites them, so NotesApp refuses to start with it and says why in `docker compose logs notes`.
 
+### Ask your vault
+
+Optionally, NotesApp answers questions about your notes, summarizes a note, a folder, a selection or this week's daily notes, and suggests links, tags and tasks, with Claude (ROADMAP item 18, DESIGN §5.20). **When you use it, your question and the text of the notes it needs are sent to Anthropic's API**, outside the tailnet; notes in the folders you exclude (`Private` by default) never are, and nothing is sent until you ask. It is off until you give the server an API key **and** switch it on in Settings.
+
+**1. An API key.** At [console.anthropic.com](https://console.anthropic.com): create a workspace for NotesApp (so its spend and limits are separate), set a **monthly spend limit** on it (the hard limit; NotesApp's own budget is a second, estimated one), and create an API key in it.
+
+**2. The key file**, readable by uid 1000 (the app's user), never in `.env`:
+
+```sh
+cd ~/notesapp/deploy
+install -d -m 700 secrets
+install -m 600 /dev/null secrets/anthropic-key
+nano secrets/anthropic-key                     # paste the key (sk-ant-...) on one line and save
+[ "$(id -u)" = 1000 ] || sudo chown 1000 secrets/anthropic-key
+```
+
+**3. `.env`.** If your `.env` predates this, append the block from `.env.example` (`grep -q '^NOTES_AI_KEY_SECRET=' .env || sed -n '/^# ---- Ask your vault/,/^NOTES_AI_KEY_SECRET=/p' .env.example >> .env`), then set `NOTES_AI_KEY_SECRET=./secrets/anthropic-key` and run `docker compose up -d` (the secret is mounted when the container is created).
+
+**4. Switch it on.** **Settings › Ask and summaries**: read the notice, turn on **Use Claude**, check **Never send** (one folder or file per line), the model (Claude Sonnet 5.5 by default; Opus 5.5 answers harder questions at twice the price, Haiku 5.5 is the cheapest), the **context per request** (60,000 characters, about 15,000 tokens) and the **monthly budget** ($5). The section's status then says *Ready* and *Found in anthropic_key*. Ask something in the **Ask** panel (the sparkles tab of the right sidebar; *Ask your vault* in the phone's drawer).
+
+What it costs: a question with a full context is about 15,000 input tokens, so roughly $0.03–0.05 with Sonnet 5.5; a follow-up within five minutes reads the earlier notes from Anthropic's cache at a tenth of that. The status line in Settings and the panel's footer show the month's estimated spend; requests stop once it reaches the budget (until the next month, or a higher budget). The estimate lives in the volume (`.notesapp/cache/ai-usage.json`, not in git). The log has one line per request with counts and cost, never the question, the answer or note text: `docker compose logs notes | grep ' AI '`.
+
+**Rotate the key:** create a new key, replace the content of `secrets/anthropic-key` (NotesApp reads it again when it changes; with a compose secret, run `docker compose up -d --force-recreate notes` if the change does not show), ask something, then delete the old key in the console.
+
+**Turn it off:** switch off **Use Claude** in Settings (nothing is sent from then on), or set `NOTES_AI_KEY_SECRET=` and run `docker compose up -d`; delete the key in the console. Conversations are kept only in each device's browser (the panel's *Conversations on this device* deletes them).
+
 ### Import an existing Obsidian vault later
 
 Before the first start, use step 4. Into a running installation: stop the app, copy the vault into a subfolder, remove the copy's own `.git` and `.obsidian` (a nested repository would hide the folder from the vault's history), fix the owner, and start again. The app commits the new files as `Changes made while NotesApp was stopped`.
@@ -918,3 +944,18 @@ The JVM could not use the AOT cache built into the image (DESIGN §7.1), usually
 ### The status page says "No backup has reported here yet"
 
 The app sees no `status.json`. With `backup-scheduler`, no run has finished yet (run one: *Run, pause or change the backups*). With host cron, set `NOTES_BACKUP_STATE` (*Host cron instead of backup-scheduler*); if the runs then fail with *state directory ... cannot be written*, see *"NotesApp backup failed"* above. "No backup for 2 days" instead means the runs have stopped: `docker compose ps backup-scheduler` and its logs.
+
+### Ask your vault says it is unavailable
+
+The *Ask* panel and **Settings › Ask and summaries** say why:
+
+| Message | Fix |
+|---|---|
+| *Ask and summaries are off* | Switch on **Use Claude** in Settings. |
+| *no API key: anthropic_key is empty* (or *does not exist*) | `NOTES_AI_KEY_SECRET` is empty or the file is missing or empty (*Ask your vault*, steps 2 and 3); after setting it, `docker compose up -d`. |
+| *anthropic_key is not readable by the app's user (uid 1000)* | `sudo chown 1000 secrets/anthropic-key && chmod 600 secrets/anthropic-key`. |
+| *… must hold just the key, on one line* | The file has extra text or spaces inside the key; paste only the `sk-ant-…` key. |
+| *The Claude API refused the API key* (in an answer) | The key was deleted, disabled or mistyped: create a new one (*Rotate the key*). |
+| *rate-limiting this key, or its spend limit is reached* | The console's workspace limit (step 1) is reached; raise it or wait. |
+| *This month's budget is used up* | NotesApp's own estimate reached **Monthly budget**: raise it in Settings, or wait for the next month. |
+| *That is in a folder excluded from Ask and summaries* | The note is under **Never send** or the excluded files of **Files and links**, which is the point; remove it from there to allow it. |

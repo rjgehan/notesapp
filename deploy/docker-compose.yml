@@ -54,7 +54,9 @@ services:
       NOTES_MIRROR_URL: ${NOTES_MIRROR_URL:-}   # https://github.com/<you>/<repo>.git; empty = no mirror
       NOTES_MIRROR_TOKEN_FILE: /run/secrets/mirror_token
       # App-error alerts (ROADMAP item 38) are on when /data/secrets/ntfy.json exists (DEPLOY.md "App alerts").
-    secrets: [mirror_token]
+      # ---- Ask your vault (ROADMAP item 18, DEPLOY.md "Ask your vault"): off until switched on in Settings.
+      NOTES_AI_API_KEY_FILE: /run/secrets/anthropic_key
+    secrets: [mirror_token, anthropic_key]
     volumes:
       - notes-data:/data
       # The last backup run's status.json, read-only, for the status page (ROADMAP item 38). Host cron writes it
@@ -156,3 +158,5 @@ secrets:                                        # files under deploy/secrets/ (g
     file: ./secrets/backup-offsite-credentials
   mirror_token:                                 # the mirror's GitHub token, readable by uid 1000 (the app's user)
     file: ${NOTES_MIRROR_TOKEN_SECRET:-./mirror/no-token}   # an empty file in git until the mirror is set up
+  anthropic_key:                                # the Anthropic API key for Ask your vault, readable by uid 1000
+    file: ${NOTES_AI_KEY_SECRET:-./ai/no-key}   # an empty file in git until a key is set up

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2. 2026-10-21: Ask your vault and summaries (item 18) in §3, §5, §17, §18, §19 and the new §20. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -169,6 +169,9 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `busy` | 503 | Busy, retry | A lock timed out (5 s) | Header `Retry-After: 1` |
 | `history-unavailable` | 503 | History unavailable | Git is disabled, the repo is unusable (detached `HEAD`, merge in progress, git-lfs), the startup import is still running, or a commit that must happen before an overwrite failed (§4) | `reason`: `"disabled"`, `"unusable: <detail>"`, `"importing"` or `"commit-failed"` |
 | `insufficient-storage` | 507 | Insufficient storage | An upload would leave less than 1 GiB free | `limit` (bytes that must stay free) |
+| `ai-unavailable` | 409 | Ask and summaries are unavailable | §20: switched off in Settings, or the server has no usable Anthropic API key | `reason`: `"off"` or `"not-configured"` |
+| `ai-excluded` | 403 | Excluded from Ask and summaries | §20: the note, folder or selection named is under `settings.ai.excludedPaths` or `settings.files.excludedPaths` | `path` |
+| `ai-budget-exceeded` | 429 | Monthly AI budget reached | §20: this month's estimated spend reached `settings.ai.monthlyBudgetUsd` | `limit` (the budget, USD), `spent` (USD) |
 
 ```ts
 export interface FieldError { field: string; message: string }   // e.g. {"field":"settings.files.newNoteFolder","message":"invalid path"}
@@ -255,7 +258,9 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
     },
     "dailyNotes": { "format": "YYYY-MM-DD", "folder": "Daily", "template": "", "openOnStartup": false },
     "templates": { "folder": "Templates", "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm" },
-    "editor": { "defaultMode": "edit", "readableLineLength": true, "strictLineBreaks": false }
+    "editor": { "defaultMode": "edit", "readableLineLength": true, "strictLineBreaks": false },
+    "ai": { "enabled": false, "model": "claude-sonnet-5-5", "excludedPaths": ["Private"],
+            "maxContextChars": 60000, "monthlyBudgetUsd": 5.0 }
   },
   "readOnly": false
 }
@@ -287,6 +292,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `format`, `dateFormat`, `timeFormat` | 1 to 100 characters |
 | `excludedPaths` | At most 100 valid paths (folder or file prefixes, matched case-insensitively) |
 | Enums | Exactly the strings in §17 |
+| `ai` (ROADMAP item 18) | **Optional**, unlike the other groups: it came after schema version 1, so a file or a request without it, or without one of its fields, is valid. A request without `ai` keeps the current values (an old page cannot switch it off by accident); a file without it gets the defaults. A field that is present must be valid: `enabled` a boolean; `model` one of `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5`; `excludedPaths` as `files.excludedPaths`; `maxContextChars` an integer from 4,000 to 400,000; `monthlyBudgetUsd` a number above 0 and at most 10,000. |
 
 **Semantics.**
 
@@ -300,6 +306,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `excludedPaths` | Excluded from search results (§12.1) and from unlinked mentions (§11.2). |
 | `dailyNotes.*`, `templates.*` | See §15.2 and §15.4. |
 | `editor.*` | UI preferences that apply on all devices. `strictLineBreaks: false` (the default, as in Obsidian) renders a single newline as a line break in reading view. |
+| `ai.*` | Ask your vault and summaries (§20). `enabled` is off by default: until it is on, nothing is ever sent to Anthropic. `excludedPaths` (default `["Private"]`) and `files.excludedPaths` are never read for a request. `maxContextChars` caps the note text of one request, earlier turns included; `monthlyBudgetUsd` refuses requests once the month's estimated spend reaches it. |
 
 ---
 
@@ -1549,7 +1556,8 @@ export type ErrorCode =
   | 'already-exists' | 'case-collision' | 'type-mismatch' | 'version-conflict' | 'settings-read-only'
   | 'too-large' | 'not-text' | 'unsupported-media-type' | 'unknown-host'
   | 'io-error' | 'permission-denied' | 'internal-error'
-  | 'busy' | 'history-unavailable' | 'insufficient-storage';
+  | 'busy' | 'history-unavailable' | 'insufficient-storage'
+  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded';
 
 export interface FieldError { field: string; message: string }
 
@@ -1565,6 +1573,7 @@ export interface Problem {
   expected?: 'file' | 'folder' | 'note';
   kind?: FileKind;
   limit?: number;
+  spent?: number;                 // ai-budget-exceeded: this month's estimated spend in USD
   from?: VaultPath;
   to?: VaultPath;
   reason?: string;
@@ -1675,12 +1684,21 @@ export interface FilesSettings {
 export interface DailyNotesSettings { format: string; folder: VaultPath; template: VaultPath; openOnStartup: boolean }
 export interface TemplatesSettings { folder: VaultPath; dateFormat: string; timeFormat: string }
 export interface EditorSettings { defaultMode: 'edit' | 'read'; readableLineLength: boolean; strictLineBreaks: boolean }
+/** Ask your vault and summaries (§20). Optional in a request: a body without it keeps the current values. */
+export interface AiSettings {
+  enabled: boolean;               // off by default: nothing is sent to Anthropic until this is on
+  model: AiModelId;               // 'claude-sonnet-5-5' (default), 'claude-opus-5-5' or 'claude-haiku-5-5'
+  excludedPaths: VaultPath[];     // never sent; files.excludedPaths are never sent either. Default ['Private']
+  maxContextChars: number;        // note text one request may carry, 4,000 to 400,000; default 60,000
+  monthlyBudgetUsd: number;       // requests are refused once this month's estimated spend reaches it; default 5
+}
 export interface Settings {
   schemaVersion: 1;
   files: FilesSettings;
   dailyNotes: DailyNotesSettings;
   templates: TemplatesSettings;
   editor: EditorSettings;
+  ai: AiSettings;
 }
 export interface SettingsResponse { settings: Settings; version: Version; readOnly: boolean }
 export interface SettingsUpdateRequest { settings: Settings; baseVersion: Version }
@@ -1857,6 +1875,78 @@ export interface CommitResult { commitId: string | null }
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
 
+// ---------- Ask your vault and summaries (§20) ----------
+export type AiModelId = string;
+export type AiAction = 'ask' | 'summarize' | 'suggest';
+export type AiScope = 'note' | 'folder' | 'notes' | 'selection';
+/** What a turn asked: a question, or the fields of a summary request. */
+export interface AiPrompt {
+  action: AiAction;
+  question?: string | null;       // ask
+  scope?: AiScope | null;         // summarize, suggest
+  path?: VaultPath | null;
+  paths?: VaultPath[] | null;
+  text?: string | null;
+  label?: string | null;
+}
+/** An earlier turn of the conversation, as this device keeps it. */
+export interface AiTurn { prompt: AiPrompt; answer: string; sources: VaultPath[] }
+export interface AiAskRequest {
+  question: string;               // 1 to 4,000 characters
+  activePath?: VaultPath | null;  // the open note: sent first when it is not excluded
+  history?: AiTurn[];             // oldest first, at most 50; the last 12 are used
+}
+export interface AiSummarizeRequest {
+  action?: 'summarize' | 'suggest';   // suggest: links, tags and tasks for a note
+  scope: AiScope;
+  path?: VaultPath | null;        // the note, the folder, or the note a selection comes from
+  paths?: VaultPath[];            // scope 'notes', at most 100
+  text?: string | null;           // scope 'selection', at most 200,000 characters
+  label?: string | null;          // what 'notes' are, e.g. "this week's daily notes"
+  history?: AiTurn[];
+}
+export interface AiModelInfo { id: AiModelId; label: string; inputUsdPerMTok: number; outputUsdPerMTok: number }
+export interface AiStatus {
+  state: 'off' | 'not-configured' | 'over-budget' | 'ready';
+  reason: string | null;
+  model: AiModelId;
+  models: AiModelInfo[];
+  keyFile: string;                // the key file's name, never its content
+  keyPresent: boolean;
+  month: string;                  // "2026-10", in the server's time zone
+  monthCostUsd: number;           // estimated
+  monthRequests: number;
+  monthlyBudgetUsd: number;
+  maxContextChars: number;
+  fake: boolean;                  // a development server that answers without Anthropic
+}
+export interface AiSource { path: VaultPath; chars: number; truncated: boolean }
+/** Events of the answer stream (`text/event-stream` on POST /api/ai/ask and /api/ai/summarize). */
+export interface AiStartEvent { model: AiModelId; sources: AiSource[]; omitted: number; excluded: number }
+export interface AiDeltaEvent { text: string }
+export interface AiRestartEvent { model: AiModelId }   // a fallback model answers from the start
+export interface AiUsage { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }
+export interface AiDoneEvent {
+  model: AiModelId;
+  stopReason: string;             // 'end_turn', 'max_tokens', 'refusal', ...
+  refusalCategory: string | null;
+  fellBack: boolean;
+  usage: AiUsage;
+  costUsd: number;                // estimated, this request
+  monthCostUsd: number;           // estimated, this month so far
+}
+export interface AiErrorEvent {
+  code: 'auth' | 'rate-limited' | 'overloaded' | 'bad-request' | 'unavailable' | 'busy' | 'internal-error';
+  message: string;
+}
+export interface AiStreamEventMap {
+  start: AiStartEvent;
+  delta: AiDeltaEvent;
+  restart: AiRestartEvent;
+  done: AiDoneEvent;
+  error: AiErrorEvent;
+}
+
 // ---------- SSE (§16) ----------
 export interface HelloEvent {
   bootId: string;
@@ -1949,6 +2039,9 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | POST | `/api/history/commit` | | 200 `CommitResult` | 14.5 |
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
+| GET | `/api/ai/status` | | 200 `AiStatus` | 20.4 |
+| POST | `/api/ai/ask` | `AiAskRequest` | 200 `text/event-stream` | 20.2 |
+| POST | `/api/ai/summarize` | `AiSummarizeRequest` | 200 `text/event-stream` | 20.3 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
 **SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**` and `/x/**` (pages registered by extensions). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
@@ -1978,8 +2071,98 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
+| `AiSettings` | Same name in `com.rjgehan.notes.settings` | `model` is a `String` checked against `AiSettings.MODELS` |
+| `AiAskRequest`, `AiSummarizeRequest`, `AiTurn`, `AiPrompt`, `AiStatus`, `AiModelInfo`, `AiSource`, `AiStartEvent`, `AiDeltaEvent`, `AiRestartEvent`, `AiUsage`, `AiDoneEvent`, `AiErrorEvent` | Same | Every request component is `@Nullable` (the service validates and applies defaults). `AiStatus.state` is the enum `AiState` (`off`, `not-configured`, `over-budget`, `ready`). The stream events are written by `AiController` through an `SseEmitter`, not through `EventHub`. |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
 **Nullability.** Every TypeScript `T | null` is a `@Nullable` component that is always serialized, including when null. An optional request field (`?`) is a `@Nullable` component; the server applies the documented default.
+
+---
+
+## 20. Ask your vault and summaries (ROADMAP item 18)
+
+Questions about the vault answered by Claude with citations, summaries of a note, a folder, some notes or a selection, and suggested links, tags and tasks for a note (DESIGN §5.20, §6.21). **Off by default**: nothing is sent to Anthropic until `settings.ai.enabled` is on, the server has an API key file, and a request asks. Notes under `settings.ai.excludedPaths` or `settings.files.excludedPaths` are never read. The server keeps no conversation: each device keeps its own and sends the earlier turns back as `history`.
+
+Every request is checked, and its prompt built, before the response starts, so a refusal is an ordinary problem document (§3), also for a client that sent `Accept: text/event-stream`:
+
+| Problem | When |
+|---|---|
+| `409 ai-unavailable` | `reason: "off"` (switched off in Settings) or `"not-configured"` (no usable key; `detail` says why, never quoting the key) |
+| `429 ai-budget-exceeded` | This month's estimated spend reached `settings.ai.monthlyBudgetUsd`; `limit` and `spent` in USD |
+| `403 ai-excluded` | The note, folder or selection's note named by the request is excluded |
+| `400 bad-request` | A field out of range (below) |
+| `404 not-found`, `409 type-mismatch` | The note or folder does not exist, or is not a note |
+
+### 20.1 Conversations and `history`
+
+A turn is what was asked (`AiPrompt`: `action` `ask` with `question`, or `summarize`/`suggest` with the fields of §20.3), the answer as streamed, and `sources`, the paths `start` reported for it (§20.5). A follow-up sends the conversation's answered turns, oldest first (at most 50; the server uses the last 12). The server rebuilds each earlier turn from its prompt and its sources **as the notes are now**, skipping notes that were deleted or are now excluded, with the same rules as the first time: while the notes are unchanged, the earlier turns are byte for byte what was sent before, and the request's prefix comes from Anthropic's prompt cache. Notes already sent in the conversation are not sent again with a new question. When the conversation outgrows `settings.ai.maxContextChars`, the oldest turns lose their notes (their question and answer stay).
+
+### 20.2 `POST /api/ai/ask`
+
+Request `AiAskRequest`:
+
+```json
+{ "question": "What did we decide about the kitchen budget?", "activePath": "Projects/Kitchen.md",
+  "history": [ { "prompt": { "action": "ask", "question": "When do the tiles arrive?" },
+                 "answer": "On Monday [[Projects/Kitchen]].", "sources": ["Projects/Kitchen.md"] } ] }
+```
+
+| Field | Rule |
+|---|---|
+| `question` | 1 to 4,000 characters after trimming |
+| `activePath` | Optional: the open note, sent first when it is a note and not excluded |
+| `history` | Optional, §20.1 |
+
+**Retrieval.** The question's words (normalized like the search index, without common English words) select the notes that contain **any** of them, ranked with the index's BM25 (DESIGN §5.5.10; embeddings may come later). Up to 8 notes go with the question, the best first, each at most a quarter of `maxContextChars` (2,000 to 20,000 characters): a longer note is cut to its paragraphs with the most matches, marked `[…]`. Notes that do not fit are counted as `omitted`; excluded notes that matched are counted as `excluded` and never read.
+
+The answer cites notes as wikilinks to their path without `.md` (`[[Projects/Kitchen]]`), which the client resolves like any link.
+
+`200 text/event-stream` (§20.5).
+
+### 20.3 `POST /api/ai/summarize`
+
+Request `AiSummarizeRequest`:
+
+| Field | Rule |
+|---|---|
+| `action` | `summarize` (default) or `suggest`: links to existing notes (chosen from related notes, titles only), tags (preferring the vault's tags) and tasks (`- [ ]` items) for a note |
+| `scope` | `note` (`path`), `folder` (`path`, its notes at any depth, newest first), `notes` (`paths`, at most 100, for example this week's daily notes, with a `label` of at most 200 characters) or `selection` (`text`, at most 200,000 characters, from the note at `path`). `suggest` takes `note` only. |
+| `history` | Optional, §20.1: a summary can be followed by questions |
+
+A note summary sends the note up to `maxContextChars` (its beginning, marked truncated, when longer). A folder or list sends up to 60 notes, each at least 1,500 characters and together at most `maxContextChars`; the rest are counted as `omitted` and the answer says so. A selection is sent as it is, no note is read; `path` only names it, and must not be excluded.
+
+`200 text/event-stream` (§20.5).
+
+### 20.4 `GET /api/ai/status`
+
+`200 AiStatus`:
+
+```json
+{ "state": "ready", "reason": null, "model": "claude-sonnet-5-5",
+  "models": [ { "id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "inputUsdPerMTok": 2.0, "outputUsdPerMTok": 10.0 } ],
+  "keyFile": "anthropic-key", "keyPresent": true, "month": "2026-10", "monthCostUsd": 0.4213, "monthRequests": 37,
+  "monthlyBudgetUsd": 5.0, "maxContextChars": 60000, "fake": false }
+```
+
+| Field | Values |
+|---|---|
+| `state` | `off` (switched off in Settings), `not-configured` (no usable key; `reason` says why), `over-budget` (`reason` names the budget), `ready` |
+| `keyFile`, `keyPresent` | The key file's name and whether it holds a key; never the key |
+| `month`, `monthCostUsd`, `monthRequests` | The calendar month in the server's time zone, and its estimated spend (list prices of the models that answered) and request count |
+| `fake` | `true` on a development server started with `notes.ai.fake=true`, which answers with canned text and never calls Anthropic |
+
+### 20.5 The answer stream
+
+The response to §20.2 and §20.3 is `text/event-stream` with `Cache-Control: no-store`, read from the `fetch` body (`EventSource` cannot `POST`). Events, in order:
+
+| `event:` | `data` | Meaning |
+|---|---|---|
+| `start` | `AiStartEvent` `{model, sources, omitted, excluded}` | The model asked and the notes sent with this turn (`{path, chars, truncated}`): the device keeps the paths as the turn's `sources` |
+| `delta` | `AiDeltaEvent` `{text}` | The next piece of the answer (Markdown) |
+| `restart` | `AiRestartEvent` `{model}` | The model declined part way and `model`, the server-side fallback, answers from the start: discard the text so far |
+| `done` | `AiDoneEvent` | The end: `stopReason` (`end_turn`, `max_tokens`, `refusal`, …), `refusalCategory`, `fellBack`, `usage` (tokens, cache reads and writes), `costUsd` and `monthCostUsd` (estimated) |
+| `error` | `AiErrorEvent` `{code, message}` | The end, after a failure: `auth` (the key was refused), `rate-limited`, `overloaded`, `bad-request`, `unavailable` (network, timeout), `busy` (two answers are already being written), `internal-error`. `message` never contains the key or note text. |
+
+A stream that ends without `done` or `error` was cut off. Closing the connection (Stop) stops the answer on the server too; what was generated until then is still counted in the month's spend, estimated at four characters per token.

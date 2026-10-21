@@ -141,7 +141,7 @@ sequenceDiagram
 
 There is no app-level login. Tailscale identity admits requests (the allowlist), and is used for display and for the git author. "Inside the boundary" therefore means: a user-owned device of an allowed login, reaching `notes:443` through the policy.
 
-**Outbound.** The app makes one internet connection, and only when it is configured: the optional mirror push (ROADMAP item 2, §5.8 *Mirror*) to the `https://` URL in `NOTES_MIRROR_URL`, authenticated with a token from a compose secret. It goes out through the host's normal network, which the tailnet policy does not restrict. With the mirror on, the vault's history (every note and every attachment under the large-file threshold) leaves the tailnet for that repository.
+**Outbound.** The app makes two kinds of internet connection, each only when it is configured. One is the optional mirror push (ROADMAP item 2, §5.8 *Mirror*) to the `https://` URL in `NOTES_MIRROR_URL`, authenticated with a token from a compose secret. It goes out through the host's normal network, which the tailnet policy does not restrict. With the mirror on, the vault's history (every note and every attachment under the large-file threshold) leaves the tailnet for that repository. The other is Ask your vault and summaries (ROADMAP item 18, §5.20): HTTPS to `api.anthropic.com`, only when `settings.ai.enabled` is on, an API key file exists, and someone asks. Each request carries the question and the text of the notes it needs (never of excluded folders), so that text leaves the tailnet for Anthropic.
 
 ---
 
@@ -171,6 +171,7 @@ NotesApp/                              (monorepo; branch main)
 │   ├── docker-compose.yml             tailscale + notes + watchtower; optional backup + backup-scheduler (§7.10)
 │   ├── backup/                        restic-job.sh, nightly.sh, scheduler.sh and their tests (§7.10)
 │   ├── mirror/no-token                empty placeholder for the mirror_token secret until the mirror is set up (§7.2)
+│   ├── ai/no-key                      empty placeholder for the anthropic_key secret until Ask your vault has a key (§5.20)
 │   ├── secrets/                       gitignored: compose secrets files (restic password, off-site keys, mirror token)
 │   ├── tailscale/serve.json           mounted as a directory (fsnotify-safe)
 │   └── .env.example                   copied to deploy/.env on homeserver (gitignored)
@@ -204,7 +205,7 @@ NotesApp/                              (monorepo; branch main)
 | `.obsidian/` | Obsidian desktop config, if the user ever opens the vault there. Never touched. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
-**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties.
+**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), `anthropic-key`, the Anthropic API key of Ask your vault (item 18, §5.20), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties (`NOTES_AI_API_KEY_FILE` points the API key there in the plain-compose deploy).
 
 ### 4.2 File kinds
 
@@ -450,12 +451,15 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
 | `notify` | `NtfyConfig`, `NtfyConfigFile` | `ntfy.json` in `notes.secrets-dir`: the server, the default topic, an optional token and the `alerts` section; read again when it changes (§5.18.1). Shared with the reminders of ROADMAP item 9. |
 | | `NtfyClient` | Publishes one message as JSON to the server's root URL, with the token as `Authorization: Bearer`; never follows a redirect. |
+| `ai` | `AiService`, `PromptBuilder`, `QueryTerms`, `Excerpts` | Ask your vault and summaries (ROADMAP item 18, §5.20): availability and budget checks, retrieval over the search index, the prompt with its caps and the rebuild of earlier turns, the stream of events. |
+| | `ClaudeGateway`, `AnthropicGateway`, `FakeGateway`, `AiConfig` | One streamed Messages API call: through the official SDK, or canned for development (`notes.ai.fake`). |
+| | `ApiKeyFile`, `UsageLedger`, `AiModels`, `AiProperties` | The API key file (read again when it changes), the monthly spend in `.notesapp/cache/ai-usage.json`, the models and their prices, `notes.ai.*`. |
 | `ops` | `AlertMarker` | The stable log markers of §5.18, each with its alert's fixed title, text and priority. |
 | | `AlertLogBridge` | A Logback appender on the root logger: hands each WARN or ERROR whose message pattern starts with a marker to `AppAlerts` (§5.18.1). |
 | | `AppAlerts` | Counts the markers; deduplicates, rate-limits and sends them to ntfy on its own thread (§5.18.1). |
 | | `BackupStatusReader` | Reads the backup run's `status.json` for the status page (§7.10). |
 | | `RuntimeInfo` | The JVM's version and heap, and whether it uses the AOT cache (§7.1). |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `StatusDetailsController`, `AlertsController`, `MirrorController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `StatusDetailsController`, `AlertsController`, `MirrorController`, `EventController`, `AiController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -1078,6 +1082,11 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | `editor` | `defaultMode` | `edit` |
 | | `readableLineLength` | `true` |
 | | `strictLineBreaks` | `false` (as in Obsidian, a single newline renders as a line break in reading view) |
+| `ai` (§5.20; optional in the file and in requests, see API.md §5) | `enabled` | `false`: nothing is sent to Anthropic until it is on |
+| | `model` | `claude-sonnet-5-5` (also `claude-opus-5-5`, `claude-haiku-5-5`) |
+| | `excludedPaths` | `["Private"]` (never sent; `files.excludedPaths` never are either) |
+| | `maxContextChars` | `60000` (4,000 to 400,000) |
+| | `monthlyBudgetUsd` | `5` |
 
 **Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on) and `loadRemoteImages` (default on). They are edited under Settings, "This device".
 
@@ -1270,6 +1279,8 @@ notes.security.require-tailscale-interface=false
 logging.level.com.rjgehan.notes=DEBUG
 ```
 
+`notes.ai.*` (Ask your vault, ROADMAP item 18) is its own record, `AiProperties`, so it does not widen this one; its keys are in §5.20.
+
 For phone testing against dev (§9.1 step 4), `NOTES_ALLOWED_HOSTS` overrides the list and adds `rgpc.<tailnet>.ts.net:5173`. Integration tests set `notes.allowed-hosts`, `notes.identity.allow-default` and `notes.security.require-tailscale-interface` explicitly.
 
 ### 5.17 Startup and shutdown
@@ -1313,6 +1324,7 @@ For phone testing against dev (§9.1 step 4), `NOTES_ALLOWED_HOSTS` overrides th
 - **Stable ERROR markers** for alerting and log searches: `GIT_COMMIT_FAILED`, `GIT_MIRROR_FAILED`, `WATCHER_DEGRADED`, `TAILSCALE_WATCHDOG_EXIT`, `STORAGE_LOW`, `SETTINGS_READ_ONLY`. The marker is the first word of the message. When ntfy is set up, the app pushes them itself (§5.18.1). `GIT_MIRROR_FAILED` is also logged once at startup when a mirror is set up but its settings cannot be used (an SSH or `http://` URL, a URL with credentials, no token file), since such a mirror never pushes.
 - **The mirror token is never logged** (§5.8 *Mirror*): it is read right before a push, and error texts are scrubbed of it.
 - **Note content, frontmatter values and search queries are never logged.** Paths are logged; they are the user's own data on their own server.
+- **Ask your vault** (§5.20) logs one INFO line per request with the counts only: `AI ask model=claude-sonnet-5-5 notes=5 history=1 in=12843 out=611 cacheRead=10240 cacheWrite=0 cost=$0.0204 month=$1.37 stop=end_turn 4210ms client=c1a2b3c4`. Never the question, the answer, a note's text or the API key; API error texts are scrubbed of anything shaped like a key.
 
 #### 5.18.1 App-error alerts (ROADMAP item 38)
 
@@ -1366,6 +1378,45 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | SSE fan-out to 5 clients | < 50 ms |
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
+
+### 5.20 Ask your vault and summaries (ROADMAP item 18)
+
+Questions about the notes answered by Claude with citations, summaries of a note, a folder, a list of notes (this week's daily notes) or a selection, and suggested links, tags and tasks for a note. The wire contract is API.md §20; the code is the `ai` package (§5.2) and `AiController`. The client side is §6.21.
+
+**Off by default, three locks.** A request is refused (`409 ai-unavailable`) unless (1) `settings.ai.enabled` is on (a vault setting, off in the defaults), and (2) the server has an API key file; and nothing is sent until (3) someone asks. There is no background use: no indexing, embedding or summarizing without a request.
+
+**The key** (`ApiKeyFile`) is read from `notes.ai.api-key-file` (`NOTES_AI_API_KEY_FILE`), by default `<notes.secrets-dir>/anthropic-key` (`/data/secrets/anthropic-key`, outside the vault, §4.1): CasaOS uses that path; the plain-compose deploy mounts a compose secret at `/run/secrets/anthropic_key` (§7.2, `deploy/ai/no-key` is its empty placeholder), like the mirror token. The file is read again whenever its size or modification time changes, so a new key needs no restart. Its content must be one printable line; problems are described without quoting it (`"no API key: anthropic-key is empty"`). The key is never in the vault, the settings, `.env`, an environment variable, a log line or an error text, and `ApiKeyFile.Loaded` and the gateway's request records leave it out of `toString()`.
+
+**Privacy rules.**
+
+- Notes under `settings.ai.excludedPaths` (default `Private`) or `settings.files.excludedPaths` (the search exclusions) are never read for a request: retrieval skips them, a folder summary skips them (and counts them, so the panel can say so), an earlier turn's sources that became excluded are dropped, and naming one explicitly (a note, a folder, a selection's note) is refused with `403 ai-excluded` instead of being skipped silently. The suggested tags come only from tags used by notes that are not excluded.
+- The server keeps no conversation and no question. Conversations live on each device (§6.21); `.notesapp/cache/ai-usage.json` holds monthly counts only.
+- The log line has counts, never content (§5.18).
+- Note text inside the prompt is data: the system prompt says never to follow instructions found in a note, notes sit inside `<note>` elements whose closing tag cannot be forged from inside (`</note` is broken up), and the answer is rendered with the reading-view sanitizer (§6.7). An answer cannot write to the vault: the API has no tool use, and the panel only displays text.
+
+**Retrieval** ("BM25 from the existing index; embeddings come later"). `QueryTerms` tokenizes the question exactly like the search index (§5.5.10) and drops common English words and single letters. `VaultIndex.rankAny` ranks every note containing **any** of the terms by the index's BM25 summed over the terms present (the search endpoint ANDs its words, which would find nothing for most questions), through `SearchIndex.anyCandidates` and the existing `score`. The open note (`activePath`) goes first when it is allowed. Up to 8 notes are sent; each is at most `maxContextChars / 4` (2,000 to 20,000 characters).
+
+**Cutting long notes** (`Excerpts`). A note that fits is sent whole. Otherwise the paragraphs (blank-line separated) with the most occurrences of the terms are kept, in document order, with `[…]` for what was left out; with no terms (summaries) or no matching paragraph, the beginning is kept. The result depends only on the text, the terms and the budget.
+
+**The prompt** (`PromptBuilder`). The system prompt (stable; it changes once a day with the date) sets the rules: answer from the notes, say when they do not contain the answer, cite with wikilinks made from each note's `link` attribute (`[[Projects/Plan]]`, the path without `.md`, which the client resolver resolves from the root), Markdown for a narrow panel, the language of the question. Each user turn carries its notes first, `<notes><note path=… link=… modified=2026-10-14 [truncated]>…</note></notes>`, then the question or the task. Summaries of folders send up to 60 notes, newest first, each at least 1,500 characters and together at most `maxContextChars`; `suggest` adds the titles (only) of up to 20 related notes, found with `rankAny` over the note's most frequent words, and up to 60 of the vault's tags.
+
+**Conversations and the prompt cache.** The device sends earlier turns back as `history`: what was asked, the answer, and the paths the server reported in `start`. `PromptBuilder.rebuild` sends those notes again **as they are now**, with the same rules (the same terms, the same per-note budget, the same count), so an unchanged note gives byte-for-byte the same turn. The last user block carries `cache_control: ephemeral`; the next request's prefix (system, earlier turns) is then read from Anthropic's prompt cache for five minutes, at a tenth of the input price. A new question does not send again a note already in the conversation, and says so to the model when nothing new matched. The newest 12 turns are used; when they outgrow `maxContextChars` (with 10 % slack), the oldest lose their notes first, and every older one with them, so the prefix only changes once.
+
+**The call** (`AnthropicGateway`, through `com.anthropic:anthropic-java` 3.0.0). `client.beta().messages().createStreaming(...)`: the model from `settings.ai.model` (default **Claude Sonnet 5.5**; Opus 5.5 and Haiku 5.5 selectable), `max_tokens` 16,000 (`notes.ai.max-output-tokens`), `output_config.effort` `medium` (`notes.ai.effort`), adaptive thinking (the models' default, so nothing is sent), and, for Sonnet and Opus, the server-side refusal fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`; Haiku 5.5 has none). One OkHttp client is kept per key, built with the key alone (no `fromEnv()`: no environment variable can redirect requests or substitute credentials) and `maxRetries(2)` for 429 and 5xx before the stream starts. While streaming, text deltas go to the browser as they arrive; a `fallback` content block means another model answers from the start (`restart` event); `message_delta` carries the stop reason, the refusal category and the cumulative usage, per model when a fallback ran (`usage.iterations`). Thinking blocks are not shown (they arrive empty by default) and never sent back: earlier turns are text only. API errors become `auth`, `rate-limited`, `overloaded`, `bad-request` or `unavailable` with a short text (the API's `error.message`, scrubbed of key-shaped strings and capped at 200 characters).
+
+**Streaming to the browser.** `AiController` checks the request and builds the prompt before answering (so refusals are problem documents), then returns an `SseEmitter` and writes the answer from a virtual thread: `start`, `delta`…, `restart`, `done` or `error` (API.md §20.5). When the browser closes the stream (Stop, a closed tab), the next write fails, the exception leaves the gateway's stream loop, and closing the SDK stream cancels the upstream request, so nothing more is generated or paid for. At most `notes.ai.max-concurrent` (2) answers are written at once; another gets `error: busy`.
+
+**Spend guard** (`UsageLedger`, `AiModels`). Each request's cost is estimated from the usage the API reports at list prices (Sonnet 5.5 $2/$10, Opus 5.5 $4/$20, Haiku 5.5 $0.10/$0.50 per million input/output tokens, cache reads and writes priced separately; a fallback hop at its own model's price, an unknown model at the highest price) and added to the calendar month (server time zone) in `.notesapp/cache/ai-usage.json`: inside the volume, so it survives restarts and is in the backups, but excluded from git (§4.6), so it is never history or mirrored. A request whose stream the browser closed is counted too, estimated at four characters per token. Once the month reaches `settings.ai.monthlyBudgetUsd`, requests are refused with `429 ai-budget-exceeded` until the next month or a higher budget. The cap is a guard, not a hard limit: two requests in flight can each finish past it. Losing the file resets the month to zero.
+
+**Per-request caps.** The question (4,000 characters), the context (`maxContextChars`, 60,000 by default, about 15,000 tokens), the history (50 turns sent, 12 used, answers of at most 100,000 characters), a selection (200,000 characters), the output (`max_tokens` 16,000) and the time (`notes.ai.timeout`, 5 minutes).
+
+**Development** (`notes.ai.fake=true`, `FakeGateway`): answers with canned Markdown that cites the notes the prompt carried, streamed word by word, with token counts estimated from the characters; no key and no network. The status says `fake: true` and the panel says so. Never set in production.
+
+**Configuration** (`AiProperties`, `notes.ai.*`): `api-key-file` (empty: `<secrets-dir>/anthropic-key`), `fake` (false), `max-output-tokens` (16000), `effort` (`medium`), `timeout` (5m), `max-concurrent` (2).
+
+**Alternatives considered.** Embeddings (a vector index needs an embedding provider, since Anthropic has no embeddings API, and its storage and refresh; BM25 over the existing index answers personal-scale questions well, and the roadmap defers embeddings). Server-side conversations (they would keep questions and answers on the server and need their own retention; the device keeping them matches "conversation history per device"). Tool use to let Claude search the vault itself (more calls and cost per question, and harder to keep excluded folders out). Opus as the default (the roadmap's first choice; Sonnet 5.5 answers note questions well at half the price, and Opus is one setting away).
+
+**Tests.** `AiServiceTest` (availability, retrieval, exclusions, caps, the byte-for-byte rebuild of earlier turns, summaries, suggestions, the stream of events, the spend guard, a browser leaving part way) with a recording gateway; `AnthropicGatewayTest` against a local HTTP server that replays recorded Messages API streams (the request's shape, the key as a bearer token, the fallback, refusals, error mapping without the key, stopping on a listener's exception); `ExcerptsTest`, `QueryTermsTest`, the settings tests, and `AiIntegrationTest` (the HTTP contract with `notes.ai.fake`). No test calls Anthropic.
 
 ---
 
@@ -1472,6 +1523,8 @@ frontend/src/
 │   ├── fuzzy.ts              fuzzysort wrappers
 │   ├── recent.ts             MRU list (localStorage)
 │   ├── mirror.ts, largeFiles.ts  the mirror's warning, summary and "push now"; the large-file threshold (§6.11, §6.18)
+│   ├── ai/                   Ask your vault (§6.21): register.ts, actions.ts, run.ts, aiClient.ts, sse.ts, conversations.ts
+│   │                         (eager, small); AiChat.tsx, AiAnswer.tsx, AiPanel.tsx, AiPage.tsx, ai.css (lazy)
 │   └── paths.ts              join, folderOf, basename, extension, encodeRoutePath, decodeRoutePath
 ├── components/
 │   ├── layout/               AppShell (hosts the app-level file input), TopBar, Ribbon, LeftSidebar, RightSidebar, StatusBar,
@@ -1601,6 +1654,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
     │                  ├ <PropertiesTable/> (reading mode, if frontmatter)
     │                  └ <NoteEditor/> (CodeMirror sized to its content) | <ReadingView/>
     ├ <RightSidebar>          tabs: <BacklinksPanel/> | <OutlinePanel/> | <HistoryPanel/> (lazy) + registered right panels
+    │                         (Ask, §6.21)
     │                         (phone: <BottomSheet>)
     ├ <StatusBar/>            desktop: <ConnectionIndicator/> · save summary · history warning · words/chars · backlink count
     ├ <MobileToolbar/>        touch devices; always mounted, shown while the editor is focused or the toolbar is in use
@@ -2191,6 +2245,22 @@ On recovery, any `resync` is processed, the replay countdown reaches `caughtUp` 
 
 Any other error shows the problem's `detail`. 5xx problem errors show a toast with the `incidentId` for log lookup. Transient failures (§6.9) never show an error toast; they show the Offline state. An unexpected render error is caught by an `ErrorBoundary` per view, which offers **Reload view**.
 
+### 6.21 Ask your vault (ROADMAP item 18)
+
+The conversation view of §5.20, in `features/ai/`, registered through the extension points (§6.8) by `registerAi()` (called from `builtins.ts`):
+
+- **Where.** A right panel *Ask* (`registerPanel`, icon `Sparkles`): a column on the desktop, the bottom sheet on tablets and phones; and the page `/x/ask` (`registerPage` *Ask your vault*: a ribbon button, an entry in the phone drawer, "Open Ask your vault"), which is how the phone uses it, since the sheet is small with the keyboard up. `openAiView()` picks the panel, or the page on phones. Both render `AiChat` (a lazy chunk with `ai.css`).
+- **Commands** (palette): *Ask a question about your notes*; while `settings.ai.enabled` is on, *Summarize current note*, *Suggest links, tags and tasks for current note*, *Summarize current folder*, *Summarize selection* (the editor's selected text, every range) and *Summarize this week's daily notes* (Monday to Sunday of this week in the browser's time zone, with the daily-note format and folder of §6.12, the notes that exist). The same actions are chips above the input.
+- **Asking.** `run.ts` adds a turn to the current conversation and streams into it: `aiClient.streamAi` posts with `fetch` (`EventSource` cannot post), reads the body with `sse.ts`, an incremental `text/event-stream` parser, and applies `start` (the notes sent), `delta`, `restart` (a fallback model starts over: the text so far is dropped), `done` and `error`. Refusals before the stream (`ai-unavailable`, `ai-excluded`, `ai-budget-exceeded`) become a short explanation in the turn. **Stop** aborts the fetch, which also stops the answer on the server. Several turns may stream at once.
+- **Include the open note.** A checkbox (on by default) sends the open note as `activePath`; the page uses the note last opened on this device (`notesapp:lastPath`).
+- **Answers** render with the reading-view pipeline (`renderNote`, §6.7, at depth 1 so no note is transcluded, remote images always as placeholders) into `.markdown-rendered`. A click on a citation resolves it over the tree (from the vault root) and opens the note (closing the sheet); a link that does not resolve shows "… is not a note in this vault" and **never creates a note**, unlike a link in a note. Tags open tag search. Each answer lists the notes sent (each opens the note; *excerpt* marks a cut note), how many matching notes were excluded or did not fit, the model, the estimated cost, and Copy. `max_tokens` and `refusal` stops are explained.
+- **Conversations per device** (`conversations.ts`, zustand): in `localStorage` under `notesapp:ai:conversations`, never on the server. A turn keeps its prompt as sent, its label, the answer, the notes and the outcome; follow-ups send the answered turns as `history` (API.md §20.1). The newest 30 conversations of at most 40 turns and 1.5 MB are kept; a page closed mid-answer reads back as *stopped*. The toolbar has *New conversation* and *Conversations on this device* (reopen, delete one, delete all).
+- **Privacy in the UI.** Before the first question on a device, a notice says that the question and the text of the notes it needs are sent to Anthropic, and which folders never are (*Got it* stores `notesapp:ai:noticeSeen`). The footer always says "Sent to Anthropic when you ask" (or "Fake answers" on a development server), the model and the month's spend against the budget. While the feature is off, not configured or over budget, the view says why (with a link to Settings, or the key file's path) and the input is disabled.
+- **Settings › Ask and summaries** edits `settings.ai`: the privacy explanation, *Use Claude* (off by default), the model (Sonnet 5.5 recommended, Opus 5.5, Haiku 5.5), *Never send* (one path per line), the context per request, the monthly budget, and the status from `GET /api/ai/status`: whether the server has a key (by file name), and this month's estimated spend and requests.
+- **Layout.** The panel is a flex column whose messages scroll above the input; on the page the workspace scrolls (§6.16) and the input is sticky at the bottom with the safe-area inset. Both follow a streaming answer unless the reader scrolled up. Inputs are 16 px and chips and buttons 44 px on touch screens; the input is a textarea that grows, Enter sends and Shift+Enter breaks the line (`enterkeyhint="send"`).
+
+**Tests** (Vitest): `sse.test.ts` (any split, CRLF, comments), `aiClient.test.ts` (the request, the events, problems, a cut-off stream, aborts), `conversations.test.ts` (storage, history, limits, damaged data), `actions.test.ts` (the week, citations) and `AiChat.test.tsx` (registration, the off and unconfigured states, the notice, a streamed answer whose citation opens the note, history and the include toggle, an unresolved citation creating nothing).
+
 ---
 
 ## 7. Infrastructure
@@ -2357,7 +2427,8 @@ services:
       NOTES_GIT_LARGE_FILE_THRESHOLD: ${NOTES_GIT_LARGE_FILE_THRESHOLD:-25MB}   # larger files stay out of git history (0 = version everything)
       NOTES_MIRROR_URL: ${NOTES_MIRROR_URL:-}   # https://github.com/<you>/<repo>.git; empty = no mirror
       NOTES_MIRROR_TOKEN_FILE: /run/secrets/mirror_token
-    secrets: [mirror_token]
+      NOTES_AI_API_KEY_FILE: /run/secrets/anthropic_key   # Ask your vault (§5.20); off until switched on in Settings
+    secrets: [mirror_token, anthropic_key]
     volumes:
       - notes-data:/data
       - ${NOTES_BACKUP_STATE:-backup-state}:/backup-state:ro   # status.json of the last backup run, for the status page
@@ -2405,6 +2476,7 @@ volumes:
 - **Backups.** The real file continues with the optional `backup` and `backup-scheduler` services (Compose profiles, off by default), the `backup-cache` and `backup-state` volumes and a top-level `secrets:` block (§7.10).
 - **Backup status** (ROADMAP item 38). `notes` mounts the `backup-state` volume read-only at `/backup-state`, so the status page can show the last backup run (§7.10). It is a named volume by default, created empty when backups are off; with host cron, `NOTES_BACKUP_STATE` in `.env` names the cron job's state directory instead, which Compose then bind-mounts. The app only reads `status.json`; it never writes there.
 - **Mirror token** (ROADMAP item 2, §5.8 *Mirror*). The top-level `secrets:` block also declares `mirror_token` with `file: ${NOTES_MIRROR_TOKEN_SECRET:-./mirror/no-token}`. `deploy/mirror/no-token` is an empty file in git, so the always-enabled `notes` service can mount the secret on deploys that have no mirror (Compose fails to create a container whose secret file is missing); `NOTES_MIRROR_URL` empty keeps the mirror off. Setting it up points `NOTES_MIRROR_TOKEN_SECRET` at `./secrets/mirror-token` (gitignored, readable by uid 1000) and sets `NOTES_MIRROR_URL` (DEPLOY.md *Mirror to GitHub*). The CasaOS compose (`deploy/casaos-compose.yml`) has no files next to it to mount as a secret, so there `NOTES_MIRROR_TOKEN_FILE` is `/data/secrets/mirror-token`, beside `ntfy.json` (§5.18.1): outside the vault, so never in git or the mirror, though in the encrypted backups; the file is read before every push and only needed once `NOTES_MIRROR_URL` is set (docs/CASAOS.md).
+- **Anthropic API key** (ROADMAP item 18, §5.20). Declared the same way: `anthropic_key` with `file: ${NOTES_AI_KEY_SECRET:-./ai/no-key}`, mounted at `/run/secrets/anthropic_key` (`NOTES_AI_API_KEY_FILE`). `deploy/ai/no-key` is the empty placeholder, which the app reports as "no API key"; the feature stays off until `settings.ai.enabled` is on anyway. Setting it up points `NOTES_AI_KEY_SECRET` at `./secrets/anthropic-key` (DEPLOY.md *Ask your vault*). The CasaOS compose sets nothing: the app's default, `/data/secrets/anthropic-key`, is the file to create there (docs/CASAOS.md).
 
 ### 7.3 `deploy/tailscale/serve.json`
 

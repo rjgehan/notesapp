@@ -1,6 +1,6 @@
 # Installing NotesApp on CasaOS
 
-This is the short path for a CasaOS server: one compose file pasted into the CasaOS UI, no `.env` and no SSH required. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); everything it says about Tailscale, Watchtower and the app applies here too. The optional extras at the end (app alerts, the GitHub mirror, nightly backups) need a shell on the server, over SSH or in CasaOS's terminal; a fresh install needs none of them.
+This is the short path for a CasaOS server: one compose file pasted into the CasaOS UI, no `.env` and no SSH required. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); everything it says about Tailscale, Watchtower and the app applies here too. The optional extras at the end (app alerts, the GitHub mirror, Ask your vault with Claude, nightly backups) need a shell on the server, over SSH or in CasaOS's terminal; a fresh install needs none of them.
 
 The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs three containers:
 
@@ -10,7 +10,7 @@ The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs
 | `notesapp` | The app. It shares the Tailscale container's network, so it has **no LAN port** and is reachable only over the tailnet |
 | `notesapp-watchtower` | Checks GHCR every 5 minutes and restarts `notesapp` when a new image is pushed to `main` |
 
-Data lives in `/DATA/AppData/notesapp/`: `data/vault` holds your notes, and `tailscale/` holds the node identity and certificates (never delete it). `data/secrets/` (the alert and mirror settings) and `backup/` appear only if you set up the extras below.
+Data lives in `/DATA/AppData/notesapp/`: `data/vault` holds your notes, and `tailscale/` holds the node identity and certificates (never delete it). `data/secrets/` (the alert and mirror settings, the Anthropic API key) and `backup/` appear only if you set up the extras below.
 
 ## 1. One-time Tailscale setup (admin console)
 
@@ -76,6 +76,19 @@ sudo -u '#1000' sh -c 'umask 077 && cat > /DATA/AppData/notesapp/data/secrets/mi
 ```
 
 Then set `NOTES_MIRROR_URL` to `https://github.com/<you>/<repo>.git` in the app's settings (above) and save. Use the HTTPS URL: an SSH URL (`git@github.com:…`) or one with the token in it is refused, and the status bar and status page say *Mirror is off: …*. Run **Push history to the mirror now** from the command palette and check **Settings › About › Mirror**. To rotate the token, replace the file's content: it is read before every push. To turn the mirror off, empty `NOTES_MIRROR_URL`.
+
+### Ask your vault (Claude)
+
+Questions about your notes with answers that cite them, summaries of a note, a folder, a selection or this week's daily notes, and suggested links, tags and tasks, written by Claude (DEPLOY.md *Ask your vault* has the details and costs). **When you use it, your question and the text of the notes it needs are sent to Anthropic**; notes in excluded folders (`Private` by default) never are. It stays off until you add a key **and** switch it on in Settings.
+
+At [console.anthropic.com](https://console.anthropic.com), create a workspace with a monthly spend limit and an API key in it, then:
+
+```sh
+sudo -u '#1000' sh -c 'umask 077 && cat > /DATA/AppData/notesapp/data/secrets/anthropic-key'
+# paste the key (sk-ant-...), press Enter, then Ctrl-D
+```
+
+No restart and no compose change: the app reads `/data/secrets/anthropic-key` by default and notices a new key by itself. Then **Settings › Ask and summaries**: turn on **Use Claude**, check **Never send**, the model and the **monthly budget** ($5 by default); the status there says *Ready* and *Found in anthropic-key*. Ask in the **Ask** panel (the sparkles tab of the right sidebar) or, on the iPhone, **Ask your vault** in the drawer. To rotate the key, replace the file's content; to stop, switch **Use Claude** off (and delete the file and the key in the console).
 
 ### Large files
 
@@ -155,6 +168,7 @@ Use `offsite` instead of `local` when the second disk is gone. Check the result 
 | `502 Bad Gateway` after a Tailscale restart | The app reconnects on its own within a minute; if not, restart the CasaOS app. |
 | `notesapp` keeps restarting, log says `notes.git.large-file-threshold (…) is below the largest text size limit` | Set `NOTES_GIT_LARGE_FILE_THRESHOLD` to `0` or at least `5MB` (*Large files*). |
 | *Mirror is off: …* in the status bar | `NOTES_MIRROR_URL` is not a plain `https://github.com/<you>/<repo>.git` URL (*GitHub mirror*). Other mirror messages: DEPLOY.md Part 3. |
+| The *Ask* panel says *no API key* or *not readable* | `/DATA/AppData/notesapp/data/secrets/anthropic-key` is missing, empty or not owned by uid 1000 (*Ask your vault*). Other messages: DEPLOY.md *"Ask your vault says it is unavailable"*. |
 | NotesApp Backup does not install: `bind source path does not exist` | The repository directory (step 1), `backup/scripts` or `backup/secrets` (step 2) is missing, or the second disk is not mounted. |
 | *NotesApp backup failed* | The status page's *Backups* card has restic's message; DEPLOY.md *"NotesApp backup failed"* explains each one. `not initialized`: run `init` (step 4). |
 | *NotesApp is down after the backup* | Restart NotesApp in CasaOS (or `docker start notesapp-tailscale notesapp`), then read its log. |
