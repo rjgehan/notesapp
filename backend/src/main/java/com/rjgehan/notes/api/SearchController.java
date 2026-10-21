@@ -21,8 +21,9 @@ public class SearchController {
 	SearchResponse search(@RequestParam(defaultValue = "") String q,
 			@RequestParam(defaultValue = "" + SearchService.DEFAULT_LIMIT) int limit,
 			@RequestParam(defaultValue = "relevance") String sort,
-			@RequestParam(defaultValue = "true") boolean prefix) {
-		return this.search.search(q, limit, sort, prefix);
+			@RequestParam(defaultValue = "true") boolean prefix,
+			@RequestParam(defaultValue = "true") boolean fuzzy) {
+		return this.search.search(q, limit, sort, prefix, fuzzy);
 	}
 
 }
