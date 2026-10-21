@@ -176,6 +176,8 @@ export default function CanvasView({ path, entry }: FileViewProps) {
   const fitted = useRef(false);
   const hasDoc = state.doc !== null;
   const env = useMemo<RenderEnv | null>(() => (tree ? { tree, settings, loadRemoteImages, canvasPath: path } : null), [tree, settings, loadRemoteImages, path]);
+  /** The stage is on screen (effects that need its element run again when it appears). */
+  const stageShown = hasDoc && env !== null && !textMode;
   const lastPointer = useRef<Point | null>(null);
 
   // The session's text is the document (controller.ts); written back on unmount before release.
@@ -209,11 +211,11 @@ export default function CanvasView({ path, entry }: FileViewProps) {
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [controller, textMode, hasDoc]);
+  }, [controller, stageShown]);
 
   // First view of a canvas on this device: everything in sight; a search hit: its card.
   useLayoutEffect(() => {
-    if (!hasDoc || stageSize.width === 0) return;
+    if (!stageShown || stageSize.width === 0) return;
     const q = new URLSearchParams(location.search).get('q')?.trim().toLowerCase();
     const doc = controller.doc!;
     if (q) {
@@ -236,7 +238,7 @@ export default function CanvasView({ path, entry }: FileViewProps) {
         controller.setView({ zoom, x: stageSize.width / 2 - cx * zoom, y: stageSize.height / 2 - cy * zoom });
       } else controller.zoomToFit();
     }
-  }, [hasDoc, stageSize.width, stageSize.height, controller, location.search, initialView]);
+  }, [stageShown, stageSize.width, stageSize.height, controller, location.search, initialView]);
 
   // File nodes follow files this page saw move (MoveService rewrites links in notes only).
   const doc = state.doc;
@@ -351,7 +353,7 @@ export default function CanvasView({ path, entry }: FileViewProps) {
       detach();
       el.removeEventListener('pointermove', track);
     };
-  }, [controller, startEditing, addCardAt, addMedia, pasteText, textMode, hasDoc]);
+  }, [controller, startEditing, addCardAt, addMedia, pasteText, stageShown]);
 
   // Palette commands act on this canvas while it is on screen.
   useEffect(() => {
@@ -510,7 +512,14 @@ export default function CanvasView({ path, entry }: FileViewProps) {
       </div>
     );
   }
-  if (!state.doc || !env) {
+  if (!env || (!state.doc && !state.error)) {
+    return (
+      <div className="view-loading" aria-busy="true">
+        <div className="skeleton-line" />
+      </div>
+    );
+  }
+  if (!state.doc) {
     return (
       <div className="error-panel" role="alert">
         <p className="error-panel-title">This canvas could not be read.</p>
