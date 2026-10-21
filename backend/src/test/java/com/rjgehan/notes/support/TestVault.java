@@ -26,6 +26,7 @@ import com.rjgehan.notes.history.GitStore;
 import com.rjgehan.notes.history.HistoryService;
 import com.rjgehan.notes.history.LargeFiles;
 import com.rjgehan.notes.identity.Identity;
+import com.rjgehan.notes.index.CanvasIndexer;
 import com.rjgehan.notes.index.FileIndexer;
 import com.rjgehan.notes.index.IndexBuilder;
 import com.rjgehan.notes.index.VaultIndex;
@@ -121,7 +122,7 @@ public final class TestVault implements AutoCloseable {
 		this.fs = fsFactory.apply(this.properties);
 		this.kinds = new FileKinds(this.properties);
 		this.paths = new VaultPaths(this.index, this.fs);
-		this.indexer = new FileIndexer(this.fs, this.kinds);
+		this.indexer = new FileIndexer(this.fs, this.kinds, List.of(new CanvasIndexer()));
 		this.hub = new RecordingEventHub(this.properties, this.clock);
 		this.largeFiles = new LargeFiles(this.index, this.properties);
 		this.git = new FailingGitStore(this.fs, this.properties, this.clock, this.largeFiles);

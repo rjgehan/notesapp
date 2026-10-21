@@ -13,11 +13,13 @@ import com.rjgehan.notes.vault.TextCodec;
 import com.rjgehan.notes.vault.VaultFs;
 import org.jspecify.annotations.Nullable;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
  * Builds {@link IndexedFile}s: text kinds within their size limit are hashed (their version), notes are decoded and
- * parsed; binary and over-size files are described by size and mtime only (DESIGN §4.2, §5.4).
+ * parsed, and other text kinds that a {@link DocumentIndexer} reads (canvases) are decoded and indexed through it;
+ * binary and over-size files are described by size and mtime only (DESIGN §4.2, §5.4, §6.8).
  */
 @Component
 public class FileIndexer {
@@ -26,9 +28,17 @@ public class FileIndexer {
 
 	private final FileKinds kinds;
 
+	private final List<DocumentIndexer> documentIndexers;
+
 	public FileIndexer(VaultFs fs, FileKinds kinds) {
+		this(fs, kinds, List.of());
+	}
+
+	@Autowired
+	public FileIndexer(VaultFs fs, FileKinds kinds, List<DocumentIndexer> documentIndexers) {
 		this.fs = fs;
 		this.kinds = kinds;
+		this.documentIndexers = List.copyOf(documentIndexers);
 	}
 
 	/** Reads the file from disk. */
@@ -61,12 +71,13 @@ public class FileIndexer {
 	}
 
 	/**
-	 * True when both names are indexed the same way (same kind and text limit), so a file renamed from one to the
-	 * other keeps its record; otherwise it must be indexed again from disk.
+	 * True when both names are indexed the same way (same kind, text limit and document indexer), so a file renamed
+	 * from one to the other keeps its record; otherwise it must be indexed again from disk.
 	 */
 	public boolean indexesAlike(String path, String other) {
 		return this.kinds.kindOf(path) == this.kinds.kindOf(other)
-				&& this.kinds.textLimit(path) == this.kinds.textLimit(other);
+				&& this.kinds.textLimit(path) == this.kinds.textLimit(other)
+				&& documentIndexer(path) == documentIndexer(other);
 	}
 
 	/**
@@ -78,6 +89,15 @@ public class FileIndexer {
 				&& (record.version() != null) == isIndexedText(record.path(), size);
 	}
 
+	private @Nullable DocumentIndexer documentIndexer(String path) {
+		for (DocumentIndexer indexer : this.documentIndexers) {
+			if (indexer.supports(path)) {
+				return indexer;
+			}
+		}
+		return null;
+	}
+
 	private IndexedFile build(String path, String disk, byte @Nullable [] bytes, long size, Instant mtime) {
 		FileKind kind = this.kinds.kindOf(path);
 		if (bytes == null) {
@@ -85,8 +105,15 @@ public class FileIndexer {
 		}
 		String version = Hashing.blobId(bytes);
 		if (kind != FileKind.NOTE) {
-			return new IndexedFile(new FileRecord(path, kind, bytes.length, mtime, version, List.of()), disk, null,
-					null);
+			FileRecord record = new FileRecord(path, kind, bytes.length, mtime, version, List.of());
+			DocumentIndexer documents = documentIndexer(path);
+			if (documents != null) {
+				DocumentIndexer.Indexed indexed = documents.index(path, TextCodec.decode(bytes).text());
+				if (indexed != null) {
+					return new IndexedFile(record, disk, indexed.searchText(), indexed.parse());
+				}
+			}
+			return new IndexedFile(record, disk, null, null);
 		}
 		TextCodec.Decoded decoded = TextCodec.decode(bytes);
 		NoteParse parse = MarkdownScanner.scan(decoded.text(), decoded.hadBom(), decoded.lossy());

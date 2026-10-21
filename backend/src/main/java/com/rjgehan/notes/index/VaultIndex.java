@@ -20,6 +20,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.rjgehan.notes.api.dto.FileEntry;
+import com.rjgehan.notes.api.dto.FileKind;
 import com.rjgehan.notes.api.dto.FolderEntry;
 import com.rjgehan.notes.api.dto.LinkStyle;
 import com.rjgehan.notes.api.dto.SkippedEntry;
@@ -519,7 +520,17 @@ public class VaultIndex {
 	}
 
 	public Stats stats() {
-		return read(() -> new Stats(this.notes.size(), this.files.size(), this.folders.size(), this.totalBytes));
+		return read(() -> {
+			// Documents indexed like notes (canvases) are not counted as notes.
+			int noteCount = 0;
+			for (String path : this.notes.keySet()) {
+				FileRecord record = this.files.get(path);
+				if (record != null && record.kind() == FileKind.NOTE) {
+					noteCount++;
+				}
+			}
+			return new Stats(noteCount, this.files.size(), this.folders.size(), this.totalBytes);
+		});
 	}
 
 	public List<SkippedEntry> skipped() {

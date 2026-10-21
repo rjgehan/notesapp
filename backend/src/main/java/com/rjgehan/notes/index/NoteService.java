@@ -61,6 +61,11 @@ public class NoteService {
 	public NoteMeta meta(String apiPath) {
 		ApiPath path = this.paths.resolve(apiPath, Mode.EXISTING);
 		VaultIndex.NoteView view = this.index.noteView(path.nfc());
+		FileRecord indexed = this.index.file(path.nfc());
+		if (view != null && indexed != null && indexed.kind() != FileKind.NOTE) {
+			// A canvas is indexed like a note (DocumentIndexer) but is not one.
+			throw NotesException.typeMismatch(path.nfc(), "note", "Not a note: " + path.nfc());
+		}
 		if (view == null) {
 			FileRecord file = this.index.file(path.nfc());
 			if (file == null && !this.index.isFolder(path.nfc())) {
@@ -126,7 +131,9 @@ public class NoteService {
 		List<BacklinkGroup> groups = new ArrayList<>();
 		for (VaultIndex.Candidate candidate : this.index.mentionCandidates(usable)) {
 			NoteRecord source = candidate.note();
-			if (source.path().equals(target.path()) || files.isExcluded(source.path())) {
+			// Only notes: a mention in a canvas's searchable text has no place in the file to become a link.
+			if (source.path().equals(target.path()) || files.isExcluded(source.path())
+					|| this.kinds.kindOf(source.path()) != FileKind.NOTE) {
 				continue;
 			}
 			List<Mention> mentions = new ArrayList<>();
