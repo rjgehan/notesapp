@@ -88,7 +88,9 @@ exec)
 			;;
 		offsite) [ "$code" -ne 0 ] || echo "offsite=${FAKE_OFFSITE_RESULT:-ok}" ;;
 		esac
-		if [ "$code" -ne 0 ]; then
+		if [ "$code" -ne 0 ] && [ -n "${FAKE_STDERR:-}" ]; then
+			printf '%s\n' "$FAKE_STDERR" >&2 # what restic printed instead of the usual line
+		elif [ "$code" -ne 0 ]; then
 			echo "Fatal: \"$step\" went wrong \\ (code $code)" >&2
 		fi
 		exit "$code"

@@ -1,6 +1,7 @@
 package com.rjgehan.notes.ops;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -70,6 +71,22 @@ class BackupStatusReaderTest {
 		BackupStatus status = reader().read();
 		assertThat(status.state()).isEqualTo(BackupState.FAILED);
 		assertThat(status.failures()).isEqualTo("- off-site copy: Fatal: unable to open");
+	}
+
+	@Test
+	void aFailureCutInsideAUtf8CharacterOrWithARawControlCharacterIsStillAFailure() throws IOException {
+		// nightly.sh cuts restic's output at 300 bytes: here in the middle of "é" (C3 A9), leaving a lone C3 byte,
+		// and an ESC (1B) from a terminal colour code is written unescaped.
+		String json = status("failed", Duration.ofHours(2), Duration.ofHours(26),
+				"\"- snapshot (restic exit 3): error: open /source/notes-data/vault/Caf\u0001\u001B[0m \"");
+		byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+		int cut = json.indexOf('\u0001');
+		bytes[cut] = (byte) 0xC3;
+		Files.write(this.dir.resolve("status.json"), bytes);
+		BackupStatus status = reader().read();
+		assertThat(status.state()).isEqualTo(BackupState.FAILED);
+		assertThat(status.failures()).startsWith("- snapshot (restic exit 3): error: open /source/notes-data/vault/Caf�")
+			.doesNotContain("\u001B");
 	}
 
 	@Test

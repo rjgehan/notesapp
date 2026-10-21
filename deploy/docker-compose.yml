@@ -58,7 +58,8 @@ services:
     volumes:
       - notes-data:/data
       # The last backup run's status.json, read-only, for the status page (ROADMAP item 38). Host cron writes it
-      # elsewhere: set NOTES_BACKUP_STATE to that directory (DEPLOY.md "Host cron instead of backup-scheduler").
+      # elsewhere: set NOTES_BACKUP_STATE to that directory, and create it first, as your user: Docker would create
+      # a missing one as root, which the cron job cannot write (DEPLOY.md "Host cron instead of backup-scheduler").
       - ${NOTES_BACKUP_STATE:-backup-state}:/backup-state:ro
     mem_limit: 1g
     stop_grace_period: 45s

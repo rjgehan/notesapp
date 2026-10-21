@@ -1,6 +1,7 @@
 package com.rjgehan.notes.ops;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -15,6 +16,7 @@ import com.rjgehan.notes.api.dto.BackupStatus;
 import com.rjgehan.notes.config.NotesProperties;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.json.JsonReadFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -68,7 +70,11 @@ public class BackupStatusReader {
 		}
 		JsonNode root;
 		try {
-			root = this.mapper.readTree(bytes);
+			// Leniently: restic's output, cut to length by a shell script, can end in half a UTF-8 character (decoded
+			// as U+FFFD here) or carry a raw control character (blanked by text()). Neither may hide a failed run.
+			root = this.mapper.reader()
+				.with(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+				.readTree(new String(bytes, StandardCharsets.UTF_8));
 		}
 		catch (JacksonException ex) {
 			return BackupStatus.unknown("The backup status file is not valid JSON");

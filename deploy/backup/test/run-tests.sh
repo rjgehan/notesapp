@@ -27,7 +27,7 @@ setup() {
 	for name in FAKE_BACKUP_RUNNING FAKE_HEALTH FAKE_STOP_FAIL FAKE_STOP_RESTARTS FAKE_START_FAIL FAKE_RESTIC_RUNNING \
 		FAKE_SNAPSHOT_SLEEP FAKE_DURING_SNAPSHOT FAKE_SNAPSHOT_NOID FAKE_SNAPSHOT_ID FAKE_OFFSITE_RESULT \
 		FAKE_FAIL_preflight FAKE_FAIL_snapshot FAKE_FAIL_discard FAKE_FAIL_forget FAKE_FAIL_offsite FAKE_FAIL_check \
-		FAKE_HTTP_FAIL NOTES_BACKUP_TIME NOTES_BACKUP_NOW TZ; do
+		FAKE_HTTP_FAIL FAKE_STDERR NOTES_BACKUP_TIME NOTES_BACKUP_NOW TZ; do
 		unset "$name"
 	done
 	export NOTES_BACKUP_STATE_DIR="$T/state"
@@ -145,10 +145,13 @@ exit_is 1
 not_called "stop -t"
 not_called "$JOB snapshot"
 called "Title: NotesApp backup failed"
-called "preflight: Fatal: \"preflight\" went wrong \\ (code 1)"
+called "The backup run on homeserver failed:|- preflight|Details: the Backups card of the status page"
+not_called "Fatal:" # restic's output stays in status.json and the log
 not_called "hc.example"
 app_is running
 status_has '"result":"failed"'
+status_has '"failures":"- preflight: Fatal: \"preflight\" went wrong \\ (code 1)'
+output_has 'ERROR preflight: Fatal: "preflight" went wrong'
 
 setup "the backup container is not running"
 export FAKE_BACKUP_RUNNING=false
@@ -163,7 +166,9 @@ nightly
 exit_is 1
 in_order "$JOB snapshot" "start notes-notes-1"
 called "$JOB forget"
-called "snapshot (restic exit 1): restic: snapshot output Fatal: \"snapshot\" went wrong"
+called "|- snapshot (restic exit 1)|"
+not_called "restic: snapshot output"
+status_has '- snapshot (restic exit 1): restic: snapshot output Fatal: \"snapshot\" went wrong'
 app_is running
 absent "$NOTES_BACKUP_STATE_DIR/app-stopped"
 status_has '"snapshot":null'
@@ -264,7 +269,8 @@ setup "a failed off-site copy alerts"
 export FAKE_FAIL_offsite=1
 nightly
 exit_is 1
-called "off-site copy: Fatal: \"offsite\" went wrong"
+called "|- off-site copy|"
+status_has '- off-site copy: Fatal: \"offsite\" went wrong'
 status_has '"offsite":"failed"'
 
 setup "a failed retention alerts and the off-site copy still runs"
@@ -373,6 +379,61 @@ status_has '"failures":"- preflight: Fatal: \"preflight\" went wrong \\ (code 1)
 if command -v jq >/dev/null 2>&1; then
 	if jq -e . "$NOTES_BACKUP_STATE_DIR/status.json" >/dev/null; then pass; else fail "status.json is not valid JSON"; fi
 fi
+
+setup "restic's output, which names vault files, never reaches the ntfy topic"
+export FAKE_FAIL_snapshot=3
+export FAKE_STDERR='{"message_type":"error","error":{"message":"read: input/output error"},"during":"archival","item":"/source/notes-data/vault/Private/Diary.md"}'
+nightly
+exit_is 1
+called "|- snapshot (restic exit 3, snapshot 0123abcd kept)|Details:"
+not_called "Diary.md"
+not_called "input/output error"
+status_has 'vault/Private/Diary.md'
+
+setup "a detail cut inside a UTF-8 character, or with control characters, keeps status.json valid"
+# A terminal colour code, then x up to byte 299, then the two bytes of "é": the 300-byte cut falls between them.
+export FAKE_FAIL_preflight=1
+FAKE_STDERR="$(printf '\033')[0m$(printf '%0295d' 0 | tr 0 x)$(printf '\303\251') is next"
+export FAKE_STDERR
+nightly
+exit_is 1
+status_has '"failures":"- preflight: ?[0mxxx'
+status_has 'xx? "}'
+not_ascii=$(LC_ALL=C tr -d '\12\40-\176' <"$NOTES_BACKUP_STATE_DIR/status.json" | wc -c | tr -d ' ')
+if [ "$not_ascii" = 0 ]; then pass; else fail "status.json has $not_ascii bytes that are not printable ASCII"; fi
+if command -v jq >/dev/null 2>&1; then
+	if jq -e . "$NOTES_BACKUP_STATE_DIR/status.json" >/dev/null; then pass; else fail "status.json is not valid JSON"; fi
+fi
+
+setup "a state directory the run cannot write is reported, not taken for a run in progress"
+# Docker creates a missing bind-mount source as root (DEPLOY.md "Host cron instead of backup-scheduler").
+mkdir -p "$NOTES_BACKUP_STATE_DIR"
+chmod 555 "$NOTES_BACKUP_STATE_DIR"
+if [ -w "$NOTES_BACKUP_STATE_DIR" ]; then
+	echo "skipped [$TEST]: chmod cannot make a directory unwritable here (root, or no Unix permissions)"
+else
+	nightly
+	exit_is 1
+	not_called "stop -t"
+	not_called "$JOB"
+	called "Title: NotesApp backup failed"
+	called "its state directory $NOTES_BACKUP_STATE_DIR cannot be written"
+	not_called "still in progress"
+	output_has "ERROR the state directory"
+fi
+chmod 755 "$NOTES_BACKUP_STATE_DIR"
+
+setup "a state directory that cannot be created is reported too"
+: >"$T/not-a-directory"
+export NOTES_BACKUP_STATE_DIR="$T/not-a-directory/state"
+nightly
+exit_is 1
+not_called "$JOB"
+called "Title: NotesApp backup failed"
+called "cannot be written. No backup is taken until that is fixed."
+nightly --recover # nothing to recover, and nothing to say
+exit_is 0
+not_called "Title: NotesApp backup interrupted"
 
 setup "no ntfy URL means no alert and no error"
 export FAKE_FAIL_preflight=1 NOTES_BACKUP_NTFY_URL=

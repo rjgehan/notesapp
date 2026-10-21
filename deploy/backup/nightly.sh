@@ -8,7 +8,8 @@
 #      snapshot during which anything started or replaced the app is discarded.
 #   3. Retention and prune, the off-site copy, and on NOTES_BACKUP_CHECK_DAY a check of both repositories.
 #
-# Failures are posted to NOTES_BACKUP_NTFY_URL; a run without failures pings NOTES_BACKUP_HEARTBEAT_URL.
+# Failures are posted to NOTES_BACKUP_NTFY_URL, naming the steps that failed; restic's output, which can name
+# vault files, stays in status.json and the log. A run without failures pings NOTES_BACKUP_HEARTBEAT_URL.
 # `nightly.sh --recover` (backup-scheduler's start, or @reboot with host cron) starts the app again when a
 # run died while the app was stopped.
 set -u
@@ -38,6 +39,7 @@ CHILD=
 IN_RUN=
 LOCKED=
 FAILED=
+FAILED_STEPS=
 URGENT=
 SNAPSHOT=
 OFFSITE_RESULT=
@@ -48,15 +50,20 @@ log() {
 	printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
-# Records a failure for the alert. $1 = what failed, $2 = optional detail.
+# Records a failure. $1 = what failed, for the alert, status.json and the log; $2 = optional detail (restic's
+# output), for status.json and the log only: it can name vault files, which never go to the ntfy topic.
 fail() {
 	log "ERROR $1${2:+: $2}"
 	FAILED="$FAILED- $1${2:+: $2}
 "
+	FAILED_STEPS="$FAILED_STEPS- $1
+"
 }
 
+# The last lines of the step's stderr on one line, at most 300 bytes. Bytes outside printable ASCII become '?', so
+# the cut can never split a UTF-8 character and no control character reaches status.json.
 last_error() {
-	tail -n 3 "$ERR" 2>/dev/null | tr '\n' ' ' | cut -c 1-300
+	tail -n 3 "$ERR" 2>/dev/null | tr '\t\r\n' '   ' | LC_ALL=C tr -c '\40-\176' '?' | cut -c 1-300
 }
 
 # Posts to the ntfy topic and never fails the run. $1 title, $2 priority, $3 tags, $4 message.
@@ -154,11 +161,13 @@ recover() {
 	fi
 }
 
+# 0: locked; 1: another run holds the lock; 2: the lock cannot be created at all.
 lock() {
 	if mkdir "$LOCK" 2>/dev/null; then
 		echo $$ >"$LOCK/pid"
 		return 0
 	fi
+	[ -d "$LOCK" ] || return 2
 	holder=$(cat "$LOCK/pid" 2>/dev/null || :)
 	# No pid yet means a run is just starting; a pid that is gone means a run died (killed, or a reboot).
 	if [ -z "$holder" ] || kill -0 "$holder" 2>/dev/null; then
@@ -169,9 +178,20 @@ lock() {
 	mkdir "$LOCK" 2>/dev/null && echo $$ >"$LOCK/pid"
 }
 
+# No run can take the lock or record its status: the state directory is missing or not ours (Docker creates a
+# missing bind-mount source as root, DEPLOY.md "Host cron instead of backup-scheduler"). Says so, rather than
+# claiming that another run is in progress.
+state_unwritable() {
+	log "ERROR the state directory $STATE cannot be written by $(id -un 2>/dev/null || id -u)"
+	notify "NotesApp backup failed" high warning \
+		"The backup run on $HOST_LABEL could not start: its state directory $STATE cannot be written. No backup is taken until that is fixed."
+	exit 1
+}
+
+# A JSON string of $1 (null when empty): line breaks and tabs become spaces, other control characters go.
 json_string() {
 	if [ -n "$1" ]; then
-		printf '"%s"' "$(printf '%s' "$1" | tr '\n\r\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')"
+		printf '"%s"' "$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '\001-\037\177' | sed 's/\\/\\\\/g; s/"/\\"/g')"
 	else
 		printf 'null'
 	fi
@@ -195,12 +215,12 @@ finish() {
 	if [ -n "$FAILED" ]; then
 		write_status "$now" failed
 		log "backup run FAILED after $(($(date +%s) - STARTED)) s"
+		alert=$(printf 'The backup run on %s failed:\n%sDetails: the Backups card of the status page, and the backup log.' \
+			"$HOST_LABEL" "$FAILED_STEPS")
 		if [ -n "$URGENT" ]; then
-			notify "NotesApp is down after the backup" urgent rotating_light \
-				"$(printf 'The backup run on %s failed:\n%s' "$HOST_LABEL" "$FAILED")"
+			notify "NotesApp is down after the backup" urgent rotating_light "$alert"
 		else
-			notify "NotesApp backup failed" high warning \
-				"$(printf 'The backup run on %s failed:\n%s' "$HOST_LABEL" "$FAILED")"
+			notify "NotesApp backup failed" high warning "$alert"
 		fi
 		exit 1
 	fi
@@ -238,7 +258,7 @@ snapshot_phase() {
 			[ "$stop_status" -ne 0 ] || fail "$APP was running again right after it was stopped (a Watchtower update?)"
 			start_app 6 || {
 				URGENT=1
-				fail "$APP could not be started again" "run: cd ~/notesapp/deploy && docker compose up -d"
+				fail "$APP could not be started again (run: cd ~/notesapp/deploy && docker compose up -d)"
 			}
 			return 1
 			;;
@@ -260,7 +280,7 @@ snapshot_phase() {
 			log "$APP started again; it was down for $(($(date +%s) - stopped)) s"
 		else
 			URGENT=1
-			fail "$APP could not be started again after the snapshot" "run: cd ~/notesapp/deploy && docker compose up -d"
+			fail "$APP could not be started again after the snapshot (run: cd ~/notesapp/deploy && docker compose up -d)"
 		fi
 	fi
 
@@ -279,26 +299,30 @@ snapshot_phase() {
 	fi
 
 	if [ -n "$stopped" ] && [ -z "$URGENT" ] && ! wait_healthy; then
-		fail "$APP did not become healthy within $HEALTH_WAIT s after the backup" \
-			"check: docker compose ps; docker compose logs notes"
+		fail "$APP did not become healthy within $HEALTH_WAIT s after the backup (check: docker compose ps; docker compose logs notes)"
 	fi
 	return 0
 }
 
 run() {
-	if ! lock; then
+	lock
+	case $? in
+	0) ;;
+	1)
 		log "ERROR another backup run is in progress (lock $LOCK)"
 		notify "NotesApp backup skipped" high warning \
 			"Another backup run on $HOST_LABEL was still in progress, so this one was skipped."
 		exit 1
-	fi
+		;;
+	*) state_unwritable ;;
+	esac
 	LOCKED=1
 	IN_RUN=1
 	recover "A previous backup run did not finish"
 	log "backup run started"
 
 	if [ "$(docker inspect -f '{{.State.Running}}' "$BACKUP" 2>/dev/null)" != true ]; then
-		fail "the backup container $BACKUP is not running" "start it with: cd ~/notesapp/deploy && docker compose up -d"
+		fail "the backup container $BACKUP is not running (start it with: cd ~/notesapp/deploy && docker compose up -d)"
 		finish
 	fi
 	if ! step preflight; then
@@ -344,11 +368,14 @@ on_exit() {
 	[ -z "$LOCKED" ] || rm -rf "$LOCK"
 }
 
-mkdir -p "$STATE" || exit 1
+mkdir -p "$STATE" 2>/dev/null
 trap on_signal TERM INT HUP
 trap on_exit EXIT
 case "${1:-}" in
-'') run ;;
+'')
+	{ [ -d "$STATE" ] && [ -w "$STATE" ]; } || state_unwritable
+	run
+	;;
 --recover)
 	rm -rf "$LOCK" # called when no run can be alive: the scheduler just started, or the host just booted
 	recover "A backup run was cut short (container restart or reboot)"
