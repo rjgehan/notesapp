@@ -709,6 +709,8 @@ Results update through SSE.
 
 ### 21. Update heading links when a heading is renamed
 
+**Status:** built (with item 12, on `feat/bookmarks`): DESIGN §5.22 and §6.24, API.md §22. Typing a new heading text offers, once the text rests, to update the links that pointed at the old one (the offer counts them with a dry run, and says nothing when there are none); **Rename heading and update links to it…** in the palette does it on purpose. Every link form follows (wiki with display or as an embed, nested `#H1#H2`, markdown with a percent-encoded or angle-bracket destination, same-note `[[#H]]`, frontmatter), only the subpath is rewritten, heading bookmarks follow too, and the rewrite is one commit, like a move's link update.
+
 **One line:** when you change a heading's text, offer to update every `[[Note#Old heading]]` across the vault. Obsidian does not do this.
 
 | Value | Effort | Depends on |

@@ -1654,6 +1654,17 @@ export interface BacklinksResponse { path: VaultPath; linked: BacklinkGroup[]; u
 export interface ResolveRequest { source: VaultPath; targets: string[] }
 export interface ResolvedLink { path: VaultPath | null; createPath: VaultPath | null }
 export interface ResolveResponse { resolved: Record<string, ResolvedLink> }
+export interface HeadingRenameRequest { path: VaultPath; from: string; to: string; dryRun?: boolean }   // §22
+export interface HeadingRenameResult {
+  dryRun: boolean;
+  path: VaultPath;
+  from: string;
+  to: string;
+  linkUpdates: LinkUpdate[];      // notes whose links were (or, in a dry run, would be) updated; version null in a dry run
+  failed: FailedUpdate[];
+  bookmarks: number;              // heading bookmarks of the note that were (or would be) updated
+  commitId: string | null;
+}
 
 // ---------- search / tags (§12) ----------
 export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
@@ -1835,6 +1846,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
 | GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
 | PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
+| POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -1863,6 +1875,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `HistoryEntry`, `HistoryResponse`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `BookmarksResponse`, `BookmarksUpdateRequest` | Same | `BookmarkItem` is not a record: items stay JSON objects (`ObjectNode`; `JsonNode` in the request), so fields from Obsidian or a newer build survive; `BookmarkCodec` checks the fields it knows (§21.2) |
+| `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`, `bookmarks.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 
@@ -1944,3 +1957,44 @@ Clients apply each change to the latest list: on a `409` they fetch the bookmark
 | Moved, renamed or deleted outside the app (watcher) | Unchanged, as links are (DESIGN §5.9). They show as missing until the target comes back. |
 
 The file is committed with the normal batch, like the settings (`Update .notesapp/bookmarks.json`).
+
+---
+
+## 22. Heading links after a heading is renamed (ROADMAP item 21)
+
+### `POST /api/notes/rename-heading`
+
+Request `HeadingRenameRequest`: `{"path": "Projects/Plan.md", "from": "Goals", "to": "Aims for 2026", "dryRun": false}`.
+
+The client renames the heading in the note and **saves the note first**; the server then rewrites every link in the vault that resolves to `path` and names `from` in a `#` segment of its subpath, so `[[Plan#Goals]]`, `[[Plan#Goals|our goals]]`, `![[Plan#Goals]]`, `[[Plan#Plan#Goals]]`, `[x](Plan.md#Goals)`, `[x](<Plan.md#Goals>)` and same-note `[[#Goals]]` all follow. Headings compare as heading targets do: case-insensitively, with whitespace collapsed. Only the subpath is rewritten; the target, the display text, the style and the embed mark are kept. In a plain markdown destination the new heading is percent-encoded like a path (`Aims%20for%202026`). Heading bookmarks of the note (§21) follow too.
+
+`200 HeadingRenameResult`:
+
+```json
+{
+  "dryRun": false,
+  "path": "Projects/Plan.md",
+  "from": "Goals",
+  "to": "Aims for 2026",
+  "linkUpdates": [ { "path": "Welcome.md", "links": 2, "version": "0b9e8d7c6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c" } ],
+  "failed": [ { "path": "Notes/Odd.md", "reason": "not-rewritable" } ],
+  "bookmarks": 1,
+  "commitId": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `dryRun` | `true` computes the answer without writing (the client's offer, DESIGN §6.24): `version` is `null` and `commitId` is `null` |
+| `linkUpdates` | Notes whose links were (would be) rewritten, with the number of links and the new version. **The calling client applies these itself**, as for a move (§10.3). |
+| `failed` | As for a move: `not-utf8`, `not-rewritable` (a frontmatter link that cannot be spliced, or a new heading the link's syntax cannot hold: `\|`, `#`, `[`, `]` in a wikilink, `<`, `>`, `#` in angle brackets), `span-mismatch`, `io-error` |
+| `bookmarks` | Heading bookmarks of the note that were (would be) updated |
+| `commitId` | The commit of the rewritten notes (`Update links after renaming heading “Goals” → “Aims for 2026” in Projects/Plan.md (1 note)`), or `null` |
+
+| Errors |
+|---|
+| `400 bad-request`: `path`, `from` or `to` missing; a heading over 1,024 characters or not one line; `to` equal to `from` ignoring case and spacing; the note has no heading `to`, or still has a heading `from` (`errors[]` names the field) |
+| `400 invalid-path`, `403 reserved-path`, `404 not-found` |
+| `409 type-mismatch` (`expected: "note"`) for a file that is not a note |
+
+Events to other clients: `file.changed` for each rewritten note, then `bookmarks.changed` (`origin: null`) when heading bookmarks changed, then `history.committed`.
