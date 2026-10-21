@@ -259,7 +259,7 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
     "dailyNotes": { "format": "YYYY-MM-DD", "folder": "Daily", "template": "", "openOnStartup": false },
     "templates": { "folder": "Templates", "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm" },
     "editor": { "defaultMode": "edit", "readableLineLength": true, "strictLineBreaks": false },
-    "ai": { "enabled": false, "model": "claude-sonnet-5-5", "excludedPaths": ["Private"],
+    "ai": { "enabled": false, "provider": "claude-code", "model": "claude-sonnet-5-5", "excludedPaths": ["Private"],
             "maxContextChars": 60000, "monthlyBudgetUsd": 5.0 }
   },
   "readOnly": false
@@ -292,7 +292,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `format`, `dateFormat`, `timeFormat` | 1 to 100 characters |
 | `excludedPaths` | At most 100 valid paths (folder or file prefixes, matched case-insensitively) |
 | Enums | Exactly the strings in §17 |
-| `ai` (ROADMAP item 18) | **Optional**, unlike the other groups: it came after schema version 1, so a file or a request without it, or without one of its fields, is valid. A request without `ai` keeps the current values (an old page cannot switch it off by accident); a file without it gets the defaults. A field that is present must be valid: `enabled` a boolean; `model` one of `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5`; `excludedPaths` as `files.excludedPaths`; `maxContextChars` an integer from 4,000 to 400,000; `monthlyBudgetUsd` a number above 0 and at most 10,000. |
+| `ai` (ROADMAP item 18) | **Optional**, unlike the other groups: it came after schema version 1, so a file or a request without it, or without one of its fields, is valid. A request without `ai` keeps the current values (an old page cannot switch it off by accident); a file without it gets the defaults. A field that is present must be valid: `enabled` a boolean; `provider` `claude-code` or `api`; `model` one of `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5`; `excludedPaths` as `files.excludedPaths`; `maxContextChars` an integer from 4,000 to 400,000; `monthlyBudgetUsd` a number above 0 and at most 10,000. |
 
 **Semantics.**
 
@@ -306,7 +306,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `excludedPaths` | Excluded from search results (§12.1) and from unlinked mentions (§11.2). |
 | `dailyNotes.*`, `templates.*` | See §15.2 and §15.4. |
 | `editor.*` | UI preferences that apply on all devices. `strictLineBreaks: false` (the default, as in Obsidian) renders a single newline as a line break in reading view. |
-| `ai.*` | Ask your vault and summaries (§20). `enabled` is off by default: until it is on, nothing is ever sent to Anthropic. `excludedPaths` (default `["Private"]`) and `files.excludedPaths` are never read for a request. `maxContextChars` caps the note text of one request, earlier turns included; `monthlyBudgetUsd` refuses requests once the month's estimated spend reaches it. |
+| `ai.*` | Ask your vault and summaries (§20). `enabled` is off by default: until it is on, nothing is ever sent to Anthropic. `provider`: `claude-code` (default), the server's Claude Code CLI with the user's Claude subscription, or `api`, the Anthropic API billed per token. `excludedPaths` (default `["Private"]`) and `files.excludedPaths` are never read for a request. `maxContextChars` caps the note text of one request, earlier turns included; `monthlyBudgetUsd` refuses requests once the month's estimated spend reaches it. |
 
 ---
 
@@ -1687,6 +1687,7 @@ export interface EditorSettings { defaultMode: 'edit' | 'read'; readableLineLeng
 /** Ask your vault and summaries (§20). Optional in a request: a body without it keeps the current values. */
 export interface AiSettings {
   enabled: boolean;               // off by default: nothing is sent to Anthropic until this is on
+  provider: AiProvider;           // 'claude-code' (default): the CLI with your Claude subscription; 'api': billed per token
   model: AiModelId;               // 'claude-sonnet-5-5' (default), 'claude-opus-5-5' or 'claude-haiku-5-5'
   excludedPaths: VaultPath[];     // never sent; files.excludedPaths are never sent either. Default ['Private']
   maxContextChars: number;        // note text one request may carry, 4,000 to 400,000; default 60,000
@@ -1877,6 +1878,7 @@ export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry
 
 // ---------- Ask your vault and summaries (§20) ----------
 export type AiModelId = string;
+export type AiProvider = 'claude-code' | 'api';
 export type AiAction = 'ask' | 'summarize' | 'suggest';
 export type AiScope = 'note' | 'folder' | 'notes' | 'selection';
 /** What a turn asked: a question, or the fields of a summary request. */
@@ -1909,10 +1911,12 @@ export interface AiModelInfo { id: AiModelId; label: string; inputUsdPerMTok: nu
 export interface AiStatus {
   state: 'off' | 'not-configured' | 'over-budget' | 'ready';
   reason: string | null;
+  provider: AiProvider;
   model: AiModelId;
   models: AiModelInfo[];
-  keyFile: string;                // the key file's name, never its content
+  keyFile: string;                // the provider's credential file (claude-token or anthropic-key), never its content
   keyPresent: boolean;
+  cliInstalled: boolean;          // the Claude Code CLI is on the server
   month: string;                  // "2026-10", in the server's time zone
   monthCostUsd: number;           // estimated
   monthRequests: number;
@@ -2083,13 +2087,13 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 
 ## 20. Ask your vault and summaries (ROADMAP item 18)
 
-Questions about the vault answered by Claude with citations, summaries of a note, a folder, some notes or a selection, and suggested links, tags and tasks for a note (DESIGN §5.20, §6.21). **Off by default**: nothing is sent to Anthropic until `settings.ai.enabled` is on, the server has an API key file, and a request asks. Notes under `settings.ai.excludedPaths` or `settings.files.excludedPaths` are never read. The server keeps no conversation: each device keeps its own and sends the earlier turns back as `history`.
+Questions about the vault answered by Claude with citations, summaries of a note, a folder, some notes or a selection, and suggested links, tags and tasks for a note (DESIGN §5.20, §6.21). **Off by default**: nothing is sent to Anthropic until `settings.ai.enabled` is on, the server has the provider's credential, and a request asks. Two providers (`settings.ai.provider`): `claude-code` (default) runs the server's Claude Code CLI headless with the user's Claude subscription (an OAuth token from `claude setup-token`), every tool disabled; `api` calls the Anthropic Messages API with an API key, billed per token. The wire contract is the same for both. Notes under `settings.ai.excludedPaths` or `settings.files.excludedPaths` are never read. The server keeps no conversation: each device keeps its own and sends the earlier turns back as `history`.
 
 Every request is checked, and its prompt built, before the response starts, so a refusal is an ordinary problem document (§3), also for a client that sent `Accept: text/event-stream`:
 
 | Problem | When |
 |---|---|
-| `409 ai-unavailable` | `reason: "off"` (switched off in Settings) or `"not-configured"` (no usable key; `detail` says why, never quoting the key) |
+| `409 ai-unavailable` | `reason: "off"` (switched off in Settings) or `"not-configured"` (no Claude Code CLI, no usable token or key; `detail` says why, never quoting the credential) |
 | `429 ai-budget-exceeded` | This month's estimated spend reached `settings.ai.monthlyBudgetUsd`; `limit` and `spent` in USD |
 | `403 ai-excluded` | The note, folder or selection's note named by the request is excluded |
 | `400 bad-request` | A field out of range (below) |
@@ -2140,18 +2144,19 @@ A note summary sends the note up to `maxContextChars` (its beginning, marked tru
 `200 AiStatus`:
 
 ```json
-{ "state": "ready", "reason": null, "model": "claude-sonnet-5-5",
+{ "state": "ready", "reason": null, "provider": "claude-code", "model": "claude-sonnet-5-5",
   "models": [ { "id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "inputUsdPerMTok": 2.0, "outputUsdPerMTok": 10.0 } ],
-  "keyFile": "anthropic-key", "keyPresent": true, "month": "2026-10", "monthCostUsd": 0.4213, "monthRequests": 37,
+  "keyFile": "claude-token", "keyPresent": true, "cliInstalled": true, "month": "2026-10", "monthCostUsd": 0.4213, "monthRequests": 37,
   "monthlyBudgetUsd": 5.0, "maxContextChars": 60000, "fake": false }
 ```
 
 | Field | Values |
 |---|---|
 | `state` | `off` (switched off in Settings), `not-configured` (no usable key; `reason` says why), `over-budget` (`reason` names the budget), `ready` |
-| `keyFile`, `keyPresent` | The key file's name and whether it holds a key; never the key |
-| `month`, `monthCostUsd`, `monthRequests` | The calendar month in the server's time zone, and its estimated spend (list prices of the models that answered) and request count |
-| `fake` | `true` on a development server started with `notes.ai.fake=true`, which answers with canned text and never calls Anthropic |
+| `provider` | `claude-code` or `api`, from Settings |
+| `keyFile`, `keyPresent`, `cliInstalled` | The selected provider's credential file (`claude-token` or `anthropic-key`) and whether it holds one, never its content; whether the Claude Code CLI is on the server |
+| `month`, `monthCostUsd`, `monthRequests` | The calendar month in the server's time zone, its estimated spend and its request count. The spend is what the API bills (list prices of the models that answered) or, with Claude Code, the API value Claude Code reports (`total_cost_usd`): the subscription is not charged per request |
+| `fake` | `true` on a development server started with `notes.ai.fake=true`, which answers with canned text and never runs Claude Code or calls Anthropic |
 
 ### 20.5 The answer stream
 
@@ -2163,6 +2168,6 @@ The response to §20.2 and §20.3 is `text/event-stream` with `Cache-Control: no
 | `delta` | `AiDeltaEvent` `{text}` | The next piece of the answer (Markdown) |
 | `restart` | `AiRestartEvent` `{model}` | The model declined part way and `model`, the server-side fallback, answers from the start: discard the text so far |
 | `done` | `AiDoneEvent` | The end: `stopReason` (`end_turn`, `max_tokens`, `refusal`, …), `refusalCategory`, `fellBack`, `usage` (tokens, cache reads and writes), `costUsd` and `monthCostUsd` (estimated) |
-| `error` | `AiErrorEvent` `{code, message}` | The end, after a failure: `auth` (the key was refused), `rate-limited`, `overloaded`, `bad-request`, `unavailable` (network, timeout), `busy` (two answers are already being written), `internal-error`. `message` never contains the key or note text. |
+| `error` | `AiErrorEvent` `{code, message}` | The end, after a failure: `auth` (the token or key was refused), `rate-limited` (also a subscription's usage limit), `overloaded`, `bad-request`, `unavailable` (network, timeout), `busy` (two answers are already being written), `internal-error`. `message` never contains the key or note text. |
 
 A stream that ends without `done` or `error` was cut off. Closing the connection (Stop) stops the answer on the server too; what was generated until then is still counted in the month's spend, estimated at four characters per token.
