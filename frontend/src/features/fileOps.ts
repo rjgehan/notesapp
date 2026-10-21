@@ -20,6 +20,8 @@ import { displayName, extensionOf, folderOf, isWithin, joinPath, lastSegment, ne
 import { forgetRecent } from './recent';
 import { toastError } from './errors';
 import { afterOpen, requestNoteFocus } from './focus';
+import { folderTemplateOutput, folderTemplateRenderer, placeTemplateCursor } from './folderTemplates';
+import type { TemplateOutput } from './templates';
 import { retitleText } from './templateTitle';
 
 /** The default new-note location (API.md §5 `newNoteLocation`). */
@@ -50,34 +52,42 @@ export function nameWithExtension(path: string, basename: string, type: 'file' |
 
 let pendingSeq = 0;
 
-/** A template rendered for a title (New note from template). */
-export type TitledContent = (title: string) => string;
+/** A template rendered for a title (New note from template, a folder template). */
+export type TitledContent = (title: string) => TemplateOutput;
 
-/** The note created from a template whose `{{title}}` still follows its name (one at a time). */
-let titled: { path: string; render: TitledContent; title: string } | null = null;
+/**
+ * The note created from a template whose `{{title}}` still follows its name (one at a time), and
+ * whether its caret still has to go to the template's `{{cursor}}`.
+ */
+let titled: { path: string; render: TitledContent; title: string; placeCursor: boolean } | null = null;
 
 /**
  * The note created from a template at `from` is now named `to` (the new-note rename, its inline
  * title): the lines its template rendered with the old title are rendered with the new one, as
- * one ordinary edit of the note.
+ * one ordinary edit of the note. The first call also puts the caret at the template's `{{cursor}}`
+ * (the retitle edit then maps it).
  */
 export async function retitleNewNote(from: string, to: string): Promise<void> {
   const t = titled;
   if (!t || t.path !== from) return;
   titled = null;
   const title = displayName(to);
-  if (title !== t.title) {
+  if (title !== t.title || t.placeCursor) {
     const session = documents.acquire(to, 'retitle');
     try {
       await session.whenSettled();
+      const before = t.render(t.title);
       const text = session.getText();
-      const next = retitleText(text, t.render(t.title), t.render(title));
-      if (next !== text) await session.restoreText(next);
+      if (t.placeCursor && before.cursor !== null && text === before.text) session.select(before.cursor);
+      if (title !== t.title) {
+        const next = retitleText(text, before.text, t.render(title).text);
+        if (next !== text) await session.restoreText(next);
+      }
     } finally {
       documents.release(session, 'retitle');
     }
   }
-  titled = { path: to, render: t.render, title };
+  titled = { path: to, render: t.render, title, placeCursor: false };
 }
 
 /** The pending note `id` once its title is committed, or null when another view replaced it. */
@@ -100,23 +110,30 @@ function titleCommitted(id: number): Promise<PendingNote | null> {
  * "New note" (DESIGN §6.15): the pending view (title focused, inside the tap) appears at once and
  * `POST /api/files {Untitled.md, onConflict: rename}` runs in the background. A title committed
  * before the POST returns becomes a rename; otherwise the typed title is handed to the note.
- * Content from a template (`TitledContent`) renders its `{{title}}` with the note's final name.
- * Another view's file (`extension`, called `label` in the pending view) is created the same way.
+ * Content from a template (`TitledContent`) renders its `{{title}}` with the note's final name,
+ * and its `{{cursor}}` places the caret; null content means its questions were cancelled, and no
+ * note is created. A note without content gets its folder's template (ROADMAP item 30). Another
+ * view's file (`extension`, called `label` in the pending view) is created the same way.
  */
-export function createNote(folder: string, initialContent: string | Promise<string | TitledContent> = '', extension = 'md', label = 'note'): void {
+export function createNote(folder: string, initialContent: string | Promise<string | TitledContent | null> = '', extension = 'md', label = 'note'): void {
   const id = ++pendingSeq;
   const key = newIdempotencyKey();
   const initialTitle = 'Untitled';
   startPendingNote(id, folder, initialTitle, { extension, label });
   useUi.getState().setDrawerOpen(false);
+  if (extension === 'md' && initialContent === '') initialContent = folderTemplateRenderer(folder);
   void (async () => {
     let created: FileEntry;
     let render: TitledContent | null;
     try {
       // A template renders while the pending view is already up (its title focused in the tap).
       const loaded = await initialContent;
+      if (loaded === null) {
+        clearPendingNote(id);
+        return;
+      }
       render = typeof loaded === 'function' ? loaded : null;
-      const content = render ? render(initialTitle) : (loaded as string);
+      const content = render ? render(initialTitle).text : (loaded as string);
       const result = await api.createFile({ path: joinPath(folder, `${initialTitle}.${extension}`), content, onConflict: 'rename' }, { idempotencyKey: key });
       applyWriteResult(queryClient, result, content);
       created = result.file;
@@ -125,7 +142,7 @@ export function createNote(folder: string, initialContent: string | Promise<stri
       toastError(e);
       return;
     }
-    if (render) titled = { path: created.path, render, title: initialTitle };
+    if (render) titled = { path: created.path, render, title: initialTitle, placeCursor: true };
     let pending = usePendingNote.getState().pending;
     // A file without an inline title to hand the typing over to (a drawing) takes its name from
     // the pending view: it opens once the title is committed (Enter or blur), or never if the
@@ -166,8 +183,9 @@ export function createNote(folder: string, initialContent: string | Promise<stri
 }
 
 /**
- * Creates a note named exactly `name` (quick switcher); an existing note is opened instead. Focus
- * follows the rules of any other navigation from the switcher (DESIGN §6.19).
+ * Creates a note named exactly `name` (quick switcher), from its folder's template; an existing
+ * note is opened instead. Focus follows the rules of any other navigation from the switcher
+ * (DESIGN §6.19).
  */
 export async function createNamedNote(name: string, fromPath: string | null, viaKeyboard: boolean): Promise<void> {
   const clean = name.trim().replace(/\.md$/i, '');
@@ -178,10 +196,13 @@ export async function createNamedNote(name: string, fromPath: string | null, via
     return;
   }
   try {
-    const result = await api.createFile({ path, content: '', onConflict: 'fail' }, { idempotencyKey: newIdempotencyKey() });
-    applyWriteResult(queryClient, result, '');
+    const out = await folderTemplateOutput(path);
+    if (!out) return;
+    const result = await api.createFile({ path, content: out.text, onConflict: 'fail' }, { idempotencyKey: newIdempotencyKey() });
+    applyWriteResult(queryClient, result, out.text);
     afterOpen(result.file.path, viaKeyboard);
     openPath(result.file.path, null, { newNote: true });
+    void placeTemplateCursor(result.file.path, out);
   } catch (e) {
     if (isProblem(e, 'already-exists') || isProblem(e, 'case-collision')) {
       const existing = e.problem.existingPath ?? path;

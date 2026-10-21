@@ -337,6 +337,17 @@ export class DocumentSession {
     return { from, to };
   }
 
+  /**
+   * Puts the caret at `anchor` without editing or focusing (a new note's `{{cursor}}`, DESIGN
+   * §6.12): an editor mounted later starts there, a mounted one moves there.
+   */
+  select(anchor: number): void {
+    const spec = { selection: { anchor: Math.min(anchor, this.editorState.doc.length) } };
+    if (this.view) this.view.dispatch(spec);
+    else this.state = this.state.update(spec).state;
+    this.selectionKnown = true;
+  }
+
   /** Reconfigured state for a new editor mount (keeps doc, selection and undo history). */
   prepareState(reconfigure: (state: EditorState) => EditorState): EditorState {
     this.state = reconfigure(this.editorState);

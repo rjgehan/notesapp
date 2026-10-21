@@ -8,6 +8,7 @@ import { newIdempotencyKey } from '../state/clientId';
 import { toast } from '../state/toasts';
 import { useUi } from '../state/ui';
 import { applyWriteResult } from '../sync/treePatch';
+import { folderTemplateOutput, placeTemplateCursor } from './folderTemplates';
 import { createPath, resolve } from './links';
 import { noteRoute, pathFromLocation } from './paths';
 import { toastError } from './errors';
@@ -60,9 +61,13 @@ export async function openLink(target: string, subpath: string | null, source: s
     return;
   }
   try {
-    const result = await api.createFile({ path, content: '', onConflict: 'fail' }, { idempotencyKey: newIdempotencyKey() });
-    applyWriteResult(queryClient, result, '');
+    // The new note gets its folder's template (ROADMAP item 30); cancelling its questions creates nothing.
+    const out = await folderTemplateOutput(path);
+    if (!out) return;
+    const result = await api.createFile({ path, content: out.text, onConflict: 'fail' }, { idempotencyKey: newIdempotencyKey() });
+    applyWriteResult(queryClient, result, out.text);
     openPath(result.file.path, subpath, { newNote: true });
+    void placeTemplateCursor(result.file.path, out);
   } catch (e) {
     if (isProblem(e, 'already-exists') || isProblem(e, 'case-collision')) {
       openPath(e.problem.existingPath ?? path, subpath);

@@ -15,6 +15,6 @@ export const DEFAULT_SETTINGS: Settings = {
     excludedPaths: [],
   },
   dailyNotes: { format: 'YYYY-MM-DD', folder: 'Daily', template: '', openOnStartup: false },
-  templates: { folder: 'Templates', dateFormat: 'YYYY-MM-DD', timeFormat: 'HH:mm' },
+  templates: { folder: 'Templates', dateFormat: 'YYYY-MM-DD', timeFormat: 'HH:mm', folderTemplates: [] },
   editor: { defaultMode: 'edit', readableLineLength: true, strictLineBreaks: false },
 };
