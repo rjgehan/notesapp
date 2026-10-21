@@ -96,14 +96,15 @@ describe('DrawingEmbed', () => {
     await waitFor(() => expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:drawing-2'));
     expect(svgs.calls[1].dark).toBe(true);
     expect(screen.getByRole('img').style.filter).toBe('invert(93%) hue-rotate(180deg)');
-    expect(revoked).toEqual(['blob:drawing-1']);
+    // The release runs in a passive effect's cleanup, which React may flush just after the new image is committed.
+    await waitFor(() => expect(revoked).toEqual(['blob:drawing-1']));
 
     // Another device's change reaches the embed through the file query (live sync refreshes it).
     vault.externalWrite('A.excalidraw', JSON.stringify(scene([el('a'), el('b')])));
     await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.file('A.excalidraw') }));
     await waitFor(() => expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:drawing-3'));
     expect(JSON.parse(svgs.calls[2].text).elements.map((e: { id: string }) => e.id)).toEqual(['a', 'b']);
-    expect(revoked).toEqual(['blob:drawing-1', 'blob:drawing-2']);
+    await waitFor(() => expect(revoked).toEqual(['blob:drawing-1', 'blob:drawing-2']));
   });
 
   it('says when a drawing is empty, unreadable or missing, and still links to it', async () => {
