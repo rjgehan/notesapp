@@ -84,6 +84,15 @@ describe('SettingsWriter', () => {
     expect(s.notices.map(([m]) => m)).toEqual([expect.stringContaining('applied on top')]);
   });
 
+  it('a debounced edit is written once typing pauses, staying on the page', async () => {
+    const s = server();
+    s.writer.update({ ...s.view(), templates: { ...s.view().templates, timeFormat: 'HH:mm:ss' } }, false);
+    await vi.advanceTimersByTimeAsync(WRITE_DEBOUNCE_MS + 200);
+    expect(s.settings.templates.timeFormat).toBe('HH:mm:ss');
+    expect(s.put).toHaveBeenCalledTimes(1);
+    expect(s.writer.draft).toBeNull();
+  });
+
   it('a debounced edit is written when the page is left within the debounce (FE-7)', async () => {
     const s = server();
     s.writer.update({ ...s.view(), templates: { ...s.view().templates, folder: 'Tpl' } }, false);
