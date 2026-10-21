@@ -381,7 +381,7 @@ interface Task {
 
 **Status:** built (wave 1). The editor for `.excalidraw` and Obsidian `.excalidraw.md` files, `![[drawing]]` embeds, and search and backlinks from drawings; design in DESIGN §6.8.1, the `DocumentIndexer` in §6.8. Deviations and additions:
 
-- **Fonts under `/assets/excalidraw-<version>/`**, not `/excalidraw-assets/`: the existing immutable `/assets/**` handler serves them, and the version in the path makes permanent caching safe. The CSP is unchanged; the editor's own SVG export embeds whole fonts because glyph subsetting needs `'unsafe-eval'`.
+- **Fonts under `/assets/excalidraw-<version>/`**, not `/excalidraw-assets/`: the existing immutable `/assets/**` handler serves them, and the version in the path makes permanent caching safe. The CSP is unchanged by drawings; the editor's own SVG export embedded whole fonts because glyph subsetting compiles WebAssembly, which the policy allows since item 32 (`'wasm-unsafe-eval'`), so exports subset fonts now.
 - **More than the drawing block and Text Elements is written** in an `.excalidraw.md`: images added here get `## Embedded Files` entries (Obsidian would not show them otherwise), and `## Element Links` is kept in step with the drawing (the plugin reads it before the JSON, so a stale entry would revert a link edited here). Both stay byte-identical while nothing in them changed. New text elements get 8-character ids in the file, the plugin's block ids.
 - **Automatic merge** is a generic `DocumentSession` extension (`SessionDeps.mergeFor`), not drawing code; a rename's rewritten link survives a concurrent edit of the same element.
 - **Embeds** are `<img>`s of the SVG (sandboxed, no id clashes) with the fonts inlined by the app, since Excalidraw's inlining fails under the CSP and its fallback can fail on Safari. Live Preview gets them when item 10 adds embeds (10b), through the same `loadEmbed`.
@@ -856,6 +856,16 @@ Plugs into the view registry. `.canvas` is already a text kind.
 - Heading folding.
 
 ### 32. PDF viewer (PDF.js)
+
+**Status:** built (wave 3). PDF.js (`pdfjs-dist` 6.4.299, Apache-2.0) renders PDFs in the app: lazy chunks, the worker and its data files self-hosted under `/assets/pdfjs-<version>/`, page thumbnails, find (Mod-F) with every match highlighted, zoom presets, pinch zoom on the phone and Ctrl+wheel on the PC, selectable text, `[[file.pdf#page=N]]` links and "Copy link to current PDF page", and `![[file.pdf#page=3]]` embeds of the same viewer. Design in DESIGN §6.8.2. Deviations and additions:
+
+- **The CSP gained `'wasm-unsafe-eval'`** (DESIGN §5.14): PDF.js decodes JPEG 2000 and JBIG2 scans and ICC colours with WebAssembly, and falls back to much slower JavaScript without it. It allows no JavaScript `eval`. It also lets Excalidraw's SVG export subset its fonts (item 5).
+- **Dark pages.** In the dark theme the pages are inverted with their hues kept, as drawings are; one tap (or a palette command) turns it off on the device, for photo-heavy PDFs.
+- **The page is remembered** per device: reopening a PDF continues where it was read last, unless a link names a page.
+- **Ranges only.** A PDF is read in the 64 KiB ranges the shown pages need, not downloaded whole first, which matters for large scans on the phone.
+- **Password-protected PDFs** open after a masked password prompt.
+- **Embeds load lazily**, when they come near the screen, and keep Obsidian's `#page=` and `#height=` (600 px by default).
+- **Not built:** annotations (as planned); PDF text in vault search stays with item 22.
 
 **One line:** consistent in-app PDF rendering on iOS, where iframes show only the first page, with page links (`#page=N`) and search. Annotations come later.
 

@@ -608,7 +608,7 @@ Events, in this order: `file.deleted {trashed: true, trashId}`, `trash.changed`,
 
 ### 9.1 `GET /api/files/raw?path={path}[&v={size}-{mtimeMillis}][&download=true]`
 
-This returns the raw bytes of any visible file. It supports `Range` (206) and conditional requests (304). It is used for `<img>`, `<audio>`, `<video>` and `<iframe>` sources and for downloads. Symlinks are never served (`404`).
+This returns the raw bytes of any visible file. It supports `Range` (206) and conditional requests (304). It is used for `<img>`, `<audio>` and `<video>` sources, by the PDF viewer (PDF.js reads a PDF in `Range` requests of 64 KiB, DESIGN §6.8.2) and for downloads. Symlinks are never served (`404`).
 
 - `v` makes the URL content-addressed. Clients build it from the tree entry's `size` and `mtime` (epoch milliseconds). When it matches the file, the response is cacheable forever; otherwise it is served like a request without `v`.
 - `download=true` forces `Content-Disposition: attachment`.

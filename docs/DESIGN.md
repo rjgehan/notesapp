@@ -1109,7 +1109,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 
 | Header | Value |
 |---|---|
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'` |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'` |
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `no-referrer` |
 | `X-Frame-Options` | `DENY` |
@@ -1121,7 +1121,9 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 
 - `'unsafe-inline'` for styles is required by CodeMirror's runtime style injection and by React `style` props. Scripts stay `'self'`-only.
 - `https:` images and media are allowed because Obsidian notes commonly embed remote images. `no-referrer` keeps the vault URL from leaking. A per-device preference can turn remote images into click-to-load placeholders (§6.7).
-- Excalidraw drawings (ROADMAP item 5) work under this policy unchanged: fonts are self-hosted, its worker is same-origin, and SVG export falls back to whole fonts instead of needing `'unsafe-eval'` (§6.8.1).
+- Excalidraw drawings (ROADMAP item 5) needed no change: fonts are self-hosted and its worker is same-origin (§6.8.1).
+- **`'wasm-unsafe-eval'`** (added with ROADMAP item 32) lets the app compile WebAssembly: PDF.js's JPEG 2000, JBIG2 and ICC colour decoders and its PostScript-function compiler (§6.8.2), and Excalidraw's font subsetting. It allows no JavaScript `eval` or `new Function`; injected script still cannot run (`script-src 'self'`), and the WebAssembly the app compiles is fetched from `'self'` (`connect-src 'self'`). A worker's policy comes from its own script's response, which carries the same header. Without it PDF.js falls back to slower JavaScript decoders, which on a 300-page scan on the iPhone is the difference that matters.
+- **PDF.js** (§6.8.2) works under the rest of the policy as it is: its worker is a same-origin module script (`worker-src 'self'`, served as `text/javascript`, which `nosniff` requires); CMaps, standard fonts and decoders are fetched from `/assets/pdfjs-<version>/`; fonts embedded in a PDF become `FontFace`s from bytes (or `data:` URLs, `font-src data:`); the document's own JavaScript never runs (no scripting manager, and `quickjs-eval` is not shipped).
 
 **2. `HostAndIdentityFilter`**: the Host and identity allowlists of §5.13 (`421`, `403`).
 
@@ -1146,7 +1148,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 - **Inline allowlist:** raster images, `image/svg+xml`, `application/pdf`, audio, video and `text/plain`. Everything else is served with `Content-Disposition: attachment; filename*=UTF-8''...`, and `?download=true` forces attachment for any type.
 - **Never rendered:** `text/html`, `application/xhtml+xml`, `text/xml`, `application/xml` and JavaScript types are sent as `application/octet-stream` with `attachment`.
 - **CSP for raw responses:** `sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'`. Script inside an SVG therefore cannot run, even when it is opened directly. The exception is PDF, which gets `default-src 'none'; frame-ancestors 'self'` without `sandbox`, because Chrome's PDF viewer refuses sandboxed documents.
-- `X-Frame-Options: SAMEORIGIN` on raw responses, so the app can embed PDFs in an iframe.
+- `X-Frame-Options: SAMEORIGIN` on raw responses, so the app can embed PDFs in an iframe. Since ROADMAP item 32 the app renders PDFs with PDF.js, which reads the bytes with `Range` requests; the PDF exception remains for the browser's own viewer ("Open in the browser's viewer", downloads opened in a tab).
 - **Caching.** `ETag: W/"<size>-<mtimeMillis>"` and `Last-Modified` always. When the request carries `v=<size>-<mtimeMillis>` and it matches the file, the response is `Cache-Control: private, max-age=31536000, immutable`: the URL is content-addressed, so the reading view can re-render without a conditional request per image. Without `v`, or with a stale one, it is `no-cache`.
 
 **7.** Reading view HTML is sanitized on the client with DOMPurify (§6.7): `FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select']`, `input` elements other than task checkboxes removed, and a hook that strips `position: fixed|sticky` and `z-index` from inline styles. The reading-view and transclusion containers use `contain: paint; position: relative`, so even surviving fixed-position content is clipped to the note and cannot draw a fake app UI over the page. The CSP is the second layer.
@@ -1240,7 +1242,7 @@ spring.web.resources.cache.cachecontrol.no-cache=true
 spring.servlet.multipart.enabled=false
 server.tomcat.max-swallow-size=110MB
 server.compression.enabled=true
-server.compression.mime-types=text/html,text/css,text/javascript,application/javascript,application/json,application/problem+json,text/markdown,text/plain,image/svg+xml
+server.compression.mime-types=text/html,text/css,text/javascript,application/javascript,application/json,application/problem+json,text/markdown,text/plain,image/svg+xml,application/wasm
 management.endpoints.web.exposure.include=health
 management.endpoint.health.show-details=never
 management.endpoint.health.probes.add-additional-paths=true
@@ -1442,9 +1444,12 @@ frontend/src/
 │   ├── excalidraw/           drawings (§6.8.1): register.ts (descriptors, eager), format.ts and merge.ts (pure, eager),
 │   │                         files.ts, controller.ts, env.ts, fonts.ts, ExcalidrawView.tsx (the editor, lazy),
 │   │                         DrawingEmbed.tsx (![[drawing]], lazy), svg.ts, images.ts, statics.ts, theme.ts
+│   ├── pdf/                  PDFs (§6.8.2): register.ts (descriptor and commands, eager), subpath.ts, active.ts,
+│   │                         pdfLib.ts (loads PDF.js), controller.ts, pinch.ts, thumbnails.ts, prefs.ts, PdfView.tsx and
+│   │                         PdfEmbed.tsx (lazy), pdfjs-viewer.css (PDF.js's layer rules), pdf.css
 │   ├── FileView.tsx          route target: picks descriptor, lazy-loads it, error boundary
 │   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, mode toggle, save status), PropertiesTable.tsx
-│   ├── ImageView.tsx, PdfView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
+│   ├── ImageView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
 ├── editor/
 │   ├── obsidianSyntax.ts     Lezer inline extension (WikiLink, Embed, Hashtag, Highlight ==x==, Comment %%x%%)
 │   ├── completion.ts         [[ / [[Note# / [[# / # completion sources
@@ -1461,7 +1466,7 @@ frontend/src/
 │   ├── render.ts             markdown-it pipeline (§6.7)
 │   ├── patch.ts              per-block keyed DOM patching (keeps embeds alive across re-renders)
 │   ├── ReadingView.tsx       delegated click/change handlers
-│   └── embeds.tsx            note transclusion, media, pdf
+│   └── embeds.tsx            media elements; everything else through the view's loadEmbed (notes, drawings, PDFs)
 ├── features/
 │   ├── syntax.ts             shared tag and wikilink patterns, parseWikiBody() (vectors API.md §15.6)
 │   ├── links.ts              resolve(), createPath(), linkText(), encodeMdPath() (vectors API.md §15.1, §15.3)
@@ -1661,7 +1666,7 @@ The pipeline is `render/render.ts` from the research, verified:
    |---|---|
    | image | `<img src="/api/files/raw?path=…&v=<size>-<mtimeMillis>" loading="lazy">`, built from the tree entry, so the URL is content-addressed and the server marks it immutable (§5.14). `\|W` or `\|WxH` sets the size; otherwise the box reserves space (a minimum height, then the image's `aspect-ratio` once known) so later images never make the page jump. Remote `https:` images become click-to-load placeholders when the per-device `loadRemoteImages` preference is off. |
    | audio or video | `<audio controls>` / `<video controls playsinline>` |
-   | pdf | `<iframe src="raw#page=N" loading="lazy">`, `height` from `#height=` or 600 px, plus an "Open" link |
+   | pdf | The PDF view's `loadEmbed` (PDF.js, §6.8.2): the pages in a box of the note at page width, scrolled to `#page=N`; the height from `#height=` (or a `WxH` size), otherwise 600 px; a header names the file and opens it at the page shown. v1 used an `<iframe>`, which iOS shows as the first page only. |
    | note (`![[Note]]`, `![[Note#Heading]]`) | Transclusion box showing the rendered note or just that heading's section, **one level deep**. Nested embeds render as links. A cycle guard prevents loops. Header links to the note. |
    | `![[Note#^block]]` | A link (block transclusion is roadmap item 20) |
    | other files | A file chip with a download link |
@@ -1722,7 +1727,7 @@ All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and buil
 | `markdown` | `.md` (3) | yes | Editor and reading view |
 | `text` | other `kind:"text"` (2) | yes | Plain CodeMirror editor (JSON language for `.json`) with the same autosave and conflict handling |
 | `image` | `kind:"image"` (2) | no | Zoomable `<img>` |
-| `pdf` | `kind:"pdf"` (2) | no | `<iframe>` plus an "Open in new tab" link |
+| `pdf` | `kind:"pdf"` (2) | no | PDF.js since ROADMAP item 32 (§6.8.2); v1 had an `<iframe>` plus an "Open in new tab" link |
 | `media` | audio and video (2) | no | Native controls |
 | `unsupported` | everything (1) | no | File info and a Download button |
 
@@ -1817,11 +1822,11 @@ Excalidraw drawings are textual views over the file's `DocumentSession`, so auto
 - Embedded data URLs of excalidraw.com files are kept as they are, whatever their size (`notes.limits.text-size-overrides.excalidraw` covers large imports). One pasted later from another app's Excalidraw clipboard stays embedded up to 256 KB; a larger one is uploaded as an attachment, and the file stores its path from then on.
 - A test asserts that five 3 MB photos keep a drawing under 1 MB of JSON.
 
-**Fonts and the CSP.** The build copies the package's `dist/prod/fonts` to `/assets/excalidraw-<version>/fonts/` (`vite.config.ts`, which also serves them in dev), and `register.ts` sets `window.EXCALIDRAW_ASSET_PATH` there. The existing `/assets/**` handler serves them as `font/woff2` with immutable caching, which the version in the path makes safe. The CSP is unchanged:
+**Fonts and the CSP.** The build copies the package's `dist/prod/fonts` to `/assets/excalidraw-<version>/fonts/` (`vite.config.ts`, which also serves them in dev), and `register.ts` sets `window.EXCALIDRAW_ASSET_PATH` there. The existing `/assets/**` handler serves them as `font/woff2` with immutable caching, which the version in the path makes safe. The CSP needed no change for drawings:
 
 - fonts load from `'self'`; Excalidraw's font-subsetting worker is a same-origin module (`worker-src 'self'`); images are `data:` URLs, exports `blob:`;
 - Excalidraw lists its CDN (esm.sh) as a fallback in every `FontFace`. The CSP never lets it load, but Chromium reports a violation for each such source when the face is created (a couple of hundred console errors per drawing), so `fonts.ts` drops cross-origin sources from `FontFace` source lists;
-- SVG export (Export image, Copy to clipboard as SVG) subsets fonts with WebAssembly glue that needs `'unsafe-eval'`. Excalidraw falls back to embedding whole fonts and logs "Skipped glyph subsetting": exported SVGs are larger, and nothing else changes. Allowing `eval` for that is not worth it. Embeds do not use that path (below).
+- SVG export (Export image, Copy to clipboard as SVG) subsets fonts with WebAssembly (HarfBuzz and WOFF2, compiled from bytes; no JavaScript `eval`). Under the original policy Excalidraw fell back to embedding whole fonts and logged "Skipped glyph subsetting". Since ROADMAP item 32 the policy has `'wasm-unsafe-eval'` for PDF.js's decoders (§5.14, §6.8.2), which also lets this subsetting run, so exported SVGs are smaller. Embeds do not use that path (below).
 
 **Embeds** (`DrawingEmbed.tsx`, `svg.ts`). `![[Diagram.excalidraw]]` and `![[Diagram.excalidraw|400]]` (an `.excalidraw.md` drawing is linked as `Diagram.excalidraw`, as in Obsidian) mount the view's `loadEmbed` in the reading view (§6.7), and in any view that hydrates embeds.
 
@@ -1838,6 +1843,30 @@ Excalidraw drawings are textual views over the file's `DocumentSession`, so auto
 - **`.excalidraw`** is a document. Its JSON is streamed (`DrawingScene`: the data URLs of embedded images are skipped, not copied) and rendered as blocks: each live text element's Markdown source (`rawText`, else `originalText`, else `text`), so its `[[links]]` and `#tags` count as in a note; each element `link` (`[[Note]]` as written; a path as a Markdown link, which the scanner percent-decodes and splits at `#` as the editor does when it opens it; web links skipped); an embed `![name](/path)` of every image stored as a vault attachment, so the image's backlinks list the drawing; and frame names. Search finds the texts, never the JSON. A file that is not an Excalidraw scene is listed but not content-indexed.
 - **`.excalidraw.md`** stays a note, as in Obsidian: the plugin keeps every text element under Text Elements and every element link under Element Links, so the note scan indexes them, with links that a rename rewrites (and that the editor then reads, above). The indexer supplements the note (§6.8) with what only the drawing's JSON holds, the elements the plugin itself would add to those sections on its next save: texts without a `^id` entry, frame names, and links without an Element Links line (or, in the plugin's older layout, a Text Elements entry for a shape; a text whose entry contains its link is covered, since the plugin derives the text's link from it; so is a link that came from the text's old source (its JSON `rawText`) while the entry holds a link, as when a rename rewrote only the entry: the editor shows the entry's link instead. A link set on a text by hand stays indexed, as the editor keeps it). Those links are not rewritable: a rename that would change one reports the drawing as `not-rewritable`.
 - **compressed-json** blocks are decompressed by `LzString`, a port of lz-string 1.5.0's `decompressFromBase64` (MIT) tested against lz-string's own output. Crafted input can expand quadratically, so a block that would decompress to more than 16 Mi characters is not indexed (the note scan still is). The editor and embeds decompress with the same bounded port (`lzString.ts`; lz-string itself has no bound and throws past the engine's longest string), so such a block opens in the text view like any unreadable one. An `.excalidraw.md` whose block does not decompress or parse is indexed as the note it is.
+
+#### 6.8.2 PDFs (ROADMAP item 32)
+
+PDFs are rendered by PDF.js (`pdfjs-dist` 6.4.299, Apache-2.0) inside the app, so the iPhone shows every page (Safari's iframe showed only the first) and every device gets the same thumbnails, find, zoom and page links. The code is in `views/pdf/`: `register.ts` (the descriptor and its commands), `subpath.ts`, `active.ts` and `prefs.ts` are small and eager; `PdfView.tsx` and `PdfEmbed.tsx` are lazy chunks, which share PDF.js through `pdfLib.ts`. Nothing changes on the server except the CSP (§5.14): PDFs stay `kind:"pdf"` files read through `GET /api/files/raw`.
+
+**Loading** (`pdfLib.ts`). PDF.js is imported on first use (the library, then its viewer module, which reads the library from `globalThis.pdfjsLib`); a PDF never opened costs nothing. One `PDFWorker` serves every document, the view's and the embeds'. The worker is a bundled asset (`pdf.worker.min-<hash>.mjs`); `vite.config.ts` copies PDF.js's CMaps (CJK text), standard fonts (PDFs that do not embed theirs), WebAssembly decoders with their JavaScript fallbacks (JPEG 2000, JBIG2, ICC colour; not `quickjs-eval`, which runs a PDF's own JavaScript), CMYK profile and annotation icons to `/assets/pdfjs-<version>/`, served immutable like Excalidraw's fonts (and by the dev server). Documents open by their content-addressed raw URL with `disableAutoFetch` and `disableStream`: PDF.js reads the ranges the shown pages need (`Range`, 64 KiB chunks) instead of the whole file, and the server already answers ranges (§5.14 item 6). A new version of the file has a new URL, so the view reopens it.
+
+**The viewer** (`controller.ts`, outside React). A `PdfController` wraps PDF.js's `PDFViewer` with its `EventBus`, `PDFLinkService` and `PDFFindController` over an absolutely positioned scroll container, and exposes the state the toolbar shows (status, pages, page, scale, find counts) through `subscribe`/`getState`. It can be mounted again after an unmount (StrictMode); each mount opens the document anew, and an unmount destroys it in the worker.
+
+- **Rendering** is PDF.js's: only the pages near the viewport are drawn (a buffer of about ten), with the text layer (selection, copy, find) and the annotation layer (links; comments as popups; form fields drawn but never inputs, as a form could not be saved). Page borders are off; the app adds the gap and shadow. On iOS and Android PDF.js caps a page canvas at 5 megapixels and draws the visible part sharper at high zoom (its detail canvas), which keeps a 300-page file within Safari's canvas memory. Its localization is replaced by a stub (no locale files are fetched); the controller labels the page landmarks itself.
+- **Links.** A PDF's internal links scroll the viewer (the route's hash stays); web links open in a new tab with `noopener noreferrer nofollow`. A document's JavaScript never runs (no scripting manager).
+- **Page.** The first page shown is the link's `#page=N` (`[[file.pdf#page=3]]` routes to `/n/file.pdf#page=3`, §6.4), otherwise the page this device read last (`prefs.ts`: up to 100 PDFs in localStorage, the least recently read forgotten first), otherwise page 1. A link to another page of the PDF already open scrolls it there; the view is not remounted.
+- **Zoom.** `auto` (the page width, up to 125 %) by default; the toolbar has zoom out, a preset menu (Automatic, Page width, Whole page, 50–400 %) and zoom in. A preset follows the container's width (rotating the phone, resizing a sidebar). **Pinch** (`pinch.ts`): two fingers on the container (`touch-action: pan-x pan-y`, so one finger scrolls natively and Safari's own page zoom is off; `gesturestart` is cancelled as well) and Ctrl/⌘ + wheel (a trackpad pinch) zoom around the fingers or pointer and pan with the midpoint, through `PDFViewer.updateScale` with a 400 ms drawing delay: the pages are stretched by CSS while the fingers move and drawn at the final scale once they rest. Steps under one percent are accumulated (PDF.js keeps whole percents), and the scale stays between 25 % and 1000 %.
+- **Find** (Mod-F while a PDF is shown, or the toolbar's search button): PDF.js's find controller, case- and accent-insensitive, every match highlighted; Enter and Shift+Enter (or the arrows) go to the next and previous match; the bar shows "3 of 12", "Searching…" or "No results"; Escape closes it and clears the highlights. The bar opens and focuses synchronously (`flushSync`), so the iPhone keyboard opens with the tap.
+- **Thumbnails** (`thumbnails.ts`, `PdfThumbnails.tsx`): a sidebar of page buttons (an overlay on phones, closed by picking a page). A thumbnail is drawn when it scrolls near the list's viewport (one `IntersectionObserver`), two at a time with the most recently requested first, at 120 CSS px (up to 2× pixel density), into a JPEG object URL; the canvas is released at once, and PDF.js frees the page unless the viewer shows it (`thumbnailrendered`). URLs are revoked with the list.
+- **Dark theme.** The toolbar and the space around the pages follow the theme. In the dark theme the pages themselves are inverted with their hues kept (`invert(93%) hue-rotate(180deg)` on the canvas layer, as drawings), so a white page is not a lamp at night; the text and annotation layers above stay as they are, so selection and find highlights keep their colours. The moon button (or "Toggle dark PDF pages") turns this off on this device, for photo-heavy PDFs; thumbnails and embeds follow.
+- **Password-protected PDFs** ask for the password in a masked prompt (`promptText` with `secret`), again after a wrong one; Cancel shows "This PDF is protected by a password." An unreadable file says so, with a Download button.
+- **Layout.** The view fills the workspace below its toolbar like a drawing (the workspace does not scroll around it). Phones show the page field (16 px, so iOS does not zoom into it), the zoom menu, find and dark pages; Download and "Open in the browser's viewer" are in the palette there (Download current file) and in the toolbar elsewhere. The container takes the keyboard focus when the PDF was opened from the keyboard, so the arrow keys, Page Down and Space scroll at once.
+
+**Commands** (the descriptor's `commands`, active while the PDF view shows the open file, §6.8): Find in PDF (Mod-F), Go to page…, Copy link to current PDF page (`[[file.pdf#page=N]]` in the configured link style, `linkTo` with a subpath), Zoom in, Zoom out, Zoom to page width, Zoom to whole page, Toggle page thumbnails, Toggle dark PDF pages.
+
+**Embeds** (`PdfEmbed.tsx`, through the reading view's `loadEmbed`, §6.7). `![[file.pdf]]`, `![[file.pdf#page=3]]`, `![[file.pdf#height=400]]` and both together (`#page=3&height=400`), as in Obsidian, show the same viewer in a box of the note: page width, scrolled to the page, 600 px high unless `#height=` or a `WxH` size says otherwise, capped at the screen's height. PDF.js loads only when the box comes within 600 px of the screen, so a note with many PDFs costs nothing until it is read. The header names the file and links to it at the page the embed shows (`a.internal-link`, so the reading view opens it). Embeds leave pinch to the page and remember no page.
+
+**Not built:** annotations and highlights (ROADMAP item 32 leaves them for later), PDF text in vault search (item 22), printing from the app (the browser's viewer prints).
 
 ### 6.9 Autosave policy
 
@@ -2784,6 +2813,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
 - Mirror and large files (ROADMAP items 2 and 23): `features/mirror.ts` (the warning texts for `failing` and `diverged`, none while `ready` or `disabled`, the About summary, the push command shown only with a configured mirror, its toasts); `features/largeFiles.ts` (the threshold format, strictly-larger rule, policy off); `HistoryPanel` (the note replaces "No history" for an excluded file and older versions are still listed); `StatusBar` (the warning button with the error as its tooltip, and a click that calls `POST /api/mirror/push`).
 - Drawings (item 5, `views/excalidraw/*.test.ts*`): both file formats with byte-identical round trips (Text Elements, Element Links, Embedded Files), the three-way merge (a rename's rewritten link survives an edit of the same element), the controller against a fake Excalidraw (edits, remote text, images, ids), the static images of the plugin's extras, the image sources, the SVG export (fonts used and inlined, dark-theme filters) with a mocked `exportToSvg`, and the embed (sizes, theme, live updates, released URLs, empty and unreadable drawings). `render/embeds.test.tsx`: `|W`/`|WxH` reach a view's embed, and a note another view shows embeds at any depth.
+- PDFs (item 32, `views/pdf/*.test.ts*`, with a fake PDF.js in `test/pdf.ts`): the controller (the initial and remembered page, page and scale state, find through the event bus with its counts, pinch and Ctrl+wheel steps of at least one percent around the fingers, no pinch in embeds, the password prompt, error messages, unmount destroying the document and a late document never reaching a new viewer, presets refitted on resize); subpath parsing (encoded route hashes too); the pinch tracker, wheel factors and the scale accumulator's limits; remembered pages (the 100-file limit, garbage ignored) and dark pages; the thumbnail queue (two at a time, newest waiting first, cancel, URLs revoked); the view (link page, typed page, zoom menu, find bar with Escape, thumbnails, dark pages per theme, errors, PDF.js failing to load) and its commands (copy page link in the link style); the embed (page, heights, lazy loading near the screen, errors, dark theme). `render/embeds.test.tsx`: PDF embeds go through the view's `loadEmbed` with their subpath, never an iframe.
 
 ### 8.3 Browser smoke checklist
 
@@ -2816,6 +2846,7 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 25. Mirror (ROADMAP item 2), when configured: 10 minutes after an edit, the commit is on github.com; with the token file emptied (then `docker compose up -d --force-recreate notes`), the status bar shows "Mirror is not being updated" and clicking it reports the error again; a commit pushed to the GitHub repository from elsewhere makes the next push stop with "Mirror stopped", and the GitHub repository keeps that commit. `docker compose logs notes | grep -c <first characters of the token>` prints 0.
 26. Large files (ROADMAP item 23): drop a file over 25 MB onto a folder: it opens and downloads, its History panel shows the note, Settings › About counts it, `git -C /srv/notes/data/vault check-ignore -v <path>` names the `info/exclude` line, and replacing it with another upload puts the old one in the trash.
 27. Drawings (item 5): `![[Diagram.excalidraw]]`, `![[Diagram.excalidraw|300]]` and an Obsidian `.excalidraw.md` render in the reading view in both themes (photos keep their colours in the dark theme) and at phone width; a tap opens the editor; an edit on the other device updates the embed. An Obsidian drawing that embeds a note, a LaTeX formula and another drawing shows them as static images. Search finds a drawing's text; its `[[links]]` show in the target's backlinks; the browser console shows no CSP violations.
+28. PDFs (item 32): a 300-page PDF opens on the iPhone at once and scrolls smoothly to the end; pinch zooms around the fingers and the pages sharpen when the fingers rest, without Safari zooming the page; text can be selected and copied; find shows "n of m" and the keyboard opens with the tap; thumbnails jump to their page; `[[file.pdf#page=5]]` opens page 5; `![[file.pdf#page=3]]` shows page 3 in the note; a scanned PDF (JPEG 2000 or JBIG2) renders; dark pages invert in the dark theme and the moon turns them off; the console shows no CSP violations.
 
 ---
 
