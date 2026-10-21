@@ -467,6 +467,36 @@ public class VaultIndex {
 		});
 	}
 
+	/**
+	 * Ranks the notes containing <em>any</em> of {@code terms} (normalized terms, as {@link Tokenizer} makes them) by
+	 * BM25 summed over the terms they contain, best first (ties: newest first), at most {@code limit} of them. The
+	 * retrieval behind Ask your vault (ROADMAP item 18): a question in natural language rarely has every word in one
+	 * note, so the ordinary search, which ANDs its words, would find nothing. Notes for which {@code excluded} holds
+	 * are never returned.
+	 */
+	public List<SearchHit> rankAny(List<String> terms, Predicate<String> excluded, int limit) {
+		if (terms.isEmpty() || limit <= 0) {
+			return List.of();
+		}
+		List<TermPattern> patterns = terms.stream().distinct().map((term) -> new TermPattern(List.of(term), false))
+			.toList();
+		return read(() -> {
+			List<SearchHit> hits = new ArrayList<>();
+			this.search.anyCandidates(terms).stream().forEach((docId) -> {
+				String path = this.search.path(docId);
+				NoteRecord note = (path != null) ? this.notes.get(path) : null;
+				FileRecord record = (path != null) ? this.files.get(path) : null;
+				if (note != null && record != null && !excluded.test(path)) {
+					hits.add(new SearchHit(note, this.search.score(docId, patterns), record.mtime()));
+				}
+			});
+			hits.sort(Comparator.comparingDouble(SearchHit::score).reversed()
+				.thenComparing(Comparator.comparing(SearchHit::mtime).reversed())
+				.thenComparing((hit) -> hit.note().path()));
+			return List.copyOf(hits.subList(0, Math.min(limit, hits.size())));
+		});
+	}
+
 	/** The pattern of a word or phrase clause, or null when it has no tokens (or the clause is a filter). */
 	private static @Nullable TermPattern pattern(SearchQuery.Clause clause, boolean prefixLast) {
 		if (!clause.isText()) {

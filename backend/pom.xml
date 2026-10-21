@@ -30,6 +30,9 @@
 		<java.version>21</java.version>
 		<jgit.version>7.8.0.202609011348-r</jgit.version>
 		<snakeyaml-engine.version>3.2</snakeyaml-engine.version>
+		<!-- The official Claude API SDK (ROADMAP item 18, DESIGN §5.20). It brings Jackson 2 (com.fasterxml), OkHttp and
+		     the Kotlin standard library; none of them clash with the app's Jackson 3 (tools.jackson). -->
+		<anthropic-java.version>3.0.0</anthropic-java.version>
 		<!-- Surefire skips the @Tag("perf") tests by default; -DexcludedGroups= (empty) runs them. Set as a property,
 		     because an explicit plugin configuration value would win over -D. -->
 		<excludedGroups>perf</excludedGroups>
@@ -56,6 +59,11 @@
 			<groupId>org.snakeyaml</groupId>
 			<artifactId>snakeyaml-engine</artifactId>
 			<version>${snakeyaml-engine.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.anthropic</groupId>
+			<artifactId>anthropic-java</artifactId>
+			<version>${anthropic-java.version}</version>
 		</dependency>
 
 		<dependency>

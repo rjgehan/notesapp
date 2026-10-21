@@ -427,6 +427,20 @@ public final class SearchIndex {
 		return false;
 	}
 
+	/** Documents containing at least one of {@code terms} (exact terms) in any field: the OR of their postings. */
+	public BitSet anyCandidates(List<String> terms) {
+		BitSet result = new BitSet();
+		for (String term : terms) {
+			for (Map<String, Postings> field : this.postings) {
+				Postings list = field.get(term);
+				if (list != null) {
+					list.addTo(result);
+				}
+			}
+		}
+		return result;
+	}
+
 	/** Documents whose body contains every one of {@code terms} (exact terms). */
 	public BitSet bodyCandidates(List<String> terms) {
 		BitSet result = null;

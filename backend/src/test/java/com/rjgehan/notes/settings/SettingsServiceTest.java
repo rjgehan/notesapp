@@ -71,7 +71,7 @@ class SettingsServiceTest {
 		assertThat(response.readOnly()).isFalse();
 		assertThat(response.version()).isEqualTo(Hashing.blobId(Files.readAllBytes(this.file)));
 		String text = Files.readString(this.file);
-		assertThat(text).startsWith("{\n  \"dailyNotes\": {").endsWith("}\n").doesNotContain("\r");
+		assertThat(text).startsWith("{\n  \"ai\": {").endsWith("}\n").doesNotContain("\r");
 		assertThat(text.indexOf("\"editor\"")).isLessThan(text.indexOf("\"files\""));
 	}
 
@@ -222,6 +222,69 @@ class SettingsServiceTest {
 				.anyMatch((name) -> name.startsWith("settings.json.bak-"));
 		}
 		assertThat(TestVault.JSON.readTree(Files.readString(this.file)).get("schemaVersion").asInt()).isEqualTo(1);
+	}
+
+	@Test
+	void aFileFromBeforeTheAiGroupIsValidAndGetsItsDefaults() throws Exception {
+		ObjectNode tree = body(Settings.defaults());
+		tree.remove("ai");
+		Files.createDirectories(this.file.getParent());
+		Files.writeString(this.file, TestVault.JSON.writeValueAsString(tree));
+		service().load();
+		assertThat(service().isReadOnly()).isFalse();
+		assertThat(service().current().ai()).isEqualTo(AiSettings.defaults());
+		assertThat(service().current().ai().enabled()).isFalse();
+	}
+
+	@Test
+	void aiSettingsAreValidatedFieldByField() throws Exception {
+		service().load();
+		ObjectNode tree = body(Settings.defaults());
+		ObjectNode ai = (ObjectNode) tree.get("ai");
+		ai.put("model", "gpt-9");
+		ai.put("maxContextChars", 100);
+		ai.put("monthlyBudgetUsd", 0);
+		ai.putArray("excludedPaths").add("../up");
+		ai.put("enabled", "yes");
+		assertThatThrownBy(() -> service().update(tree, service().get().version(), TestVault.ALICE, "client-a1"))
+			.isInstanceOfSatisfying(NotesException.class, (ex) -> {
+				@SuppressWarnings("unchecked")
+				List<FieldError> errors = (List<FieldError>) ex.getBody().getProperties().get("errors");
+				assertThat(errors).extracting(FieldError::field)
+					.containsExactlyInAnyOrder("settings.ai.model", "settings.ai.maxContextChars",
+							"settings.ai.monthlyBudgetUsd", "settings.ai.excludedPaths[0]", "settings.ai.enabled");
+			});
+	}
+
+	@Test
+	void aiSettingsAreSavedAndAPageWithoutThemKeepsThem() throws Exception {
+		service().load();
+		ObjectNode tree = body(Settings.defaults());
+		ObjectNode ai = (ObjectNode) tree.get("ai");
+		ai.put("enabled", true);
+		ai.put("model", "claude-opus-5-5");
+		ai.put("monthlyBudgetUsd", 12.5);
+		service().update(tree, service().get().version(), TestVault.ALICE, "client-a1");
+		assertThat(service().current().ai())
+			.isEqualTo(new AiSettings(true, "claude-opus-5-5", List.of("Private"), 60_000, 12.5));
+		JsonNode onDisk = TestVault.JSON.readTree(Files.readString(this.file));
+		assertThat(onDisk.get("ai").get("model").asString()).isEqualTo("claude-opus-5-5");
+		// An old page sends no "ai": the feature stays as it was rather than falling back to "off".
+		ObjectNode old = defaultsWith("files", "useWikilinks", false);
+		old.remove("ai");
+		service().update(old, service().get().version(), TestVault.BOB, "client-b1");
+		assertThat(service().current().ai().enabled()).isTrue();
+		assertThat(service().current().files().useWikilinks()).isFalse();
+	}
+
+	@Test
+	void aiExcludedPathsMatchFoldersAndFiles() {
+		AiSettings ai = new AiSettings(true, "claude-sonnet-5-5", List.of("Private/", "Health.md"), 60_000, 5);
+		assertThat(ai.isExcluded("private/diary.md")).isTrue();
+		assertThat(ai.isExcluded("Private")).isTrue();
+		assertThat(ai.isExcluded("health.md")).isTrue();
+		assertThat(ai.isExcluded("Privateer.md")).isFalse();
+		assertThat(ai.isExcluded("Notes/Private/x.md")).isFalse();
 	}
 
 	@Test

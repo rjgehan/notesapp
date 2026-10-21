@@ -166,6 +166,12 @@ public class SettingsService {
 					Map.of("reason", String.valueOf(current.reason())));
 		}
 		SettingsCodec.Parsed parsed = SettingsCodec.read(settings);
+		if (settings != null && settings.isObject() && settings.get("ai") == null) {
+			// A page from before settings.ai existed (it reloads once it notices the new build) keeps what is set.
+			Settings s = parsed.settings();
+			parsed = new SettingsCodec.Parsed(new Settings(s.schemaVersion(), s.files(), s.dailyNotes(), s.templates(),
+					s.editor(), current.settings().ai()), parsed.errors());
+		}
 		List<FieldError> errors = new ArrayList<>(parsed.errors());
 		if (baseVersion == null || baseVersion.isBlank()) {
 			errors.add(new FieldError("baseVersion", "is required"));

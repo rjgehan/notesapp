@@ -33,7 +33,10 @@ public enum ErrorCode {
 	INTERNAL_ERROR("internal-error", HttpStatus.INTERNAL_SERVER_ERROR, "Internal error"),
 	BUSY("busy", HttpStatus.SERVICE_UNAVAILABLE, "Busy, retry"),
 	HISTORY_UNAVAILABLE("history-unavailable", HttpStatus.SERVICE_UNAVAILABLE, "History unavailable"),
-	INSUFFICIENT_STORAGE("insufficient-storage", HttpStatus.INSUFFICIENT_STORAGE, "Insufficient storage");
+	INSUFFICIENT_STORAGE("insufficient-storage", HttpStatus.INSUFFICIENT_STORAGE, "Insufficient storage"),
+	AI_UNAVAILABLE("ai-unavailable", HttpStatus.CONFLICT, "Ask and summaries are unavailable"),
+	AI_EXCLUDED("ai-excluded", HttpStatus.FORBIDDEN, "Excluded from Ask and summaries"),
+	AI_BUDGET_EXCEEDED("ai-budget-exceeded", HttpStatus.TOO_MANY_REQUESTS, "Monthly AI budget reached");
 
 	private final String code;
 

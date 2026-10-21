@@ -7,7 +7,7 @@ import java.util.List;
  * such as the theme are not vault settings; the client keeps them in {@code localStorage}.
  */
 public record Settings(int schemaVersion, FilesSettings files, DailyNotesSettings dailyNotes,
-		TemplatesSettings templates, EditorSettings editor) {
+		TemplatesSettings templates, EditorSettings editor, AiSettings ai) {
 
 	/** The schema version this build reads and writes. */
 	public static final int SCHEMA_VERSION = 1;
@@ -18,7 +18,7 @@ public record Settings(int schemaVersion, FilesSettings files, DailyNotesSetting
 						"Attachments", "attachments", true, List.of()),
 				new DailyNotesSettings("YYYY-MM-DD", "Daily", "", false),
 				new TemplatesSettings("Templates", "YYYY-MM-DD", "HH:mm"),
-				new EditorSettings(EditorMode.EDIT, true, false));
+				new EditorSettings(EditorMode.EDIT, true, false), AiSettings.defaults());
 	}
 
 }
