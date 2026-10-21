@@ -264,6 +264,7 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
 - `readOnly` is `true` when the file on disk was written by a newer version of the app or fails validation. The server then serves what it could read plus defaults, and refuses writes (DESIGN §5.12).
 - Fields in the file that this version does not know are **preserved** on write.
 - Per-device preferences (theme, spellcheck, autocorrect, remote images) are not vault settings; the client keeps them in `localStorage`.
+- A vault's first start creates the settings from the defaults plus what its `.obsidian/` folder says, when it has one (ROADMAP item 24, DESIGN §5.20). The compatibility report (§11.5) shows the mapping and proposes it again later.
 
 ### `PUT /api/settings`
 
@@ -929,6 +930,54 @@ Request `ResolveRequest`:
 - Files matching `settings.files.excludedPaths` are left out, with their edges, as in Obsidian's graph.
 - Tag nodes, orphans, folders and the local graph are computed by the client from this response (DESIGN §6.21).
 - The client refreshes it with `since` after tree changes; it is never pushed over SSE.
+
+| Errors |
+|---|
+| `403` |
+
+### 11.5 `GET /api/compat`
+
+`200 CompatReport`: the Obsidian compatibility report (ROADMAP item 24, DESIGN §5.20, §6.22). Computed on request; it never writes anything, `.obsidian/` included.
+
+```json
+{
+  "generatedAt": "2026-10-21T16:55:30.120Z",
+  "tookMs": 18,
+  "obsidian": { "found": true, "configFiles": ["app.json", "daily-notes.json", "graph.json"], "problems": [] },
+  "settings": [
+    { "source": "daily-notes.json › folder", "obsidianValue": "\"Journal\"", "setting": "dailyNotes.folder",
+      "current": "Daily", "proposed": "Journal", "status": "different", "note": null },
+    { "source": "app.json › userIgnoreFilters", "obsidianValue": "[\"Archive/\",\"/^Private.*$/\"]",
+      "setting": "files.excludedPaths", "current": "", "proposed": "Archive", "status": "different",
+      "note": "Not used: /^Private.*$/ (NotesApp excludes folders and files by path, not by regular expression)" }
+  ],
+  "proposedSettings": { "schemaVersion": 1, "files": { "…": "…" }, "dailyNotes": { "folder": "Journal", "…": "…" }, "templates": { "…": "…" }, "editor": { "…": "…" } },
+  "settingsVersion": "a1f3c5e7b9d0a2c4e6f8b0d2f4a6c8e0b2d4f6a8",
+  "graph": { "colorGroups": [ { "query": "tag:#project", "color": { "a": 1, "rgb": 14701138 } } ], "showArrow": true },
+  "plugins": [
+    { "id": "dataview", "name": "Dataview", "kind": "community", "status": "planned",
+      "note": "Queries show as code blocks; scripts and query blocks are planned.", "roadmapItem": 40 }
+  ],
+  "issues": [
+    { "id": "missing-headings", "category": "links", "severity": "warning",
+      "title": "Links to headings that do not exist",
+      "detail": "The note exists, but not the heading: the link opens the note at the top.",
+      "roadmapItem": null, "count": 1, "noteCount": 1,
+      "occurrences": [ { "path": "Home.md", "line": 6, "text": "[[Plan#Missing heading]]" } ], "truncated": false }
+  ],
+  "totals": { "notes": 412, "files": 530, "errors": 0, "warnings": 9, "infos": 31 }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `obsidian` | Whether the vault has a `.obsidian/` folder, the configuration files read from it, and the ones that could not be read (`"app.json is not valid JSON"`). |
+| `settings` | One row per Obsidian setting NotesApp maps (DESIGN §5.20 table), in file order. `obsidianValue` is the value as JSON text; `current` and `proposed` are display strings. `status`: `same` (in effect), `different` (applying changes it), `unsupported` (`proposed` is null, `note` says why). Empty without `.obsidian/`. |
+| `proposedSettings`, `settingsVersion` | The current settings with every `different` row applied, and the settings version they are based on. Clients apply them with `PUT /api/settings {settings: proposedSettings, baseVersion: settingsVersion}`; a `409` means the settings changed since, so the report is fetched again. `proposedSettings` is null without `.obsidian/`. |
+| `graph` | The options of `.obsidian/graph.json` the graph view understands (`search`, `showTags`, `showAttachments`, `hideUnresolved`, `showOrphans`, `colorGroups`, `showArrow`, `textFadeMultiplier`, `nodeSizeMultiplier`, `lineSizeMultiplier`, `centerStrength`, `repelStrength`, `linkStrength`, `linkDistance`) as Obsidian wrote them; null when there are none. Group colors stay `{a, rgb}` objects. |
+| `plugins` | The enabled core plugins (`core-plugins.json`), then the enabled community plugins (`community-plugins.json`, named from their `manifest.json`), each group ordered by `status` (`unsupported`, `unknown`, `planned`, `partial`, `supported`) and name. |
+| `issues` | One entry per finding with at least one occurrence, in a fixed order (syntax, links, files). `id` is stable (`dataview`, `tasks-query`, `search-query`, `plugin-blocks`, `callouts`, `mermaid`, `math`, `templater`, `block-references`, `obsidian-uris`, `html-removed`, `kanban`, `missing-files`, `missing-headings`, `missing-blocks`, `missing-notes`, `skipped`, `too-large`, `not-utf8`, `frontmatter`, `excalidraw`, `canvas`, `bases`). `count` counts every occurrence, `noteCount` the files they are in; `occurrences` lists at most 200 in path order, with a 0-based `line` (null for whole files) and the text found (at most 160 characters), and `truncated` says there are more. |
+| `totals` | Notes and files in the vault, and occurrences by severity. |
 
 | Errors |
 |---|
@@ -1830,6 +1879,52 @@ export interface GraphResponse {
   edges: number[];     // flat triples [source, target, count, ...]: node indexes, links from source to target
 }
 
+// ---------- compatibility report (§11.5) ----------
+export interface ObsidianInfo { found: boolean; configFiles: string[]; problems: string[] }
+export interface CompatSetting {
+  source: string;               // 'app.json › attachmentFolderPath'
+  obsidianValue: string;        // the value as JSON text
+  setting: string | null;       // 'files.attachmentLocation'; null when NotesApp has none
+  current: string | null;
+  proposed: string | null;
+  status: 'same' | 'different' | 'unsupported';
+  note: string | null;
+}
+export interface CompatPlugin {
+  id: string;
+  name: string;
+  kind: 'core' | 'community';
+  status: 'supported' | 'partial' | 'planned' | 'unsupported' | 'unknown';
+  note: string;
+  roadmapItem: number | null;
+}
+export interface CompatOccurrence { path: VaultPath; line: number | null; text: string }
+export interface CompatIssue {
+  id: string;                   // 'dataview', 'missing-notes', …
+  category: 'syntax' | 'links' | 'files';
+  severity: 'info' | 'warning' | 'error';
+  title: string;
+  detail: string;
+  roadmapItem: number | null;
+  count: number;
+  noteCount: number;
+  occurrences: CompatOccurrence[];   // at most 200, in path order
+  truncated: boolean;
+}
+export interface CompatTotals { notes: number; files: number; errors: number; warnings: number; infos: number }
+export interface CompatReport {
+  generatedAt: IsoInstant;
+  tookMs: number;
+  obsidian: ObsidianInfo;
+  settings: CompatSetting[];
+  proposedSettings: Settings | null;   // PUT /api/settings with baseVersion: settingsVersion to apply
+  settingsVersion: Version;
+  graph: Record<string, unknown> | null;   // .obsidian/graph.json, only the keys the graph view uses
+  plugins: CompatPlugin[];
+  issues: CompatIssue[];
+  totals: CompatTotals;
+}
+
 // ---------- search / tags (§12) ----------
 export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
 export interface SearchHit {
@@ -1983,6 +2078,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | GET | `/api/notes/backlinks?path=&unlinked=` | | 200 `BacklinksResponse` | 11.2 |
 | POST | `/api/links/resolve` | `ResolveRequest` | 200 `ResolveResponse` | 11.3 |
 | GET | `/api/graph?since=` | | 200 `GraphResponse` | 11.4 |
+| GET | `/api/compat` | | 200 `CompatReport` | 11.5 |
 | GET | `/api/search?q=&limit=&sort=&prefix=` | | 200 `SearchResponse` | 12.1 |
 | GET | `/api/tags` | | 200 `TagsResponse` | 12.2 |
 | GET | `/api/trash` | | 200 `TrashListResponse` | 13.1 |
@@ -2022,6 +2118,7 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `CreateFolderRequest`, `FolderResult`, `MoveRequest`, `MovedFile`, `LinkUpdate`, `FailedUpdate`, `MoveResult` | Same | `MoveRequest.updateLinks` and `dryRun` are `@Nullable Boolean`. `FailedUpdate.reason` is the enum `FailedReason` |
 | `HeadingInfo`, `OutgoingLink`, `NoteMeta`, `Mention`, `BacklinkGroup`, `BacklinksResponse`, `ResolveRequest`, `ResolvedLink`, `ResolveResponse` | Same | `NoteMeta.frontmatter` is `@Nullable Map<String, Object>` |
 | `GraphNode`, `GraphResponse` | Same | `GraphNode.type` is the enum `GraphNodeType` (`note`, `attachment`, `unresolved`); `GraphResponse.edges` is an `int[]` |
+| `CompatReport`, `ObsidianInfo`, `CompatSetting`, `CompatPlugin`, `CompatIssue`, `CompatOccurrence`, `CompatTotals` | Same | Nested enums `CompatSetting.Status`, `CompatPlugin.Kind`, `CompatPlugin.Support`, `CompatIssue.Category`, `CompatIssue.Severity` serialize as the lower-case strings in §17. `CompatReport.proposedSettings` is a `@Nullable Settings`, `graph` a `@Nullable ObjectNode` |
 | `SearchMatch`, `SearchHit`, `SearchResponse`, `TagCount`, `TagsResponse` | Same | |
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryExclusion`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | `HistoryExclusion.reason` is the nested enum `Reason` (`large-file`) |

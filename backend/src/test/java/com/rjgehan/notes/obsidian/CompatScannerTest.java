@@ -1,0 +1,112 @@
+package com.rjgehan.notes.obsidian;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import com.rjgehan.notes.api.dto.CompatIssue;
+import com.rjgehan.notes.api.dto.CompatOccurrence;
+import com.rjgehan.notes.api.dto.SkipReason;
+import com.rjgehan.notes.api.dto.SkippedEntry;
+import com.rjgehan.notes.index.VaultIndex;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** The findings of the compatibility report on the fixture vault (ROADMAP item 24). */
+class CompatScannerTest {
+
+	private static Map<String, CompatIssue> scanFixture() {
+		VaultIndex index = ObsidianFixture.index();
+		List<CompatIssue> issues = CompatScanner.scan(index.noteViews(), index.filesUnder(""),
+				List.of(new SkippedEntry("Bad\\name.md", SkipReason.UNSAFE_NAME)), ObsidianFixture.KINDS::kindOf);
+		return issues.stream().collect(Collectors.toMap(CompatIssue::id, (i) -> i));
+	}
+
+	private static List<String> where(CompatIssue issue) {
+		return issue.occurrences().stream().map((o) -> o.path() + ":" + o.line()).toList();
+	}
+
+	@Test
+	void findsUnsupportedSyntaxOutsideCode() {
+		Map<String, CompatIssue> issues = scanFixture();
+		assertThat(where(issues.get("dataview"))).containsExactly("Home.md:19", "Projects/Plan.md:6");
+		assertThat(where(issues.get("mermaid"))).containsExactly("Projects/Plan.md:10");
+		assertThat(where(issues.get("plugin-blocks"))).containsExactly("Projects/Plan.md:15");
+		assertThat(where(issues.get("tasks-query"))).containsExactly("Projects/Plan.md:19");
+		assertThat(where(issues.get("callouts"))).containsExactly("Home.md:11");
+		// The $$ block once, and $x^2$ (the prices on the same line are not math).
+		assertThat(where(issues.get("math"))).containsExactly("Home.md:14", "Home.md:18");
+		// Templater in the template, not in Code.md's fence or code span.
+		assertThat(where(issues.get("templater"))).containsExactly("Templates/Daily.md:0");
+		assertThat(where(issues.get("obsidian-uris"))).containsExactly("Home.md:9");
+		assertThat(where(issues.get("html-removed"))).containsExactly("Home.md:20");
+		assertThat(where(issues.get("kanban"))).containsExactly("Board.md:0");
+		assertThat(where(issues.get("block-references"))).containsExactly("Home.md:7", "Home.md:7");
+		assertThat(issues.get("block-references").noteCount()).isEqualTo(1);
+		assertThat(issues.get("dataview").roadmapItem()).isEqualTo(40);
+		assertThat(issues.get("dataview").category()).isEqualTo(CompatIssue.Category.SYNTAX);
+	}
+
+	@Test
+	void findsLinksThatLeadNowhere() {
+		Map<String, CompatIssue> issues = scanFixture();
+		assertThat(issues.get("missing-files").occurrences()).extracting(CompatOccurrence::text)
+			.containsExactly("![[missing.png]]");
+		assertThat(issues.get("missing-notes").occurrences()).extracting(CompatOccurrence::text)
+			.containsExactly("[[Someday]]");
+		assertThat(issues.get("missing-headings").occurrences()).extracting(CompatOccurrence::text)
+			.containsExactly("[[Plan#Missing heading]]");
+		assertThat(issues.get("missing-blocks").occurrences()).extracting(CompatOccurrence::text)
+			.containsExactly("[[Plan#^nope]]");
+	}
+
+	@Test
+	void findsFilesNotesAppCannotUseFully() {
+		Map<String, CompatIssue> issues = scanFixture();
+		assertThat(where(issues.get("frontmatter"))).containsExactly("Broken.md:0");
+		assertThat(where(issues.get("excalidraw"))).containsExactly("Drawing.excalidraw.md:null");
+		assertThat(where(issues.get("canvas"))).containsExactly("Map.canvas:null");
+		assertThat(issues.get("skipped").occurrences().get(0).text()).isEqualTo("Bad\\name.md (unsafe-name)");
+		assertThat(issues.get("skipped").severity()).isEqualTo(CompatIssue.Severity.ERROR);
+		assertThat(issues).doesNotContainKeys("too-large", "not-utf8", "bases");
+	}
+
+	@Test
+	void listsIssuesInRuleOrder() {
+		VaultIndex index = ObsidianFixture.index();
+		List<String> ids = CompatScanner
+			.scan(index.noteViews(), index.filesUnder(""), List.of(), ObsidianFixture.KINDS::kindOf)
+			.stream()
+			.map(CompatIssue::id)
+			.toList();
+		assertThat(ids).containsSubsequence("dataview", "callouts", "missing-files", "missing-notes", "frontmatter",
+				"canvas");
+	}
+
+	@Test
+	void capsOccurrencesButCountsAll() {
+		VaultIndex index = new VaultIndex();
+		StringBuilder text = new StringBuilder();
+		for (int i = 0; i < 250; i++) {
+			text.append("[[Missing ").append(i).append("]]\n");
+		}
+		index.put(ObsidianFixture.note("Many.md", text.toString()));
+		CompatIssue issue = CompatScanner
+			.scan(index.noteViews(), index.filesUnder(""), List.of(), ObsidianFixture.KINDS::kindOf)
+			.get(0);
+		assertThat(issue.id()).isEqualTo("missing-notes");
+		assertThat(issue.count()).isEqualTo(250);
+		assertThat(issue.noteCount()).isEqualTo(1);
+		assertThat(issue.occurrences()).hasSize(CompatScanner.MAX_OCCURRENCES);
+		assertThat(issue.truncated()).isTrue();
+	}
+
+	@Test
+	void blanksCodeSpans() {
+		assertThat(CompatScanner.stripCodeSpans("a `<% x %>` b ``c ` d`` e"))
+			.isEqualTo("a" + " ".repeat(11) + "b" + " ".repeat(11) + "e");
+		assertThat(CompatScanner.stripCodeSpans("unclosed `tick")).isEqualTo("unclosed `tick");
+	}
+
+}

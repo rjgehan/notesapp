@@ -1,0 +1,10 @@
+{
+  "file-explorer": true,
+  "global-search": true,
+  "graph": true,
+  "canvas": true,
+  "page-preview": true,
+  "daily-notes": true,
+  "templates": true,
+  "sync": false
+}

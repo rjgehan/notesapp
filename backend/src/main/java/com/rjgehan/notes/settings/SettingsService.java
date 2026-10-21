@@ -43,6 +43,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -86,7 +87,16 @@ public class SettingsService {
 
 	private volatile State state;
 
+	private final List<SettingsSeed> seeds;
+
 	public SettingsService(VaultFs fs, CommitBatcher batcher, EventHub hub, Clock clock, JsonMapper mapper) {
+		this(fs, batcher, hub, clock, mapper, List.of());
+	}
+
+	@Autowired
+	public SettingsService(VaultFs fs, CommitBatcher batcher, EventHub hub, Clock clock, JsonMapper mapper,
+			List<SettingsSeed> seeds) {
+		this.seeds = List.copyOf(seeds);
 		this.fs = fs;
 		this.batcher = batcher;
 		this.hub = hub;
@@ -109,8 +119,9 @@ public class SettingsService {
 	public void load() throws IOException {
 		byte[] bytes = readOrNull();
 		if (bytes == null) {
-			writeDefaults();
-			logger.info("Created {} with default settings", FILE);
+			Settings first = firstRunSettings();
+			writeInitial(first);
+			logger.info("Created {} with {} settings", FILE, first.equals(Settings.defaults()) ? "default" : "imported");
 			return;
 		}
 		JsonNode tree = parse(bytes);
@@ -224,11 +235,44 @@ public class SettingsService {
 	}
 
 	private void writeDefaults() throws IOException {
-		ObjectNode raw = SettingsCodec.merge(JsonNodeFactory.instance.objectNode(), Settings.defaults());
+		writeInitial(Settings.defaults());
+	}
+
+	/**
+	 * The defaults with what the seeds add (an Obsidian vault's own settings, ROADMAP item 24). A seed whose result
+	 * would not pass validation, or that fails, is skipped: a first start never ends with invalid settings.
+	 */
+	private Settings firstRunSettings() {
+		Settings settings = Settings.defaults();
+		for (SettingsSeed seed : this.seeds) {
+			try {
+				Settings seeded = seed.firstRun(settings);
+				List<FieldError> errors = validate(seeded);
+				if (errors.isEmpty()) {
+					settings = seeded;
+				}
+				else {
+					logger.warn("Ignored the imported settings: {}", describe(errors));
+				}
+			}
+			catch (RuntimeException ex) {
+				logger.warn("Ignored the imported settings: {}", ex.toString());
+			}
+		}
+		return settings;
+	}
+
+	/** Every problem {@code PUT /api/settings} would report for {@code settings} (empty when they are valid). */
+	public static List<FieldError> validate(Settings settings) {
+		return SettingsCodec.read(SettingsCodec.merge(JsonNodeFactory.instance.objectNode(), settings)).errors();
+	}
+
+	private void writeInitial(Settings settings) throws IOException {
+		ObjectNode raw = SettingsCodec.merge(JsonNodeFactory.instance.objectNode(), settings);
 		byte[] bytes = serialize(raw);
 		Files.createDirectories(this.fs.resolve(FILE).getParent());
 		this.fs.atomicWrite(FILE, bytes);
-		this.state = new State(Settings.defaults(), raw, Hashing.blobId(bytes), false, null);
+		this.state = new State(settings, raw, Hashing.blobId(bytes), false, null);
 	}
 
 	private @Nullable JsonNode parse(byte[] bytes) {

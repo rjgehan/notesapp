@@ -1,0 +1,16 @@
+{
+  "attachmentFolderPath": "./assets",
+  "newFileLocation": "folder",
+  "newFileFolderPath": "Inbox/",
+  "newLinkFormat": "relative",
+  "useMarkdownLinks": false,
+  "alwaysUpdateLinks": true,
+  "userIgnoreFilters": [
+    "Archive/",
+    "/^Private.*$/"
+  ],
+  "strictLineBreaks": true,
+  "defaultViewMode": "preview",
+  "showLineNumber": true,
+  "promptDelete": false
+}

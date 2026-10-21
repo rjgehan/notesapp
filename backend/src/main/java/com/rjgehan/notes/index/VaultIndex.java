@@ -317,6 +317,21 @@ public class VaultIndex {
 		});
 	}
 
+	/**
+	 * Every note with its links as resolved now, in path order: a consistent snapshot for whole-vault scans (the
+	 * compatibility report, ROADMAP item 24), which then run without the lock. Records are immutable.
+	 */
+	public List<NoteView> noteViews() {
+		return read(() -> {
+			List<NoteView> views = new ArrayList<>(this.notes.size());
+			for (NoteRecord note : this.notes.values()) {
+				views.add(new NoteView(note, this.links.outgoing(note.path())));
+			}
+			views.sort(Comparator.comparing((view) -> view.note().path()));
+			return views;
+		});
+	}
+
 	/** A note linking to some target, with its mtime and the links that resolve there. */
 	public record Backlink(NoteRecord source, Instant mtime, List<LinkOcc> links) {
 	}
