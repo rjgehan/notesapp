@@ -39,4 +39,22 @@ describe('PendingNoteView', () => {
     rerender(view());
     expect(screen.getByText('Creating the drawing…')).toBeInTheDocument();
   });
+
+  it("keeps the title open while a template's questions have the focus, and commits it on any other blur", () => {
+    queryClient.setQueryData(queryKeys.settings(), { settings: DEFAULT_SETTINGS, version: 'v1', readOnly: false });
+    startPendingNote(3, '', 'Untitled');
+    render(view());
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const field = document.createElement('input');
+    dialog.appendChild(field);
+    document.body.appendChild(dialog);
+    field.focus();
+    expect(usePendingNote.getState().pending?.committed).toBe(false);
+    screen.getByLabelText('Note title').focus();
+    document.body.focus();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(usePendingNote.getState().pending?.committed).toBe(true);
+    dialog.remove();
+  });
 });
