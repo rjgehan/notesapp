@@ -1411,6 +1411,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `trash.changed` | `TrashChangedEvent` (`{}`) | yes | The trash list changed |
 | `history.committed` | `HistoryCommittedEvent` | yes | A commit was made. `paths` has at most 100 entries, and `truncated` is true when there were more. Not sent when an operation had nothing to commit. |
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
+| `bookmarks.changed` | `BookmarksChangedEvent` | no | The bookmarks were saved (§21). After a move or a trash restore the server re-keys them itself and sends this with `origin: null`, so it reaches every client, the mover's included. Refetch `GET /api/bookmarks`. |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, or free space crossing 1 GiB); refetch it |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 
@@ -1721,6 +1722,26 @@ export interface CommitResult { commitId: string | null }
 export interface TemplateEntry { path: VaultPath; name: string }
 export interface TemplatesResponse { folder: VaultPath; templates: TemplateEntry[] }
 
+// ---------- bookmarks (§21) ----------
+/**
+ * One bookmark, in Obsidian's bookmarks.json format: `type` is 'file' (a note or any file; with `subpath`
+ * '#Heading' or '#^blockid' for part of a note), 'folder', 'search' or 'group'. Other types Obsidian writes
+ * ('url', 'graph') pass through unchanged. Fields that do not apply are absent rather than null, and fields this
+ * build does not know are kept.
+ */
+export interface BookmarkItem {
+  type: string;
+  ctime?: number;                 // when it was bookmarked, epoch milliseconds
+  title?: string;                 // a display name; groups show theirs
+  path?: VaultPath;               // file and folder
+  subpath?: string;               // file: '#Heading' or '#^blockid'
+  query?: string;                 // search
+  items?: BookmarkItem[];         // group
+  [field: string]: unknown;
+}
+export interface BookmarksResponse { version: Version; items: BookmarkItem[] }
+export interface BookmarksUpdateRequest { items: BookmarkItem[]; baseVersion: Version }
+
 // ---------- SSE (§16) ----------
 export interface HelloEvent {
   bootId: string;
@@ -1746,6 +1767,7 @@ export interface HistoryCommittedEvent {
   truncated: boolean;
 }
 export interface SettingsChangedEvent { version: Version; origin: string | null }
+export interface BookmarksChangedEvent { version: Version; origin: string | null }   // origin null: re-keyed by the server after a move or restore
 export interface StatusChangedEvent { reason: 'git' | 'watcher' | 'settings' | 'disk' }
 export interface ResyncEvent { reason: 'watcher-overflow' | 'bulk-change' | 'rescan-error' }
 
@@ -1761,13 +1783,15 @@ export interface VaultEventMap {
   'trash.changed': TrashChangedEvent;
   'history.committed': HistoryCommittedEvent;
   'settings.changed': SettingsChangedEvent;
+  'bookmarks.changed': BookmarksChangedEvent;
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
-  'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'status.changed', 'resync',
+  'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'bookmarks.changed', 'status.changed',
+  'resync',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
 ```
@@ -1809,6 +1833,8 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | POST | `/api/history/restore` | `HistoryRestoreRequest` | 200 `HistoryRestoreResult` | 14.4 |
 | POST | `/api/history/commit` | | 200 `CommitResult` | 14.5 |
 | GET | `/api/templates` | | 200 `TemplatesResponse` | 15.4 |
+| GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
+| PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
 | GET | `/api/events?clientId=&lastEventId=` | | `text/event-stream` | 16 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
@@ -1836,9 +1862,85 @@ export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
 | `TrashEntry`, `TrashListResponse`, `RestoreRequest`, `RestoreResult`, `PurgeResult` | Same | |
 | `HistoryEntry`, `HistoryResponse`, `HistoryContent`, `HistoryRestoreRequest`, `HistoryRestoreResult`, `CommitResult` | Same | |
 | `TemplateEntry`, `TemplatesResponse` | Same | |
-| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
+| `BookmarksResponse`, `BookmarksUpdateRequest` | Same | `BookmarkItem` is not a record: items stay JSON objects (`ObjectNode`; `JsonNode` in the request), so fields from Obsidian or a newer build survive; `BookmarkCodec` checks the fields it knows (§21.2) |
+| `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`, `bookmarks.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
 **Nullability.** Every TypeScript `T | null` is a `@Nullable` component that is always serialized, including when null. An optional request field (`?`) is a `@Nullable` component; the server applies the documented default.
+
+---
+
+## 21. Bookmarks (ROADMAP item 12)
+
+Bookmarks are stored in `.notesapp/bookmarks.json`, in the format of Obsidian's `.obsidian/bookmarks.json` (`{"items": [...]}`), so a list can be copied between the two apps. They sync like the settings: a version token, the conflict protocol of §4, and a `bookmarks.changed` event. DESIGN §5.21 has the server's side and §6.23 the client's. Recent files are not part of the API: they are kept per device by the client.
+
+### 21.1 `GET /api/bookmarks`
+
+`200 BookmarksResponse`:
+
+```json
+{
+  "version": "3f1c2d9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e",
+  "items": [
+    { "type": "file", "ctime": 1760616202120, "path": "Projects/Plan.md" },
+    { "type": "file", "ctime": 1760616230411, "path": "Projects/Plan.md", "subpath": "#Goals" },
+    { "type": "folder", "ctime": 1760616251002, "path": "Projects" },
+    { "type": "search", "ctime": 1760616270930, "query": "tag:#work -path:Archive" },
+    { "type": "group", "ctime": 1760616290000, "title": "Reading",
+      "items": [ { "type": "file", "ctime": 1760616301234, "path": "Books/Dune.md", "title": "Dune (reread)" } ] }
+  ]
+}
+```
+
+| `type` | Fields | Meaning |
+|---|---|---|
+| `file` | `path` (required), `subpath`, `title` | A file of any kind; with `subpath` (`#Heading`, or `#^blockid`) a part of a note |
+| `folder` | `path` (required), `title` | A folder; opening it reveals it in the explorer |
+| `search` | `query` (required), `title` | A search (§12.1 syntax) |
+| `group` | `title`, `items` (required) | A named, nestable list of bookmarks |
+| anything else | kept as it is | Obsidian's `url` and `graph` bookmarks, or a type from a newer build |
+
+- Every item may have `ctime` (when it was bookmarked, epoch milliseconds, which Obsidian writes) and `title` (a display name; without one, the client shows the target's name, the heading, or the query).
+- Items are **passed through** in Obsidian's shape: a field that does not apply is absent, not `null`, and fields this build does not know are kept, at the item and at the top level of the file.
+- Without the file, the response lists the bookmarks of `.obsidian/bookmarks.json` when Obsidian left one (it is only ever read), or none. `version` is then the blob id of the document NotesApp would write, so a `PUT` with it creates the file.
+- Items in the file that break the rules of §21.2 (a hand edit) are left out of the response and logged, so a client never receives an item it could not send back. A file that is not JSON at all reads as no bookmarks; the next save keeps it beside the new one as `bookmarks.json.bak-<timestamp>`.
+- The file is read on every request, so a hand edit or a pull is seen at once.
+
+### 21.2 `PUT /api/bookmarks`
+
+Request `BookmarksUpdateRequest`: `{"items": [ ...the whole list... ], "baseVersion": "<version from GET>"}`.
+
+| Status | Body |
+|---|---|
+| `200` | `BookmarksResponse` with the new version. Other clients get `bookmarks.changed` with this client as `origin`. Saving a list equal to the stored one writes nothing and sends no event, whatever `baseVersion` says. |
+| `400 bad-request` | `errors[]`, with fields such as `items[2].path` or `items[4].items[0].query` |
+| `409 version-conflict` | `currentVersion`, and `currentContent` (the file's JSON) |
+
+**Validation.**
+
+| Field | Rule |
+|---|---|
+| `items` | Required; a list of objects; at most 5,000 bookmarks in all, groups nested at most 8 deep |
+| `type` | Required; 1 to 64 characters |
+| `ctime` | Optional; a non-negative integer |
+| `title` | Optional; text of at most 1,024 characters |
+| `path` (`file`, `folder`) | Required; a vault path that passes the safety rules (§1.3); it need not exist. NFC-normalized. |
+| `subpath` (`file`) | Optional; starts with `#`; at most 1,024 characters |
+| `query` (`search`) | Required; 1 to 1,024 characters, not blank |
+| `items` (`group`) | Required; a list, checked with the same rules |
+| `baseVersion` | Required |
+
+Clients apply each change to the latest list: on a `409` they fetch the bookmarks again, apply the same change, and retry, so two devices bookmarking different notes never lose either (DESIGN §6.23).
+
+### 21.3 Bookmarks follow their targets
+
+| What happens to the target | Bookmarks |
+|---|---|
+| Moved or renamed through the app (§10.3) | Re-keyed, like links: a file's bookmarks (headings included) follow it; a folder's bookmark and every bookmark under the folder follow it. Paths match ignoring case, as link resolution does, unless an entry with the bookmark's exact path still exists. One `bookmarks.changed` with `origin: null` follows the move's other content events. |
+| Moved to the trash | Kept. The client shows them as missing (their target is not in the tree), with a Remove action. Restoring the entry to its original path brings them back as they were. |
+| Restored to another path (`to`, or a free name) | Bookmarks of the original path follow it when nothing else has taken that path, with `bookmarks.changed` (`origin: null`). |
+| Moved, renamed or deleted outside the app (watcher) | Unchanged, as links are (DESIGN §5.9). They show as missing until the target comes back. |
+
+The file is committed with the normal batch, like the settings (`Update .notesapp/bookmarks.json`).

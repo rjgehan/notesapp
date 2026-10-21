@@ -184,6 +184,7 @@ NotesApp/                              (monorepo; branch main)
 | `**/*.md` | Notes | yes | committed |
 | any other visible file | Attachments and documents (images, PDF, `.sheet`, `.excalidraw`, ...) | in tree; only notes are content-indexed | committed |
 | `.notesapp/settings.json` | App settings (§5.12) | hidden | committed, so settings have history |
+| `.notesapp/bookmarks.json` | Bookmarks (§5.21), in Obsidian's `bookmarks.json` format | hidden | committed, like the settings |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
 | `.notesapp/cache/` | Reserved for derived caches (unused in v1) | hidden | excluded |
@@ -423,10 +424,11 @@ Thumbs.db
 | | `VaultEvent` | Sealed interface with one record per event type, matching API.md §16. |
 | | `EventIds` | Formats and parses `bootId.seq`. |
 | `settings` | `Settings` (+ nested records), `SettingsService` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12). |
+| `bookmarks` | `BookmarkService`, `BookmarkCodec` | Load, check and save `.notesapp/bookmarks.json` with a version token; re-key bookmarks after moves and trash restores (§5.21). |
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
 | | `TailscaleInterfaceCheck` | Refuses to start outside the dev profile when no kernel Tailscale interface is visible (§5.13). |
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
-| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
+| `api` | `TreeController`, `FileController`, `AttachmentController`, `FolderController`, `MoveController`, `NoteController`, `LinkController`, `SearchController`, `TagController`, `TrashController`, `HistoryController`, `TemplateController`, `SettingsController`, `BookmarkController`, `MeController`, `StatusController`, `EventController` | Thin controllers. They validate input, call services and map results to DTOs. |
 | | `IdempotencyCache` | Per-boot LRU for the `Idempotency-Key` header (§5.4). |
 | `api.dto` | Records named exactly as listed in API.md §19 | Wire DTOs. |
 | `api.error` | `ErrorCode` (enum of the API.md §3 codes), `NotesException` (extends `ErrorResponseException`), `VersionConflictException`, `ApiExceptionHandler` (extends `ResponseEntityExceptionHandler`) | RFC 9457 errors (§5.15). |
@@ -770,7 +772,7 @@ This is `MoveService.move(from, to, updateLinks, dryRun, identity, origin)`. `up
    - **What is preserved:** the `!`, the `#subpath`, the `|display` or `[text]`, angle brackets, the title string, and the original style (wiki stays wiki, markdown stays markdown). A plain `[[Old]]` becomes `[[New]]`; no alias is added.
    - **Never rewritten:** anything inside excluded zones; external URLs; links that resolved to something other than a moved file, except the collateral-protection rewrites.
 8. If any note was rewritten, `commitNow("Update links after renaming A.md → B.md (5 notes)", rewritten paths)`. Messages are given in §5.8.
-9. **Publish**, still under the vault write lock: `folder.created` for each newly created target parent, then `entry.moved` (a folder move implies its source is gone, so there is no separate `folder.deleted`), then `file.changed` for each rewritten note, then `history.committed` for each commit made. `MoveResult` carries `createdFolders`, the new versions in `linkUpdates` (the calling client receives no echoes), and `commitId`, which is the last commit made.
+9. **Publish**, still under the vault write lock: `folder.created` for each newly created target parent, then `entry.moved` (a folder move implies its source is gone, so there is no separate `folder.deleted`), then `file.changed` for each rewritten note, then, when bookmarks pointed at the moved entry, `bookmarks.changed` (§5.21: they are re-keyed after the commits, and the file goes into the next batch), then `history.committed` for each commit made. `MoveResult` carries `createdFolders`, the new versions in `linkUpdates` (the calling client receives no echoes), and `commitId`, which is the last commit made.
 
 **`MoveLog`.** A per-boot map `lower(oldPath) → newPath`. It is chained (a later move of `newPath` updates the earlier entries) and capped at 10,000 entries. A save to a path that no longer exists gets `movedTo` from it in its `409 version-conflict`, so a device whose SSE stream was down during a rename on another device can follow the note instead of recreating it at the old path (§6.10).
 
@@ -789,7 +791,7 @@ This is `MoveService.move(from, to, updateLinks, dryRun, identity, origin)`. `up
 |---|---|
 | **Delete** a file or folder | Vault read lock and the path lock for a file; the write lock for a folder. Run `preserve` (§5.4), so the last content, including an external edit the watcher has not seen yet, is in git; here a commit failure is logged rather than thrown, because the content survives in `.trash/` anyway. Under the `TrashStore` lock, choose the trash name and move the entry there (`moveExclusive` for a file, `ATOMIC_MOVE` for a folder), then append the `trash.json` entry. Remove the entry from the index; links to it become unresolved, which matches Obsidian. Commit immediately (`Delete X` / `Delete folder X (N files)`). Publish `file.deleted` or `folder.deleted` (both with `trashId`), then `trash.changed`, then `history.committed`. |
 | **List** | Under the `TrashStore` lock, read `trash.json` and reconcile it **1:1** with the top-level entries of `.trash/`. Entries whose item has vanished are dropped. Top-level items without metadata (put there by Obsidian or by hand) are listed with id `x-<first 16 hex of sha1(name)>`, `originalPath` equal to their name, `deletedBy: "unknown"` and `deletedAt` equal to their mtime. |
-| **Restore** | Vault write lock. The target is `originalPath`, resolved in `EXISTING` mode (the new-name rules are not applied, because the name existed), or `to` if given, resolved in `NEW` mode. Implicit parents resolve case-insensitively. On a collision, return `409 already-exists`, or with `onConflict: "rename"` insert ` 1`, ` 2`, .... Re-create the parent folders and move back (`moveExclusive` or `ATOMIC_MOVE`). Re-index and re-resolve the name buckets, so links light up again. Commit immediately (`Restore X from trash`). Publish `folder.created` for each re-created folder, then `file.created` per restored file; if more than 50 files come back, a single `resync {reason:"bulk-change"}` replaces them. Then publish `trash.changed` and `history.committed`. |
+| **Restore** | Vault write lock. The target is `originalPath`, resolved in `EXISTING` mode (the new-name rules are not applied, because the name existed), or `to` if given, resolved in `NEW` mode. Implicit parents resolve case-insensitively. On a collision, return `409 already-exists`, or with `onConflict: "rename"` insert ` 1`, ` 2`, .... Re-create the parent folders and move back (`moveExclusive` or `ATOMIC_MOVE`). Re-index and re-resolve the name buckets, so links light up again. Commit immediately (`Restore X from trash`). Publish `folder.created` for each re-created folder, then `file.created` per restored file; if more than 50 files come back, a single `resync {reason:"bulk-change"}` replaces them. When the entry comes back at another path, bookmarks of its original path follow it if nothing has taken that path (§5.21, `bookmarks.changed`). Then publish `trash.changed` and `history.committed`. |
 | **Purge** one entry, or **empty** the trash | Vault read lock plus the `TrashStore` lock, held only to rename each item out of `.trash/` into `.notesapp/tmp/purge-<uuid>` (a symlink is moved as a link) and update `trash.json`; then publish `trash.changed`. The items are deleted **after** the locks are released (§5.4: no long work under a lock), with `Files.walkFileTree` **without** `FOLLOW_LINKS`: a symlink is deleted, never followed. A crash before that leaves them in `.notesapp/tmp/`, which is emptied at startup. If an item cannot be renamed there (another filesystem), it is deleted in place under the locks. No git commit is made, because the trash is outside git. |
 
 - **Safety.** `trashPath` is validated as one safe segment directly under `realpath(.trash)` (§4.7). `GET /api/trash/{id}/raw` refuses symlinks with `404`.
@@ -947,7 +949,7 @@ Hashing during step 1 therefore never blocks saves.
 - **Otherwise** it sends `hello {resync:true, replayed:0}` with `id:` set to the current head. The client then refetches the tree, the open documents and the panels (with the buffering rule of API.md §16.5). Setting `id:` on this hello stops `EventSource` from looping on an unreplayable id.
 - `hello` also carries `buildSha`, so a tab running an old bundle after a deploy notices (§6.18).
 
-**Echo suppression.** Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) are **not** delivered to the connection whose `clientId` equals the event's `origin`; that client already applied the change from its HTTP response. Every content event still carries `origin`, so clients can double-check. All other events go to everyone.
+**Echo suppression.** Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`, `bookmarks.changed`) are **not** delivered to the connection whose `clientId` equals the event's `origin`; that client already applied the change from its HTTP response. Every content event still carries `origin`, so clients can double-check. All other events go to everyone.
 
 **Delivery.**
 
@@ -1258,6 +1260,24 @@ Measured on `homeserver` with 10,000 notes and 50 MB of Markdown.
 | Heap in steady state | < 400 MB |
 | Startup rescan of an unchanged vault (stat only) | < 2 s |
 
+### 5.21 Bookmarks (ROADMAP item 12)
+
+*(§5.20 is taken by structured tasks, ROADMAP item 4, on its own branch.)*
+
+**Storage.** `.notesapp/bookmarks.json`, in the format of Obsidian's `.obsidian/bookmarks.json`: `{"items": [...]}`, where an item is a `file` (with an optional `subpath` such as `#Heading` or `#^blockid`), `folder`, `search` or `group` (with nested `items`), plus Obsidian's `ctime` and optional `title` (API.md §21). Obsidian's other types (`url`, `graph`) and any unknown field, at the item or the top level, are kept: the server keeps items as JSON trees (`ObjectNode`) and `BookmarkCodec` only checks the fields it knows. The file is written pretty-printed with two-space indents, as Obsidian writes it, in the order the items have.
+
+**`BookmarkService`.**
+
+- **Read on every request.** The file is small, and the watcher ignores `.notesapp/`, so reading it each time is what lets a hand edit, a pull from the git mirror or a history restore show at once. Items that break the codec's rules are left out (logged). A file that is not a JSON object reads as no bookmarks; the next save first copies it to `bookmarks.json.bak-<timestamp>`.
+- **No file yet.** The bookmarks of `.obsidian/bookmarks.json` are served when Obsidian left one (read only; `.obsidian/` is never written, §4.1), otherwise none, with `version` set to the blob id of the document as it would be written. The first change writes NotesApp's own file. A vault moved over from Obsidian therefore keeps its bookmarks without an import step.
+- **Save** (`PUT /api/bookmarks`) follows the settings (§5.12): validate, take the service's lock (`tryLock(5 s)`, else `503 busy`), read the disk, and serialize the new document; equal bytes return `200` without writing; a `baseVersion` that differs from the disk's blob id is `409 version-conflict` with the file's JSON as `currentContent`; otherwise `prepareWrite`, `atomicWrite`, `markDirty` (committed with the next batch, like the settings) and `bookmarks.changed` with the request's `X-Client-Id` as origin, published before the lock is released.
+- **Following targets** (re-keying), always server-side so every device sees the same list:
+  - `MoveService` calls `moved(from, to, type)` after both commits of a move (§5.6 step 8), still under the vault write lock: a file's bookmarks (headings and blocks included) take the new path; for a folder, its own bookmark and every bookmark whose path is under it take the new prefix (the rest of the path is kept segment by segment). Matching ignores case, like link resolution, unless an entry with the bookmark's exact path still exists (a case-variant duplicate keeps its bookmark).
+  - `TrashService` calls `restored(originalPath, target, type)` when an entry comes back at another path (an explicit `to`, or a free name): bookmarks of the original path follow it, but only when nothing exists at the original path, so a bookmark whose path a new note has taken keeps pointing at that note.
+  - A delete leaves bookmarks alone, exactly as it leaves links: the client shows them as missing until the target comes back (§6.23). Moves and deletes made outside the app are not followed, as for links (§5.9).
+  - A re-key writes the file under the bookmarks lock (taken after the vault lock; the `PUT` path never takes the vault lock, so the order is fixed), marks it dirty with the mover's identity, and publishes `bookmarks.changed` with `origin: null`. The calling client's `MoveResult` says nothing about bookmarks, so the event must reach it too; a failure is logged and never fails the move.
+- **Why a whole-list `PUT`** rather than per-item endpoints: Obsidian's items have no ids, the list is small, and the settings already prove the version protocol. Clients apply each change as a function of the latest list and re-apply it after a `409` (§6.23), so concurrent changes from two devices both survive.
+
 ---
 
 ## 6. Frontend design
@@ -1357,14 +1377,16 @@ frontend/src/
 │   ├── commands.ts           command registry + built-in commands (§6.13)
 │   ├── hotkeys.ts            global key handler (Mod = Cmd on Apple, Ctrl elsewhere)
 │   ├── fuzzy.ts              fuzzysort wrappers
-│   ├── recent.ts             MRU list (localStorage)
+│   ├── recent.ts             recently opened files, per device (localStorage), with times and a subscription (§6.23)
+│   ├── bookmarks.ts          bookmark item helpers (Obsidian format) and BookmarkWriter (§6.23)
+│   ├── bookmarkStore.ts      the page's bookmarks: query + unsaved edits, useBookmarks(), toggle actions
 │   └── paths.ts              join, folderOf, basename, extension, encodeRoutePath, decodeRoutePath
 ├── components/
 │   ├── layout/               AppShell (hosts the app-level file input), TopBar, Ribbon, LeftSidebar, RightSidebar, StatusBar,
 │   │                         MobileToolbar, Drawer, BottomSheet, Resizer, WorkspaceScroll
 │   ├── VirtualList.tsx       fixed-row-height windowing for the tree, tags and long panel lists
 │   ├── explorer/             FileExplorer, TreeRow (long-press menu), RowMenu, MoveDialog (dry-run preview)
-│   ├── panels/               SearchPanel, TagsPanel, BacklinksPanel, OutlinePanel, HistoryPanel (lazy)
+│   ├── panels/               SearchPanel, TagsPanel, BookmarksPanel, RecentPanel, BacklinksPanel, OutlinePanel, HistoryPanel (lazy)
 │   ├── overlays/             QuickSwitcher, CommandPalette, PromptDialog, ConfirmDialog, TemplatePicker, Toasts
 │   ├── ConflictBanner.tsx, ConnectionIndicator.tsx, SaveStatus.tsx, ErrorBoundary.tsx
 │   └── pages/                HomePage, SearchPage (mobile), TrashPage, SettingsPage (lazy), NotFoundPage
@@ -1387,6 +1409,7 @@ frontend/src/
 | `['history', path]` | `GET /api/history` | 0 | |
 | `['historyContent', commit, path]` | `GET /api/history/content` | Infinity | Immutable |
 | `['trash']`, `['settings']`, `['me']`, `['status']`, `['templates']` | | 60 s / Infinity / Infinity / 10 s / 60 s | |
+| `['bookmarks']` | `GET /api/bookmarks` | Infinity | Refreshed on `bookmarks.changed`; this tab's unsaved edits are laid over it (§6.23). Read through the page's own client, so components outside a provider can show stars. |
 
 There is no `['resolve']` query: link resolution runs on the client over the tree (§6.6).
 
@@ -1421,6 +1444,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | `trash.changed` | Invalidate `['trash']`. |
 | `history.committed` | Invalidate `['history', p]` for each `p` in `paths`, and `['status']`. |
 | `settings.changed` | Invalidate `['settings']`. |
+| `bookmarks.changed` | Invalidate `['bookmarks']`. Sent with `origin: null` after a move or restore, so the mover refetches too. |
 | `status.changed` | Invalidate `['status']`. |
 | `ping` | Nothing; it only feeds the watchdog and the Live indicator (§6.18). |
 | Names registered with `registerEventHandler` (§6.8) | The registered handler. |
@@ -1474,7 +1498,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
  └ <AppShell>                                    (CSS grid; phone/tablet/desktop variants §6.16; hosts the hidden app-level file input)
     ├ <Ribbon/>               desktop: full ribbon; tablet: collapsed icon rail. Switcher, Search, Today, Template, New note,
     │                         Command palette, Trash, Settings
-    ├ <LeftSidebar>           tabs: <FileExplorer/> | <SearchPanel/> | <TagsPanel/> + registered left panels
+    ├ <LeftSidebar>           tabs: <FileExplorer/> | <SearchPanel/> | <BookmarksPanel/> | <TagsPanel/> | <RecentPanel/> + registered left panels
     │                         (phone: inside <Drawer>, whose footer holds Settings, Trash and the theme toggle)
     ├ <Workspace>
     │   ├ <TopBar/>           phone/tablet: ☰, title (+ connection dot), switcher/search button, mode toggle, ⋯ menu
@@ -1597,7 +1621,7 @@ export function registerEventHandler(name: string, fn: (data: unknown, eventId: 
                                                                  // on the current EventSource and on every future one
 ```
 
-All v1 views, panels (Files, Search, Tags, Backlinks, Outline, History) and built-in commands are registered through these same functions (`extensions/builtins.ts`), which proves the APIs before the first extension needs them.
+All v1 views, panels (Files, Search, Bookmarks, Tags, Recent files, Backlinks, Outline, History) and built-in commands are registered through these same functions (`extensions/builtins.ts`), which proves the APIs before the first extension needs them.
 
 **v1 registrations.**
 
@@ -1782,7 +1806,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
   - one extra item per alias ("alias of X");
   - every other file (label: file name).
 - **Ranking:** `fuzzysort.go(q, items, {keys: ['label', 'path'], threshold: 0, limit: 50})`, with notes boosted by +0.05.
-- **Empty query:** the 20 most recently opened files (`features/recent.ts`).
+- **Empty query:** the 20 most recently opened files on this device (`features/recent.ts`), a star marking the bookmarked ones.
 - **Keys:**
   - `Enter` opens the selection.
   - `Shift-Enter` creates a note named exactly the query at the default new-note location (`POST /api/files {onConflict:"fail"}`; a 409 opens the existing note).
@@ -1819,7 +1843,11 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 | `daily.today` / `daily.prev` / `daily.next` | Open today's / previous / next daily note | |
 | `templates.insert` | Insert template | |
 | `view.toggleLeft` / `view.toggleRight` | Toggle left / right sidebar | |
-| `view.files` / `view.search` / `view.tags` / `view.backlinks` / `view.outline` / `view.history` | Show panel | |
+| `view.files` / `view.search` / `view.bookmarks` / `view.tags` / `view.recent` / `view.backlinks` / `view.outline` / `view.history` | Show panel | |
+| `bookmarks.add` / `bookmarks.remove` | Bookmark current file / Remove bookmark for current file (whichever applies) | |
+| `bookmarks.heading` | Bookmark heading at cursor (the nearest heading above it) | |
+| `bookmarks.search` | Bookmark current search | |
+| `bookmarks.newGroup` | Create new bookmark group | |
 | `history.commitNow` | Commit pending changes now | |
 | `nav.back` / `nav.forward` | Navigate back / forward | `Mod-Alt-←` / `Mod-Alt-→` (as in Obsidian; bound at `Prec.highest`, so they also work inside the editor). The browser's own back and forward still work. |
 | `trash.open` | Open trash | |
@@ -1860,7 +1888,7 @@ The panel is the right-sidebar tab **History**, a lazy chunk. Phones show it in 
 
 | Breakpoint | Layout |
 |---|---|
-| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, and ⋯ (Command palette, Backlinks, Outline, History, Rename, Move, Delete, Template, Today, Reload). **Drawer:** full-height, 88 % width, slides in from the left; Files, Search and Tags tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
+| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, and ⋯ (Command palette, Backlinks, Outline, History, Bookmark, Rename, Move, Delete, Template, Today, Reload). **Drawer:** full-height, 88 % width, slides in from the left; Files, Search, Bookmarks, Tags and Recent files tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
 | **Tablet** `768–1199 px` | The ribbon is a collapsed icon rail (48 px) that is always visible, so every desktop entry point (switcher, search, Today, template, new note, palette, Trash, Settings) stays one tap away on an iPad. Both sidebars are overlays over the editor, toggled from the rail or the TopBar. |
 | **Desktop** `≥ 1200 px` | Ribbon (48 px), left sidebar (default 280 px, resizable 200–480), workspace (readable width 46 rem when `readableLineLength`), right sidebar (300 px, resizable). Status bar at the bottom. |
 
@@ -1955,6 +1983,31 @@ On recovery, any `resync` is processed, the replay countdown reaches `caughtUp` 
 - `settings-read-only`: "Settings were written by a newer version of NotesApp and are read-only here."
 
 Any other error shows the problem's `detail`. 5xx problem errors show a toast with the `incidentId` for log lookup. Transient failures (§6.9) never show an error toast; they show the Offline state. An unexpected render error is caught by an `ErrorBoundary` per view, which offers **Reload view**.
+
+### 6.23 Bookmarks and recent files (ROADMAP item 12)
+
+*(§6.21 and §6.22 are taken by spreadsheets and tasks, on their own branches.)*
+
+**Bookmarks** sync through the vault (§5.21, API.md §21); **recent files** stay on each device.
+
+- **State** (`features/bookmarkStore.ts`). The query `['bookmarks']` holds the server's list, read through the page's own `QueryClient` (so a star can show anywhere, provider or not), and `bookmarkWriter` lays this tab's unsaved edits over it: `useBookmarks()` and `currentBookmarks()` return that view. The list is prefetched when live sync starts, so commands and menus know what is bookmarked.
+- **Saving** (`BookmarkWriter` in `features/bookmarks.ts`). Every change is an *edit*, a function from the current list to the next. It shows at once; one `PUT` is in flight at a time, carrying every edit made so far on top of the cached list and its version; edits made meanwhile go in the next `PUT`. A `409` (another device, or the server's re-keying) refetches the list and applies the same edits again, up to four times, so two devices bookmarking different notes both keep theirs. Any other failure drops the edits (the view falls back to the server's list) and shows an error toast. The edits a response covers are removed before the response is cached, so the view never applies them twice.
+- **Live sync.** `bookmarks.changed` invalidates `['bookmarks']`. After a move or a restore the server sends it with `origin: null` (§5.21), which is how the moving tab learns that its bookmarks were re-keyed.
+- **Entry points.**
+
+  | Where | What |
+  |---|---|
+  | Note header (desktop and tablet) | A star toggles the open file's bookmark |
+  | TopBar ⋯ (phone) | **Bookmark** / **Remove bookmark** |
+  | Explorer row menu | **Bookmark** / **Remove bookmark** for a file or folder |
+  | Outline panel | A star per heading, shown on hover and always on touch (`subpath: "#Heading"`) |
+  | Search panel and phone search page | A star beside the result count bookmarks the query |
+  | Bookmarks panel toolbar | Bookmark the current file, New group, Collapse all groups |
+  | Palette | The `bookmarks.*` and `view.bookmarks` commands (§6.13); no default hotkeys, as in Obsidian |
+  | Drag and drop (desktop) | An explorer row dropped on the Bookmarks panel is bookmarked where it lands |
+
+- **Bookmarks panel** (left sidebar; a drawer tab on phones). Rows follow the explorer's look: an icon by kind (the file's view icon, a heading, a block, a folder, a search), the title or the target's name, and a faint detail (the folder, or the note of a heading). Groups have a chevron and collapse; collapsed groups are remembered per device (`localStorage notesapp:bookmarkGroupsCollapsed`, keyed by `ctime` and title, because Obsidian's groups have no ids). File and folder targets resolve ignoring case, as links do; a target that is not in the tree is shown **missing** (faint, struck through) and opening it offers **Remove bookmark** in a toast; it lights up again when the target comes back (a trash restore). Opening a file goes to the file (at its heading), a folder reveals it in the explorer, a search opens the search panel (phones: the search page) with the query, and an Obsidian `url` bookmark opens in a new tab. The row menu (right-click; long-press or ⋯ on touch) has **Open**, **Rename…** (a display title; empty gives the target's name back), **Move up** / **Move down**, **Move out of the group**, **Move to “group”**, and **Remove bookmark** (a group: **Remove group**, which keeps its bookmarks in its place). On desktop, rows drag to reorder (a drop on a group moves into it). Keyboard: arrows, Enter, ←/→ on groups, F2 renames, Delete removes, the ContextMenu key opens the menu.
+- **Recent files** (`features/recent.ts`, `localStorage notesapp:recentFiles`): up to 50 `{path, at}` entries, newest first, recorded when a file view opens. Renames and moves re-key them (own `MoveResult`s and `entry.moved`), deletes through the app drop them, and entries whose file is gone are hidden. The first format (`notesapp:recent`, paths only) is moved over once. Other tabs follow through the `storage` event. The **Recent files panel** (left sidebar; a drawer tab on phones) lists them with the time each was opened, a star on bookmarked ones, and a row menu with **Open**, **Bookmark** / **Remove bookmark** and **Remove from recent files**; its toolbar clears the list (after a confirmation; no file is touched). The quick switcher's empty query shows the same list (§6.13), and `[[` completion ranks recent notes first.
 
 ---
 
@@ -2406,6 +2459,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 | `EventHubTest` | Echo suppression; replay after `lastEventId` with the right `replayed` count; a foreign `bootId` or too-old id gives `hello{resync:true}` with the head id; **`ping` frames carry no `id:` and never enter the ring**; concurrent publishers produce strictly increasing ids in delivery order; `onTimeout` completes the emitter without an exception; a slow client does not block others; `closeAll`. |
 | `Rfc2047Test`, `IdentityResolverTest`, `HostAndIdentityFilterTest` | Q-encoding, B-encoding, multiple encoded words, invalid input. A missing login gives `403` unless `allow-default`; a login outside `allowed-logins` gives `403`; `Host: evil.example` gives `421`; health paths are exempt from both. |
 | `ApiGuardInterceptorTest`, `SettingsServiceTest` | Header, Origin and `Sec-Fetch-Site` rules. Settings defaults, validation and version conflict; unknown fields survive a write; a newer `schemaVersion` makes settings read-only and leaves the file byte-for-byte unchanged. |
+| `BookmarkServiceTest` | No file: no bookmarks and nothing written by a `GET`; a save writes Obsidian's format, bumps the version, publishes `bookmarks.changed` and is committed in the batch; equal content is a no-op whatever the base; a stale base is a conflict with the server copy; every invalid field is named (`items[7].items[0].query`); unknown types and fields survive and paths are NFC-normalized; invalid items in the file are left out and a broken file is kept as `.bak-` before it is replaced; Obsidian's bookmarks show until the first change and `.obsidian/` is never written; a file move, a folder move (prefix, case-insensitive, groups included) and a restore elsewhere re-key, with `origin: null`; a move touching no bookmark writes nothing; a case-variant duplicate keeps its bookmark; a delete keeps the bookmark. |
 
 **Integration tests** (classes named `*IntegrationTest`; `@SpringBootTest(webEnvironment = RANDOM_PORT)` + `@AutoConfigureRestTestClient`, `@TempDir` vault, `notes.watcher.enabled=false`, short git periods, `notes.allowed-hosts=localhost`, `notes.identity.allow-default=true`, `notes.security.require-tailscale-interface=false`):
 
@@ -2423,7 +2477,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 12. Startup: a fresh vault gets `Welcome.md` and, after readiness, `Initial commit`; a pre-populated vault gets the import commit and no welcome note; a vault whose files were all deleted gets no welcome note on restart; a dirty tree at startup gets the External commit.
 13. A JSON body with `Content-Length` above `max-json-body` gets `413` before it is read.
 14. Importing a vault whose `.git` has a `post-commit` hook that writes a marker file: after several commits, the marker does not exist.
-15. A save is not delayed by more than a few ms while a slow upload (a body trickled over 5 s) is in progress.
+. Bookmarks (`BookmarksIntegrationTest`): `GET` and `PUT` with the version protocol, `no-store`, validation and `client-id-required`; `bookmarks.changed` reaches another client but not the saving one; a folder move through `/api/move` re-keys a file and a folder bookmark (the heading subpath kept) and the mover receives `bookmarks.changed` with `origin: null`.
 
 **Performance check** (`@Tag("perf")`, excluded by the Surefire `excludedGroups=perf` setting; run with `-DexcludedGroups=`): generate 10k notes with links and tags, then assert the §5.19 targets with a 3× margin on CI hardware.
 
@@ -2438,6 +2492,7 @@ The full runbook is DEPLOY.md, written by WP-Infra.
 - `drafts.ts` (with `fake-indexeddb`): write, restore, re-key, ownership by live tabs over a mocked `BroadcastChannel`, the quota-failure warning.
 - `applyEvents`: each event's cache patch, including `removeQueries(['file', …])` and the own-mutation invalidations. `events.ts`: `lastEventId` tracking; **an idle stream that receives only pings for 2 minutes stays Live and never reconnects**; `onerror` with `readyState` `CLOSED` recreates the stream with backoff; the `replayed` countdown sets `caughtUp`; resync buffering drops buffered events with `seq` at or below the tree's `eventId`; a `buildSha` mismatch reloads when all sessions are clean and shows the banner when one is dirty.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
+- Bookmarks and recent files: the item helpers (labels, insert, move into and out of groups, shift, find ignoring case and Unicode form, the server's re-keying for the mock) and `BookmarkWriter` (optimistic view, one request in flight with later edits batched, re-applying edits after a `409`, dropping refused edits); `features/recent.ts` (times, the 50 cap, the move from the first format, renames, deletes, subscribers); `BookmarksPanel` (kinds, missing targets and their Remove toast, opening files, headings and searches, collapsing groups, the menu's Remove and Move to group, a dropped explorer row) and `RecentPanel`; `applyEvents` for `bookmarks.changed`; the mock's bookmarks.
 
 ### 8.3 Browser smoke checklist
 
@@ -2466,7 +2521,7 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 21. iPhone: Settings, Trash, the quick switcher, the command palette and the theme toggle are all reachable without a keyboard; a long-press on a tree row opens its menu; New note opens the keyboard on the title in one tap.
 22. iPhone: type frontmatter (`---`, `tags: ["a"]`, `"[[Link]]"`) and a code span with quotes; nothing is turned into an em dash or curly quotes.
 23. Deploy a new build while a tab is open on each device: the indicator shows Reconnecting and then Live within about a minute, a clean tab reloads itself to the new build, and a dirty tab shows the reload banner and saves after reconnecting.
-24. Open the app from a tagged device or a non-allowed login: it gets 403. `docker compose config` shows both volumes as `external: true`.
+. Bookmarks: star a note in its header (rgpc) and a heading in the Outline; on the iPhone they appear in the drawer's Bookmarks tab within a second, and ⋯ › Bookmark stars the open note. Rename the starred note on rgpc: both devices show the new name. Move it to the trash: the bookmark is dimmed; restore it: it lights up. Recent files lists the notes opened on that device only, with times.
 
 ---
 
