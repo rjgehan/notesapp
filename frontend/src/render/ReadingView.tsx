@@ -1,5 +1,6 @@
 // Reading view host (DESIGN §6.7): renders the session's text, patches the DOM per block, hydrates
-// embeds, and handles link, tag and checkbox interaction through delegated listeners.
+// embeds and rich blocks (math, Mermaid, code), and handles link, tag and checkbox interaction
+// through delegated listeners.
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTree, useVaultSettings } from '../api/hooks';
 import { splitFrontmatter } from '../features/frontmatter';
@@ -12,6 +13,7 @@ import { makeEmbedContext, makeRenderContext } from './context';
 import { hydrateEmbeds, unmountEmbeds, type EmbedContext } from './embeds';
 import { patchChildren } from './patch';
 import { lineHash, onlyCheckboxesChanged, renderNote, TASK_PATTERN, toggleTaskAtLine } from './render';
+import { hydrateRich } from './rich';
 import { scrollToLine } from './scroll';
 
 const RENDER_DEBOUNCE_MS = 150;
@@ -60,6 +62,8 @@ export function ReadingView({ session, initialLine, onRendered }: Props) {
         patchChildren(el, fragment, unmountEmbeds);
         embedContext.current = makeEmbedContext(session.path, tree);
         hydrateEmbeds(el, embedContext.current);
+        // Math, diagrams and code in new blocks only: kept blocks keep their rendering.
+        hydrateRich(el);
       }
       lastText.current = current;
       lastInputs.current = inputs;

@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
@@ -15,6 +16,13 @@ export default defineConfig({
   plugins: [react()],
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(buildSha),
+  },
+  resolve: {
+    alias: [
+      // Mermaid's optional ELK layout: elkjs is EPL-2.0 (not GPL-compatible) and 1.4 MB, so it is
+      // left out of the bundle; diagrams use the dagre layout (src/render/rich/mermaid.ts).
+      { find: /^elkjs\/lib\/elk\.bundled\.js$/, replacement: fileURLToPath(new URL('./src/render/rich/elkStub.ts', import.meta.url)) },
+    ],
   },
   server: {
     proxy: {

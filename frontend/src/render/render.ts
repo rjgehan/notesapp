@@ -1,6 +1,8 @@
-// Reading-view pipeline (DESIGN §6.7): markdown-it with the Obsidian rules, DOMPurify, and a
-// post-sanitize pass that builds app-generated elements (images with content-addressed URLs,
-// remote-image placeholders). Note, PDF and media embeds are hydrated after insertion (embeds.tsx).
+// Reading-view pipeline (DESIGN §6.7): markdown-it with the Obsidian rules and the rich Markdown
+// pack (callouts, math, Mermaid and code placeholders: rich/), DOMPurify, and a post-sanitize pass
+// that builds app-generated elements (images with content-addressed URLs, remote-image
+// placeholders). Note, PDF and media embeds (embeds.tsx) and the rich placeholders
+// (rich/hydrateRich) are hydrated after insertion.
 import { footnote } from '@mdit/plugin-footnote';
 import { mark } from '@mdit/plugin-mark';
 import { tasklist } from '@mdit/plugin-tasklist';
@@ -11,6 +13,7 @@ import type { FileEntry } from '../api/types';
 import { splitFrontmatter } from '../features/frontmatter';
 import { noteRoute } from '../features/paths';
 import { isInternalDestination, isWhitespace, matchWikiLinkAt, parseMarkdownDestination, splitWikiBody, tagBodyLength } from '../features/syntax';
+import { richMarkdown } from './rich';
 
 export interface RenderContext {
   sourcePath: string;
@@ -311,7 +314,11 @@ function parser(breaks: boolean): Md {
   if (!md) {
     md = new MarkdownIt({ html: true, linkify: true, breaks });
     rawDestinations(md);
-    md.use(obsidianPlugin).use(mark).use(tasklist, { disabled: false, label: false }).use(footnote);
+    md.use(obsidianPlugin)
+      .use(richMarkdown, { ownAttrs: ownMark })
+      .use(mark)
+      .use(tasklist, { disabled: false, label: false })
+      .use(footnote);
     parsers.set(breaks, md);
   }
   return md;
@@ -339,6 +346,10 @@ const RESERVED_ATTRS = [
   'data-height',
   'data-src',
   'data-alt',
+  // Rich placeholders (rich/markdown.ts): hydrated with KaTeX, Mermaid and the highlighter.
+  'data-math',
+  'data-mermaid',
+  'data-lang',
 ];
 const OWN_ATTR = 'data-app';
 
