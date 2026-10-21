@@ -47,6 +47,7 @@ import { toast } from '../state/toasts';
 import { useUi } from '../state/ui';
 import { documents } from '../sync/instance';
 import { eventStream } from '../sync/liveSync';
+import { registerCanvasView } from '../views/canvas/register';
 import { onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
 
@@ -169,6 +170,8 @@ export function registerBuiltins(): void {
     modes: ['read'],
     load: () => import('../views/UnsupportedView'),
   });
+  // JSON Canvas boards (ROADMAP item 25).
+  registerCanvasView();
   registerCreateCommands();
   onViewsChanged(registerCreateCommands);
   // Commands contributed by a view are active only while that view shows the open file.

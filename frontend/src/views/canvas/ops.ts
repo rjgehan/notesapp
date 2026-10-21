@@ -54,6 +54,29 @@ export function updateNode(doc: CanvasDoc, id: string, patch: Partial<Record<str
   return mapNodes(doc, (n) => (n.id === id ? patchObject(n, patch) : n));
 }
 
+/**
+ * File nodes (and group backgrounds) whose file moved: `where(path)` gives the new path, or null.
+ * Returns the same document when nothing points at a moved file.
+ */
+export function followMoves(doc: CanvasDoc, where: (path: string) => string | null): CanvasDoc {
+  return mapNodes(doc, (n) => {
+    if (n.type === 'file' && typeof n.file === 'string') {
+      const to = where(n.file);
+      return to && to !== n.file ? patchObject(n, { file: to }) : n;
+    }
+    if (n.type === 'group' && typeof n.background === 'string') {
+      const to = where(n.background);
+      return to && to !== n.background ? patchObject(n, { background: to }) : n;
+    }
+    return n;
+  });
+}
+
+/** Replaces a node with another object (keeping its place in the stacking order). */
+export function replaceNode(doc: CanvasDoc, id: string, node: CanvasNode): CanvasDoc {
+  return mapNodes(doc, (n) => (n.id === id ? node : n));
+}
+
 export function updateNodes(doc: CanvasDoc, ids: ReadonlySet<string>, patch: Partial<Record<string, unknown>>): CanvasDoc {
   return mapNodes(doc, (n) => (ids.has(n.id) ? patchObject(n, patch) : n));
 }
@@ -247,7 +270,8 @@ export const DEFAULT_SIZES: Record<string, { width: number; height: number }> = 
 export function makeNode(doc: CanvasDoc, kind: 'text' | 'file' | 'link' | 'group', at: Point, fields: Partial<CanvasNode> = {}, size?: { width: number; height: number }): CanvasNode {
   const s = size ?? DEFAULT_SIZES[kind];
   const id = newId(idSet(doc));
-  const geometry = { x: Math.round(at.x - s.width / 2), y: Math.round(at.y - s.height / 2), width: Math.round(s.width), height: Math.round(s.height) };
+  // On the 20 px grid that moves snap to, so new cards line up with the others.
+  const geometry = { x: snap(at.x - s.width / 2, 20), y: snap(at.y - s.height / 2, 20), width: Math.round(s.width), height: Math.round(s.height) };
   // Obsidian writes a group's label after its geometry, and other nodes' content before it.
   return kind === 'group' ? { id, type: kind, ...geometry, ...fields } : { id, type: kind, ...fields, ...geometry };
 }

@@ -47,6 +47,7 @@ import type {
 import { MockEventHub } from './events';
 import { numbered, sanitizeAttachmentName } from './names';
 import { fail } from './problems';
+import { isCanvasPath, scanCanvas } from './canvasScan';
 import { lineAt, scanNote, type NoteScan, type ScannedLink } from './scan';
 import { seedFiles } from './seed';
 import { blobId } from './sha1';
@@ -150,7 +151,7 @@ export class MockVault {
   private folders = new Set<string>();
   private trash: TrashItem[] = [];
   private commits: Commit[] = [];
-  private scans = new Map<string, { version: string; scan: NoteScan }>();
+  private scans = new Map<string, { version: string; scan: NoteScan; text: string | null }>();
   private moveLog = new Map<string, string>();
   private idempotency = new Map<string, unknown>();
   private settings: Settings = structuredClone(DEFAULT_SETTINGS);
@@ -194,12 +195,23 @@ export class MockVault {
   }
 
   private scanOf(f: StoredFile): NoteScan {
+    return this.indexOf(f).scan;
+  }
+
+  /** A note's parse, or a canvas's (over its searchable text, like the server's CanvasIndexer). */
+  private indexOf(f: StoredFile): { scan: NoteScan; text: string | null } {
     const version = blobId(f.bytes);
     const cached = this.scans.get(f.path);
-    if (cached && cached.version === version) return cached.scan;
-    const scan = scanNote(decodeText(f.bytes).content);
-    this.scans.set(f.path, { version, scan });
-    return scan;
+    if (cached && cached.version === version) return cached;
+    const content = decodeText(f.bytes).content;
+    const entry = isCanvasPath(f.path) ? { version, ...scanCanvas(content) } : { version, scan: scanNote(content), text: null };
+    this.scans.set(f.path, entry);
+    return entry;
+  }
+
+  /** The text search and backlink contexts read: a canvas's searchable text, a note's content. */
+  private indexTextOf(f: StoredFile): string {
+    return this.indexOf(f).text ?? this.textOf(f);
   }
 
   private textOf(f: StoredFile): string {
@@ -208,6 +220,11 @@ export class MockVault {
 
   private notes(): StoredFile[] {
     return [...this.files.values()].filter((f) => kindOf(f.path) === 'note');
+  }
+
+  /** Notes and canvases: what search, backlinks and tags read. */
+  private indexed(): StoredFile[] {
+    return [...this.files.values()].filter((f) => kindOf(f.path) === 'note' || (isCanvasPath(f.path) && f.bytes.length <= TEXT_LIMIT));
   }
 
   private linkIndex(paths: Iterable<string> = this.files.keys()): LinkIndex {
@@ -862,9 +879,9 @@ export class MockVault {
     const target = this.existing(path);
     const index = this.linkIndex();
     const linked: Array<BacklinkGroup & { mtime: number }> = [];
-    for (const note of this.notes()) {
+    for (const note of this.indexed()) {
       const scan = this.scanOf(note);
-      const text = this.textOf(note);
+      const text = this.indexTextOf(note);
       const mentions: Mention[] = [];
       for (const l of scan.links) {
         if (resolve(l.target, note.path, index) !== path || note.path === path) continue;
@@ -925,12 +942,12 @@ export class MockVault {
     const lastWord = [...clauses].reverse().find((c) => c.kind === 'word' && !c.negated);
     const excluded = this.settings.files.excludedPaths.map((p) => p.toLowerCase());
     const hits: SearchHit[] = [];
-    for (const note of this.notes()) {
+    for (const note of this.indexed()) {
       if (excluded.some((p) => note.path.toLowerCase().startsWith(p))) continue;
       const scan = this.scanOf(note);
-      const text = this.textOf(note);
+      const text = this.indexTextOf(note);
       const body = foldAccents(text);
-      const title = stripMd(lastSegment(note.path));
+      const title = isCanvasPath(note.path) ? basenameOf(note.path) : stripMd(lastSegment(note.path));
       let ok = true;
       let score = 0;
       for (const c of clauses) {
@@ -996,7 +1013,7 @@ export class MockVault {
 
   getTags(): TagCount[] {
     const exact = new Map<string, { display: string; notes: Set<string> }>();
-    for (const note of this.notes()) {
+    for (const note of this.indexed()) {
       for (const tag of this.scanOf(note).tags) {
         const key = tag.toLowerCase();
         const e = exact.get(key) ?? { display: tag, notes: new Set<string>() };

@@ -12,9 +12,10 @@ import { insertWikilink } from '../../editor/completion';
 import { noteContext } from '../../editor/context';
 import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox, toggleInlineCode } from '../../editor/editorCommands';
 import { revealCaret } from '../../editor/mobileViewport';
-import { pickAndInsertAttachments } from '../../features/attachments';
+import { pickAndInsertAttachments, pickFiles } from '../../features/attachments';
 import { runCommand } from '../../features/commands';
 import { activePath } from '../../features/navigation';
+import { isNotePath } from '../../features/paths';
 import { toast } from '../../state/toasts';
 import { documents } from '../../sync/instance';
 
@@ -57,8 +58,15 @@ const TOOLS: Tool[] = [
     run: (v) => {
       // The picker blurs the editor; the session remembers where to insert before it opens.
       const ctx = v.state.facet(noteContext);
-      const session = ctx ? documents.get(ctx.path()) : undefined;
-      if (session) pickAndInsertAttachments(session, 'image/*');
+      if (!ctx) return;
+      const session = isNotePath(ctx.path()) ? documents.get(ctx.path()) : undefined;
+      if (session) {
+        pickAndInsertAttachments(session, 'image/*');
+        return;
+      }
+      // A Markdown editor that is not a note's (a canvas card) inserts through its own context.
+      const { from, to } = v.state.selection.main;
+      void pickFiles({ accept: 'image/*', multiple: true }).then((files) => ctx.insertFiles(files, { from, to }, false));
     },
   },
   { id: 'hide', label: 'Hide keyboard', icon: KeyboardOff, run: (v) => v.contentDOM.blur() },

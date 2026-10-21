@@ -1,0 +1,774 @@
+/* Canvas view (ROADMAP item 25). World-space sizes that should look the same at every zoom are
+   multiplied by --inv-zoom (1 / zoom), set on the world layer. */
+
+.canvas-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 320px;
+  overflow: hidden;
+}
+
+.canvas-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  background-color: var(--background-primary);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--text-faint) 55%, transparent) 1px, transparent 1.4px);
+  cursor: default;
+}
+
+.canvas-stage.is-panning {
+  cursor: grab;
+}
+
+.canvas-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+/* ---------- nodes ---------- */
+
+.canvas-node {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.canvas-node-container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: 2px solid var(--background-modifier-border-hover);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s);
+}
+
+.canvas-node.has-color .canvas-node-container {
+  border-color: var(--canvas-color);
+  background: color-mix(in srgb, var(--canvas-color) 8%, var(--background-primary));
+}
+
+.canvas-node.is-selected .canvas-node-container,
+.canvas-node.is-target .canvas-node-container {
+  outline: calc(2px * var(--inv-zoom)) solid var(--interactive-accent);
+  outline-offset: calc(2px * var(--inv-zoom));
+}
+
+/* A selected card scrolls its own content (wheel; the stage pans otherwise). */
+.canvas-node.is-selected .canvas-node-container {
+  overflow: auto;
+}
+
+.canvas-node.is-editing .canvas-node-container {
+  overflow: hidden;
+  cursor: text;
+}
+
+.canvas-markdown {
+  padding: 10px 16px;
+  min-height: 100%;
+  box-sizing: border-box;
+  font-size: 16px;
+}
+
+.canvas-markdown > :first-child {
+  margin-top: 0;
+}
+
+.canvas-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.canvas-node-plain {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 10px 16px;
+  overflow: hidden;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.canvas-node-plain.is-muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Zoomed far out, cards show their first lines large enough to read as titles. */
+.canvas-world.is-low-detail .canvas-node-plain {
+  font-size: calc(14px * clamp(1, var(--inv-zoom) * 0.6, 8));
+}
+
+.canvas-world.is-preview .canvas-node-plain {
+  font-size: 16px;
+}
+
+.canvas-node-label {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  max-width: 100%;
+  margin-bottom: calc(4px * var(--inv-zoom));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(14px * clamp(1, var(--inv-zoom) * 0.7, 10));
+  line-height: 1.3;
+  color: var(--text-muted);
+  transform-origin: 0 100%;
+}
+
+.canvas-node-label.is-file {
+  cursor: pointer;
+}
+
+.canvas-node-label.is-file:hover {
+  color: var(--link);
+}
+
+.canvas-node-label-sub {
+  margin-left: 6px;
+  color: var(--text-faint);
+}
+
+.canvas-node-label.is-group {
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.canvas-node.is-group.has-color .canvas-node-label.is-group {
+  background: color-mix(in srgb, var(--canvas-color) 30%, var(--background-secondary));
+}
+
+.canvas-group-box {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--background-modifier-border-hover);
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--text-faint) 6%, transparent);
+}
+
+.canvas-node.is-group.has-color .canvas-group-box {
+  border-color: var(--canvas-color);
+  background-color: color-mix(in srgb, var(--canvas-color) 7%, transparent);
+}
+
+.canvas-node.is-group.is-selected .canvas-group-box,
+.canvas-node.is-group.is-target .canvas-group-box {
+  outline: calc(2px * var(--inv-zoom)) solid var(--interactive-accent);
+  outline-offset: calc(2px * var(--inv-zoom));
+}
+
+.canvas-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+}
+
+.canvas-node.is-file:has(> .canvas-node-container > .canvas-image) .canvas-node-container {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.canvas-node.is-file.has-color:has(> .canvas-node-container > .canvas-image) .canvas-node-container {
+  border-color: var(--canvas-color);
+}
+
+.canvas-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.canvas-file-chip,
+.canvas-file-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  color: var(--text-muted);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.canvas-file-chip-name {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.canvas-file-chip-size {
+  font-size: var(--font-ui-small);
+}
+
+.canvas-link-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.canvas-link-host {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.canvas-link-url {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  overflow-wrap: anywhere;
+}
+
+.canvas-link-open {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+/* ---------- handles ---------- */
+
+.canvas-node {
+  --handle: calc(14px * var(--inv-zoom));
+}
+
+@media (pointer: coarse) {
+  .canvas-node {
+    --handle: calc(30px * var(--inv-zoom));
+  }
+}
+
+.canvas-resize {
+  position: absolute;
+  z-index: 2;
+}
+
+.canvas-resize.is-n,
+.canvas-resize.is-s {
+  left: var(--handle);
+  right: var(--handle);
+  height: var(--handle);
+  cursor: ns-resize;
+}
+
+.canvas-resize.is-e,
+.canvas-resize.is-w {
+  top: var(--handle);
+  bottom: var(--handle);
+  width: var(--handle);
+  cursor: ew-resize;
+}
+
+.canvas-resize.is-n {
+  top: calc(var(--handle) / -2);
+}
+
+.canvas-resize.is-s {
+  bottom: calc(var(--handle) / -2);
+}
+
+.canvas-resize.is-e {
+  right: calc(var(--handle) / -2);
+}
+
+.canvas-resize.is-w {
+  left: calc(var(--handle) / -2);
+}
+
+.canvas-resize.is-ne,
+.canvas-resize.is-se,
+.canvas-resize.is-sw,
+.canvas-resize.is-nw {
+  width: var(--handle);
+  height: var(--handle);
+}
+
+.canvas-resize.is-ne {
+  top: calc(var(--handle) / -2);
+  right: calc(var(--handle) / -2);
+  cursor: nesw-resize;
+}
+
+.canvas-resize.is-sw {
+  bottom: calc(var(--handle) / -2);
+  left: calc(var(--handle) / -2);
+  cursor: nesw-resize;
+}
+
+.canvas-resize.is-nw {
+  top: calc(var(--handle) / -2);
+  left: calc(var(--handle) / -2);
+  cursor: nwse-resize;
+}
+
+.canvas-resize.is-se {
+  right: calc(var(--handle) / -2);
+  bottom: calc(var(--handle) / -2);
+  cursor: nwse-resize;
+}
+
+.canvas-resize.is-se::after {
+  content: '';
+  position: absolute;
+  inset: 25%;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.canvas-connect {
+  position: absolute;
+  z-index: 3;
+  width: var(--handle);
+  height: var(--handle);
+  transform: translate(-50%, -50%);
+  cursor: crosshair;
+}
+
+.canvas-connect::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border: calc(2px * var(--inv-zoom)) solid var(--interactive-accent);
+  border-radius: 50%;
+  background: var(--background-primary);
+}
+
+.canvas-connect:hover::after {
+  background: var(--interactive-accent);
+}
+
+.canvas-connect.is-top {
+  left: 50%;
+  top: 0;
+}
+
+.canvas-connect.is-bottom {
+  left: 50%;
+  top: 100%;
+}
+
+.canvas-connect.is-left {
+  left: 0;
+  top: 50%;
+}
+
+.canvas-connect.is-right {
+  left: 100%;
+  top: 50%;
+}
+
+/* ---------- edges ---------- */
+
+.canvas-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-edge {
+  --canvas-edge: var(--text-muted);
+}
+
+.canvas-edge.has-color {
+  --canvas-edge: var(--canvas-color);
+}
+
+.canvas-edge.is-selected {
+  --canvas-edge: var(--interactive-accent);
+}
+
+.canvas-edge-line {
+  fill: none;
+  stroke: var(--canvas-edge, var(--text-muted));
+  stroke-width: calc(2px * max(1, var(--inv-zoom) * 0.6));
+  stroke-linecap: round;
+}
+
+.canvas-edge-line.is-preview {
+  stroke: var(--interactive-accent);
+  stroke-dasharray: calc(8px * var(--inv-zoom)) calc(6px * var(--inv-zoom));
+}
+
+.canvas-edge-arrow {
+  fill: var(--canvas-edge, var(--text-muted));
+}
+
+.canvas-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: calc(16px * var(--inv-zoom));
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.canvas-world.is-preview .canvas-edge-hit {
+  pointer-events: none;
+}
+
+.canvas-edge-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  max-width: 320px;
+  padding: 2px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  white-space: pre-wrap;
+  text-align: center;
+  cursor: pointer;
+}
+
+.canvas-edge-label.has-color {
+  border-color: var(--canvas-color);
+}
+
+.canvas-edge-label.is-selected {
+  border-color: var(--interactive-accent);
+}
+
+.canvas-marquee {
+  position: absolute;
+  border: calc(1px * var(--inv-zoom)) solid var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+  pointer-events: none;
+}
+
+/* ---------- card editor ---------- */
+
+.canvas-card-editor {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  touch-action: auto;
+  cursor: text;
+}
+
+/* The editor fills the card, so a tap anywhere in it places the caret (and keeps the focus there). */
+.canvas-card-editor .cm-editor {
+  height: 100%;
+  background: transparent;
+}
+
+.canvas-card-editor .cm-scroller {
+  overflow: auto;
+}
+
+.canvas-card-editor .cm-content {
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.canvas-card-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.canvas-card-editor .cm-content {
+  padding: 10px 16px;
+  font-family: var(--font-text);
+  font-size: 16px;
+}
+
+/* ---------- floating UI ---------- */
+
+.canvas-header {
+  position: absolute;
+  z-index: 6;
+  top: 8px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 24px);
+  padding: 2px 4px 2px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background-primary) 85%, transparent);
+}
+
+.canvas-title {
+  min-width: 3ch;
+  max-width: 50vw;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-normal);
+  font: 600 16px var(--font-text);
+  text-overflow: ellipsis;
+}
+
+.canvas-title:focus {
+  outline: 2px solid var(--interactive-accent);
+}
+
+.canvas-title.is-invalid {
+  outline-color: var(--text-error);
+}
+
+.canvas-toolbar {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  padding: 4px;
+  overflow-x: auto;
+  transform: translateX(-50%);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-l);
+  scrollbar-width: none;
+}
+
+.canvas-toolbar-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--background-modifier-border);
+}
+
+.canvas-tool {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.canvas-tool:hover:not(:disabled),
+.canvas-tool.is-active {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.canvas-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.canvas-zoom-level {
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-selection-bar {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  transform: translate(-50%, -100%);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-l);
+}
+
+.canvas-colors {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  transform: translateX(-50%);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-l);
+}
+
+.canvas-colors.is-above {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.canvas-swatch {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.canvas-swatch.is-current {
+  border-color: var(--text-normal);
+}
+
+.canvas-swatch.is-none {
+  background: linear-gradient(135deg, transparent 45%, var(--text-error) 45%, var(--text-error) 55%, transparent 55%), var(--background-primary);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.canvas-swatch.is-custom {
+  overflow: hidden;
+  background: conic-gradient(#fb464c, #e9973f, #e0de71, #44cf6e, #53dfdd, #a882ff, #fb464c);
+}
+
+.canvas-swatch.is-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-faint);
+  text-align: center;
+  pointer-events: none;
+}
+
+.canvas-text-mode {
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-text-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px var(--content-gutter, 16px);
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+@media (pointer: coarse) {
+  .canvas-tool {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .canvas-swatch {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* Phones: pinch zooms, so the toolbar keeps only "fit"; the top bar already shows the name and save
+   status, so the header stays out of the way (it reappears while its name is being edited). */
+@media (max-width: 600px) {
+  .canvas-toolbar .is-zoom-step {
+    display: none;
+  }
+
+  .canvas-header {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .canvas-header:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* On touch screens the keyboard and the editing toolbar need the room while a card is edited. */
+@media (pointer: coarse) {
+  .canvas-view.is-editing .canvas-toolbar {
+    display: none;
+  }
+}
+
+/* ---------- ![[Board.canvas]] preview ---------- */
+
+.canvas-embed {
+  margin: 0.5em 0 1em;
+}
+
+.canvas-embed-open {
+  display: block;
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+.canvas-preview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background-color: var(--background-primary-alt);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.canvas-preview.is-bare {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.canvas-preview .canvas-node-container {
+  box-shadow: none;
+}
+
+.canvas-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-faint);
+  font-style: italic;
+}

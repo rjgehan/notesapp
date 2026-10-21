@@ -130,6 +130,18 @@ export function isSide(v: unknown): v is CanvasSide {
   return v === 'top' || v === 'right' || v === 'bottom' || v === 'left';
 }
 
+/** The first lines of a card's Markdown as plain text, for zoomed-out views and previews. */
+export function plainExcerpt(text: string, max = 160): string {
+  const plain = text
+    .replace(/^---\n[\s\S]*?\n---\n?/, '')
+    .replace(/!?\[\[([^\]|]*)\|?([^\]]*)\]\]/g, (_m, t: string, d: string) => d || t)
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/[*_`~=]{1,3}/g, '')
+    .trim();
+  return plain.length > max ? plain.slice(0, max) + '…' : plain;
+}
+
 // ---------- colours ----------
 
 /** The six presets (the spec leaves the exact values to apps; these are Obsidian's). */
