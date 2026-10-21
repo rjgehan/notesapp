@@ -1,4 +1,5 @@
 import { undo } from '@codemirror/commands';
+import { syntaxTree } from '@codemirror/language';
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { destroyEditors, marked, noteEditor, parsed } from '../test/noteEditor';
@@ -102,6 +103,28 @@ describe('rich paste (ROADMAP 10a)', () => {
     expect(view.state.doc.toString()).toBe('fallback');
   });
 
+  it('keeps a pasted rule from turning the paragraph above into a heading', () => {
+    const view = noteEditor('Para\n‸');
+    paste(view, { 'text/html': '<hr><p>x</p>', 'text/plain': 'x' });
+    expect(view.state.doc.toString()).toBe('Para\n\n---\n\nx');
+    parsed(view);
+    expect(syntaxTree(view.state).topNode.getChild('SetextHeading2')).toBeNull();
+  });
+
+  it('pastes plain text into a code block, inline code and the properties', () => {
+    const html = { 'text/html': '<p><strong>Bold</strong> [x]</p>', 'text/plain': 'Bold [x]' };
+    for (const doc of ['```\n‸\n```', '    code‸', 'a `in‸line` b', '---\ntitle: ‸\n---\n']) {
+      const view = noteEditor(doc, { mode: 'source' });
+      const at = view.state.selection.main.head;
+      paste(view, html);
+      expect(view.state.sliceDoc(at, at + 8), doc).toBe('Bold [x]');
+    }
+    // Right after inline code, it converts.
+    const view = noteEditor('a `code`‸');
+    paste(view, html);
+    expect(view.state.doc.toString()).toBe('a `code`**Bold** [x]');
+  });
+
   it('does nothing in a locked note', () => {
     const view = noteEditor('‸text', { mode: 'locked' });
     paste(view, { 'text/html': '<p><b>x</b></p>', 'text/plain': 'x' });
@@ -115,5 +138,15 @@ describe('blockSafePaste', () => {
     const at = view.state.selection.main.head;
     expect(blockSafePaste(view.state, at, at, '| a |\n| - |')).toBe('\n| a |\n| - |');
     expect(blockSafePaste(view.state, at, at, '**x**')).toBe('**x**');
+  });
+
+  it('puts a rule on a line apart, never under a paragraph, and keeps the text after it apart', () => {
+    const view = noteEditor('Para‸ end\n');
+    const at = view.state.selection.main.head;
+    expect(blockSafePaste(view.state, at, at, '---\n\nx')).toBe('\n\n---\n\nx');
+    expect(blockSafePaste(view.state, at, at, 'x\n\n---')).toBe('x\n\n---\n\n');
+    const under = noteEditor('Para\n‸');
+    const end = under.state.selection.main.head;
+    expect(blockSafePaste(under.state, end, end, '---')).toBe('\n---');
   });
 });

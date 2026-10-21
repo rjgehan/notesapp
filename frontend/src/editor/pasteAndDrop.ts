@@ -2,9 +2,12 @@
 // inserted at the current selection (paste) or at the drop point; an explorer row dragged in
 // (`application/x-notesapp-path`) inserts a link to it. Rich text pasted from a web page, Google
 // Docs or Word becomes Markdown (features/htmlToMarkdown.ts, a lazy chunk loaded when the editor
-// first gets the focus); plain text, and anything pasted with Mod-Shift-V, stays plain.
+// first gets the focus); plain text, anything pasted with Mod-Shift-V, and anything pasted into code
+// or the properties stays plain.
+import { syntaxTree } from '@codemirror/language';
 import { EditorSelection, type EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import type { SyntaxNode } from '@lezer/common';
 import { modKey } from '../features/platform';
 import { noteContext } from './context';
 
@@ -74,23 +77,36 @@ export function inspectHtml(html: string): { text: string; rich: boolean } {
   return { text, rich: !code && (RICH_TAGS.test(html) || RICH_STYLES.test(html)) };
 }
 
+/** A first line that a paragraph right above it would take as its underline (a rule, `---`). */
+const UNDERLINE = /^ {0,3}(?:-+|=+)[ \t]*(?:\n|$)/;
+
 /**
  * Markdown pasted inside a line keeps its blocks apart from the text around it: a heading, list,
- * quote, table or code block starts on a line of its own, and a table or list that ends the paste
- * does not take in the rest of the line.
+ * quote, table, rule or code block starts on a line of its own, and a table, list or rule that ends
+ * the paste does not take in the rest of the line.
  */
 export function blockSafePaste(state: EditorState, from: number, to: number, markdown: string): string {
   const line = state.doc.lineAt(from);
   const before = state.sliceDoc(line.from, from);
   const after = state.sliceDoc(to, state.doc.lineAt(to).to);
   let insert = markdown;
-  if (/^(?:#{1,6}\s|[-+*]\s|\d{1,9}[.)]\s|>|\||```|~~~)/.test(markdown)) {
+  if (/^(?:#{1,6}\s|[-+*]\s|\d{1,9}[.)]\s|>|\||```|~~~)/.test(markdown) || UNDERLINE.test(markdown)) {
     if (before.trim() !== '') insert = '\n\n' + insert;
-    // A table or code block right under a paragraph would be read as part of it.
-    else if (/^(?:\||```|~~~)/.test(markdown) && line.number > 1 && state.doc.line(line.number - 1).text.trim() !== '') insert = '\n' + insert;
+    // A table or code block right under a paragraph would be read as part of it, and a rule as
+    // its underline (a heading).
+    else if ((/^(?:\||```|~~~)/.test(markdown) || UNDERLINE.test(markdown)) && line.number > 1 && state.doc.line(line.number - 1).text.trim() !== '') insert = '\n' + insert;
   }
-  if (after.trim() !== '' && /(?:^|\n)(?:\||[-+*]\s|\d{1,9}[.)]\s|#{1,6}\s|>|```|~~~)[^\n]*$/.test(markdown)) insert += '\n\n';
+  if (after.trim() !== '' && /(?:^|\n)(?:(?:\||[-+*]\s|\d{1,9}[.)]\s|#{1,6}\s|>|```|~~~)[^\n]*|-{3,}[ \t]*)$/.test(markdown)) insert += '\n\n';
   return insert;
+}
+
+/** Where pasted text stays as it is: code (`InlineCode` only inside its backticks) and the properties. */
+export function pastesPlain(state: EditorState, pos: number): boolean {
+  for (let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, -1); node; node = node.parent) {
+    if ((node.name === 'FencedCode' || node.name === 'CodeBlock') && pos > node.from) return true;
+    if ((node.name === 'InlineCode' || node.name === 'Frontmatter') && pos > node.from && pos < node.to) return true;
+  }
+  return false;
 }
 
 function insertPasted(view: EditorView, markdown: string): void {
@@ -148,7 +164,8 @@ export const pasteAndDrop = EditorView.domEventHandlers({
       ctx.insertFiles(files, { from, to }, true);
       return true;
     }
-    if (!content.rich) return false;
+    // In code, Markdown would be text: the plain text goes in (CodeMirror's own paste).
+    if (!content.rich || view.state.selection.ranges.some((r) => pastesPlain(view.state, r.from))) return false;
     event.preventDefault();
     pasteHtml(view, html, data?.getData('text/plain') ?? '');
     return true;

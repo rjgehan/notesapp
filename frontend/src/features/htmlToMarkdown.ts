@@ -8,6 +8,7 @@ import { gfm } from '@joplin/turndown-plugin-gfm';
 import DOMPurify from 'dompurify';
 import TurndownService from 'turndown';
 import { encodeMdPath } from './links';
+import { tagBodyLength } from './syntax';
 
 export interface HtmlToMarkdownOptions {
   /** `[[links]]` for links copied from this app's reading view (else Markdown links). */
@@ -15,6 +16,17 @@ export interface HtmlToMarkdownOptions {
   /** Line breaks need two trailing spaces (`settings.editor.strictLineBreaks`). */
   strictLineBreaks: boolean;
 }
+
+// Private-use characters that carry a mark through turndown to the escaping and the clean-up after
+// it; any in the pasted text are dropped first.
+/** `[` and `]` in a link's text: always escaped (`[[1]](#cite)` would read as a note link). */
+const OPEN = '';
+const CLOSE = '';
+/** Starts each link: a `!` right before it is text (`Wow![link](…)` would read as an image). */
+const LINK = '';
+/** Ends each line of a code block, so that its blank lines and trailing spaces stay. */
+const KEEP = '';
+const MARKS = /[-]/g;
 
 /** Tags whose content is never note text. */
 const FORBID_TAGS = ['style', 'script', 'noscript', 'template', 'form', 'button', 'textarea', 'select', 'option', 'iframe', 'object', 'embed', 'svg', 'math', 'canvas', 'audio', 'video', 'title', 'meta', 'link'];
@@ -247,11 +259,74 @@ function tables(doc: Document): void {
   }
 }
 
-/** Non-breaking spaces (Google Docs is full of them) become spaces, so Markdown sees them as spaces. */
-function plainSpaces(doc: Document): void {
+const FORMATS: Record<string, string> = { STRONG: 'strong', B: 'strong', EM: 'em', I: 'em', DEL: 'del', S: 'del', STRIKE: 'del', CODE: 'code', MARK: 'mark' };
+
+function formatOf(node: Node | null): string | undefined {
+  return node?.nodeType === Node.ELEMENT_NODE ? FORMATS[(node as Element).tagName] : undefined;
+}
+
+/**
+ * Puts the format wrapper `kind` of `el` outermost, when `el` is a chain of wrappers that each hold
+ * only the next (`<strong><em>\u2026`), and returns the outermost element. Formats nest in any order.
+ */
+function hoist(el: Element, kind: string): Element {
+  const chain = [el];
+  for (let last = el; last.childNodes.length === 1 && formatOf(last.firstChild); ) chain.push((last = last.firstChild as Element));
+  const at = chain.findIndex((w) => formatOf(w) === kind);
+  if (at <= 0) return el;
+  const wrapper = chain[at];
+  chain[at - 1].replaceChildren(...wrapper.childNodes);
+  el.replaceWith(wrapper);
+  wrapper.appendChild(el);
+  return wrapper;
+}
+
+function mergeRuns(parent: Node): void {
+  for (let node = parent.firstChild; node; node = node.nextSibling) {
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    let el = node as Element;
+    for (let next = el.nextSibling; formatOf(el) && formatOf(next); next = el.nextSibling) {
+      // A run that has this one's format among others gets that format outermost, and the other
+      // way round: `*a*` then `***b***` become `*a**b***`.
+      const kind = formatOf(el) ?? '';
+      const other = hoist(next as Element, kind);
+      if (formatOf(other) !== kind) el = hoist(el, formatOf(other) ?? '');
+      if (formatOf(other) !== formatOf(el)) break;
+      el.append(...other.childNodes);
+      other.remove();
+    }
+    node = el;
+    mergeRuns(el);
+  }
+}
+
+/**
+ * Runs of text in the same format next to each other (Google Docs and Word write a span for each
+ * run) become one run: `**ab**`, not `**a****b**`, which Markdown reads as one bold run with four
+ * asterisks in it. Spans mean nothing in Markdown; they go first.
+ */
+function formatRuns(doc: Document): void {
+  for (const span of doc.body.querySelectorAll('span, font')) unwrap(span);
+  doc.body.normalize();
+  mergeRuns(doc.body);
+}
+
+/** Links written as note links or tags, whose rules below read their text as it is. */
+function isNoteLink(a: Element): boolean {
+  return (a.classList.contains('internal-link') && a.hasAttribute('data-href')) || a.classList.contains('tag');
+}
+
+/**
+ * Text, last: non-breaking spaces (Google Docs is full of them) become spaces, so Markdown sees them
+ * as spaces, and the brackets in a link's text are marked to be escaped.
+ */
+function textNodes(doc: Document): void {
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node.nodeValue?.includes('\u00a0')) node.nodeValue = node.nodeValue.replace(/\u00a0/g, ' ');
+    let text = (node.nodeValue ?? '').replace(MARKS, '').replace(/\u00a0/g, ' ');
+    const link = node.parentElement?.closest('a[href]');
+    if (link && !isNoteLink(link) && !node.parentElement?.closest('code, pre')) text = text.replace(/\[/g, OPEN).replace(/\]/g, CLOSE);
+    if (text !== node.nodeValue) node.nodeValue = text;
   }
 }
 
@@ -274,8 +349,14 @@ export function escapeMarkdown(text: string): string {
     switch (ch) {
       case '\\':
         // A backslash that would escape the character after it.
-        escape = /[!-/:-@[-`{-~]/.test(at(i + 1));
+        escape = /[!-/:-@[-`{-~]/.test(at(i + 1));
         break;
+      case OPEN:
+        out += '\\[';
+        continue;
+      case CLOSE:
+        out += '\\]';
+        continue;
       case '`':
         escape = true;
         break;
@@ -331,6 +412,21 @@ export function escapeMarkdown(text: string): string {
     .replace(/^(=+|-+)(?=\s*$)/, '\\$1');
 }
 
+/** Text for a Markdown link's brackets: every bracket in it escaped. */
+function linkText(text: string): string {
+  return escapeMarkdown(text.replace(/\[/g, OPEN).replace(/\]/g, CLOSE));
+}
+
+/** The text of a `<pre>`, whose `<br>`s are line breaks too. */
+function preText(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? '';
+  if (node.nodeName === 'BR') return '\n';
+  return [...node.childNodes].map(preText).join('');
+}
+
+/** GitHub wraps a code block in `<div class="highlight highlight-source-js">`. */
+const HIGHLIGHT = /highlight-(?:text|source)-/;
+
 function turndownFor(options: HtmlToMarkdownOptions): TurndownService {
   const service = new TurndownService({
     headingStyle: 'atx',
@@ -367,23 +463,56 @@ function turndownFor(options: HtmlToMarkdownOptions): TurndownService {
     filter: 'mark',
     replacement: (content) => (content.trim() ? `==${content}==` : content),
   });
-  // Links copied from this app's reading view: back to the note links they were.
+  // Code blocks keep every line as it is: the marks keep tidy() off their blank lines and trailing spaces.
+  service.addRule('codeBlock', {
+    filter: (node) => node.nodeName === 'PRE' || (node.nodeName === 'DIV' && HIGHLIGHT.test(node.className) && node.firstChild?.nodeName === 'PRE'),
+    replacement(_content, node) {
+      const pre = (node.nodeName === 'PRE' ? node : node.firstChild) as Element;
+      const classes = [pre.querySelector('code')?.className, pre.className, pre.parentElement?.className].join(' ');
+      const language = /(?:language|lang|highlight-(?:text|source))-([\w+#.-]+)/.exec(classes)?.[1] ?? '';
+      const code = preText(pre).replace(/\n$/, '');
+      // A fence longer than any run of backticks in the code that would close it.
+      let size = 3;
+      for (const m of code.matchAll(/^ {0,3}(`{3,})/gm)) size = Math.max(size, m[1].length + 1);
+      const fence = '`'.repeat(size);
+      const lines = code.split('\n').map((line) => line + KEEP);
+      return `\n\n${fence}${language}\n${lines.join('\n')}\n${fence}\n\n`;
+    },
+  });
+  // turndown's link rule, with the mark before it.
+  service.addRule('link', {
+    filter: (node) => node.nodeName === 'A' && !!node.getAttribute('href'),
+    replacement(content, node) {
+      const el = node as Element;
+      const href = (el.getAttribute('href') ?? '').replace(/([<>()])/g, '\\$1');
+      const title = (el.getAttribute('title') ?? '').replace(/(\n+\s*)+/g, '\n').replace(/"/g, '\\"');
+      return `${LINK}[${content}](${href.includes(' ') ? `<${href}>` : href}${title ? ` "${title}"` : ''})`;
+    },
+  });
+  // Links copied from this app's reading view: back to the note links they were. One whose target
+  // or text a note link cannot hold (brackets, `|`, markup) is written as a Markdown link.
   service.addRule('internalLink', {
     filter: (node) => node.nodeName === 'A' && node.classList.contains('internal-link') && node.hasAttribute('data-href'),
     replacement(_content, node) {
       const target = (node as Element).getAttribute('data-href') ?? '';
       const text = (node.textContent ?? '').trim();
       const shown = target.replace(/^#/, '').replace(/#/g, ' > ');
-      if (options.useWikilinks) return text === '' || text === shown || text === target ? `[[${target}]]` : `[[${target}|${text}]]`;
+      if (options.useWikilinks && !/[[\]|<>\n]/.test(target) && !/[[\]<>\n]/.test(text)) {
+        return LINK + (text === '' || text === shown || text === target ? `[[${target}]]` : `[[${target}|${text}]]`);
+      }
       const hash = target.indexOf('#');
       const path = hash < 0 ? target : target.slice(0, hash);
       const subpath = hash < 0 ? '' : '#' + encodeMdPath(target.slice(hash + 1));
-      return `[${text || shown}](${encodeMdPath(path)}${subpath})`;
+      return `${LINK}[${linkText(text || shown)}](${encodeMdPath(path)}${subpath})`;
     },
   });
+  // A tag stays a tag; any other text in its place is escaped like all text.
   service.addRule('tagLink', {
     filter: (node) => node.nodeName === 'A' && node.classList.contains('tag'),
-    replacement: (_content, node) => node.textContent ?? '',
+    replacement(_content, node) {
+      const text = (node.textContent ?? '').trim();
+      return text.startsWith('#') && tagBodyLength(text.slice(1)) === text.length - 1 ? text : escapeMarkdown(text);
+    },
   });
   // Underlines, superscripts and the like keep their text; Markdown has no form for them.
   service.addRule('plainInline', {
@@ -393,14 +522,19 @@ function turndownFor(options: HtmlToMarkdownOptions): TurndownService {
   return service;
 }
 
-/** Collapses the blank lines turndown leaves between blocks, and trims. */
+/**
+ * Collapses the blank lines turndown leaves between blocks (code blocks keep theirs), and trims;
+ * then a `!` right before a link is escaped, and the marks go.
+ */
 function tidy(markdown: string, strictLineBreaks: boolean): string {
   return markdown
     .split('\n')
     .map((line) => (line.trim() === '' ? '' : strictLineBreaks ? line : line.trimEnd()))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/^\n+|\n+$/g, '');
+    .replace(/^\n+|\n+$/g, '')
+    .replace(/!/g, '\\!')
+    .replace(MARKS, '');
 }
 
 /** Markdown for pasted HTML (DESIGN §6.6.1). */
@@ -413,6 +547,7 @@ export function htmlToMarkdown(html: string, options: HtmlToMarkdownOptions): st
   leveledLists(doc);
   localImages(doc);
   tables(doc);
-  plainSpaces(doc);
+  formatRuns(doc);
+  textNodes(doc);
   return tidy(turndownFor(options).turndown(doc.body), options.strictLineBreaks);
 }

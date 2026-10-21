@@ -115,6 +115,40 @@ describe('rich paste: HTML to Markdown (ROADMAP 10a)', () => {
   it('turns non-breaking spaces into spaces and leaves no blank runs', () => {
     expect(md('<p>a&nbsp;b&nbsp;&nbsp;</p><br><br><p>c</p>')).toBe('a b\n\nc');
   });
+
+  it('escapes brackets in a link’s text, so a Wikipedia citation stays a link and never becomes a note link', () => {
+    const cite = '<p>Paris<sup class="reference"><a href="https://en.wikipedia.org/wiki/Paris#cite_note-1">[1]</a></sup> is big</p>';
+    expect(md(cite)).toBe('Paris[\\[1\\]](https://en.wikipedia.org/wiki/Paris#cite_note-1) is big');
+    expect(md('<p><a href="https://x.y">a ] b</a> and <a href="https://x.y">[[c]]</a></p>')).toBe('[a \\] b](https://x.y) and [\\[\\[c\\]\\]](https://x.y)');
+    // Code keeps its brackets; a backslash before a bracket stays a backslash.
+    expect(md('<p><a href="https://x.y"><code>a[0]</code> or \\[x]</a></p>')).toBe('[`a[0]` or \\\\\\[x\\]](https://x.y)');
+  });
+
+  it('merges runs in the same format next to each other (Google Docs and Word write a span for each run)', () => {
+    const span = (style: string, text: string) => `<span style="font-family:Arial;${style}">${text}</span>`;
+    expect(md(`<p>${span('font-weight:700;', 'Bold')}${span('font-weight:700;', ' run')} and ${span('font-weight:700;font-style:italic;', 'both')}${span('font-weight:700;', ' bold')}</p>`)).toBe('**Bold run** and ***both* bold**');
+    expect(md(`<p>${span('font-style:italic;', 'it')}${span('font-weight:700;font-style:italic;', 'both')}</p>`)).toBe('*it**both***');
+    expect(md('<p><b>a</b><strong>b</strong> <b>c</b><code>x</code><code>y</code></p>')).toBe('**ab** **c**`xy`');
+  });
+
+  it('escapes the text of tags and note links, so markup in it stays text', () => {
+    expect(md('<p><a class="tag" href="#">#x&lt;img src=x onerror=alert(1)&gt;</a> <a class="tag" href="#">#my_tag/sub</a></p>')).toBe('#x\\<img src=x onerror=alert(1)> #my_tag/sub');
+    // A note link that cannot hold its text or target is written as a Markdown link.
+    expect(md('<p><a class="internal-link" data-href="My Note">a&lt;img src=x&gt; [1]</a></p>')).toBe('[a\\<img src=x> \\[1\\]](My%20Note)');
+    expect(md('<p><a class="internal-link" data-href="x]]<img src=y>">t</a></p>')).toBe('[t](x%5D%5D%3Cimg%20src=y%3E)');
+  });
+
+  it('keeps the blank lines and trailing spaces of a code block, in a list and a quote too', () => {
+    expect(md('<pre><code>a  \n\n\n\nb\t\n</code></pre>')).toBe('```\na  \n\n\n\nb\t\n```');
+    expect(md('<ul><li>item<pre><code>x\n\n\ny  </code></pre></li></ul><blockquote><pre>q\n\n\nr</pre></blockquote>')).toBe('- item\n\n  ```\n  x\n  \n  \n  y  \n  ```\n\n> ```\n> q\n> \n> \n> r\n> ```');
+    // A bare <pre> with line breaks, and GitHub's highlighted block with its language.
+    expect(md('<pre>one<br>two</pre><div class="highlight highlight-source-js"><pre>```\nx</pre></div>')).toBe('```\none\ntwo\n```\n\n````js\n```\nx\n````');
+  });
+
+  it('escapes a `!` right before a link, which would make it an image or an embed', () => {
+    expect(md('<p>Wow!<a href="https://x.y">link</a> and Hi!<a class="internal-link" data-href="N">N</a></p>')).toBe('Wow\\![link](https://x.y) and Hi\\![[N]]');
+    expect(md('<p>Wow! <a href="https://x.y">link</a>, <b>yes!</b><a href="https://x.y">x</a></p>')).toBe('Wow! [link](https://x.y), **yes!**[x](https://x.y)');
+  });
 });
 
 describe('escaping pasted text (ROADMAP 10a)', () => {
