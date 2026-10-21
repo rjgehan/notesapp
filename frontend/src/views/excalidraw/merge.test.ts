@@ -64,6 +64,35 @@ describe('element merge', () => {
     expect(mergeElements([old], [opened], [theirs]).elements[0].x).toBe(42);
   });
 
+  it('does not count what Excalidraw normalizes on load as an edit, so a deletion on the other side holds', () => {
+    // Excalidraw saves new elements with `boundElements: null` and holds them as `[]` once the file is open.
+    const e = el('e', { boundElements: null, index: 'a0' });
+    const f = el('f', { boundElements: null, index: 'a1' });
+    const opened = (x: SceneElement): SceneElement => ({ ...x, boundElements: [], frameId: null, link: null, locked: false, groupIds: [] });
+    expect(unchanged(opened(e), e)).toBe(true);
+    // This device moved F in its open drawing; the other deleted E.
+    expect(mergeElements([e, f], [opened(e), edit(opened(f), { x: 9 })], [f]).elements.map((x) => x.id)).toEqual(['f']);
+    // The other way round: theirs comes from a device that had the drawing open.
+    expect(mergeElements([e, f], [f], [opened(e), edit(opened(f), { y: 3 })]).elements.map((x) => x.id)).toEqual(['f']);
+    // An older file's text without the keys restore adds.
+    const t = text('t', 'Hi');
+    expect(unchanged({ ...t, lineHeight: 1.25, autoResize: true, containerId: null, link: '' }, t)).toBe(true);
+    // A stroke is saved with its drawing cursor and opened without it; an image of a file older
+    // than crops gets `crop: null` and a scale; a link is trimmed.
+    const stroke = el('s', { type: 'freedraw', points: [[0, 0], [4, 4]], lastCommittedPoint: [4, 4] });
+    expect(unchanged({ ...stroke, lastCommittedPoint: null }, stroke)).toBe(true);
+    const image = el('i', { type: 'image', fileId: 'f1' });
+    expect(unchanged({ ...image, crop: null, scale: [1, 1], status: 'saved' }, image)).toBe(true);
+    expect(unchanged({ ...opened(e), link: '[[Plan]]' }, { ...e, link: ' [[Plan]] ' })).toBe(true);
+    expect(mergeElements([stroke, f], [{ ...stroke, lastCommittedPoint: null }, edit(opened(f), { x: 9 })], [f]).elements.map((x) => x.id)).toEqual(['f']);
+    // Real changes to those properties still count.
+    expect(unchanged({ ...image, crop: { x: 1, y: 1, width: 5, height: 5, naturalWidth: 10, naturalHeight: 10 } }, image)).toBe(false);
+    expect(unchanged({ ...stroke, points: [[0, 0], [5, 5]] }, stroke)).toBe(false);
+    expect(unchanged({ ...opened(e), boundElements: [{ id: 'arrow', type: 'arrow' }] }, e)).toBe(false);
+    expect(unchanged({ ...t, lineHeight: 2 }, { ...t, lineHeight: 1.25 })).toBe(false);
+    expect(unchanged({ ...t, link: '[[Plan]]' }, t)).toBe(false);
+  });
+
   it('orders by fractional index when every element has one', () => {
     const top = el('top', { index: 'a5' });
     const mid = el('mid', { index: 'a0V' });

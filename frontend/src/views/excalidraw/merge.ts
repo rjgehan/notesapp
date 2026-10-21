@@ -35,19 +35,62 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   return true;
 }
 
-/** Bookkeeping that changes without the element changing (rawText mirrors the Markdown section). */
-const VOLATILE = new Set(['version', 'versionNonce', 'updated', 'rawText']);
+/**
+ * Bookkeeping that changes without the element changing: rawText mirrors the Markdown section,
+ * an image's status is how its file loaded on that device, and `lastCommittedPoint` is the
+ * drawing cursor of a line or stroke (a stroke is saved with it, and opened without it).
+ */
+const VOLATILE = new Set(['version', 'versionNonce', 'updated', 'rawText', 'status', 'lastCommittedPoint']);
 
 /**
- * True when `side` holds no change to `base`. A fractional `index` that `base` lacked is not a
- * change: Excalidraw assigns one (and bumps the version) when it opens an older file.
+ * What Excalidraw's restore (`restoreElementWithProperties`) puts in place of a property that a
+ * file lacks or holds as null (it creates `boundElements: null`, and opens it as `[]`), without
+ * bumping the version. Opening a drawing changes these, the user does not, so a missing value and
+ * the default compare equal.
+ */
+const LOAD_DEFAULTS: Readonly<Record<string, unknown>> = {
+  boundElements: [],
+  groupIds: [],
+  frameId: null,
+  containerId: null,
+  link: null,
+  locked: false,
+  angle: 0,
+  roundness: null,
+  autoResize: true,
+  isDeleted: false,
+  // Images (`crop` is newer than many files) and frames.
+  crop: null,
+  scale: [1, 1],
+  name: null,
+};
+
+/** Restore derives these from other properties when a file lacks them: a value base lacked is not a change. */
+const DERIVED = new Set(['index', 'lineHeight']);
+
+/** An element's property as Excalidraw holds it once the drawing is open. */
+function loadedValue(e: SceneElement, k: string): unknown {
+  let v = e[k];
+  if (!(k in LOAD_DEFAULTS)) return v;
+  // Restore trims a link (`normalizeLink`), and an empty one is none.
+  if (k === 'link' && typeof v === 'string') v = v.trim() || null;
+  return v === undefined || v === null ? LOAD_DEFAULTS[k] : v;
+}
+
+/**
+ * True when `side` holds no change to `base`. What Excalidraw adds or normalizes when it opens a
+ * file is not a change: a fractional `index` (it bumps the version for that), a line height, an
+ * empty `boundElements` list in place of null, a stroke's dropped `lastCommittedPoint`, and the
+ * other restore defaults.
  */
 export function unchanged(side: SceneElement, base: SceneElement): boolean {
-  const ignoreIndex = typeof base.index !== 'string';
   const keys = new Set([...Object.keys(side), ...Object.keys(base)]);
   for (const k of keys) {
-    if (VOLATILE.has(k) || (ignoreIndex && k === 'index')) continue;
-    if (!deepEqual(side[k], base[k])) return false;
+    if (VOLATILE.has(k)) continue;
+    if (DERIVED.has(k) && (base[k] === undefined || base[k] === null)) continue;
+    // A text's unwrapped text defaults to its text.
+    if (k === 'originalText' && base.originalText === undefined && side.originalText === side.text) continue;
+    if (!deepEqual(loadedValue(side, k), loadedValue(base, k))) return false;
   }
   return true;
 }
@@ -112,7 +155,8 @@ export function mergeElements(base: readonly SceneElement[], mine: readonly Scen
     if (element.isDeleted) continue;
     // Both changed it: a link that only the other side changed (a rename rewrote it there) stays.
     const other = side === 'mine' ? theirsEl : mineEl;
-    if (base && other && deepEqual(element.link, base.link) && !deepEqual(other.link, base.link)) element = { ...element, link: other.link };
+    const linkOf = (e: SceneElement) => loadedValue(e, 'link');
+    if (base && other && deepEqual(linkOf(element), linkOf(base)) && !deepEqual(linkOf(other), linkOf(base))) element = { ...element, link: other.link };
     elements.push(element);
     from.set(id, side);
   }

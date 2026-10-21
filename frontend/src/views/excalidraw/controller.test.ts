@@ -12,11 +12,14 @@ import { mergeDrawingTexts } from './merge';
 // ---------- a stand-in for Excalidraw ----------
 
 const fakeLib: SceneLib = {
-  // Like Excalidraw's restore: copies, and an incoming element older than the local one is bumped past it.
+  // Like Excalidraw's restore: copies with its defaults (`boundElements: null` becomes `[]`, a
+  // stroke loses its drawing cursor, without a version bump), and an incoming element older than
+  // the local one is bumped past it.
   restoreElements: (elements, local) =>
     elements.map((e) => {
       const mine = local?.find((l) => l.id === e.id);
-      return mine && mine.version > e.version ? { ...e, version: mine.version + 1 } : { ...e };
+      const restored = { ...e, boundElements: e.boundElements ?? [], ...(e.type === 'freedraw' ? { lastCommittedPoint: null } : {}) };
+      return mine && mine.version > e.version ? { ...restored, version: mine.version + 1 } : restored;
     }),
   hashElementsVersion: (elements) => elements.reduce((h, e) => (Math.imul(h ^ e.version, 31) + e.id.length) | 0, 7),
   captureNever: 'NEVER',
@@ -307,6 +310,27 @@ describe('text put into the buffer from outside the view', () => {
     canvas.add(el('c'));
     await vi.advanceTimersByTimeAsync(1000);
     expect(saved().scene.elements.map((e) => e.id)).toEqual(['a', 'z', 'c']);
+  });
+});
+
+describe('merging with what Excalidraw normalized on load', () => {
+  it('a deletion on the other device holds, though the open drawing holds `boundElements: []`', async () => {
+    const { canvas, saved, remote } = await setup('Plan.excalidraw', json(scene([el('e', { boundElements: null }), el('f', { boundElements: null })])));
+    canvas.change('f', { x: 30 });
+    await remote((s) => ({ ...s, elements: s.elements.filter((e) => e.id !== 'e') }));
+    expect(canvas.ids()).toEqual(['f']);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => [e.id, e.x])).toEqual([['f', 30]]);
+  });
+
+  it('a stroke deleted on the other device stays deleted, though it opened without its drawing cursor', async () => {
+    const stroke = el('s', { type: 'freedraw', points: [[0, 0], [4, 4]], lastCommittedPoint: [4, 4], boundElements: null });
+    const { canvas, saved, remote } = await setup('Plan.excalidraw', json(scene([stroke, el('f', { boundElements: null })])));
+    canvas.change('f', { x: 30 });
+    await remote((s) => ({ ...s, elements: s.elements.filter((e) => e.id !== 's') }));
+    expect(canvas.ids()).toEqual(['f']);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(saved().scene.elements.map((e) => e.id)).toEqual(['f']);
   });
 });
 
