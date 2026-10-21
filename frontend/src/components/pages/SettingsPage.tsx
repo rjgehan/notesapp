@@ -334,8 +334,8 @@ function EditorSection({ settings: s, set, disabled }: VaultSectionProps) {
           value={e.defaultMode}
           disabled={disabled}
           options={[
-            ['edit', 'Editing view (Live Preview)'],
-            ['read', 'Reading view'],
+            ['edit', 'Live Preview (editing)'],
+            ['read', 'Locked (reading)'],
           ]}
           onChange={(v) => editor({ defaultMode: v })}
         />
@@ -343,7 +343,7 @@ function EditorSection({ settings: s, set, disabled }: VaultSectionProps) {
       <Row label="Readable line length" description="Limit the line width of notes.">
         <Toggle label="Readable line length" checked={e.readableLineLength} disabled={disabled} onChange={(v) => editor({ readableLineLength: v })} />
       </Row>
-      <Row label="Strict line breaks" description="Off (as in Obsidian): a single line break shows as a line break in reading view.">
+      <Row label="Strict line breaks" description="Off (as in Obsidian): a single line break shows as a line break in embedded notes. A note itself always shows its lines as typed.">
         <Toggle label="Strict line breaks" checked={e.strictLineBreaks} disabled={disabled} onChange={(v) => editor({ strictLineBreaks: v })} />
       </Row>
     </>

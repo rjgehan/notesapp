@@ -22,9 +22,9 @@ interface Props {
 }
 
 /**
- * Lock editing (DESIGN §6.6.1): a note locks and unlocks editing (Live Preview, read-only); the
- * reading view goes back to editing. Views with `edit` and `read` switch between the two. Mod-E does
- * the same, except in a note's text, where it toggles inline code; so only unlocking names it.
+ * Lock editing (DESIGN §6.6.1): a note locks and unlocks editing (Live Preview, read-only, which is
+ * also the reading view). Views with `edit` and `read` switch between the two. Mod-E does the same,
+ * except in a note's text, where it toggles inline code; so only unlocking names it.
  */
 export function ModeToggle({ mode }: { mode: ViewMode }) {
   const shortcut = keyLabel('Mod-e');
@@ -97,7 +97,7 @@ export function NoteHeader({ path, snapshot, mode, editable }: Props) {
             {snapshot && <SaveStatus snapshot={snapshot} />}
             {breakpoint === 'desktop' && (
               <>
-                {mode !== 'read' && <SourceToggle mode={mode} />}
+                <SourceToggle mode={mode} />
                 <ModeToggle mode={mode} />
               </>
             )}

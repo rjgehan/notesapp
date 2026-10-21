@@ -10,6 +10,7 @@ import { linkTo } from '../features/fileOps';
 import { wantsNoteFocus } from '../features/focus';
 import { openLink, openTag } from '../features/navigation';
 import { recentPaths } from '../features/recent';
+import { renderLiveEmbed, renderLiveProperties } from '../render/liveEmbeds';
 import { usePrefs } from '../state/prefs';
 import type { DocumentSession } from '../sync/DocumentSession';
 import { clearActiveEditor, setActiveEditor } from './activeEditor';
@@ -36,6 +37,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
   const spellcheck = usePrefs((s) => s.spellcheck);
   const autocorrect = usePrefs((s) => s.autocorrect);
   const syntaxVisibility = usePrefs((s) => s.syntaxVisibility);
+  const loadRemoteImages = usePrefs((s) => s.loadRemoteImages);
   const tree = useTree().data;
   const callbacks = useRef({ onToggleMode, onView });
 
@@ -60,6 +62,8 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       insertFiles: (files, range, pasted) => void insertAttachments(session, files, range, pasted),
       linkTo: (path) => linkTo(path, session.path),
       showMenu: openContextMenu,
+      renderEmbed: (el, embed) => renderLiveEmbed(el, embed, session.path),
+      renderProperties: (el, yaml, onEdit) => renderLiveProperties(el, yaml, onEdit, session.path),
     };
     const hooks: EditorHooks = {
       onLocalChange: () => session.markDirty(),
@@ -67,7 +71,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       readOnly,
       spellcheck,
       autocorrect,
-      livePreview: preview ? { visibility: syntaxVisibility, locked: preview === 'locked', checkboxes: !readOnly } : null,
+      livePreview: preview ? { visibility: syntaxVisibility, locked: preview === 'locked', checkboxes: !readOnly, remoteImages: loadRemoteImages } : null,
     };
     const state = session.prepareState((st) => st.update({ effects: StateEffect.reconfigure.of(extensions(ctx, hooks)) }).state);
     const v = new EditorView({ state, parent });
@@ -90,7 +94,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
     };
     // `autoFocus` only matters at mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, readOnly, preview, syntaxVisibility, spellcheck, autocorrect, extensions]);
+  }, [session, readOnly, preview, syntaxVisibility, loadRemoteImages, spellcheck, autocorrect, extensions]);
 
   // Link decorations re-resolve when the vault changes.
   useEffect(() => {

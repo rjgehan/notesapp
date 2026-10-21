@@ -740,3 +740,115 @@ th.cm-lp-cell {
     inset: -13px;
   }
 }
+
+/* ---------- images, embeds, footnotes, comments, code fences, properties (ROADMAP 10b) ---------- */
+
+/* An embed shows as the reading of the note shows it (reading.css, through .markdown-rendered).
+   Images flow with the text; media, PDFs and notes take the line's width. */
+.cm-lp-embed {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  white-space: normal;
+}
+
+.cm-lp-embed.markdown-rendered {
+  contain: none;
+}
+
+.cm-lp-embed-note,
+.cm-lp-embed-pdf,
+.cm-lp-embed-video,
+.cm-lp-embed-audio {
+  width: 100%;
+}
+
+.cm-lp-embed img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-s);
+  vertical-align: bottom;
+}
+
+.cm-lp-embed .internal-embed {
+  margin: 0.25em 0;
+}
+
+.cm-lp-remote-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px dashed var(--background-modifier-border-hover);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.cm-lp-remote-image::before {
+  content: 'Load remote image: ';
+  color: var(--text-faint);
+}
+
+/* A footnote's number; its text shows on hover or a tap. */
+.cm-lp-footnote {
+  padding: 0 1px;
+  color: var(--link);
+  font-size: 0.75em;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.cm-lp-footnote.is-missing {
+  color: var(--text-faint);
+}
+
+.cm-lp-footnote-label {
+  margin-right: 0.35em;
+  color: var(--text-muted);
+}
+
+.cm-editor .cm-tooltip.cm-lp-footnote-tooltip,
+.cm-editor .cm-tooltip .cm-lp-footnote-tooltip {
+  max-width: min(28em, 90vw);
+  padding: 6px 10px;
+  font-size: 0.9em;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cm-lp-footnote-tooltip.is-missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* A code block's hidden fences are slim lines; the opening one shows the language. */
+.note-editor .cm-editor .cm-line.cm-lp-fence-line {
+  font-size: 0.7em;
+  line-height: 1.6;
+}
+
+.cm-lp-fence {
+  float: right;
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  user-select: none;
+}
+
+/* The properties block (the frontmatter) and hidden comment blocks. */
+.cm-lp-properties {
+  padding-top: 2px;
+  font-family: var(--font-interface);
+  white-space: normal;
+}
+
+.cm-lp-properties .properties {
+  margin-bottom: 12px;
+}
+
+.cm-lp-hidden-comment {
+  height: 0;
+  overflow: hidden;
+}

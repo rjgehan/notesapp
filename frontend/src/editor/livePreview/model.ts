@@ -5,6 +5,7 @@
 import { syntaxTree } from '@codemirror/language';
 import type { EditorSelection, EditorState, Line } from '@codemirror/state';
 import type { SyntaxNode, Tree } from '@lezer/common';
+import { isInternalDestination, parseMarkdownDestination, splitWikiBody } from '../../features/syntax';
 
 /**
  * How the cursor treats a replaced range (DESIGN §6.6.1):
@@ -17,17 +18,57 @@ import type { SyntaxNode, Tree } from '@lezer/common';
  * - `close-link`: the closing marker of a link or inline code. A click at its edge puts the cursor
  *   after it, so typing does not extend the link.
  * - `inner`: markup inside an element's text (the `#` of `[[Note#Heading]]`, shown as " > ").
- * - `block`: a whole line shown as a widget (`---`).
+ * - `block`: a whole line shown as a widget (`---`, a code block's fence).
+ * - `atom`: an inline element shown whole as a widget (an image or embed, a footnote reference).
+ *   The cursor steps over it, and Backspace or Delete next to it deletes it whole.
  */
-export type PieceRole = 'prefix' | 'open' | 'close' | 'close-link' | 'inner' | 'block';
+export type PieceRole = 'prefix' | 'open' | 'close' | 'close-link' | 'inner' | 'block' | 'atom';
+
+/** An embedded file or image: `![[target#subpath|display]]`, or `![alt](destination)`. */
+export interface EmbedSpec {
+  /** The vault file's link target (a wikilink's, or an internal destination's), or null for a web image. */
+  target: string | null;
+  subpath: string | null;
+  /** A wikilink embed's display text, or a Markdown image's alt text (a size taken out). */
+  display: string | null;
+  /** A web image's address (`https:`, `//host`, or a `data:image/…` URI). */
+  url: string | null;
+  /** `300` or `300x200`, from `|300` after the target or the alt text. */
+  size: { width: number; height: number | null } | null;
+}
 
 export type WidgetSpec =
   | { type: 'bullet'; depth: number }
   | { type: 'checkbox'; checked: boolean; depth: number }
   | { type: 'rule' }
-  | { type: 'text'; text: string; className: string };
+  | { type: 'text'; text: string; className: string }
+  | { type: 'embed'; embed: EmbedSpec }
+  /** A footnote reference `[^label]`, or an inline footnote `^[text]` (`label` null) starting at `at`. */
+  | { type: 'footnote'; label: string | null; at: number }
+  /** The label of a footnote's definition (`[^label]:`). */
+  | { type: 'footnote-label'; label: string }
+  /** A code block's opening fence, showing its language. */
+  | { type: 'fence'; language: string };
 
-export type ElementKind = 'heading' | 'quote' | 'list' | 'rule' | 'emphasis' | 'strong' | 'strikethrough' | 'highlight' | 'code' | 'link' | 'wikilink' | 'autolink' | 'url';
+export type ElementKind =
+  | 'heading'
+  | 'quote'
+  | 'list'
+  | 'rule'
+  | 'emphasis'
+  | 'strong'
+  | 'strikethrough'
+  | 'highlight'
+  | 'code'
+  | 'link'
+  | 'wikilink'
+  | 'autolink'
+  | 'url'
+  | 'embed'
+  | 'footnote'
+  | 'footnote-def'
+  | 'comment'
+  | 'codeblock';
 
 /** A replaced range of markup: hidden, or shown as a widget. */
 export interface Piece {
@@ -71,8 +112,12 @@ interface Draft extends Omit<LiveElement, 'pieces'> {
 /** Width of one list level, and of a bullet or task box, in em (the reading view's list indent). */
 export const LIST_INDENT_EM = 1.6;
 
-/** Subtrees Live Preview leaves as typed: code, HTML, comments, frontmatter, and what 10a/10b render as blocks. */
-const SKIP = new Set(['FencedCode', 'CodeBlock', 'HTMLBlock', 'CommentBlock', 'Comment', 'Frontmatter', 'Embed', 'Image', 'Table', 'LinkReference']);
+/**
+ * Subtrees whose insides Live Preview leaves as typed: code, HTML, comments, frontmatter, tables
+ * (a grid) and the elements shown whole as a widget. Some are elements themselves (a code block's
+ * fences, an embed, an inline comment); comment blocks and the frontmatter are blocks (blocks.ts).
+ */
+const SKIP = new Set(['FencedCode', 'CodeBlock', 'HTMLBlock', 'CommentBlock', 'Comment', 'Frontmatter', 'Embed', 'Image', 'Table', 'LinkReference', 'FootnoteReference', 'InlineFootnote']);
 
 const HEADING = /^ATXHeading([1-6])$/;
 
@@ -288,6 +333,132 @@ function wikilink(state: EditorState, node: SyntaxNode): Draft | null {
   ]);
 }
 
+/** Whether `from`..`to` is on one line: a replaced range never crosses a line break (a view plugin provides them). */
+function oneLine(state: EditorState, from: number, to: number): boolean {
+  return !state.sliceDoc(from, to).includes('\n');
+}
+
+/** An element shown whole as one widget (an embed, a footnote reference). */
+function atom(kind: ElementKind, from: number, to: number, widget: WidgetSpec): Draft {
+  return { kind, from, to, textFrom: to, textTo: to, revealFrom: from, revealTo: to, pieces: [{ from, to, role: 'atom', widget }], marks: [] };
+}
+
+const SIZE = /^(\d+)(?:x(\d+))?$/;
+
+/** `300` or `300x200` as a size, else null. */
+export function parseSize(text: string | null): EmbedSpec['size'] {
+  const m = text === null ? null : SIZE.exec(text.trim());
+  return m ? { width: Number(m[1]), height: m[2] ? Number(m[2]) : null } : null;
+}
+
+/** Web images Live Preview shows: `http(s):`, `//host`, and `data:` images of the kinds the reading view allowed. */
+const WEB_IMAGE = /^(?:https?:\/\/|\/\/|data:image\/(?:gif|png|jpeg|webp)[;,])/i;
+
+/**
+ * What an `Embed` (`![[target#subpath|display]]`) or `Image` (`![alt](destination)`, `alt|300`
+ * setting the width) node shows, read through `slice` (the note's text, or a table cell's); null
+ * for one that shows as typed (a `javascript:` image, a link without a target, one over a line
+ * break, which a view plugin's replaced range may not cross).
+ */
+export function embedSpec(node: SyntaxNode, slice: (from: number, to: number) => string): EmbedSpec | null {
+  if (slice(node.from, node.to).includes('\n')) return null;
+  if (node.name === 'Embed') {
+    if (!node.getChild('WikiLinkTarget')) return null;
+    const { target, subpath, display } = splitWikiBody(slice(node.from + 3, node.to - 2));
+    const size = parseSize(display);
+    return { target, subpath, display: size ? null : display, url: null, size };
+  }
+  const url = node.getChild('URL');
+  const marks = node.getChildren('LinkMark');
+  if (node.name !== 'Image' || !url || marks.length < 2) return null;
+  const raw = slice(url.from, url.to);
+  const dest = raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1) : raw;
+  let alt = slice(marks[0].to, marks[1].from);
+  let size: EmbedSpec['size'] = null;
+  const pipe = alt.lastIndexOf('|');
+  if (pipe >= 0 && parseSize(alt.slice(pipe + 1))) {
+    size = parseSize(alt.slice(pipe + 1));
+    alt = alt.slice(0, pipe);
+  } else if (parseSize(alt)) {
+    size = parseSize(alt);
+    alt = '';
+  }
+  if (isInternalDestination(dest)) {
+    const { target, subpath } = parseMarkdownDestination(raw);
+    return target === '' ? null : { target, subpath, display: alt || null, url: null, size };
+  }
+  // `javascript:` and other schemes show as typed.
+  return WEB_IMAGE.test(dest) ? { target: null, subpath: null, display: alt || null, url: dest, size } : null;
+}
+
+/** `![[file]]` and `![alt](file)`: the file (an image, media, a PDF, a note one level deep) or a web image. */
+function embed(state: EditorState, node: SyntaxNode): Draft | null {
+  const spec = embedSpec(node, (from, to) => state.sliceDoc(from, to));
+  return spec ? atom('embed', node.from, node.to, { type: 'embed', embed: spec }) : null;
+}
+
+/** `[^label]` and `^[text]`: a superscript number. */
+function footnote(state: EditorState, node: SyntaxNode): Draft | null {
+  if (!oneLine(state, node.from, node.to)) return null;
+  const label = node.name === 'FootnoteReference' ? node.getChild('FootnoteLabel') : null;
+  return atom('footnote', node.from, node.to, { type: 'footnote', label: label ? state.sliceDoc(label.from, label.to) : null, at: node.from });
+}
+
+/** `[^label]: text`: the label shows as the footnote's number, the text as text. */
+function footnoteDefinition(state: EditorState, node: SyntaxNode): Draft | null {
+  const label = node.getChild('FootnoteLabel');
+  if (!label) return null;
+  const line = state.doc.lineAt(label.from);
+  const textFrom = skipBlanks(state, label.to, line.to);
+  return {
+    kind: 'footnote-def',
+    from: node.from,
+    to: node.to,
+    textFrom,
+    textTo: textFrom,
+    revealFrom: label.from,
+    revealTo: textFrom,
+    pieces: [{ from: label.from, to: textFrom, role: 'prefix', widget: { type: 'footnote-label', label: state.sliceDoc(label.from + 2, label.to - 2) } }],
+    marks: [],
+  };
+}
+
+/** `%%text%%` inside a line: hidden. One that runs over a line break shows (hiding it would hide whole lines). */
+function comment(state: EditorState, node: SyntaxNode): Draft | null {
+  if (!oneLine(state, node.from, node.to)) return null;
+  return { kind: 'comment', from: node.from, to: node.to, textFrom: node.to, textTo: node.to, revealFrom: node.from, revealTo: node.to, pieces: [{ from: node.from, to: node.to, role: 'open', widget: null }], marks: [] };
+}
+
+/**
+ * A fenced code block: its fences hide (the opening one shows the language) while no selection
+ * touches the block. An unclosed block keeps its fence, so its runaway extent stays visible.
+ */
+function codeBlock(state: EditorState, node: SyntaxNode): Draft | null {
+  const marks = node.getChildren('CodeMark');
+  if (marks.length < 2) return null;
+  const open = marks[0];
+  const close = marks[marks.length - 1];
+  const openLine = state.doc.lineAt(open.from);
+  const closeLine = state.doc.lineAt(close.from);
+  if (openLine.number === closeLine.number || state.sliceDoc(close.to, closeLine.to).trim() !== '') return null;
+  const info = node.getChild('CodeInfo');
+  const language = info ? state.sliceDoc(info.from, info.to).trim().split(/\s/)[0] : '';
+  return {
+    kind: 'codeblock',
+    from: node.from,
+    to: node.to,
+    textFrom: openLine.to,
+    textTo: openLine.to,
+    revealFrom: openLine.from,
+    revealTo: closeLine.to,
+    pieces: [
+      { from: open.from, to: openLine.to, role: 'block', widget: { type: 'fence', language } },
+      { from: close.from, to: closeLine.to, role: 'block', widget: null },
+    ],
+    marks: [],
+  };
+}
+
 function draftFor(state: EditorState, node: SyntaxNode): Draft | null {
   const name = node.name;
   if (HEADING.test(name)) return heading(state, node);
@@ -314,6 +485,18 @@ function draftFor(state: EditorState, node: SyntaxNode): Draft | null {
       return autolink(node);
     case 'WikiLink':
       return wikilink(state, node);
+    case 'Embed':
+    case 'Image':
+      return embed(state, node);
+    case 'FootnoteReference':
+    case 'InlineFootnote':
+      return footnote(state, node);
+    case 'FootnoteDefinition':
+      return footnoteDefinition(state, node);
+    case 'Comment':
+      return comment(state, node);
+    case 'FencedCode':
+      return codeBlock(state, node);
     case 'URL': {
       // A bare web address (GFM autolink): styled and clickable, nothing hidden.
       const parent = node.parent?.name;
@@ -345,6 +528,8 @@ export function collectElements(state: EditorState, ranges: readonly { from: num
           if (draft) out.push({ ...draft, pieces: draft.pieces.map((p) => ({ ...p, kind: draft.kind })) });
         };
         if (SKIP.has(ref.name)) {
+          // Some are elements themselves (a code block's fences, an embed, an inline comment).
+          add(ref.node);
           // The `>` of the lines a skipped block spans (a quoted table or code block) still hides.
           for (let child = ref.node.firstChild; child; child = child.nextSibling) if (child.name === 'QuoteMark') add(child);
           return false;
@@ -364,10 +549,16 @@ export interface RevealOptions {
   atSelectionEnds: boolean;
   /** While autocompletion is open, the inline element at the cursor shows (the `[[` being typed). */
   completing: boolean;
+  /** `%%comments%%` show (dimmed): reveal-at-cursor mode. Otherwise they are hidden. */
+  comments: boolean;
+  /** A code block's fences show while a selection touches the block: an editable note, in both visibilities. */
+  codeAtCursor: boolean;
 }
 
 /** Whether the markup of `element` shows instead of being replaced. */
 export function isRevealed(element: LiveElement, selection: EditorSelection, options: RevealOptions): boolean {
+  if (element.kind === 'comment' && options.comments) return true;
+  if (element.kind === 'codeblock') return options.codeAtCursor && selection.ranges.some((r) => r.from <= element.revealTo && r.to >= element.revealFrom);
   for (const r of selection.ranges) {
     if (options.atCursor && r.from <= element.revealTo && r.to >= element.revealFrom) return true;
     if (options.atSelectionEnds) {
@@ -395,7 +586,7 @@ export interface Run {
  * - `zones`: the block prefix of a line (chained prefix pieces, from the line start when only
  *   blanks come before them). `to` is where the line's text starts.
  * - `runs`: adjacent inline pieces.
- * - `blocks`: lines shown as a widget.
+ * - `blocks`: lines shown as a widget, and inline elements shown whole as one (atoms).
  * Together they are the editor's atomic ranges.
  */
 export interface Layout {
@@ -410,7 +601,7 @@ export function layoutOf(state: EditorState, pieces: readonly Piece[]): Layout {
   const runs: Run[] = [];
   const blocks: Piece[] = [];
   for (const p of sorted) {
-    if (p.role === 'block') {
+    if (p.role === 'block' || p.role === 'atom') {
       blocks.push(p);
     } else if (p.role === 'prefix') {
       const last = zones.at(-1);
@@ -449,4 +640,4 @@ export function lineLayout(state: EditorState, pos: number, selection: EditorSel
 }
 
 /** Hide-all, ignoring the selection: every piece of markup is hidden. */
-export const HIDE_ALL: RevealOptions = { atCursor: false, atSelectionEnds: false, completing: false };
+export const HIDE_ALL: RevealOptions = { atCursor: false, atSelectionEnds: false, completing: false, comments: false, codeAtCursor: false };

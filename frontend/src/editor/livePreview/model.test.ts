@@ -22,6 +22,14 @@ function token(widget: WidgetSpec | null): string {
       return '———';
     case 'text':
       return widget.text;
+    case 'embed':
+      return `⟦${widget.embed.url ?? widget.embed.target}${widget.embed.subpath ? '#' + widget.embed.subpath : ''}${widget.embed.display ? '|' + widget.embed.display : ''}${widget.embed.size ? '|' + widget.embed.size.width : ''}⟧`;
+    case 'footnote':
+      return `^${widget.label ?? 'inline'}`;
+    case 'footnote-label':
+      return `${widget.label}:`;
+    case 'fence':
+      return `‹${widget.language}›`;
   }
 }
 
@@ -38,7 +46,7 @@ function shown(s: EditorState, options: RevealOptions = HIDE_ALL, selection: Edi
   return out + s.sliceDoc(pos);
 }
 
-const REVEAL: RevealOptions = { atCursor: true, atSelectionEnds: true, completing: false };
+const REVEAL: RevealOptions = { atCursor: true, atSelectionEnds: true, completing: false, comments: true, codeAtCursor: true };
 
 describe('Live Preview rendering, hide-all (ROADMAP 10a)', () => {
   const corpus: Array<[string, string, string]> = [
@@ -56,10 +64,14 @@ describe('Live Preview rendering, hide-all (ROADMAP 10a)', () => {
     ['quotes', '> quote\n> > nested\n> - [ ] in a quote', 'quote\nnested\n☐in a quote'],
     ['rules', 'Text\n\n---\n\n***', 'Text\n\n———\n\n———'],
     ['setext headings keep their underline', 'Title\n===', 'Title\n==='],
-    ['code blocks show as typed', '```\n**not bold** [[x]]\n```\n\n    indented **code**', '```\n**not bold** [[x]]\n```\n\n    indented **code**'],
+    ['code blocks show as typed, their fences hidden (the language shows)', '```js\n**not bold** [[x]]\n```\n\n    indented **code**\n\n```\nunclosed', '‹js›\n**not bold** [[x]]\n\n\n    indented **code**\n\n```\nunclosed'],
     ['inline code hides only its backticks', '`**x**` and ``a ` b``', '**x** and a ` b'],
-    ['comments, embeds, images and tables stay for 10b', '%%c **b**%%\n\n![[Pic.png]] ![alt](a.png)\n\n| a | **b** |\n|---|---|\n| 1 | 2 |', '%%c **b**%%\n\n![[Pic.png]] ![alt](a.png)\n\n| a | **b** |\n|---|---|\n| 1 | 2 |'],
-    ['a quoted table or code block hides the quote markers of all its lines', '> | a |\n> |---|\n> | b |\n\n> ```\n> **x**\n> ```', '| a |\n|---|\n| b |\n\n```\n**x**\n```'],
+    ['comment blocks and tables are blocks (blocks.ts, table/)', '%%c **b**%%\n\n| a | **b** |\n|---|---|\n| 1 | 2 |', '%%c **b**%%\n\n| a | **b** |\n|---|---|\n| 1 | 2 |'],
+    ['inline comments hide; one over a line break shows', 'a %%c **b**%% b\nc %%d\ne%% f', 'a  b\nc %%d\ne%% f'],
+    ['embeds and images', '![[Pic.png]] ![[Pic.png|300]] ![[Note#Head|alias]] ![alt](a.png) ![alt|200](https://x.y/i.png) ![](<my pic.png>)', '⟦Pic.png⟧ ⟦Pic.png|300⟧ ⟦Note#Head|alias⟧ ⟦a.png|alt⟧ ⟦https://x.y/i.png|alt|200⟧ ⟦my pic.png⟧'],
+    ['images of other schemes, and embeds without a target, show as typed', '![x](javascript:alert(1)) ![[]] ![[#Head]]', '![x](javascript:alert(1)) ![[]] ⟦#Head⟧'],
+    ['footnotes', 'A[^1] and ^[inline *note*].\n\n[^1]: The **note**.', 'A^1 and ^inline.\n\n1:The note.'],
+    ['a quoted table or code block hides the quote markers of all its lines', '> | a |\n> |---|\n> | b |\n\n> ```\n> **x**\n> ```', '| a |\n|---|\n| b |\n\n‹›\n**x**\n'],
     ['frontmatter shows as typed', '---\ntitle: "**x**"\n---\n# H', '---\ntitle: "**x**"\n---\nH'],
     ['escapes, reference links and links without text', '\\*not\\* [a][b] [](u) [e]()', '\\*not\\* [a][b] [](u) [e]()'],
     ['hashtags', 'a #tag and #nested/tag', 'a #tag and #nested/tag'],
@@ -74,7 +86,7 @@ describe('Live Preview rendering, hide-all (ROADMAP 10a)', () => {
   it('never changes the document', () => {
     const doc = corpus.map((c) => c[1]).join('\n\n');
     const s = state(doc);
-    buildLivePreview(s, [{ from: 0, to: s.doc.length }], { visibility: 'hide-all', locked: false, checkboxes: true, selection: s.selection, focused: true, completing: false });
+    buildLivePreview(s, [{ from: 0, to: s.doc.length }], { visibility: 'hide-all', locked: false, checkboxes: true, selection: s.selection, focused: true, completing: false, note: null });
     expect(s.doc.toString()).toBe(doc);
   });
 

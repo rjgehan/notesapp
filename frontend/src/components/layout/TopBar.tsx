@@ -2,12 +2,12 @@
 // switcher/search, the lock toggle and ⋯ (palette, panels, source mode, file actions, template,
 // today, reload).
 // On tablets it also toggles the right sidebar overlay.
-import { BookOpen, CalendarDays, CodeXml, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
+import { CalendarDays, CodeXml, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
-import { toggleReadingView, toggleSourceMode, useNoteMode, viewModeFor } from '../../features/noteMode';
+import { toggleSourceMode, useNoteMode, viewModeFor } from '../../features/noteMode';
 import { navigateOverOverlays, useOverlayHistory } from '../../features/overlayHistory';
 import { displayName, isNotePath, pathFromLocation } from '../../features/paths';
 import { usePendingNote } from '../../state/pendingNote';
@@ -69,8 +69,7 @@ function MoreMenu({ path, mode, onClose }: { path: string | null; mode: ViewMode
       {command('app.commandPalette', 'Command palette', <CommandIcon size={16} />)}
       {hasFile && item('Backlinks', <Link2 size={16} />, () => showPanel('right', 'backlinks'))}
       {note && item('Outline', <ListTree size={16} />, () => showPanel('right', 'outline'))}
-      {note && mode !== null && mode !== 'read' && item(mode === 'source' ? 'Live Preview' : 'Source mode', <CodeXml size={16} />, toggleSourceMode)}
-      {note && mode !== null && item(mode === 'read' ? 'Editing view' : 'Reading view', mode === 'read' ? <Pencil size={16} /> : <BookOpen size={16} />, toggleReadingView)}
+      {note && mode !== null && item(mode === 'source' ? 'Live Preview' : 'Source mode', <CodeXml size={16} />, toggleSourceMode)}
       {hasFile && item('History', <History size={16} />, () => showPanel('right', 'history'))}
       {hasFile && <div className="menu-separator" role="separator" />}
       {hasFile && command('file.rename', 'Rename', <Pencil size={16} />)}

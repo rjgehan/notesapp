@@ -36,6 +36,8 @@ function context(overrides: Partial<NoteContext> = {}): NoteContext {
     insertFiles: () => {},
     linkTo: (p) => `[[${p}]]`,
     showMenu: () => {},
+    renderEmbed: () => () => {},
+    renderProperties: () => () => {},
     ...overrides,
   };
 }

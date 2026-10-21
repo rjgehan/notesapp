@@ -10,12 +10,16 @@ import { syntaxTree } from '@codemirror/language';
 import { EditorSelection, EditorState, Facet, findClusterBreak, Prec, RangeSet, type Extension, type SelectionRange } from '@codemirror/state';
 import { Direction, EditorView, keymap, ViewPlugin, type Command, type ViewUpdate } from '@codemirror/view';
 import { isCoarsePointer, isIOS, modKey } from '../../features/platform';
+import { noteContext, vaultChanged } from '../context';
 import { followLink } from '../editorCommands';
 import { linkAt } from '../linkAt';
+import { liveBlocks } from './blocks';
 import { buildLivePreview, revealOptions, type LivePreview, type LivePreviewConfig } from './decorations';
+import { footnoteTooltips } from './footnotes';
 import { formatToolbar } from './formatToolbar';
 import { inputRules } from './inputRules';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
+import { isPointerSelection, touchTracking } from './pointer';
 import { tables } from './table';
 
 export type { LivePreviewConfig } from './decorations';
@@ -39,7 +43,9 @@ const livePlugin = ViewPlugin.fromClass(
         update.focusChanged ||
         syntaxTree(update.startState) !== syntaxTree(update.state) ||
         completionStatus(update.startState) !== completionStatus(update.state) ||
-        update.startState.facet(livePreviewConfig) !== update.state.facet(livePreviewConfig)
+        update.startState.facet(livePreviewConfig) !== update.state.facet(livePreviewConfig) ||
+        // Embeds and links resolve against the vault.
+        update.transactions.some((tr) => tr.effects.some((e) => e.is(vaultChanged)))
       ) {
         this.live = build(update.view);
       }
@@ -55,6 +61,7 @@ function build(view: EditorView): LivePreview {
     selection: view.state.selection,
     focused: view.hasFocus,
     completing: completionStatus(view.state) !== null,
+    note: view.state.facet(noteContext),
   });
 }
 
@@ -109,7 +116,7 @@ const settleSelection = EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged || !tr.selection) return tr;
   const config = tr.startState.facet(livePreviewConfig);
   if (!config || config.locked || config.visibility !== 'hide-all') return tr;
-  const pointer = tr.isUserEvent('select.pointer');
+  const pointer = isPointerSelection(tr);
   const state = tr.state;
   let changed = false;
   const ranges = tr.selection.ranges.map((r): SelectionRange => {
@@ -311,6 +318,7 @@ export function livePreviewInline(config: LivePreviewConfig): Extension {
     EditorView.atomicRanges.of((view) => view.plugin(livePlugin)?.live.atomic ?? RangeSet.empty),
     EditorView.editorAttributes.of({ class: config.locked ? 'cm-live-preview cm-lp-locked' : 'cm-live-preview' }),
     Prec.high(linkClicks),
+    touchTracking,
     config.locked ? EditorView.contentAttributes.of({ tabindex: '0' }) : [settleSelection, removeEmptyFormatting, liveKeymap],
     // The selection toolbar on desktop; phones have the keyboard toolbar and the system's selection menu.
     config.locked || isIOS || isCoarsePointer() ? [] : formatToolbar(),
@@ -324,5 +332,11 @@ export function livePreviewInline(config: LivePreviewConfig): Extension {
  * (inputRules.ts) apply to the note's lines, not in a table cell.
  */
 export function livePreview(config: LivePreviewConfig): Extension {
-  return [tables({ locked: config.locked }), livePreviewInline(config), config.locked ? [] : inputRules()];
+  return [
+    liveBlocks({ locked: config.locked, hideComments: config.locked || config.visibility === 'hide-all' }),
+    tables({ locked: config.locked, remoteImages: config.remoteImages }),
+    livePreviewInline(config),
+    footnoteTooltips(),
+    config.locked ? [] : inputRules(),
+  ];
 }

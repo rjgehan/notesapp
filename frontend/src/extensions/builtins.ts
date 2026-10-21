@@ -38,7 +38,7 @@ import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../feat
 import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
 import { navigateTo, openSearch } from '../features/navigation';
-import { toggleNoteMode, toggleReadingView, toggleSourceMode } from '../features/noteMode';
+import { toggleNoteMode, toggleSourceMode } from '../features/noteMode';
 import { basenameOf, folderOf, isNotePath } from '../features/paths';
 import { promptText } from '../state/dialogs';
 import { toggleTheme } from '../state/prefs';
@@ -123,7 +123,7 @@ export function registerBuiltins(): void {
     match: (e) => (e.path.toLowerCase().endsWith('.md') ? 3 : 0),
     icon: FileText,
     textual: true,
-    modes: ['live', 'source', 'locked', 'read'],
+    modes: ['live', 'source', 'locked'],
     load: () => import('../views/markdown/MarkdownView'),
     loadEmbed: () => import('../render/NoteEmbed'),
     create: { label: 'note', extension: 'md', initialContent: () => '' },
@@ -222,7 +222,6 @@ export function registerBuiltins(): void {
   // Mod-E outside the note's text; in the text it is inline code, and in a locked note it unlocks (DESIGN §6.6.1).
   registerCommand({ id: 'editor.toggleMode', name: 'Toggle lock editing', hotkey: 'Mod-e', run: toggleNoteMode, when: onNote });
   registerCommand({ id: 'editor.toggleSource', name: 'Toggle source mode', run: toggleSourceMode, when: onNote });
-  registerCommand({ id: 'editor.toggleReading', name: 'Toggle reading view', run: toggleReadingView, when: onNote });
   registerCommand({
     id: 'editor.save',
     name: 'Save now',

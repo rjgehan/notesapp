@@ -1,0 +1,403 @@
+// Live Preview blocks (DESIGN §6.6.1, ROADMAP 10b): the note's frontmatter shows as its
+// properties, and comment blocks (`%%` lines) are hidden, in hide-all and in locked mode. Both are
+// block widgets over whole lines, from editor state (they hide line breaks). The caret never rests
+// in or against a block (a move that lands there goes past it), typing next to one never puts text
+// inside it, and Backspace or Delete never joins a line to it.
+//
+// Editing them: the properties have an edit button (and ArrowUp from the line under them goes in),
+// which shows the frontmatter's YAML as text; a comment block shows while you type in it (as you
+// close it) or a search selects text in it. Either goes back to a block when the caret leaves it.
+import { syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
+import { EditorSelection, EditorState, Facet, Prec, RangeSet, RangeValue, StateEffect, StateField, Transaction, type ChangeDesc, type Extension, type SelectionRange, type TransactionSpec } from '@codemirror/state';
+import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { noteContext } from '../context';
+import { remeasureOnChange } from './embeds';
+import { isPointerSelection } from './pointer';
+import { tableEdit } from './table/facets';
+
+export interface HiddenBlock {
+  kind: 'properties' | 'comment';
+  /** The start of the block's first line, and the end of its last. */
+  from: number;
+  to: number;
+}
+
+/** The note's frontmatter: its block and its YAML (between the start of its second line and the start of its closing line). */
+interface Frontmatter {
+  block: HiddenBlock;
+  yamlFrom: number;
+  yamlTo: number;
+}
+
+interface Blocks {
+  frontmatter: Frontmatter | null;
+  /** The blocks that show as a widget unless being edited, in document order. */
+  candidates: readonly HiddenBlock[];
+  /** The block shown as text while you edit it (the properties' YAML, a comment you are typing). */
+  editing: { from: number; to: number } | null;
+  decorations: DecorationSet;
+  atomic: RangeSet<RangeValue>;
+}
+
+export interface BlocksConfig {
+  /** A locked note: the properties have no edit button, and unclosed comments hide too (as in the reading of the note). */
+  locked: boolean;
+  /** Comment blocks hide (hide-all, and locked); in reveal-at-cursor mode they show, dimmed. */
+  hideComments: boolean;
+}
+
+const blocksConfig = Facet.define<BlocksConfig, BlocksConfig>({
+  combine: (values) => values[0] ?? { locked: false, hideComments: true },
+});
+
+/** Shows (true) the properties' YAML for editing, or the properties block again (false). */
+export const editProperties = StateEffect.define<boolean>();
+
+class Atom extends RangeValue {}
+const atom = new Atom();
+
+// ---------- widgets ----------
+
+const cleanups = new WeakMap<HTMLElement, () => void>();
+
+/** The note's properties, drawn by the app (`NoteContext.renderProperties`). */
+class PropertiesWidget extends WidgetType {
+  readonly yaml: string;
+  readonly editable: boolean;
+  constructor(yaml: string, editable: boolean) {
+    super();
+    this.yaml = yaml;
+    this.editable = editable;
+  }
+  override eq(other: PropertiesWidget): boolean {
+    return other.yaml === this.yaml && other.editable === this.editable;
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'cm-lp-properties';
+    const note = view.state.facet(noteContext);
+    const unmount = note ? note.renderProperties(el, this.yaml, this.editable ? () => startEditingProperties(view) : null) : () => {};
+    if (!note) el.textContent = 'Properties';
+    const unmeasure = remeasureOnChange(view, el);
+    cleanups.set(el, () => {
+      unmeasure();
+      unmount();
+    });
+    return el;
+  }
+  override destroy(dom: HTMLElement): void {
+    cleanups.get(dom)?.();
+    cleanups.delete(dom);
+  }
+  override ignoreEvent(): boolean {
+    return true;
+  }
+  override get estimatedHeight(): number {
+    return 44 + 32 * this.yaml.split('\n').filter((l) => /^\S/.test(l)).length;
+  }
+}
+
+/** A hidden comment block: nothing to see. */
+class HiddenCommentWidget extends WidgetType {
+  override eq(): boolean {
+    return true;
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'cm-lp-hidden-comment';
+    el.setAttribute('aria-hidden', 'true');
+    return el;
+  }
+  override ignoreEvent(): boolean {
+    return true;
+  }
+  override get estimatedHeight(): number {
+    return 0;
+  }
+}
+
+const hiddenComment = new HiddenCommentWidget();
+
+// ---------- finding the blocks ----------
+
+function frontmatterOf(state: EditorState): Frontmatter | null {
+  const node = syntaxTree(state).topNode.firstChild;
+  if (!node || node.name !== 'Frontmatter') return null;
+  const dashes = node.getChildren('DashLine');
+  if (dashes.length < 2) return null;
+  const open = dashes[0];
+  const close = dashes[dashes.length - 1];
+  return { block: { kind: 'properties', from: 0, to: state.doc.lineAt(close.from).to }, yamlFrom: open.to, yamlTo: close.from };
+}
+
+/** Whether the parse has reached past `to` (its next line), so a block is not cut short. */
+function parsedPast(state: EditorState, to: number): boolean {
+  return to >= state.doc.length || syntaxTreeAvailable(state, state.doc.lineAt(to + 1).to);
+}
+
+/** The note's top-level comment blocks: closed ones while editing, every one in a locked note. */
+function commentBlocks(state: EditorState, config: BlocksConfig, previous: Blocks | null, changes: ChangeDesc | null): HiddenBlock[] {
+  if (!config.hideComments) return [];
+  const top = syntaxTree(state).topNode;
+  const body = top.getChild('Document') ?? top;
+  const out: HiddenBlock[] = [];
+  for (let node = body.firstChild; node; node = node.nextSibling) {
+    if (node.name !== 'CommentBlock') continue;
+    // An unclosed `%%` runs to the end of the note: while you write, it stays text (dimmed).
+    if (!config.locked && node.getChildren('CommentMark').length < 2) continue;
+    const to = state.doc.lineAt(node.to).to;
+    if (parsedPast(state, to)) out.push({ kind: 'comment', from: state.doc.lineAt(node.from).from, to });
+  }
+  // Where the parse has not caught up with an edit yet, a block keeps its place (mapped through the
+  // edit) while its lines still start and end it, so it never blinks out.
+  if (previous && changes) {
+    for (const b of previous.candidates) {
+      if (b.kind !== 'comment') continue;
+      const from = changes.mapPos(b.from, 1);
+      const to = changes.mapPos(b.to, -1);
+      if (to <= from || parsedPast(state, to) || out.some((o) => o.from <= to && o.to >= from)) continue;
+      const first = state.doc.lineAt(from);
+      if (first.from === from && state.doc.lineAt(to).to === to && first.text.startsWith('%%')) out.push({ kind: 'comment', from, to });
+    }
+    out.sort((a, b) => a.from - b.from);
+  }
+  return out;
+}
+
+/** Whether a transaction is your edit (or a search) that leaves the cursor in a block it should show as text. */
+function entersByEditing(tr: Transaction): boolean {
+  if (tr.isUserEvent('select.search')) return true;
+  if (!tr.docChanged || tr.annotation(Transaction.remote)) return false;
+  return tr.isUserEvent('input') || tr.isUserEvent('delete') || tr.isUserEvent('undo') || tr.isUserEvent('redo') || tr.isUserEvent('move');
+}
+
+function build(state: EditorState, frontmatter: Frontmatter | null, candidates: readonly HiddenBlock[], editing: Blocks['editing']): Blocks {
+  const config = state.facet(blocksConfig);
+  const editable = !config.locked && !state.readOnly;
+  const shown = candidates.filter((b) => !editing || b.from !== editing.from);
+  const decorations = Decoration.set(
+    shown.map((b) => {
+      const widget = b.kind === 'properties' && frontmatter ? new PropertiesWidget(state.sliceDoc(frontmatter.yamlFrom, frontmatter.yamlTo), editable) : hiddenComment;
+      return Decoration.replace({ widget, block: true }).range(b.from, b.to);
+    }),
+  );
+  return { frontmatter, candidates, editing, decorations, atomic: RangeSet.of(shown.map((b) => atom.range(b.from, b.to))) };
+}
+
+const blocksField = StateField.define<Blocks>({
+  create(state) {
+    const frontmatter = frontmatterOf(state);
+    const candidates = [...(frontmatter ? [frontmatter.block] : []), ...commentBlocks(state, state.facet(blocksConfig), null, null)];
+    return build(state, frontmatter, candidates, null);
+  },
+  update(value, tr) {
+    const config = tr.state.facet(blocksConfig);
+    // A mode switch keeps the field's value (the editor's state is reconfigured): it is computed again.
+    const reconfigured = config !== tr.startState.facet(blocksConfig) || tr.state.readOnly !== tr.startState.readOnly;
+    let { frontmatter, candidates } = value;
+    if (reconfigured || tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state)) {
+      frontmatter = frontmatterOf(tr.state);
+      candidates = [...(frontmatter ? [frontmatter.block] : []), ...commentBlocks(tr.state, config, value, tr.docChanged ? tr.changes : null)];
+    }
+    const editable = !config.locked && !tr.state.readOnly;
+    let editing = !editable ? null : value.editing && tr.docChanged ? { from: tr.changes.mapPos(value.editing.from, 1), to: tr.changes.mapPos(value.editing.to, -1) } : value.editing;
+    for (const e of tr.effects) if (e.is(editProperties)) editing = e.value && frontmatter && editable ? { from: frontmatter.block.from, to: frontmatter.block.to } : null;
+    const head = tr.state.selection.main.head;
+    const holding = (b: HiddenBlock) => head >= b.from && head <= b.to;
+    if (editing) {
+      // Still the block you are in? It may have grown or shrunk with your edit.
+      const was = editing;
+      const b = candidates.find((c) => c.from <= was.to && c.to >= was.from);
+      editing = b && holding(b) ? { from: b.from, to: b.to } : null;
+    }
+    if (!editing && editable && entersByEditing(tr)) {
+      const b = candidates.find(holding);
+      if (b) editing = { from: b.from, to: b.to };
+    }
+    const same =
+      frontmatter?.block.to === value.frontmatter?.block.to &&
+      (frontmatter === null || value.frontmatter === null || tr.state.sliceDoc(frontmatter.yamlFrom, frontmatter.yamlTo) === tr.startState.sliceDoc(value.frontmatter.yamlFrom, value.frontmatter.yamlTo)) &&
+      candidates.length === value.candidates.length &&
+      candidates.every((c, i) => c.from === value.candidates[i].from && c.to === value.candidates[i].to) &&
+      editing?.from === value.editing?.from &&
+      editing?.to === value.editing?.to;
+    if (same && !tr.docChanged && !reconfigured) return value;
+    return build(tr.state, frontmatter, candidates, editing);
+  },
+  provide: (field) => [EditorView.decorations.from(field, (b) => b.decorations), EditorView.atomicRanges.of((view) => view.state.field(field).atomic)],
+});
+
+/** The blocks shown as a widget: the caret goes around them. */
+export function shownBlocks(state: EditorState): readonly HiddenBlock[] {
+  const value = state.field(blocksField, false);
+  if (!value) return [];
+  return value.editing ? value.candidates.filter((b) => b.from !== value.editing!.from) : value.candidates;
+}
+
+/** Whether the properties show as text for editing. */
+export function editingProperties(state: EditorState): boolean {
+  const value = state.field(blocksField, false);
+  return !!value?.frontmatter && value.editing?.from === value.frontmatter.block.from;
+}
+
+// ---------- editing the properties ----------
+
+/** The transaction that shows the properties' YAML with the caret at its end (an empty frontmatter gets a line to type on). */
+function editingSpec(state: EditorState): TransactionSpec | null {
+  const fm = state.field(blocksField, false)?.frontmatter;
+  if (!fm || state.readOnly) return null;
+  const effects = editProperties.of(true);
+  if (fm.yamlTo > fm.yamlFrom) return { selection: EditorSelection.cursor(fm.yamlTo - 1), effects, scrollIntoView: true, userEvent: 'select' };
+  return { changes: { from: fm.yamlFrom, insert: '\n' }, selection: EditorSelection.cursor(fm.yamlFrom), effects, scrollIntoView: true, userEvent: 'input' };
+}
+
+/** The properties' edit button: shows their YAML as text, with the caret at its end. */
+export function startEditingProperties(view: EditorView): boolean {
+  const spec = editingSpec(view.state);
+  if (!spec) return false;
+  view.dispatch(spec);
+  view.focus();
+  return true;
+}
+
+// ---------- the caret around blocks ----------
+
+/**
+ * The caret never rests in or against a block: a move that lands there goes past it, the way it
+ * was heading (a click: to the nearer side). From the line under the properties, a move up or left
+ * goes into them (their YAML shows); a jump (Mod-Home) stops on the line under them. When the
+ * properties end the note, your move past them gets an empty line there to type on.
+ */
+const settleAroundBlocks = EditorState.transactionFilter.of((tr) => {
+  const selection = tr.selection;
+  if (tr.docChanged || !selection || tr.annotation(tableEdit) !== undefined || tr.effects.some((e) => e.is(editProperties))) return tr;
+  const blocks = shownBlocks(tr.startState);
+  if (blocks.length === 0) return tr;
+  const { doc } = tr.startState;
+  const old = tr.startState.selection.main.head;
+  const pointer = isPointerSelection(tr);
+  const editable = !tr.startState.facet(blocksConfig).locked && !tr.startState.readOnly;
+  const blockAt = (pos: number) => blocks.find((x) => pos >= x.from && pos <= x.to);
+  /** Past the blocks at `pos` (adjacent ones too) the way `side` goes; null at the note's edge. */
+  const past = (pos: number, side: 'before' | 'after'): number | null => {
+    for (let b = blockAt(pos); b; b = blockAt(pos)) {
+      pos = side === 'after' ? b.to + 1 : b.from - 1;
+      if (pos < 0 || pos > doc.length) return null;
+    }
+    return pos;
+  };
+  let changed = false;
+  let replace: TransactionSpec | null = null;
+  const ranges = selection.ranges.map((r, i): SelectionRange => {
+    const b = r.empty ? blockAt(r.head) : undefined;
+    if (!b) return r;
+    const nearest = r.head - b.from <= b.to - r.head ? 'before' : 'after';
+    let side: 'before' | 'after' = pointer ? nearest : old < b.from ? 'after' : old > b.to ? 'before' : nearest;
+    if (b.kind === 'properties') {
+      const fromBelow = old > b.to && doc.lineAt(old).number === doc.lineAt(b.to).number + 1;
+      if (editable && !pointer && fromBelow && i === selection.mainIndex) {
+        replace = editingSpec(tr.startState);
+        return r;
+      }
+      // Nothing comes before the properties.
+      side = 'after';
+    }
+    const pos = past(r.head, side) ?? past(r.head, side === 'after' ? 'before' : 'after');
+    if (pos !== null) {
+      changed = true;
+      return EditorSelection.cursor(pos);
+    }
+    // Properties that end the note: your move past them gets a line to type on.
+    const last = blocks[blocks.length - 1];
+    if (editable && last.to === doc.length && tr.isUserEvent('select') && i === selection.mainIndex) {
+      replace = { changes: { from: last.to, insert: '\n' }, selection: EditorSelection.cursor(last.to + 1), scrollIntoView: true, userEvent: 'input' };
+    }
+    return r;
+  });
+  if (replace) return replace;
+  return changed ? [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }] : tr;
+});
+
+/**
+ * Typing where the caret should not be (against or in a block, as a note opens with the caret at
+ * its start) never puts text inside the block: it goes on the line under the properties, or on a
+ * line of its own before or after a comment block.
+ */
+const guardBlockEdges = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged || !tr.isUserEvent('input') || tr.annotation(tableEdit) !== undefined || tr.effects.some((e) => e.is(editProperties))) return tr;
+  const blocks = shownBlocks(tr.startState);
+  if (blocks.length === 0) return tr;
+  const changes: Array<{ from: number; to: number; insert: string }> = [];
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => changes.push({ from: fromA, to: toA, insert: inserted.toString() }));
+  if (changes.length !== 1) return tr;
+  const [{ from, to, insert }] = changes;
+  if (from !== to || insert === '') return tr;
+  const b = blocks.find((x) => from >= x.from && from <= x.to);
+  // A line break at a comment block's edge, or after the properties, keeps it whole.
+  if (!b || (insert === '\n' && (b.kind === 'comment' ? from === b.from || from === b.to : from === b.to))) return tr;
+  const length = tr.startState.doc.length;
+  let at: number;
+  let text: string;
+  if (b.kind === 'comment' && from === b.from) {
+    at = b.from;
+    text = insert.endsWith('\n') ? insert : insert + '\n';
+  } else if (b.kind === 'properties' && b.to < length) {
+    at = b.to + 1;
+    text = insert;
+  } else {
+    at = b.to;
+    text = insert.startsWith('\n') ? insert : '\n' + insert;
+  }
+  const caret = at + (b.kind === 'comment' && from === b.from ? insert.length : text.length);
+  return { changes: { from: at, insert: text }, selection: EditorSelection.cursor(caret), scrollIntoView: true, userEvent: tr.annotation(Transaction.userEvent) ?? 'input' };
+});
+
+/**
+ * Backspace at the start of the line under a block, and Delete at the end of the line above one,
+ * would join that line to it (hiding the line in a comment, or breaking the frontmatter): the
+ * caret moves past the block instead. An empty line next to a block is deleted as usual.
+ */
+function deleteNextToBlock(forward: boolean): Command {
+  return (view) => {
+    const { state } = view;
+    const { selection } = state;
+    if (state.readOnly || selection.ranges.length !== 1 || !selection.main.empty) return false;
+    const blocks = shownBlocks(state);
+    if (blocks.length === 0) return false;
+    const pos = selection.main.head;
+    // The caret never rests in a block; if it does (as a note opens), nothing of the block is deleted.
+    if (blocks.some((b) => pos >= b.from && pos <= b.to)) return true;
+    const b = blocks.find((x) => (forward ? pos === x.from - 1 : pos === x.to + 1));
+    if (!b || state.doc.lineAt(pos).length === 0) return false;
+    const target = forward ? (b.to < state.doc.length ? b.to + 1 : null) : b.from > 0 ? b.from - 1 : null;
+    if (target !== null) view.dispatch({ selection: EditorSelection.cursor(target), scrollIntoView: true, userEvent: 'select' });
+    return true;
+  };
+}
+
+const blockKeymap = keymap.of([
+  ...['Backspace', 'Shift-Backspace', 'Mod-Backspace', 'Alt-Backspace'].map((key) => ({ key, run: deleteNextToBlock(false) })),
+  ...['Delete', 'Mod-Delete', 'Alt-Delete'].map((key) => ({ key, run: deleteNextToBlock(true) })),
+]);
+
+/** A note that opens with the caret in a block (at its start, say): focusing it moves the caret out. */
+const settleOnFocus = ViewPlugin.fromClass(
+  class {
+    update(update: ViewUpdate) {
+      if (!update.focusChanged || !update.view.hasFocus) return;
+      const view = update.view;
+      const head = (s: EditorState) => s.selection.main;
+      const inBlock = (s: EditorState) => head(s).empty && shownBlocks(s).some((b) => head(s).head >= b.from && head(s).head <= b.to && (b.kind !== 'properties' || b.to < s.doc.length));
+      if (!inBlock(view.state)) return;
+      // Not during the update; the settle filter takes it from here.
+      queueMicrotask(() => {
+        if (view.hasFocus && inBlock(view.state)) view.dispatch({ selection: EditorSelection.cursor(view.state.selection.main.head), userEvent: 'select' });
+      });
+    }
+  },
+);
+
+/** The properties block and hidden comment blocks of Live Preview, and in an editable note the caret rules around them. */
+export function liveBlocks(config: BlocksConfig): Extension {
+  return [blocksConfig.of(config), blocksField, config.locked ? [] : [settleAroundBlocks, guardBlockEdges, settleOnFocus, Prec.highest(blockKeymap)]];
+}

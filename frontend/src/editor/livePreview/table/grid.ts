@@ -16,7 +16,8 @@ import { noteContext, type EditorMenuEntry } from '../../context';
 import { followLink } from '../../editorCommands';
 import { linkAt } from '../../linkAt';
 import { addNestedEditor, removeNestedEditor } from '../../remote';
-import { tableCellFormatters, tableCellHost, tableCellSetup, tableEdit } from './facets';
+import { cellImage } from '../embeds';
+import { tableCellFormatters, tableCellHost, tableCellSetup, tableEdit, tablesConfig } from './facets';
 import {
   cellContent,
   cellSpans,
@@ -329,7 +330,8 @@ export class TableGrid {
     if (!ctx) return { resolves: () => true };
     const index = ctx.tree().links;
     const source = ctx.path();
-    return { resolves: (target) => resolve(target, source, index) !== null };
+    const remoteImages = this.view.state.facet(tablesConfig).remoteImages ?? true;
+    return { resolves: (target) => resolve(target, source, index) !== null, image: (embed) => cellImage(this.view, embed, ctx, remoteImages) };
   }
 
   private display(rows: string[][]): ((row: number, column: number) => CellDisplay | null) | null {

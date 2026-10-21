@@ -6,6 +6,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import type { SyntaxNode } from '@lezer/common';
 import { isInternalDestination, parseMarkdownDestination, splitWikiBody } from '../../../features/syntax';
 import { ObsidianSyntax } from '../../obsidianSyntax';
+import { embedSpec, type EmbedSpec } from '../model';
 
 /** Block syntax a table cell cannot hold: GFM cells are inline content. */
 const BLOCKS = ['LinkReference', 'IndentedCode', 'FencedCode', 'Blockquote', 'HorizontalRule', 'BulletList', 'OrderedList', 'ATXHeading', 'HTMLBlock', 'SetextHeading', 'Table', 'TaskList'];
@@ -22,6 +23,8 @@ const cellParser = cellLanguage.language.parser;
 export interface CellRenderContext {
   /** Whether an internal link target resolves; unresolved links are dimmed, as in the editor. */
   resolves(target: string): boolean;
+  /** An image in a cell (ROADMAP 10b): its element, or null to show its Markdown as typed (other embeds). */
+  image?(embed: EmbedSpec): HTMLElement | null;
 }
 
 /** What a table cell shows instead of its Markdown (a formula's result, ROADMAP 39). */
@@ -146,10 +149,12 @@ function appendNode(parent: Node, node: SyntaxNode, src: string, ctx: CellRender
       else raw();
       return;
     case 'Image':
-    case 'Embed':
-      // Images and embeds render in 10b; until then they show as typed.
-      parent.appendChild(element('span', 'cm-lp-embed-source', src.slice(node.from, node.to)));
+    case 'Embed': {
+      // Images show; other embeds (notes, PDFs, media) show as typed: a cell holds a line of text.
+      const spec = ctx.image ? embedSpec(node, (from, to) => src.slice(from, to)) : null;
+      parent.appendChild((spec && ctx.image?.(spec)) || element('span', 'cm-lp-embed-source', src.slice(node.from, node.to)));
       return;
+    }
     default:
       appendInner(parent, node, src, ctx);
   }

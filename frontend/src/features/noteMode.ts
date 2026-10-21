@@ -1,10 +1,10 @@
 // The open file's mode (DESIGN §6.4, §6.6.1). Notes show Live Preview (`live`, the default),
-// styled source (`source`), Live Preview read-only (`locked`) or, until ROADMAP 10b replaces it
-// with `locked`, the v1 reading view (`read`). The mode is chosen per file for the page load:
-// `?mode=read` forces the reading view; a note this tab has just created opens in the editor;
-// otherwise the mode chosen for the file, else `settings.editor.defaultMode` (`edit` is Live
-// Preview). The scroll position maps between the modes through the source line at the top of the
-// workspace.
+// styled source (`source`) or Live Preview read-only (`locked`), which is also the reading view:
+// since ROADMAP 10b there is one look everywhere. Other views show `edit` or `read`. The mode is
+// chosen per file for the page load: `?mode=read` forces reading (a locked note); a note this tab
+// has just created opens in the editor; otherwise the mode chosen for the file, else
+// `settings.editor.defaultMode` (`edit` is Live Preview, `read` a locked note). The scroll
+// position maps between the modes through the source line at the top of the workspace.
 import { useLocation } from 'react-router';
 import { currentSettings, useVaultSettings } from '../api/hooks';
 import type { Settings } from '../api/types';
@@ -13,20 +13,22 @@ import { lastInputWasKeyboard, requestNoteFocus } from './focus';
 import { activePath, navigateTo } from './navigation';
 import { pathFromLocation } from './paths';
 
+/** `?mode=read` (a link from search, say): a note shows locked, another file its reading mode (`viewModeFor`). */
 function forcedMode(search: string): ViewMode | null {
-  return new URLSearchParams(search).get('mode') === 'read' ? 'read' : null;
+  return new URLSearchParams(search).get('mode') === 'read' ? 'locked' : null;
 }
 
 /**
- * "New note, title, Enter, type" must land in an editor, even when the note would otherwise show
- * the reading view or be locked. It keeps a note's own choice of source mode.
+ * "New note, title, Enter, type" must land in an editor, even when the note would otherwise be
+ * locked. It keeps a note's own choice of source mode.
  */
 function newNoteMode(path: string | null, editingNew: string | null, chosen: ViewMode | null): ViewMode | null {
   return path !== null && path === editingNew ? (chosen === 'source' ? 'source' : 'live') : null;
 }
 
+/** `settings.editor.defaultMode`: `edit` is Live Preview, `read` a locked note (the reading view). */
 function defaultMode(settings: Settings): ViewMode {
-  return settings.editor.defaultMode === 'read' ? 'read' : 'live';
+  return settings.editor.defaultMode === 'read' ? 'locked' : 'live';
 }
 
 function resolve(path: string | null, search: string, settings: Settings, modes: Record<string, ViewMode>, editingNew: string | null): ViewMode {
@@ -105,8 +107,8 @@ export function setNoteMode(mode: ViewMode): void {
 }
 
 /**
- * Mod-E: locks a note being edited (Live Preview, read-only) and unlocks it into Live Preview; the
- * reading view goes back to editing. Views without the note modes toggle between `edit` and `read`.
+ * Mod-E: locks a note being edited (Live Preview, read-only: the reading view) and unlocks it into
+ * Live Preview. Views without the note modes toggle between `edit` and `read`.
  */
 export function toggleNoteMode(): void {
   const mode = currentNoteMode();
@@ -114,14 +116,9 @@ export function toggleNoteMode(): void {
   else setNoteMode(mode === 'live' || mode === 'source' ? 'locked' : 'live');
 }
 
-/** Switches a note between Live Preview and source mode (a locked note or the reading view opens in source). */
+/** Switches a note between Live Preview and source mode (a locked note opens in source). */
 export function toggleSourceMode(): void {
   setNoteMode(currentNoteMode() === 'source' ? 'live' : 'source');
-}
-
-/** The v1 reading view and back (ROADMAP 10b replaces it with `locked`). */
-export function toggleReadingView(): void {
-  setNoteMode(currentNoteMode() === 'read' ? 'live' : 'read');
 }
 
 /** The note at `path` (just created, or its title left with Enter) shows the editor. */

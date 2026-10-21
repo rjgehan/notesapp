@@ -470,3 +470,25 @@
   color: var(--text-error);
   font-size: var(--font-ui-small);
 }
+
+.properties-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.properties-header .properties-heading {
+  margin-bottom: 0;
+}
+
+.properties-edit {
+  width: 26px;
+  height: 26px;
+  color: var(--text-faint);
+}
+
+.properties-header + .properties-list,
+.properties-header + .properties-error,
+.properties-header + .property-empty {
+  margin-top: 6px;
+}

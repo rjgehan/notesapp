@@ -9,7 +9,7 @@ import { EditorSelection, EditorState, Prec, RangeSet, RangeValue, StateField, T
 import { Decoration, EditorView, keymap, ViewPlugin, type Command, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { toast } from '../../../state/toasts';
 import { noteContext, vaultChanged } from '../../context';
-import { refreshTables, tableCellHost, tableEdit, tablesConfig } from './facets';
+import { refreshTables, tableCellHost, tableEdit, tablesConfig, type TablesConfig } from './facets';
 import { gridAt, gridsOf, TableWidget, type TableBlock } from './grid';
 import { newTableText, parseTable, rowCount } from './model';
 
@@ -75,7 +75,9 @@ function findTables(state: EditorState, previous: Tables | null, changes: Change
 const tablesField = StateField.define<Tables>({
   create: (state) => findTables(state, null, null, 0),
   update(value, tr) {
-    const refresh = tr.effects.some((e) => e.is(refreshTables) || e.is(vaultChanged));
+    // A mode switch reconfigures the note's state and keeps this field's value: locking a note must
+    // make its grids read-only (and unlocking editable), so a new configuration redraws them too.
+    const refresh = tr.effects.some((e) => e.is(refreshTables) || e.is(vaultChanged)) || tr.startState.facet(tablesConfig) !== tr.state.facet(tablesConfig) || tr.startState.readOnly !== tr.state.readOnly;
     if (!refresh && !tr.docChanged && syntaxTree(tr.startState) === syntaxTree(tr.state)) return value;
     return findTables(tr.state, value, tr.changes, value.revision + (refresh ? 1 : 0));
   },
@@ -339,6 +341,6 @@ export function moveToCell(view: EditorView, delta: 1 | -1): boolean {
 }
 
 /** The tables of Live Preview (DESIGN §6.6.1): grids, and in an editable note the caret rules around them. */
-export function tables(config: { locked: boolean }): Extension {
+export function tables(config: TablesConfig): Extension {
   return [tablesConfig.of(config), tablesField, tableEditing, config.locked ? [] : [settleAroundTables, guardTableEdges, keepTablesApart, Prec.highest(tableKeymap)]];
 }

@@ -1,4 +1,4 @@
-// Demo vault for the dev mock. It exercises every feature the reading view and editor support.
+// Demo vault for the dev mock. It exercises every feature Live Preview and the editor support.
 
 const WELCOME = `---
 aliases: [Start here]
@@ -21,7 +21,7 @@ Type \`[[\` in edit mode to link a note, \`[[Note#\` for its headings and \`#\` 
 ## Formatting
 
 Single line breaks
-are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is hidden%% in reading view.
+are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is hidden%% in Live Preview.
 
 > [!note] Quotes render as blockquotes.
 > - [ ] A task inside a quote
@@ -29,7 +29,7 @@ are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is
 ### Tasks
 
 - [x] Open the welcome note
-- [ ] Toggle a checkbox in reading view
+- [ ] Toggle a checkbox, also in a locked note
 - [ ] Lock editing with the lock button
 
 | Feature | Shortcut |

@@ -6,12 +6,12 @@ export type ConnectionState = 'live' | 'reconnecting' | 'offline';
 export type SaveSummary = 'saved' | 'saving' | 'unsaved' | 'offline' | 'storage-error' | 'conflict';
 /**
  * How a file shows (DESIGN §6.6.1, §6.8). Notes: `live` (Live Preview, the default), `source`
- * (styled source), `locked` (Live Preview, read-only) and `read` (the v1 reading view, until
- * ROADMAP 10b makes `locked` replace it). Other views use `edit` and `read`.
+ * (styled source) and `locked` (Live Preview, read-only, which is also the reading view since
+ * ROADMAP 10b). Other views use `edit` and `read`; a note asked for `read` shows `locked`.
  */
 export type ViewMode = 'live' | 'source' | 'locked' | 'read' | 'edit';
 /** The modes of a note. */
-export type NoteMode = Exclude<ViewMode, 'edit'>;
+export type NoteMode = Exclude<ViewMode, 'edit' | 'read'>;
 export type ExplorerSort = 'name' | 'mtime';
 /** The topmost modal overlay; later work packages add their own ids. */
 export type OverlayId = string;
@@ -39,7 +39,7 @@ export interface UiState {
   draftsFailing: boolean;
   /**
    * Modes chosen in this page load, per file path; they follow renames and moves. A file without
-   * one shows `settings.editor.defaultMode` (`edit` is Live Preview, `read` the reading view).
+   * one shows `settings.editor.defaultMode` (`edit` is Live Preview, `read` a locked note).
    */
   noteModes: Record<string, ViewMode>;
   /**

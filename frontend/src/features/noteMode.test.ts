@@ -11,7 +11,7 @@ import { syncTarget } from '../sync/liveSync';
 import { getCommand, runCommand } from './commands';
 import { createNote } from './fileOps';
 import { wantsNoteFocus } from './focus';
-import { currentNoteMode, isEditingMode, setNoteMode, toggleNoteMode, toggleReadingView, toggleSourceMode, viewModeFor } from './noteMode';
+import { currentNoteMode, isEditingMode, setNoteMode, toggleNoteMode, toggleSourceMode, viewModeFor } from './noteMode';
 import { DEFAULT_SETTINGS } from './settings';
 
 function entry(path: string): FileEntry {
@@ -37,10 +37,10 @@ afterEach(() => {
 });
 
 describe('note modes (ROADMAP 10a)', () => {
-  it('Live Preview is the default for every note; `edit` as the vault default means Live Preview', () => {
+  it('Live Preview is the default for every note; `read` as the vault default means locked (ROADMAP 10b)', () => {
     expect(currentNoteMode()).toBe('live');
     defaultMode('read');
-    expect(currentNoteMode()).toBe('read');
+    expect(currentNoteMode()).toBe('locked');
   });
 
   it('a mode chosen for one note leaves the others in their own mode', () => {
@@ -59,7 +59,7 @@ describe('note modes (ROADMAP 10a)', () => {
     expect(useUi.getState().noteModes).toEqual({});
   });
 
-  it('Mod-E locks and unlocks editing; the reading view goes back to editing', () => {
+  it('Mod-E locks and unlocks editing; a note asked for `read` goes back to editing', () => {
     toggleNoteMode();
     expect(currentNoteMode()).toBe('locked');
     toggleNoteMode();
@@ -94,13 +94,11 @@ describe('note modes (ROADMAP 10a)', () => {
     expect(currentNoteMode()).toBe('source');
   });
 
-  it('the reading view stays reachable, and ?mode=read forces it', () => {
-    toggleReadingView();
-    expect(currentNoteMode()).toBe('read');
-    toggleReadingView();
-    expect(currentNoteMode()).toBe('live');
+  it('the reading view is the locked note: ?mode=read locks it, and the palette has no separate reading view', () => {
     window.history.replaceState(null, '', '/n/Welcome.md?mode=read');
-    expect(currentNoteMode()).toBe('read');
+    expect(currentNoteMode()).toBe('locked');
+    registerBuiltins();
+    expect(getCommand('editor.toggleReading')).toBeUndefined();
   });
 
   it('modes follow a renamed note', () => {
@@ -117,14 +115,16 @@ describe('note modes (ROADMAP 10a)', () => {
     expect(viewModeFor('source', [...editOrRead])).toBe('edit');
     expect(viewModeFor('locked', [...editOrRead])).toBe('read');
     expect(viewModeFor('locked', ['read'])).toBe('read');
-    expect(viewModeFor('locked', ['live', 'source', 'locked', 'read'])).toBe('locked');
+    expect(viewModeFor('locked', ['live', 'source', 'locked'])).toBe('locked');
+    // A note asked for its reading mode shows locked.
+    expect(viewModeFor('read', ['live', 'source', 'locked'])).toBe('locked');
     expect(isEditingMode('locked')).toBe(false);
     expect(isEditingMode('source')).toBe(true);
   });
 });
 
 describe('new notes open in the editor (FE-1, ux)', () => {
-  it('a note created while reading view is the default opens in Live Preview, and keeps it when renamed', async () => {
+  it('a note created while locked is the default opens in Live Preview, and keeps it when renamed', async () => {
     defaultMode('read');
     vi.spyOn(api, 'createFile').mockImplementation(async (req): Promise<WriteResult> => ({ file: entry(req.path), created: true, createdFolders: [] }));
     createNote('');
@@ -135,17 +135,17 @@ describe('new notes open in the editor (FE-1, ux)', () => {
     applyMoveResult(syncTarget, result);
     expect(window.location.pathname).toBe('/n/Bug%20one%20test.md');
     expect(currentNoteMode()).toBe('live');
-    // Other notes keep the default reading view.
+    // Other notes keep the default: locked.
     window.history.replaceState(null, '', '/n/Welcome.md');
-    expect(currentNoteMode()).toBe('read');
+    expect(currentNoteMode()).toBe('locked');
   });
 
   it('toggling the mode ends the new note’s override', () => {
     defaultMode('read');
     useUi.setState({ editingNew: 'Welcome.md' });
     expect(currentNoteMode()).toBe('live');
-    setNoteMode('read');
-    expect(currentNoteMode()).toBe('read');
+    setNoteMode('locked');
+    expect(currentNoteMode()).toBe('locked');
   });
 
   it('a new note that was locked opens in the editor', () => {
@@ -163,7 +163,7 @@ describe('Mod-E keeps the focus in the note (FE-13)', () => {
     note.appendChild(content);
     document.body.appendChild(note);
     content.focus();
-    setNoteMode('read');
+    setNoteMode('locked');
     expect(wantsNoteFocus()).toBe(true);
     note.remove();
   });

@@ -4,7 +4,7 @@ import { ensureSyntaxTree } from '@codemirror/language';
 import { EditorSelection, EditorState, type Transaction } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { buildVaultTree } from '../api/vaultTree';
-import type { NoteContext } from '../editor/context';
+import type { EmbedRequest, NoteContext } from '../editor/context';
 import { noteExtensions } from '../editor/editorSetup';
 import type { LivePreviewConfig } from '../editor/livePreview';
 import { DEFAULT_SETTINGS } from '../features/settings';
@@ -37,8 +37,49 @@ export function testContext(overrides: Partial<NoteContext> = {}): NoteContext {
     insertFiles: () => {},
     linkTo: (p) => `[[${p}]]`,
     showMenu: () => {},
+    renderEmbed: fakeEmbed,
+    renderProperties: fakeProperties,
     ...overrides,
   };
+}
+
+/** What a test editor shows for an embed: `<span class="test-embed">path#subpath|display|size</span>`. */
+export function fakeEmbed(el: HTMLElement, embed: EmbedRequest): () => void {
+  const span = document.createElement('span');
+  span.className = 'test-embed';
+  span.textContent = [embed.entry.path + (embed.subpath ? '#' + embed.subpath : ''), embed.display ?? '', embed.size ? `${embed.size.width}x${embed.size.height ?? ''}` : ''].join('|');
+  el.appendChild(span);
+  return () => span.remove();
+}
+
+/** What a test editor shows for the properties: their YAML, and an Edit button when they can be edited. */
+export function fakeProperties(el: HTMLElement, yaml: string, onEdit: (() => void) | null): () => void {
+  const pre = document.createElement('pre');
+  pre.className = 'test-properties';
+  pre.textContent = yaml;
+  el.appendChild(pre);
+  if (onEdit) {
+    const button = document.createElement('button');
+    button.className = 'test-properties-edit';
+    button.textContent = 'Edit';
+    button.addEventListener('click', onEdit);
+    el.appendChild(button);
+  }
+  return () => el.replaceChildren();
+}
+
+/** A tree with the given files (all `md` notes unless their extension says otherwise). */
+export function treeOf(...paths: string[]) {
+  const kind = (p: string) => (/\.(png|jpe?g|gif|webp|svg)$/i.test(p) ? 'image' : /\.pdf$/i.test(p) ? 'pdf' : /\.(mp3|wav|m4a)$/i.test(p) ? 'audio' : /\.(mp4|webm|mov)$/i.test(p) ? 'video' : p.endsWith('.md') ? 'note' : 'other');
+  return buildVaultTree({
+    eventId: 'b.1',
+    folders: [],
+    files: paths.map((path) => {
+      const name = path.split('/').pop()!;
+      const dot = name.lastIndexOf('.');
+      return { path, name, basename: dot > 0 ? name.slice(0, dot) : name, extension: dot > 0 ? name.slice(dot + 1) : '', kind: kind(path), size: 1, mtime: '2026-10-16T10:00:00.000Z', version: 'v', aliases: [] };
+    }),
+  });
 }
 
 export interface TestEditorOptions {

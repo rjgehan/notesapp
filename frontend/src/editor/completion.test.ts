@@ -59,6 +59,8 @@ function context(settings: Settings = DEFAULT_SETTINGS, path = 'Welcome.md'): No
     insertFiles: () => {},
     linkTo: (path) => `[[${path}]]`,
     showMenu: () => {},
+    renderEmbed: () => () => {},
+    renderProperties: () => () => {},
   };
 }
 

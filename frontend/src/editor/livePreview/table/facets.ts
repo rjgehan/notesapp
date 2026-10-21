@@ -37,8 +37,13 @@ export const tableCellHost = Facet.define<EditorView, EditorView | null>({
 /** Marks the transactions a table grid makes in the note, with the grid's id. */
 export const tableEdit = Annotation.define<number>();
 
-/** How the note's editor shows its tables. */
-export const tablesConfig = Facet.define<{ locked: boolean }, { locked: boolean }>({
+/** How the note's editor shows its tables: locked (read-only), and whether images from the web load in cells. */
+export interface TablesConfig {
+  locked: boolean;
+  remoteImages?: boolean;
+}
+
+export const tablesConfig = Facet.define<TablesConfig, TablesConfig>({
   combine: (values) => values[0] ?? { locked: false },
 });
 

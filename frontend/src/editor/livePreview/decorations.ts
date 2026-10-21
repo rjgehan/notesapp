@@ -3,8 +3,9 @@
 import { RangeSet, type EditorSelection, type EditorState, type Range, RangeValue } from '@codemirror/state';
 import { Decoration, type DecorationSet } from '@codemirror/view';
 import type { SyntaxVisibility } from '../../state/prefs';
+import type { NoteContext } from '../context';
 import { collectElements, hiddenPieces, isRevealed, layoutOf, type RevealOptions } from './model';
-import { widgetFor } from './widgets';
+import { widgetFor, type WidgetContext } from './widgets';
 
 export interface LivePreviewConfig {
   visibility: SyntaxVisibility;
@@ -12,6 +13,8 @@ export interface LivePreviewConfig {
   locked: boolean;
   /** Task checkboxes can be toggled (false while the note cannot be written). */
   checkboxes: boolean;
+  /** Images from other sites load as they show (the per-device preference); otherwise on a click. */
+  remoteImages?: boolean;
 }
 
 export interface BuildContext extends LivePreviewConfig {
@@ -20,6 +23,8 @@ export interface BuildContext extends LivePreviewConfig {
   focused: boolean;
   /** Autocompletion is open. */
   completing: boolean;
+  /** The app (link resolution, embeds); null in a plain editor. */
+  note: NoteContext | null;
 }
 
 export interface LivePreview {
@@ -32,6 +37,7 @@ class Atom extends RangeValue {}
 const atom = new Atom();
 
 const hidden = Decoration.replace({});
+const fenceLine = Decoration.line({ class: 'cm-lp-fence-line' });
 const markCache = new Map<string, Decoration>();
 function mark(className: string): Decoration {
   let d = markCache.get(className);
@@ -43,22 +49,31 @@ function mark(className: string): Decoration {
 }
 
 export function revealOptions(ctx: Pick<BuildContext, 'visibility' | 'locked' | 'focused' | 'completing'>): RevealOptions {
-  if (ctx.locked) return { atCursor: false, atSelectionEnds: false, completing: false };
-  return { atCursor: ctx.visibility === 'reveal-at-cursor' && ctx.focused, atSelectionEnds: true, completing: ctx.completing };
+  if (ctx.locked) return { atCursor: false, atSelectionEnds: false, completing: false, comments: false, codeAtCursor: false };
+  const reveal = ctx.visibility === 'reveal-at-cursor';
+  return { atCursor: reveal && ctx.focused, atSelectionEnds: true, completing: ctx.completing, comments: reveal, codeAtCursor: true };
 }
 
 /** Decorations and atomic ranges for `ranges` of `state` (the visible ranges in the editor). */
 export function buildLivePreview(state: EditorState, ranges: readonly { from: number; to: number }[], ctx: BuildContext): LivePreview {
   const elements = collectElements(state, ranges);
   const options = revealOptions(ctx);
+  const widgets: WidgetContext = { checkboxes: ctx.checkboxes, remoteImages: ctx.remoteImages ?? true, note: ctx.note, doc: state.doc };
   const decos: Range<Decoration>[] = [];
   for (const el of elements) {
     for (const m of el.marks) if (m.to > m.from) decos.push(mark(m.className).range(m.from, m.to));
     if (el.lineClass) decos.push(Decoration.line({ class: el.lineClass.className }).range(el.lineClass.at));
-    if (isRevealed(el, ctx.selection, options)) continue;
+    if (isRevealed(el, ctx.selection, options)) {
+      // A revealed embed shows its source, and the file still shows after it.
+      const spec = el.pieces[0]?.widget;
+      if (el.kind === 'embed' && spec) decos.push(Decoration.widget({ widget: widgetFor(spec, widgets), side: 1 }).range(el.to));
+      continue;
+    }
     for (const p of el.pieces) {
       if (p.to <= p.from) continue;
-      decos.push((p.widget ? Decoration.replace({ widget: widgetFor(p.widget, ctx.checkboxes) }) : hidden).range(p.from, p.to));
+      decos.push((p.widget ? Decoration.replace({ widget: widgetFor(p.widget, widgets) }) : hidden).range(p.from, p.to));
+      // A code block's hidden fences are slim lines.
+      if (el.kind === 'codeblock') decos.push(fenceLine.range(state.doc.lineAt(p.from).from));
     }
     if (el.hangingIndent) {
       decos.push(Decoration.line({ class: 'cm-lp-indent', attributes: { style: `--lp-indent: ${el.hangingIndent.em}em` } }).range(el.hangingIndent.at));

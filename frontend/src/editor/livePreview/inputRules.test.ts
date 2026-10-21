@@ -3,6 +3,7 @@ import { redo, undo } from '@codemirror/commands';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { destroyEditors, marked, noteEditor, parsed, press, typeText } from '../../test/noteEditor';
+import { editProperties } from './blocks';
 import { collectElements } from './model';
 import { tableBlocks } from './table';
 
@@ -109,7 +110,9 @@ describe('typing shortcuts write ordinary Markdown (ROADMAP 10a)', () => {
     view = noteEditor('```\n‸\n```');
     typeText(view, '[] ');
     expect(view.state.doc.toString()).toBe('```\n[] \n```');
+    // The properties' YAML, shown for editing (ROADMAP 10b).
     view = noteEditor('---\ntags: x\n‸\n---\n');
+    view.dispatch({ effects: editProperties.of(true) });
     typeText(view, '[] ');
     expect(view.state.doc.toString()).toBe('---\ntags: x\n[] \n---\n');
   });

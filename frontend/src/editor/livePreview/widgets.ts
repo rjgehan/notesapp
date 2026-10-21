@@ -1,7 +1,12 @@
-// Live Preview widgets (DESIGN §6.6.1): bullets, task checkboxes, horizontal rules and the " > " of
-// a heading link. Each stands in for markup without changing the document; a checkbox click is an
-// ordinary edit of the one character between its brackets.
+// Live Preview widgets (DESIGN §6.6.1): bullets, task checkboxes, horizontal rules, the " > " of
+// a heading link, footnote numbers, code fences, and (embeds.ts) images and embeds. Each stands in
+// for markup without changing the document; a checkbox click is an ordinary edit of the one
+// character between its brackets.
+import type { Text } from '@codemirror/state';
 import { EditorView, WidgetType } from '@codemirror/view';
+import type { NoteContext } from '../context';
+import { embedWidget } from './embeds';
+import { footnoteIndex, showFootnote } from './footnotes';
 import { LIST_INDENT_EM, type WidgetSpec } from './model';
 
 /** Bullet glyphs by nesting level, as the reading view's disc, circle and square. */
@@ -114,16 +119,110 @@ class TextWidget extends WidgetType {
 
 const rule = new RuleWidget();
 
-/** The widget for `spec`. Checkboxes toggle only while the note can be written. */
-export function widgetFor(spec: WidgetSpec, checkboxes: boolean): WidgetType {
+// ---------- footnotes and code fences (ROADMAP 10b) ----------
+
+/** A footnote reference or inline footnote: its number, superscript. A click or tap shows its text. */
+class FootnoteWidget extends WidgetType {
+  readonly number: number | null;
+  readonly label: string | null;
+  constructor(number: number | null, label: string | null) {
+    super();
+    this.number = number;
+    this.label = label;
+  }
+  override eq(other: FootnoteWidget): boolean {
+    return other.number === this.number && other.label === this.label;
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const el = document.createElement('sup');
+    el.className = this.number === null ? 'cm-lp-footnote is-missing' : 'cm-lp-footnote';
+    // Without a definition the reference reads as typed, as in the reading of the note.
+    el.textContent = this.number === null ? `[^${this.label ?? ''}]` : `[${this.number}]`;
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', this.number === null ? `Footnote ${this.label ?? ''} (no text)` : `Footnote ${this.number}`);
+    // The caret (and the phone's keyboard) stay put; the tap shows the footnote's text.
+    el.addEventListener('mousedown', (e) => e.preventDefault());
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      view.dispatch({ effects: showFootnote.of(view.posAtDOM(el)) });
+    });
+    return el;
+  }
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+/** The label of a footnote's definition, as its number (`1.`), or its label when nothing refers to it. */
+class FootnoteLabelWidget extends WidgetType {
+  readonly text: string;
+  constructor(text: string) {
+    super();
+    this.text = text;
+  }
+  override eq(other: FootnoteLabelWidget): boolean {
+    return other.text === this.text;
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement('span');
+    el.className = 'cm-lp-footnote-label';
+    el.textContent = this.text;
+    return el;
+  }
+}
+
+/** A code block's opening fence: the block's language, small and faint. */
+class FenceWidget extends WidgetType {
+  readonly language: string;
+  constructor(language: string) {
+    super();
+    this.language = language;
+  }
+  override eq(other: FenceWidget): boolean {
+    return other.language === this.language;
+  }
+  toDOM(): HTMLElement {
+    const el = document.createElement('span');
+    el.className = 'cm-lp-fence';
+    el.textContent = this.language;
+    return el;
+  }
+}
+
+/** What the widgets need besides their spec. */
+export interface WidgetContext {
+  /** Task checkboxes can be toggled (false while the note cannot be written). */
+  checkboxes: boolean;
+  /** Images from other sites load (the per-device preference); otherwise a click loads one. */
+  remoteImages: boolean;
+  /** The app (link resolution, embeds); null in a plain editor. */
+  note: NoteContext | null;
+  /** The document, for its footnotes' numbers. */
+  doc: Text;
+}
+
+/** The widget for `spec`. */
+export function widgetFor(spec: WidgetSpec, ctx: WidgetContext): WidgetType {
   switch (spec.type) {
     case 'bullet':
       return new BulletWidget(spec.depth);
     case 'checkbox':
-      return new CheckboxWidget(spec.checked, spec.depth, checkboxes);
+      return new CheckboxWidget(spec.checked, spec.depth, ctx.checkboxes);
     case 'rule':
       return rule;
     case 'text':
       return new TextWidget(spec.text, spec.className);
+    case 'embed':
+      return embedWidget(spec.embed, ctx.note, ctx.remoteImages);
+    case 'footnote': {
+      const index = footnoteIndex(ctx.doc);
+      return new FootnoteWidget(spec.label === null ? index.inlineNumber(spec.at) : index.number(spec.label), spec.label);
+    }
+    case 'footnote-label': {
+      const n = footnoteIndex(ctx.doc).number(spec.label);
+      return new FootnoteLabelWidget(n === null ? `${spec.label}.` : `${n}.`);
+    }
+    case 'fence':
+      return new FenceWidget(spec.language);
   }
 }
