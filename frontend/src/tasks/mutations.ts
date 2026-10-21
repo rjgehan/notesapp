@@ -23,7 +23,8 @@ import { activePath, navigateTo, openPath } from '../features/navigation';
 import { displayName } from '../features/paths';
 import { newIdempotencyKey } from '../state/clientId';
 import { confirmAction } from '../state/dialogs';
-import { toast } from '../state/toasts';
+import { toast, useToasts } from '../state/toasts';
+import { useUi } from '../state/ui';
 import { applyMoveResult, applyTrashEntry } from '../sync/applyEvents';
 import { documents } from '../sync/instance';
 import { syncTarget } from '../sync/liveSync';
@@ -156,14 +157,38 @@ function reportFailure<T>(e: unknown, write: Write<T>, store: TaskStore, key: st
     return;
   }
   if (isTransient(e)) {
-    // Kept until dismissed: its Retry may hold the only copy of what was typed (quick add).
-    toast(`${subject}: not saved, you're offline.`, {
-      action: { label: 'Retry', run: () => void runWrite(write, store, key) },
-      timeout: 0,
-    });
+    // Sent again by itself when the connection is back; until then the toast stays, since its
+    // Retry may hold the only copy of what was typed (quick add).
+    const retry = (): void => {
+      waiting.delete(id);
+      useToasts.getState().dismiss(id);
+      void runWrite(write, store, key);
+    };
+    const id = toast(`${subject}: not saved, you're offline.`, { action: { label: 'Retry', run: retry }, timeout: 0 });
+    waiting.set(id, retry);
+    watchConnection();
     return;
   }
   toastError(e, subject);
+}
+
+/** Writes that failed offline, by their toast: each is sent again (same key) when the connection is back. */
+const waiting = new Map<number, () => void>();
+let unwatch: (() => void) | null = null;
+
+function watchConnection(): void {
+  if (unwatch) return;
+  unwatch = useUi.subscribe((state, prev) => {
+    if (state.connection !== 'live' || prev.connection === 'live') return;
+    for (const retry of [...waiting.values()]) retry();
+  });
+}
+
+/** Forgets the writes waiting for the connection (tests). */
+export function resetWaitingWrites(): void {
+  waiting.clear();
+  unwatch?.();
+  unwatch = null;
 }
 
 // ---------- tasks ----------

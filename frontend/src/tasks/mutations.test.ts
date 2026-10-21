@@ -4,7 +4,8 @@ import { queryClient } from '../api/queryClient';
 import type { FileEntry, Problem, Task, TaskWriteResult, TreeResponse } from '../api/types';
 import { useToasts } from '../state/toasts';
 import { taskApi } from './api';
-import { completeTask, createTask, deleteTask, isPending, moveTask, updateTask } from './mutations';
+import { useUi } from '../state/ui';
+import { completeTask, createTask, deleteTask, isPending, moveTask, resetWaitingWrites, updateTask } from './mutations';
 import { inToday } from './model';
 import { TaskStore } from './store';
 import { makeList, makeTask } from './testing';
@@ -39,6 +40,8 @@ beforeEach(() => {
 
 afterEach(() => {
   queryClient.clear();
+  resetWaitingWrites();
+  useUi.getState().setConnection('live');
 });
 
 describe('optimistic updates (DESIGN §6.22)', () => {
@@ -109,6 +112,21 @@ describe('optimistic updates (DESIGN §6.22)', () => {
     await Promise.all([a, b]);
     expect(update.mock.calls[1][1]).toEqual({ changes: { title: 'three' }, base: { title: 'two' } });
     expect(store.task('A')?.title).toBe('three');
+  });
+
+  it('sends a write that failed offline again when the connection is back, and drops its toast', async () => {
+    const t = makeTask({ id: 'A', title: 'Water plants', priority: 0 });
+    store.upsert([t]);
+    const update = vi.spyOn(taskApi, 'update').mockRejectedValueOnce(new TransientError('Failed to fetch')).mockResolvedValueOnce(result({ ...t, priority: 3 }));
+    useUi.getState().setConnection('offline');
+    await updateTask(t, { priority: 3 }, undefined, store);
+    expect(store.task('A')?.priority).toBe(0);
+    const offline = useToasts.getState().toasts.at(-1)!;
+    expect(offline).toMatchObject({ message: "“Water plants”: not saved, you're offline.", timeout: 0 });
+    useUi.getState().setConnection('live');
+    await vi.waitFor(() => expect(store.task('A')?.priority).toBe(3));
+    expect(update.mock.calls[0][2]).toBe(update.mock.calls[1][2]);
+    expect(useToasts.getState().toasts.some((x) => x.id === offline.id)).toBe(false);
   });
 
   it('skips a change to the value the task already has', async () => {
