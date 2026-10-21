@@ -132,10 +132,12 @@ describe('optimistic updates (DESIGN §6.22)', () => {
 });
 
 describe('completing, creating, deleting and moving', () => {
-  it('completes a task and its open subtasks at once, then offers Undo', async () => {
+  it('completes a task and its open subtasks at once, then offers Undo, which reopens exactly those', async () => {
     const p = makeTask({ id: 'P', due: '2026-10-17' });
     const c = makeTask({ id: 'C', parentId: 'P' });
-    store.upsert([p, c]);
+    const g = makeTask({ id: 'G', parentId: 'C' });
+    const finished = makeTask({ id: 'F', parentId: 'P', status: 'done', completedAt: '2026-10-16T10:00:00.000Z' });
+    store.upsert([p, c, g, finished]);
     const held = deferred<TaskWriteResult>();
     const complete = vi.spyOn(taskApi, 'complete').mockReturnValue(held.promise);
     const done = completeTask(p, store);
@@ -143,13 +145,41 @@ describe('completing, creating, deleting and moving', () => {
     expect(store.task('C')?.status).toBe('done');
     await Promise.resolve();
     expect(complete.mock.calls[0][1]).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), base: { due: '2026-10-17', start: null } });
-    held.resolve(result({ ...p, status: 'done', completedAt: '2026-10-17T10:00:00.000Z' }, { changed: [{ ...c, status: 'done', completedAt: '2026-10-17T10:00:00.000Z' }] }));
+    const at = '2026-10-17T10:00:00.000Z';
+    held.resolve(result({ ...p, status: 'done', completedAt: at }, { changed: [{ ...c, status: 'done', completedAt: at }, { ...g, status: 'done', completedAt: at }] }));
     await done;
     expect(toasts().at(-1)).toContain('Completed');
-    const uncomplete = vi.spyOn(taskApi, 'uncomplete').mockResolvedValue(result({ ...p, status: 'open' }));
+    const uncomplete = vi.spyOn(taskApi, 'uncomplete').mockImplementation(async (id) => result({ ...store.task(id)!, status: 'open', completedAt: null }));
     useToasts.getState().toasts.at(-1)!.action!.run();
     await vi.waitFor(() => expect(store.task('P')?.status).toBe('open'));
-    expect(uncomplete).toHaveBeenCalledWith('P', expect.any(String));
+    await vi.waitFor(() => expect(store.task('C')?.status).toBe('open'));
+    await vi.waitFor(() => expect(store.task('G')?.status).toBe('open'));
+    // A subtask that was already done before stays done.
+    expect(store.task('F')?.status).toBe('done');
+    expect(uncomplete.mock.calls.map((call) => call[0]).sort()).toEqual(['C', 'G', 'P']);
+  });
+
+  it('undoes a roll-forward: the dates go back and the subtasks it reopened close again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 9, 17, 10, 0));
+    try {
+      const t = makeTask({ id: 'R', due: '2026-10-17', recurrence: { rrule: 'FREQ=WEEKLY', from: 'due' } });
+      const open = makeTask({ id: 'S', parentId: 'R' });
+      const closed = makeTask({ id: 'C', parentId: 'R', status: 'done', completedAt: '2026-10-16T10:00:00.000Z' });
+      store.upsert([t, open, closed]);
+      vi.spyOn(taskApi, 'complete').mockResolvedValue(result({ ...t, due: '2026-10-24' }, { rolledForward: true, changed: [{ ...closed, status: 'open', completedAt: null }] }));
+      await completeTask(t, store);
+      expect(store.task('C')?.status).toBe('open');
+      const update = vi.spyOn(taskApi, 'update').mockImplementation(async (id, req) => result({ ...store.knownTask(id)!, ...req.changes } as Task));
+      useToasts.getState().toasts.at(-1)!.action!.run();
+      await vi.waitFor(() => expect(store.task('R')?.due).toBe('2026-10-17'));
+      await vi.waitFor(() => expect(store.task('C')?.status).toBe('done'));
+      expect(update).toHaveBeenCalledWith('C', { changes: { status: 'done' }, base: { status: 'open' } }, expect.any(String));
+      // The subtask that was open stays open.
+      expect(update.mock.calls.some((call) => call[0] === 'S')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rolls a recurring task forward at once, as the server will, and says when it is next due', async () => {

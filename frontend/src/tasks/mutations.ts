@@ -319,6 +319,8 @@ export async function completeTask(task: Task, store: TaskStore = taskStore): Pr
   if (isPending(task) || task.status !== 'open' || completing.has(task.id)) return null;
   completing.add(task.id);
   const day = localToday();
+  // The subtasks' statuses before, so Undo can put back exactly those the completion changed.
+  const prior = new Map(descendants(task.id, childrenByParent(store.tasks().values())).map((d) => [d.id, store.knownTask(d.id)?.status ?? d.status]));
   let result: TaskWriteResult | null;
   try {
     // Only a recurring task waits (for the rrule chunk), so a plain one is checked off at once.
@@ -339,13 +341,32 @@ export async function completeTask(task: Task, store: TaskStore = taskStore): Pr
   }
   if (!result) return null;
   const after = result.task;
+  const subtasks = result.changed.filter((c) => prior.has(c.id));
   if (result.rolledForward && after) {
     const next = after.due ?? after.start;
+    // The roll-forward reopened the closed subtasks for the next round; Undo closes them again.
+    const reopened = subtasks.filter((c) => c.status === 'open' && prior.get(c.id) !== 'open');
     toast(next ? `“${task.title}” is next due ${formatTaskDate(next, localToday())}` : `“${task.title}” rolled forward`, {
-      action: { label: 'Undo', run: () => void updateTask(after, { due: task.due, start: task.start, reminders: task.reminders, recurrence: task.recurrence }, undefined, store) },
+      action: {
+        label: 'Undo',
+        run: () => {
+          void updateTask(after, { due: task.due, start: task.start, reminders: task.reminders, recurrence: task.recurrence }, undefined, store);
+          for (const c of reopened) void updateTask(store.task(c.id) ?? c, { status: prior.get(c.id)! }, { status: 'open' }, store);
+        },
+      },
     });
   } else if (after && after.status !== 'open') {
-    toast(`Completed “${task.title}”`, { action: { label: 'Undo', run: () => void uncompleteTask(after, store) } });
+    // The completion closed the subtasks that were open; Undo reopens those (and only those).
+    const closed = subtasks.filter((c) => c.status !== 'open' && prior.get(c.id) === 'open');
+    toast(`Completed “${task.title}”`, {
+      action: {
+        label: 'Undo',
+        run: () => {
+          void uncompleteTask(after, store);
+          for (const c of closed) void uncompleteTask(store.task(c.id) ?? c, store);
+        },
+      },
+    });
   }
   return result;
 }
