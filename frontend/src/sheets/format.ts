@@ -86,6 +86,11 @@ export interface Sheet {
   frozen: Frozen;
   /** Keyed by chart id; shown in id order. Written only when there are any. */
   charts: Record<string, ChartProps>;
+  /**
+   * Changes with every insertion or deletion of rows or columns, which moves cells: a merge whose
+   * other side changed anything then shows the banner (DESIGN §6.21.3). Written only when set.
+   */
+  structure?: string;
   extra?: Extra;
 }
 
@@ -104,7 +109,7 @@ export interface SheetFile {
 export type ParseResult = { ok: true; file: SheetFile; repairs: string[] } | { ok: false; error: string; newer?: boolean };
 
 const FILE_KEYS = ['type', 'version', 'engine', 'sheets', 'named'];
-const SHEET_KEYS = ['id', 'name', 'cells', 'cols', 'rows', 'frozen', 'charts'];
+const SHEET_KEYS = ['id', 'name', 'cells', 'cols', 'rows', 'frozen', 'charts', 'structure'];
 const CELL_KEYS = ['v', 'f', 'c', 'fmt'];
 const COLUMN_KEYS = ['w', 'fmt', 'bold'];
 const ROW_KEYS = ['h', 'fmt', 'bold'];
@@ -135,6 +140,12 @@ export function newSheetFile(engine = SHEET_ENGINE): SheetFile {
 
 export function emptySheet(id: string, name: string): Sheet {
   return { id, name, cells: {}, cols: {}, rows: {}, frozen: { rows: 0, cols: 0 }, charts: {} };
+}
+
+/** A new random value for a sheet's `structure`. */
+export function newStructureId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => (b % 36).toString(36)).join('');
 }
 
 /**
@@ -468,6 +479,11 @@ function parseSheetEntry(raw: Json, index: number, repairs: string[]): Sheet {
     addExtra(sheet, 'charts', raw.charts);
     repairs.push(`${label}: "charts" is not an object; it is kept unchanged but not shown.`);
   }
+  if (typeof raw.structure === 'string') sheet.structure = raw.structure;
+  else if (raw.structure !== undefined) {
+    addExtra(sheet, 'structure', raw.structure);
+    repairs.push(`${label}: "structure" is not text; it is kept unchanged.`);
+  }
   return sheet;
 }
 
@@ -639,6 +655,8 @@ function sheetBlock(sheet: Sheet): string {
   // Only when there are any, so files without charts keep the layout of earlier versions.
   if (charts.length > 0) lines.push(`${i}"charts": ${keyedBlock(charts, i, chartLine)}`);
   else if (sheet.extra?.charts !== undefined) lines.push(`${i}"charts": ${block(sheet.extra.charts, i)}`);
+  if (sheet.structure !== undefined) lines.push(`${i}"structure": ${quote(sheet.structure)}`);
+  else if (sheet.extra?.structure !== undefined) lines.push(`${i}"structure": ${block(sheet.extra.structure, i)}`);
   for (const [k, v] of Object.entries(sheet.extra ?? {})) if (!SHEET_KEYS.includes(k)) lines.push(`${i}${quote(k)}: ${block(v, i)}`);
   return `    {\n${lines.join(',\n')}\n    }`;
 }

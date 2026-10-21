@@ -14,6 +14,12 @@ export interface SheetActions {
   freezeColumns(): void;
   unfreeze(): void;
   addSheet(): void;
+  insertRowsAbove(): void;
+  insertRowsBelow(): void;
+  insertColumnsLeft(): void;
+  insertColumnsRight(): void;
+  deleteRows(): void;
+  deleteColumns(): void;
   openNamedRanges(): void;
   openColumnWidth(): void;
   openNumberFormat(): void;

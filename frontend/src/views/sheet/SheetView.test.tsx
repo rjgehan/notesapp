@@ -361,6 +361,33 @@ describe('the spreadsheet view', () => {
     expect(nameBox()).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('inserts and deletes rows and columns from the toolbar, a right-click and the palette', async () => {
+    const path = await openGrid();
+    select(0, 1, 1, 2); // A3:A4
+    fireEvent.click(screen.getByRole('button', { name: 'Insert or delete rows and columns' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Insert 2 rows above' }));
+    let cells = (await saved(path)).sheets[0].cells;
+    expect(cells.A3).toBeUndefined();
+    expect(cells.A5).toEqual({ v: 'Food' });
+    expect(cells.B7).toEqual({ f: '=SUM(B2:B6)', c: 1937.5 });
+    // A right-click on a cell outside the selection selects it, then opens the same menu.
+    const contextMenu = gridProps().onCellContextMenu!;
+    act(() => contextMenu([1, 3], { bounds: { x: 100, y: 200, width: 80, height: 24 }, localEventX: 5, localEventY: 5, preventDefault: vi.fn() } as never));
+    expect(nameBox().value).toBe('B5');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete column B' }));
+    cells = (await saved(path)).sheets[0].cells;
+    expect(cells.B7).toBeUndefined();
+    expect(cells.B2).toEqual({ f: '=#REF!/Total', c: { e: '#REF!' } });
+    // The palette's commands act on the open sheet; Mod-Z undoes one step each.
+    act(() => void SHEET_COMMANDS.find((c) => c.id === 'sheet.deleteRows')!.run({ activePath: path }));
+    act(() => void activeSheet(path)!.undo());
+    act(() => void activeSheet(path)!.undo());
+    act(() => void activeSheet(path)!.undo());
+    cells = (await saved(path)).sheets[0].cells;
+    expect(cells.A3).toEqual({ v: 'Food' });
+    expect(cells.B5).toEqual({ f: '=SUM(B2:B4)', c: 1937.5 });
+  });
+
   it('sets a column width from the dialog (the way on a phone)', async () => {
     const path = await openGrid();
     select(1, 0);

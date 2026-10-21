@@ -11,7 +11,7 @@ function file(value: unknown): SheetFile {
   return result.file;
 }
 
-function workbook(sheets: Array<{ id?: string; name: string; cells?: Record<string, unknown> }>, named: Record<string, string> = {}, engine = ENGINE_ID): Workbook {
+function workbook(sheets: Array<{ id?: string; name: string; cells?: Record<string, unknown>; cols?: Record<string, unknown>; rows?: Record<string, unknown>; frozen?: unknown }>, named: Record<string, string> = {}, engine = ENGINE_ID): Workbook {
   return Workbook.open(file({ type: 'notesapp-sheet', version: 1, engine, sheets: sheets.map((s, i) => ({ id: s.id ?? `s${i + 1}`, ...s })), named }));
 }
 
@@ -784,5 +784,95 @@ describe('formats a formula’s result implies', () => {
     wb.setCells([{ sheet: 's1', ref: 'D1', content: { f: '=TODAY()' } }]);
     const cells = wb.file.sheets[0].cells;
     expect([cells.A1.fmt, cells.C1.fmt, cells.D1.fmt]).toEqual(['0.0', undefined, undefined]);
+  });
+});
+
+describe('inserting and deleting rows and columns', () => {
+  /** The workbook's model recalculated from scratch: what any device opening the saved file computes. */
+  const fresh = (wb: Workbook) => Workbook.open(file(JSON.parse(wb.serialize()))).file;
+  const budget = () =>
+    workbook(
+      [
+        {
+          name: 'Data',
+          cells: { A1: { v: 'Item' }, A2: { v: 1 }, A3: { v: 2, fmt: '0.0' }, A4: { v: 3 }, A6: { f: '=SUM(A2:A4)' }, B2: { f: '=A2*2' }, B4: { f: '=ROW()' }, C1: { f: '=SEQUENCE(2)' } },
+          rows: { '1': { bold: true }, '4': { h: 40 } },
+          cols: { B: { w: 120 } },
+          frozen: { rows: 1, cols: 0 },
+        },
+        { name: 'Summary', cells: { A1: { f: '=Data!A6' }, A2: { f: '=SUM(Data!A:A)' } } },
+      ],
+      { Values: 'Data!$A$2:$A$4' },
+    );
+
+  it('inserts rows: cells, formats and heights move; references follow and ranges grow', () => {
+    const wb = budget();
+    const chart = wb.addChart('s1', { type: 'bar', range: 'A1:A4' });
+    wb.insertRows('s1', 2, 2); // before row 3
+    const [data, summary] = wb.file.sheets;
+    expect(data.cells.A3).toBeUndefined();
+    expect(data.cells.A5).toEqual({ v: 2, fmt: '0.0' });
+    expect(data.cells.A8).toEqual({ f: '=SUM(A2:A6)', c: 6 });
+    expect(data.cells.B2).toEqual({ f: '=A2*2', c: 2 });
+    expect(data.cells.B6).toEqual({ f: '=ROW()', c: 6 });
+    expect(data.rows).toEqual({ '1': { bold: true }, '6': { h: 40 } });
+    expect(data.cols).toEqual({ B: { w: 120 } });
+    expect(data.charts[chart].range).toBe('A1:A6');
+    expect(summary.cells.A1).toEqual({ f: '=Data!A8', c: 6 });
+    expect(summary.cells.A2).toEqual({ f: '=SUM(Data!A:A)', c: 12 });
+    expect(wb.file.named).toEqual({ Values: 'Data!$A$2:$A$6' });
+    expect(data.frozen).toEqual({ rows: 1, cols: 0 });
+    expect(data.structure).toMatch(/^[0-9a-z]{8}$/);
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+    // One undo step puts everything back, the structure marker included.
+    wb.undo();
+    expect(wb.file.sheets[0].cells.A6).toEqual({ f: '=SUM(A2:A4)', c: 6 });
+    expect(wb.file.sheets[0].structure).toBeUndefined();
+    expect(wb.file.named).toEqual({ Values: 'Data!$A$2:$A$4' });
+    wb.redo();
+    expect(wb.file.sheets[0].cells.A8).toEqual({ f: '=SUM(A2:A6)', c: 6 });
+  });
+
+  it('deletes rows: their cells go, references to them become #REF!, ranges shrink', () => {
+    const wb = budget();
+    wb.deleteRows('s1', 1, 2); // rows 2 and 3
+    const [data, summary] = wb.file.sheets;
+    expect(data.cells.A2).toEqual({ v: 3 });
+    expect(data.cells.A4).toEqual({ f: '=SUM(A2:A2)', c: 3 });
+    expect(data.cells.B2).toEqual({ f: '=ROW()', c: 2 });
+    expect(data.cells.A3).toBeUndefined();
+    expect(data.rows).toEqual({ '1': { bold: true }, '2': { h: 40 } });
+    expect(summary.cells.A1).toEqual({ f: '=Data!A4', c: 3 });
+    expect(wb.file.named).toEqual({ Values: 'Data!$A$2:$A$2' });
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+    // A frozen row deleted is no longer frozen; a reference to a deleted cell is #REF!.
+    wb.setCell('s2', 'B1', { f: '=Data!A1' });
+    wb.deleteRows('s1', 0);
+    expect(wb.file.sheets[0].frozen.rows).toBe(0);
+    expect(wb.cell('s2', 'B1')).toEqual({ f: '=#REF!', c: { e: '#REF!' } });
+  });
+
+  it('inserts and deletes columns', () => {
+    const wb = budget();
+    wb.insertColumns('s1', 0);
+    let data = wb.file.sheets[0];
+    expect(data.cells.B6).toEqual({ f: '=SUM(B2:B4)', c: 6 });
+    expect(data.cells.C2).toEqual({ f: '=B2*2', c: 2 });
+    expect(data.cols).toEqual({ C: { w: 120 } });
+    expect(wb.cell('s2', 'A2')).toEqual({ f: '=SUM(Data!B:B)', c: 12 });
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+    wb.deleteColumns('s1', 0, 2);
+    data = wb.file.sheets[0];
+    expect(data.cells.A2).toEqual({ f: '=#REF!*2', c: { e: '#REF!' } });
+    expect(wb.cell('s2', 'A2')).toEqual({ f: '=SUM(#REF!)', c: { e: '#REF!' } });
+    expect(wb.file.sheets).toEqual(fresh(wb).sheets);
+  });
+
+  it('refuses to push cells off the sheet, and indexes that are not rows', () => {
+    const wb = workbook([{ name: 'S', cells: { A1048576: { v: 1 } } }]);
+    expect(() => wb.insertRows('s1', 0)).toThrow(/no room/);
+    expect(() => wb.deleteRows('s1', -1)).toThrow();
+    expect(() => wb.insertColumns('s1', 0, 0)).toThrow();
+    expect(wb.canUndo()).toBe(false);
   });
 });

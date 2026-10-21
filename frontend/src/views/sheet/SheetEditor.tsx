@@ -5,6 +5,7 @@ import type { DataEditorRef } from '@glideapps/glide-data-grid';
 import {
   ArrowDownToLine,
   ArrowRightToLine,
+  BetweenHorizontalStart,
   Bold,
   ChartColumn,
   DecimalsArrowLeft,
@@ -153,6 +154,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [freezeMenu, setFreezeMenu] = useState<{ x: number; y: number } | null>(null);
   const [exportMenu, setExportMenu] = useState<{ x: number; y: number } | null>(null);
+  const [linesMenu, setLinesMenu] = useState<{ x: number; y: number } | null>(null);
   /** The cut waiting to be pasted, shown with a dashed outline while it is still the last copy. */
   const [cutMark, setCutMark] = useState<SheetClip | null>(null);
   // On a phone the charts start folded, so the grid keeps its room.
@@ -283,6 +285,28 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
   };
 
   const setFrozen = (rows: number, cols: number) => run(() => workbook.setFrozen(sheet.id, { rows, cols }));
+
+  // ---------- inserting and deleting rows and columns ----------
+
+  /** The selected rows (the active cell's row when whole columns are selected), and columns likewise. */
+  const rowSpan = wholeColumns ? { at: selection.active.row, count: 1 } : { at: selection.range.row, count: selection.range.height };
+  const colSpan = wholeRows ? { at: selection.active.col, count: 1 } : { at: selection.range.col, count: selection.range.width };
+  const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
+  const rowsLabel = rowSpan.count === 1 ? `row ${rowSpan.at + 1}` : `rows ${rowSpan.at + 1}–${rowSpan.at + rowSpan.count}`;
+  const colsLabel = colSpan.count === 1 ? `column ${columnLetters(colSpan.at)}` : `columns ${columnLetters(colSpan.at)}–${columnLetters(colSpan.at + colSpan.count - 1)}`;
+  const insertRows = (below: boolean) => run(() => workbook.insertRows(sheet.id, rowSpan.at + (below ? rowSpan.count : 0), rowSpan.count));
+  const insertColumns = (right: boolean) => run(() => workbook.insertColumns(sheet.id, colSpan.at + (right ? colSpan.count : 0), colSpan.count));
+  const deleteRows = () => run(() => workbook.deleteRows(sheet.id, rowSpan.at, rowSpan.count));
+  const deleteColumns = () => run(() => workbook.deleteColumns(sheet.id, colSpan.at, colSpan.count));
+  const lineItems: MenuEntry[] = [
+    { id: 'rowsAbove', label: `Insert ${plural(rowSpan.count, 'row', 'rows')} above`, run: () => insertRows(false) },
+    { id: 'rowsBelow', label: `Insert ${plural(rowSpan.count, 'row', 'rows')} below`, run: () => insertRows(true) },
+    { id: 'colsLeft', label: `Insert ${plural(colSpan.count, 'column', 'columns')} left`, run: () => insertColumns(false) },
+    { id: 'colsRight', label: `Insert ${plural(colSpan.count, 'column', 'columns')} right`, run: () => insertColumns(true) },
+    'separator',
+    { id: 'deleteRows', label: `Delete ${rowsLabel}`, danger: true, run: deleteRows },
+    { id: 'deleteCols', label: `Delete ${colsLabel}`, danger: true, run: deleteColumns },
+  ];
 
   const setWidths = (cols: number[], width: number | null) => {
     run(() =>
@@ -591,6 +615,12 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
       freezeColumns: () => setFrozen(sheet.frozen.rows, selection.active.col + 1),
       unfreeze: () => setFrozen(0, 0),
       addSheet,
+      insertRowsAbove: () => insertRows(false),
+      insertRowsBelow: () => insertRows(true),
+      insertColumnsLeft: () => insertColumns(false),
+      insertColumnsRight: () => insertColumns(true),
+      deleteRows,
+      deleteColumns,
       openNamedRanges: () => setDialog({ kind: 'named' }),
       openColumnWidth: () => setDialog({ kind: 'width' }),
       openNumberFormat: () => setDialog({ kind: 'format' }),
@@ -616,6 +646,12 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
       freezeColumns: call('freezeColumns'),
       unfreeze: call('unfreeze'),
       addSheet: call('addSheet'),
+      insertRowsAbove: call('insertRowsAbove'),
+      insertRowsBelow: call('insertRowsBelow'),
+      insertColumnsLeft: call('insertColumnsLeft'),
+      insertColumnsRight: call('insertColumnsRight'),
+      deleteRows: call('deleteRows'),
+      deleteColumns: call('deleteColumns'),
       openNamedRanges: call('openNamedRanges'),
       openColumnWidth: call('openColumnWidth'),
       openNumberFormat: call('openNumberFormat'),
@@ -650,6 +686,9 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
     onFillRight: fillRight,
     onToggleBold: toggleBold,
     onColumnWidth: (col, width) => setWidths([col], width),
+    onContextMenu: (x, y) => {
+      if (editable) setLinesMenu({ x, y });
+    },
     onGrow: (rows, cols) =>
       setGrowth((m) => {
         const g = m.get(sheet.id);
@@ -713,6 +752,16 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
         </ToolButton>
         <ToolButton title="Column width" disabled={!editable} onClick={() => setDialog({ kind: 'width' })}>
           <MoveHorizontal size={16} />
+        </ToolButton>
+        <ToolButton
+          title="Insert or delete rows and columns"
+          disabled={!editable}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setLinesMenu({ x: r.left, y: r.bottom + 4 });
+          }}
+        >
+          <BetweenHorizontalStart size={16} />
         </ToolButton>
         <span className="sheet-toolbar-sep" aria-hidden />
         <ToolButton title="Decrease decimal places" disabled={!editable} onClick={() => changeSelectionDecimals(-1)}>
@@ -794,6 +843,7 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
       <div ref={portalRef} className="sheet-portal" />
       {freezeMenu && <ContextMenu x={freezeMenu.x} y={freezeMenu.y} label="Freeze" items={freezeItems} onClose={() => setFreezeMenu(null)} />}
       {exportMenu && <ContextMenu x={exportMenu.x} y={exportMenu.y} label="Download" items={exportItems} onClose={() => setExportMenu(null)} />}
+      {linesMenu && <ContextMenu x={linesMenu.x} y={linesMenu.y} label="Rows and columns" items={lineItems} onClose={() => setLinesMenu(null)} />}
       {dialog?.kind === 'named' && (
         <NamedRangesDialog
           workbook={workbook}

@@ -8,6 +8,7 @@ import {
   type DataEditorRef,
   type DrawHeaderCallback,
   type GridCell,
+  type CellClickedEventArgs,
   type GridKeyEventArgs,
   type GridSelection,
   type HeaderClickedEventArgs,
@@ -51,6 +52,8 @@ export interface SheetGridHandlers {
   onFillRight(): void;
   onToggleBold(): void;
   onColumnWidth(col: number, width: number): void;
+  /** A right-click on a cell or a header, at a point on the screen (the selection already covers it). */
+  onContextMenu(x: number, y: number): void;
   /** The grid scrolled close to its last row or column. */
   onGrow(rows: number, cols: number): void;
 }
@@ -298,6 +301,42 @@ export function SheetGrid({ sheet, layout, version, selection, marked, editable,
     [editable, handlers, f],
   );
 
+  // ---------- context menu ----------
+
+  // A right-click outside the selection selects what it is on first (a cell, a whole row from its
+  // number, a whole column from its letter), as in Google Sheets; the menu then acts on the selection.
+  const selectFor = useCallback(
+    (col: number, row: number | null) => {
+      const r = selection.range;
+      if (col < 0 && row !== null) {
+        const whole = r.col === 0 && r.width >= layout.cols && row >= r.row && row < r.row + r.height;
+        if (!whole) handlers.onSelect({ active: { col: 0, row }, range: { col: 0, row, width: layout.cols, height: 1 } });
+      } else if (row === null) {
+        const whole = r.row === 0 && r.height >= layout.rows && col >= r.col && col < r.col + r.width;
+        if (!whole) handlers.onSelect({ active: { col, row: 0 }, range: { col, row: 0, width: 1, height: layout.rows } });
+      } else if (!inRange(col, row, r)) handlers.onSelect({ active: { col, row }, range: { col, row, width: 1, height: 1 } });
+    },
+    [handlers, selection, layout],
+  );
+
+  const onCellContextMenu = useCallback(
+    ([col, row]: Item, e: CellClickedEventArgs) => {
+      e.preventDefault();
+      selectFor(col, row + f);
+      handlers.onContextMenu(e.bounds.x + e.localEventX, e.bounds.y + e.localEventY);
+    },
+    [handlers, selectFor, f],
+  );
+
+  const onHeaderContextMenu = useCallback(
+    (col: number, e: HeaderClickedEventArgs) => {
+      e.preventDefault();
+      if (col >= 0) selectFor(col, e.localEventY >= band ? frozenRowAt(layout, e.localEventY - band) : null);
+      handlers.onContextMenu(e.bounds.x + e.localEventX, e.bounds.y + e.localEventY);
+    },
+    [handlers, selectFor, layout, band],
+  );
+
   // ---------- keys ----------
 
   const onKeyDown = useCallback(
@@ -428,6 +467,8 @@ export function SheetGrid({ sheet, layout, version, selection, marked, editable,
         columnSelect="multi"
         rowSelect="multi"
         onHeaderClicked={onHeaderClicked}
+        onCellContextMenu={onCellContextMenu}
+        onHeaderContextMenu={onHeaderContextMenu}
         onCellActivated={onCellActivated}
         onCellEdited={onCellEdited}
         onDelete={onDelete}

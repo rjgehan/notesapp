@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { absoluteRangeText, moveReferences, parseRangeText, rangeText, renameSheetsInFormula, shiftFormula, type CellMove } from './refs';
+import { absoluteRangeText, moveReferences, parseRangeText, rangeText, renameSheetsInFormula, restructureReferences, shiftFormula, type CellMove, type LineChange } from './refs';
 
 describe('shiftFormula', () => {
   it('shifts relative references and keeps absolute parts', () => {
@@ -117,5 +117,32 @@ describe('moveReferences (cut and paste)', () => {
   it('moves named ranges, whose references all name their sheet', () => {
     expect(moveReferences('=Data!$D$1:$E$2', { from: null, to: null }, down)).toBe('=Data!$D$10:$E$11');
     expect(moveReferences('=Data!$D$1:$E$9', { from: null, to: null }, down)).toBe('=Data!$D$1:$E$9');
+  });
+});
+
+describe('restructureReferences (inserted and deleted rows and columns)', () => {
+  // Two rows inserted before row 5 (index 4) of Data.
+  const insert: LineChange = { sheet: 'Data', axis: 'rows', at: 4, count: 2, remove: false };
+  // Rows 5 and 6 deleted.
+  const remove: LineChange = { ...insert, remove: true };
+
+  it('shifts references below inserted rows and grows ranges that span them', () => {
+    expect(restructureReferences('=A4+A5+$B$9+Other!A9', 'Data', insert)).toBe('=A4+A7+$B$11+Other!A9');
+    expect(restructureReferences('=SUM(A1:A10)+SUM(A5:B6)+SUM(A1:A4)+SUM(4:5)+SUM(A:A)', 'Data', insert)).toBe('=SUM(A1:A12)+SUM(A7:B8)+SUM(A1:A4)+SUM(4:7)+SUM(A:A)');
+    expect(restructureReferences('=Data!A5+data!A3', 'Summary', insert)).toBe('=Data!A7+data!A3');
+    expect(restructureReferences('=A5', 'Summary', insert)).toBe('=A5');
+    expect(restructureReferences('=Data!$A$5:$A$9', null, insert)).toBe('=Data!$A$7:$A$11');
+  });
+
+  it('shrinks ranges that lose rows, and makes references to deleted cells #REF!', () => {
+    expect(restructureReferences('=A4+A5+A6+A7', 'Data', remove)).toBe('=A4+#REF!+#REF!+A5');
+    expect(restructureReferences('=SUM(A1:A10)+SUM(A5:A6)+SUM(A6:A9)+SUM(A2:A5)', 'Data', remove)).toBe('=SUM(A1:A8)+SUM(#REF!)+SUM(A5:A7)+SUM(A2:A4)');
+    expect(restructureReferences('=Data!B6*2', 'Summary', remove)).toBe('=#REF!*2');
+  });
+
+  it('does the same for columns', () => {
+    const cols: LineChange = { sheet: 'Data', axis: 'cols', at: 1, count: 1, remove: false };
+    expect(restructureReferences('=A1+B1+SUM(A1:C3)+SUM(B:C)+SUM(1:2)', 'Data', cols)).toBe('=A1+C1+SUM(A1:D3)+SUM(C:D)+SUM(1:2)');
+    expect(restructureReferences('=A1+B1+C1+SUM(B:B)', 'Data', { ...cols, remove: true })).toBe('=A1+#REF!+B1+SUM(#REF!)');
   });
 });

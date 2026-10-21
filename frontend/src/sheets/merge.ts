@@ -75,6 +75,7 @@ const sheetContent = (s: Sheet) => ({
   rows: s.rows,
   frozen: s.frozen,
   charts: s.charts,
+  structure: s.structure ?? '',
   extra: s.extra ?? {},
 });
 
@@ -108,15 +109,17 @@ function mergeSheet(base: Sheet, mine: Sheet, theirs: Sheet): Sheet | Conflict {
   const [b, m, t] = [base, mine, theirs].map(sheetContent);
   const name = merge3(b.name, m.name, t.name);
   const frozen = merge3(b.frozen, m.frozen, t.frozen);
+  const structure = merge3(b.structure, m.structure, t.structure);
   const cells = mergeCells(b.cells, m.cells, t.cells);
   const cols = mergeKeyed(b.cols, m.cols, t.cols);
   const rows = mergeKeyed(b.rows, m.rows, t.rows);
   const charts = mergeKeyed(b.charts, m.charts, t.charts);
   const extra = mergeKeyed(b.extra, m.extra, t.extra);
-  if (name === CONFLICT || frozen === CONFLICT || cells === CONFLICT || cols === CONFLICT || rows === CONFLICT || charts === CONFLICT || extra === CONFLICT) {
+  if (name === CONFLICT || frozen === CONFLICT || structure === CONFLICT || cells === CONFLICT || cols === CONFLICT || rows === CONFLICT || charts === CONFLICT || extra === CONFLICT) {
     return CONFLICT;
   }
   const sheet: Sheet = { id: mine.id, name: name ?? mine.name, cells, cols, rows, frozen: frozen ?? mine.frozen, charts };
+  if (structure) sheet.structure = structure;
   if (Object.keys(extra).length > 0) sheet.extra = extra as Record<string, Json>;
   return sheet;
 }
@@ -225,7 +228,23 @@ export function mergeSheetFiles(base: SheetFile, mine: SheetFile, theirs: SheetF
   return mergeFiles(followRenames(base, [...mineRenames, ...theirsRenames]), followRenames(mine, theirsRenames), followRenames(theirs, mineRenames));
 }
 
+/** Everything a merge compares, cached values aside. */
+const contentKey = (file: SheetFile) => canon({ sheets: file.sheets.map((s) => [s.id, sheetContent(s)]), named: file.named, extra: file.extra ?? {} });
+
+/** Whether `side` inserted or deleted rows or columns of a sheet the base has. */
+function restructured(base: SheetFile, side: SheetFile): boolean {
+  return side.sheets.some((s) => {
+    const b = base.sheets.find((x) => x.id === s.id);
+    return b !== undefined && (b.structure ?? '') !== (s.structure ?? '');
+  });
+}
+
 function mergeFiles(base: SheetFile, mine: SheetFile, theirs: SheetFile): SheetFile | null {
+  // Inserted or deleted rows and columns move cells, which a merge per cell cannot follow: with any
+  // change on the other side (a new cell below an inserted row would land on the wrong row), the
+  // banner decides.
+  const baseKey = contentKey(base);
+  if ((restructured(base, mine) && contentKey(theirs) !== baseKey) || (restructured(base, theirs) && contentKey(mine) !== baseKey)) return null;
   const byId = (file: SheetFile) => new Map(file.sheets.map((s) => [s.id, s]));
   const [b, m, t] = [base, mine, theirs].map(byId);
   const merged = new Map<string, Sheet>();

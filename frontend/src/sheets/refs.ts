@@ -286,6 +286,81 @@ export function moveReferences(formula: string, home: { from: string | null; to:
   });
 }
 
+/** Rows or columns inserted into, or deleted from, sheet `sheet`: `count` of them at index `at`. */
+export interface LineChange {
+  sheet: string;
+  axis: 'rows' | 'cols';
+  at: number;
+  count: number;
+  remove: boolean;
+}
+
+/**
+ * Where index `i` of `change`'s axis goes: shifted past inserted lines or back over deleted ones;
+ * null for a deleted line, or one pushed off the end of the sheet.
+ */
+export function movedLine(i: number, change: Pick<LineChange, 'axis' | 'at' | 'count' | 'remove'>): number | null {
+  const { at, count } = change;
+  if (i < at) return i;
+  if (change.remove) return i < at + count ? null : i - count;
+  return i + count < (change.axis === 'rows' ? MAX_ROWS : MAX_COLUMNS) ? i + count : null;
+}
+
+/**
+ * `formula` after rows or columns were inserted or deleted, as Excel and Google Sheets update it:
+ * references to the sheet below (or right of) the change shift, ranges that span inserted lines
+ * grow and ranges that lose lines shrink, and a reference whose cells are all deleted becomes
+ * `#REF!`. `home` is the formula's own sheet (null for a named range, whose references all name
+ * their sheet).
+ */
+export function restructureReferences(formula: string, home: string | null, change: LineChange): string {
+  const last = (change.axis === 'rows' ? MAX_ROWS : MAX_COLUMNS) - 1;
+  const { at, count } = change;
+  /** What is left of the span lo..hi, or null. */
+  const span = (lo: number, hi: number): [number, number] | null => {
+    if (!change.remove) return [movedLine(lo, change) ?? last, movedLine(hi, change) ?? last];
+    if (lo >= at && hi < at + count) return null;
+    return [lo < at ? lo : lo < at + count ? at : lo - count, hi < at ? hi : hi < at + count ? at - 1 : hi - count];
+  };
+  // The part of a reference on the change's axis: its index, and the reference with another index.
+  const part = (kind: FormulaRef['kind'], text: string): { index: number; with(index: number): string } | null => {
+    if (kind === 'cell' || kind === 'cells') {
+      const m = CELL.exec(text);
+      if (!m) return null;
+      const [, colAbs, col, rowAbs, row] = m;
+      return change.axis === 'rows'
+        ? { index: Number(row) - 1, with: (i) => `${colAbs}${col}${rowAbs}${i + 1}` }
+        : { index: columnIndex(col.toUpperCase()), with: (i) => `${colAbs}${columnLetters(i)}${rowAbs}${row}` };
+    }
+    if (kind === 'rows' && change.axis === 'rows') {
+      const m = ROW.exec(text);
+      return m ? { index: Number(m[2]) - 1, with: (i) => `${m[1]}${i + 1}` } : null;
+    }
+    if (kind === 'columns' && change.axis === 'cols') {
+      const m = COLUMN.exec(text);
+      return m ? { index: columnIndex(m[2].toUpperCase()), with: (i) => `${m[1]}${columnLetters(i)}` } : null;
+    }
+    return null;
+  };
+  return mapReferences(formula, (ref) => {
+    const text = ref.parts.join(':');
+    const target = ref.sheet ?? home;
+    if (target === null || !sameName(target, change.sheet)) return { text };
+    const parts = ref.parts.map((p) => part(ref.kind, p));
+    if (parts.some((p) => p === null) || parts.length === 0) return { text };
+    const [a, b] = parts as Array<{ index: number; with(index: number): string }>;
+    if (!b) {
+      const next = movedLine(a.index, change);
+      return next === null ? null : { text: a.with(next) };
+    }
+    const lo = Math.min(a.index, b.index);
+    const left = span(lo, Math.max(a.index, b.index));
+    if (!left) return null;
+    const [x, y] = a.index === lo ? left : [left[1], left[0]];
+    return { text: `${a.with(x)}:${b.with(y)}` };
+  });
+}
+
 /**
  * `formula` with references to sheet `from` (any case, quoted or not) pointing at `to` instead: an
  * imported sheet that had to be renamed keeps its formulas. Strings are never changed.

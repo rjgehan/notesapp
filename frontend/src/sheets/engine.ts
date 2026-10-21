@@ -21,15 +21,16 @@ import {
   type RawCellContent,
   type SimpleCellAddress,
 } from 'hyperformula';
-import { MAX_COLUMNS, MAX_ROWS, parseA1, toA1 } from './a1';
+import { columnIndex, columnLetters, MAX_COLUMNS, MAX_ROWS, parseA1, toA1 } from './a1';
 import { effectiveFormat } from './display';
 import {
   emptySheet,
   isCellError,
   isEmptyCell,
   newChartId,
-  own,
   newSheetId,
+  newStructureId,
+  own,
   nextSheetName,
   sameName,
   serializeSheet,
@@ -48,7 +49,18 @@ import {
   type SheetFile,
 } from './format';
 import { formatKind, isGeneral } from './numfmt';
-import { mapReferences, moveReferences, parseRangeText, rangeText, type CellMove, type CellRange, type FormulaRef } from './refs';
+import {
+  mapReferences,
+  movedLine,
+  moveReferences,
+  parseRangeText,
+  rangeText,
+  restructureReferences,
+  type CellMove,
+  type CellRange,
+  type FormulaRef,
+  type LineChange,
+} from './refs';
 
 /** The engine identity written to `engine`. A config change that alters results must change it too. */
 export const ENGINE_ID = `hyperformula@${HyperFormula.version}`;
@@ -77,6 +89,7 @@ export function engineConfig(): Partial<ConfigParams> {
 interface SheetMeta {
   name: string;
   frozen: Frozen;
+  structure?: string;
   extra?: Extra;
 }
 
@@ -133,6 +146,7 @@ function content(cell: SheetCell | undefined): SheetCell | undefined {
 
 function meta(s: Sheet): SheetMeta {
   const m: SheetMeta = { name: s.name, frozen: { ...s.frozen } };
+  if (s.structure !== undefined) m.structure = s.structure;
   if (s.extra) m.extra = s.extra;
   return m;
 }
@@ -620,6 +634,121 @@ export class Workbook {
     this.record(patch);
   }
 
+  /** Inserts `count` empty rows before row index `at` (0-based), as one undo step; see `changeLines`. */
+  insertRows(sheetId: string, at: number, count = 1): void {
+    this.changeLines(sheetId, { axis: 'rows', at, count, remove: false });
+  }
+
+  /** Deletes `count` rows from row index `at` with everything in them, as one undo step. */
+  deleteRows(sheetId: string, at: number, count = 1): void {
+    this.changeLines(sheetId, { axis: 'rows', at, count, remove: true });
+  }
+
+  /** Inserts `count` empty columns before column index `at`, as one undo step. */
+  insertColumns(sheetId: string, at: number, count = 1): void {
+    this.changeLines(sheetId, { axis: 'cols', at, count, remove: false });
+  }
+
+  /** Deletes `count` columns from column index `at` with everything in them, as one undo step. */
+  deleteColumns(sheetId: string, at: number, count = 1): void {
+    this.changeLines(sheetId, { axis: 'cols', at, count, remove: true });
+  }
+
+  /**
+   * Inserts or deletes rows or columns as Google Sheets and Excel do: the cells after them move (with
+   * their formats), as do row heights and column widths; references to the sheet in every formula
+   * and named range follow, ranges that span inserted lines grow and ranges that lose lines shrink,
+   * and references to deleted cells become #REF!; charts' ranges and frozen panes follow too. The
+   * sheet's `structure` changes, so a merge with edits made elsewhere meanwhile shows the banner.
+   */
+  private changeLines(sheetId: string, how: Omit<LineChange, 'sheet'>): void {
+    const sheet = this.requireSheet(sheetId);
+    const { axis, at, count, remove } = how;
+    const max = axis === 'rows' ? MAX_ROWS : MAX_COLUMNS;
+    if (!Number.isInteger(at) || !Number.isInteger(count) || at < 0 || count < 1 || at >= max || (remove && at + count > max)) throw new Error('Not a row or column range.');
+    const change: LineChange = { sheet: sheet.name, ...how };
+    const index = (ref: string) => {
+      const a = parseA1(ref) as { col: number; row: number };
+      return axis === 'rows' ? a.row : a.col;
+    };
+    const relocate = (ref: string, i: number) => {
+      const a = parseA1(ref) as { col: number; row: number };
+      return axis === 'rows' ? toA1(a.col, i) : toA1(i, a.row);
+    };
+    if (!remove) {
+      for (const [ref, cell] of Object.entries(sheet.cells)) {
+        if (content(cell) && movedLine(index(ref), change) === null) throw new Error(`There is no room: ${ref} would go past the end of the sheet.`);
+      }
+    }
+
+    // Each changed cell slot's content afterwards (undefined: empty), keyed by sheet id and ref.
+    const after = new Map<string, SheetCell | undefined>();
+    const slot = (id: string, ref: string) => `${id}\n${ref}`;
+    const moving: Array<[string, SheetCell, number | null]> = [];
+    for (const [ref, cell] of Object.entries(sheet.cells)) {
+      const c = content(cell);
+      // Values an array formula spilled are the engine's to place again.
+      if (!c) continue;
+      const next = movedLine(index(ref), change);
+      if (next === index(ref) && c.f === undefined) continue;
+      moving.push([ref, c, next]);
+    }
+    for (const [ref, , next] of moving) if (next !== index(ref)) after.set(slot(sheet.id, ref), undefined);
+    for (const [ref, c, next] of moving) {
+      if (next === null) continue;
+      const f = c.f === undefined ? undefined : restructureReferences(c.f, sheet.name, change);
+      after.set(slot(sheet.id, relocate(ref, next)), f === undefined ? c : { ...c, f });
+    }
+    for (const other of this.model.sheets) {
+      if (other.id === sheet.id) continue;
+      for (const [ref, cell] of Object.entries(other.cells)) {
+        if (cell.f === undefined) continue;
+        const f = restructureReferences(cell.f, other.name, change);
+        if (f !== cell.f) after.set(slot(other.id, ref), { ...content(cell), f });
+      }
+    }
+    const patch: Patch = [];
+    for (const [key, next] of after) {
+      const [id, ref] = key.split('\n');
+      const before = content(sheetById(this.model, id)?.cells[ref]);
+      if (!same(before, next)) patch.push({ kind: 'cell', id, ref, before, after: next });
+    }
+
+    // Row heights or column widths and formats move with their lines.
+    const kind = axis === 'rows' ? 'row' : 'col';
+    const lines: Record<string, ColumnProps | RowProps> = axis === 'rows' ? sheet.rows : sheet.cols;
+    const lineIndex = (key: string) => (axis === 'rows' ? Number(key) - 1 : columnIndex(key));
+    const lineKey = (i: number) => (axis === 'rows' ? String(i + 1) : columnLetters(i));
+    const props = new Map<string, ColumnProps | RowProps | undefined>();
+    for (const key of Object.keys(lines)) if (movedLine(lineIndex(key), change) !== lineIndex(key)) props.set(key, undefined);
+    for (const [key, value] of Object.entries(lines)) {
+      const next = movedLine(lineIndex(key), change);
+      if (next !== null && next !== lineIndex(key)) props.set(lineKey(next), value);
+    }
+    for (const [key, next] of props) {
+      const before = own(lines, key);
+      if (!same(before, next)) patch.push({ kind, id: sheet.id, key, before, after: next } as Change);
+    }
+
+    for (const [key, chart] of Object.entries(sheet.charts)) {
+      if (chart.range === undefined || !parseRangeText(chart.range)) continue;
+      const range = restructureReferences('=' + chart.range, sheet.name, change).slice(1);
+      if (range !== chart.range) patch.push({ kind: 'chart', id: sheet.id, key, before: chart, after: { ...chart, range } });
+    }
+    for (const [name, expression] of Object.entries(this.model.named)) {
+      const next = restructureReferences('=' + expression, null, change).slice(1);
+      if (next !== expression) patch.push({ kind: 'named', name, before: expression, after: next });
+    }
+
+    // Frozen rows or columns: inserted ones inside the frozen part are frozen too, deleted ones go.
+    const frozen = { ...sheet.frozen };
+    const n = axis === 'rows' ? 'rows' : 'cols';
+    if (remove) frozen[n] -= Math.max(0, Math.min(frozen[n], at + count) - at);
+    else if (at < frozen[n]) frozen[n] = Math.min(1000, frozen[n] + count);
+    patch.push({ kind: 'sheet', id: sheet.id, before: meta(sheet), after: { ...meta(sheet), frozen, structure: newStructureId() } });
+    this.record(patch);
+  }
+
   /** Runs several edits as one undo step, with one change notification. */
   transact(edits: () => void): void {
     if (this.transaction) {
@@ -756,6 +885,8 @@ export class Workbook {
       if (!sheetById(this.model, c.id)) this.model.sheets.push(sheet);
       sheet.name = c.after.name;
       sheet.frozen = { ...c.after.frozen };
+      if (c.after.structure !== undefined) sheet.structure = c.after.structure;
+      else delete sheet.structure;
       if (c.after.extra) sheet.extra = c.after.extra;
       else delete sheet.extra;
       sheetsChanged = true;

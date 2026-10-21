@@ -410,3 +410,25 @@ describe('a sheet renamed on one device', () => {
     expect(merged.ok && notes(merged.file).cells.B1.f).toBe('=Costs!B2*2');
   });
 });
+
+describe('inserted or deleted rows and columns', () => {
+  // What a workbook's insert of a row before row 3 makes of the base.
+  const inserted = (f: SheetFile) => {
+    const b = budget(f);
+    b.cells = { A1: b.cells.A1, B1: b.cells.B1, A2: b.cells.A2, B2: b.cells.B2, A4: b.cells.A3, B4: b.cells.B3, B11: { f: '=SUM(B2:B10)', c: 1750 } };
+    b.structure = 'r1';
+  };
+
+  it('show the banner when the other side changed anything meanwhile', () => {
+    expect(merge(inserted, (f) => (budget(f).cells.A20 = { v: 'new' }))).toBeNull();
+    expect(merge((f) => (notesOf(f).cells.B1 = { v: 'elsewhere' }), inserted)).toBeNull();
+  });
+
+  it('merge when the other side changed only cached values', () => {
+    const merged = merge(inserted, (f) => (budget(f).cells.B10 = { f: '=SUM(B2:B9)', c: 1 }))!;
+    expect(budget(merged).cells.B11).toEqual({ f: '=SUM(B2:B10)', c: 1750 });
+    expect(budget(merged).structure).toBe('r1');
+  });
+});
+
+const notesOf = (f: SheetFile) => f.sheets.find((s) => s.id === 's2')!;

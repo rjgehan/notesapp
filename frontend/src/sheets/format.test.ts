@@ -470,3 +470,18 @@ describe('keys that are also Object.prototype members', () => {
     expect(parseSheet(serializeSheet(result.file))).toEqual(result);
   });
 });
+
+describe('a sheet’s structure marker', () => {
+  it('is written after the charts only when set, and an unusable one is kept', () => {
+    const text = (structure: unknown) =>
+      JSON.stringify({ type: 'notesapp-sheet', version: 1, engine: SHEET_ENGINE, sheets: [{ id: 's1', name: 'S', cells: { A1: { v: 1 } }, structure }], named: {} });
+    const set = parseSheet(text('k2x9'));
+    expect(set.ok && set.file.sheets[0].structure).toBe('k2x9');
+    const written = serializeSheet((set as { file: SheetFile }).file);
+    expect(written).toContain('"frozen": { "rows": 0, "cols": 0 },\n      "structure": "k2x9"\n');
+    expect(serializeSheet(newSheetFile())).not.toContain('structure');
+    const odd = parseSheet(text(7));
+    expect(odd.ok && odd.repairs).toEqual(['Sheet "S": "structure" is not text; it is kept unchanged.']);
+    expect(serializeSheet((odd as { file: SheetFile }).file)).toContain('"structure": 7');
+  });
+});
