@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -364,6 +365,9 @@ class UploadIntegrationTest {
 		}
 
 		int length = 50;
+		// The trickle runs on its own thread, not the common pool: on a 2-CPU runner that pool has one worker, and on
+		// JDK 25 the HTTP client sending the saves below needs it, so 5 s of sleeps there would hold every save back.
+		Executor ownThread = (task) -> Thread.ofPlatform().daemon().name("slow-upload").start(task);
 		CompletableFuture<RawHttp.Response> upload = CompletableFuture.supplyAsync(() -> {
 			try (RawHttp http = new RawHttp(this.port, Duration.ofSeconds(30))) {
 				http.sendHead("""
@@ -387,7 +391,7 @@ class UploadIntegrationTest {
 				Thread.currentThread().interrupt();
 				throw new IllegalStateException(ex);
 			}
-		});
+		}, ownThread);
 
 		List<Long> during = new ArrayList<>();
 		Thread.sleep(300);
