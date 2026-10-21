@@ -286,6 +286,66 @@ public class VaultIndex {
 		});
 	}
 
+	/**
+	 * Rewrites the links of a document indexed through a {@link DocumentIndexer} ({@code source}, at its path before
+	 * the move) by the rules of {@link #planMove}: a Markdown fragment's links are rewritten as a note's at the same
+	 * path would be, and a vault path held as data follows the file it named. It reads the index as it is now, so it
+	 * is used while planning, before the move.
+	 */
+	public DocumentIndexer.LinkRewriter documentRewriter(String source, Map<String, String> moved, LinkFormat format) {
+		String newSource = moved.getOrDefault(source, source);
+		return new DocumentIndexer.LinkRewriter() {
+
+			@Override
+			public DocumentIndexer.@Nullable Rewritten markdown(String fragment) {
+				return read(() -> rewriteFragment(fragment, source, newSource, moved, format));
+			}
+
+			@Override
+			public String path(String path) {
+				return read(() -> {
+					String before = LinkResolver.resolve("/" + path, source, VaultIndex.this.lookup);
+					return (before != null && moved.containsKey(before)) ? moved.get(before) : path;
+				});
+			}
+
+		};
+	}
+
+	private DocumentIndexer.@Nullable Rewritten rewriteFragment(String fragment, String source, String newSource,
+			Map<String, String> moved, LinkFormat format) {
+		LinkResolver.Lookup after = new MovedLookup(this.lookup, moved);
+		List<MovePlan.Edit> edits = new ArrayList<>();
+		for (LinkOcc occ : MarkdownScanner.scanFragment(fragment).links()) {
+			String before = LinkResolver.resolve(occ.target(), source, this.lookup);
+			if (before == null || occ.target().isEmpty()) {
+				continue;
+			}
+			boolean inbound = moved.containsKey(before) && !moved.containsKey(source);
+			String desired = moved.getOrDefault(before, before);
+			if (!inbound && desired.equals(LinkResolver.resolve(occ.target(), newSource, after))) {
+				continue;
+			}
+			String plain = LinkTextGenerator.plainText(desired, newSource, format, occ.style(), after);
+			String replacement = (occ.style() == LinkStyle.MARKDOWN && !occ.angle())
+					? LinkTextGenerator.encodeMdPath(plain) : plain;
+			if (replacement.equals(fragment.substring(occ.targetFrom(), occ.targetTo()))) {
+				continue;
+			}
+			String written = occ.rewritable() ? occ.quoting().encode(replacement) : null;
+			if (written == null) {
+				return null;
+			}
+			edits.add(new MovePlan.Edit(occ.from(), occ.to(), occ.raw(), occ.targetFrom(), occ.targetTo(), written));
+		}
+		edits.sort((a, b) -> Integer.compare(b.targetFrom(), a.targetFrom()));
+		StringBuilder text = new StringBuilder(fragment);
+		for (MovePlan.Edit edit : edits) {
+			text.replace(edit.targetFrom(), edit.targetTo(), edit.replacement());
+		}
+		return new DocumentIndexer.Rewritten(text.toString(), edits.size());
+	}
+
 	/** The notes with at least one link resolving to {@code targetPath}. */
 	public Set<String> backlinkSources(String targetPath) {
 		return read(() -> this.links.sourcesLinkingTo(targetPath));

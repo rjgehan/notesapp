@@ -25,6 +25,7 @@ import com.rjgehan.notes.history.CommitBatcher;
 import com.rjgehan.notes.history.CommitFailedException;
 import com.rjgehan.notes.history.GitStore;
 import com.rjgehan.notes.identity.Identity;
+import com.rjgehan.notes.index.DocumentIndexer;
 import com.rjgehan.notes.index.FileIndexer;
 import com.rjgehan.notes.index.FileRecord;
 import com.rjgehan.notes.index.IndexedFile;
@@ -33,6 +34,7 @@ import com.rjgehan.notes.index.MarkdownScanner;
 import com.rjgehan.notes.index.MovePlan;
 import com.rjgehan.notes.index.NoteParse;
 import com.rjgehan.notes.index.VaultIndex;
+import com.rjgehan.notes.settings.LinkFormat;
 import com.rjgehan.notes.settings.Settings;
 import com.rjgehan.notes.settings.SettingsService;
 import com.rjgehan.notes.vault.VaultPaths.Mode;
@@ -230,17 +232,57 @@ public class MoveService {
 
 	/**
 	 * The rewrite plan; a file that will no longer be a note after the move never has its own content rewritten. A
-	 * document indexed through a {@code DocumentIndexer} (a {@code .tasks} list) has only non-rewritable links, so it
-	 * stays in the plan without edits and is reported as {@code not-rewritable}.
+	 * document indexed through a {@code DocumentIndexer} (a {@code .tasks} list) has only non-rewritable links, whose
+	 * offsets point into its search text: its indexer rewrites it as a whole instead ({@link #documentRewrite}), and
+	 * one it cannot rewrite stays in the plan without edits and is reported as {@code not-rewritable}.
 	 */
 	private MovePlan plan(Map<String, String> moved, Settings current) {
-		MovePlan plan = this.index.planMove(moved, current.files().newLinkFormat());
-		List<MovePlan.NoteRewrite> notes = plan.rewrites()
-			.stream()
-			.filter((rewrite) -> this.indexer.kindOf(rewrite.target()) == FileKind.NOTE
-					|| this.indexer.kindOf(rewrite.source()) != FileKind.NOTE)
-			.toList();
-		return (notes.size() == plan.rewrites().size()) ? plan : new MovePlan(notes);
+		LinkFormat format = current.files().newLinkFormat();
+		MovePlan plan = this.index.planMove(moved, format);
+		List<MovePlan.NoteRewrite> notes = new ArrayList<>();
+		for (MovePlan.NoteRewrite rewrite : plan.rewrites()) {
+			if (this.indexer.kindOf(rewrite.target()) != FileKind.NOTE
+					&& this.indexer.kindOf(rewrite.source()) == FileKind.NOTE) {
+				continue;
+			}
+			MovePlan.NoteRewrite document = rewrite.notRewritable() ? documentRewrite(rewrite, moved, format) : null;
+			if (document == null) {
+				notes.add(rewrite);
+			}
+			else if (document.document() != null && document.document().links() > 0) {
+				notes.add(document);
+			}
+		}
+		return new MovePlan(List.copyOf(notes));
+	}
+
+	/**
+	 * A document's rewrite as its new text, made by its indexer from the bytes the plan was computed from; null when
+	 * the file is not such a document, changed since it was indexed, or cannot be rewritten.
+	 */
+	private MovePlan.@Nullable NoteRewrite documentRewrite(MovePlan.NoteRewrite rewrite, Map<String, String> moved,
+			LinkFormat format) {
+		if (rewrite.lossy() || this.index.note(rewrite.source()) == null) {
+			return null;
+		}
+		byte[] bytes;
+		try {
+			bytes = this.fs.readBytes(existing(rewrite.source()).disk());
+		}
+		catch (IOException ex) {
+			return null;
+		}
+		TextCodec.Decoded decoded = TextCodec.decode(bytes);
+		if (decoded.lossy() || !Hashing.blobId(bytes).equals(rewrite.version())) {
+			return null;
+		}
+		DocumentIndexer.Rewritten text = this.indexer.rewriteDocument(rewrite.source(), rewrite.target(),
+				decoded.text(), this.index.documentRewriter(rewrite.source(), moved, format));
+		if (text == null) {
+			return null;
+		}
+		return new MovePlan.NoteRewrite(rewrite.source(), rewrite.target(), rewrite.version(), false, List.of(), false,
+				text);
 	}
 
 	/**
@@ -367,6 +409,10 @@ public class MoveService {
 			if (rewrite.notRewritable()) {
 				failed.add(new FailedUpdate(rewrite.target(), FailedReason.NOT_REWRITABLE));
 			}
+			if (rewrite.document() != null) {
+				applyDocument(rewrite, rewrite.document(), updates, failed, entries, written);
+				continue;
+			}
 			if (rewrite.edits().isEmpty()) {
 				continue;
 			}
@@ -402,6 +448,30 @@ public class MoveService {
 			}
 		}
 		return new Rewritten(updates, failed, entries, written);
+	}
+
+	/** Writes a document its indexer rewrote, unless it changed since the plan was made. */
+	private void applyDocument(MovePlan.NoteRewrite rewrite, DocumentIndexer.Rewritten document,
+			List<LinkUpdate> updates, List<FailedUpdate> failed, List<FileEntry> entries, List<ApiPath> written) {
+		ApiPath file = existing(rewrite.target());
+		try {
+			byte[] bytes = this.fs.readBytes(file.disk());
+			if (!Hashing.blobId(bytes).equals(rewrite.version())) {
+				logger.warn("{} changed since the move was planned; links not rewritten", file.nfc());
+				failed.add(new FailedUpdate(rewrite.target(), FailedReason.SPAN_MISMATCH));
+				return;
+			}
+			byte[] updated = TextCodec.encode(document.text(), TextCodec.decode(bytes).hadBom());
+			this.fs.atomicWrite(file.disk(), updated);
+			FileEntry entry = this.files.indexWritten(file, updated);
+			updates.add(new LinkUpdate(entry.path(), document.links(), entry.version()));
+			entries.add(entry);
+			written.add(file);
+		}
+		catch (IOException ex) {
+			logger.warn("Could not update links in {}: {}", file.nfc(), ex.toString());
+			failed.add(new FailedUpdate(rewrite.target(), FailedReason.IO_ERROR));
+		}
 	}
 
 	/**
@@ -450,7 +520,10 @@ public class MoveService {
 			if (rewrite.notRewritable()) {
 				failed.add(new FailedUpdate(rewrite.target(), FailedReason.NOT_REWRITABLE));
 			}
-			if (!rewrite.edits().isEmpty()) {
+			if (rewrite.document() != null) {
+				updates.add(new LinkUpdate(rewrite.target(), rewrite.document().links(), null));
+			}
+			else if (!rewrite.edits().isEmpty()) {
 				updates.add(new LinkUpdate(rewrite.target(), rewrite.edits().size(), null));
 			}
 		}

@@ -136,6 +136,25 @@ public class FileIndexer {
 		}
 	}
 
+	/**
+	 * A document's text with its links rewritten by its {@link DocumentIndexer} after a move, or null when no indexer
+	 * handles both names or it cannot rewrite this text.
+	 */
+	public DocumentIndexer.@Nullable Rewritten rewriteDocument(String path, String newPath, String text,
+			DocumentIndexer.LinkRewriter links) {
+		DocumentIndexer indexer = documentIndexer(path);
+		if (indexer == null || indexer != documentIndexer(newPath)) {
+			return null;
+		}
+		try {
+			return indexer.rewriteLinks(path, text, links);
+		}
+		catch (RuntimeException ex) {
+			logger.warn("Cannot rewrite the links of {}: {}", path, ex.toString());
+			return null;
+		}
+	}
+
 	private @Nullable DocumentIndexer documentIndexer(String path) {
 		for (DocumentIndexer indexer : this.documents) {
 			if (indexer.supports(path)) {

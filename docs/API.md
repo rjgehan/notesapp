@@ -716,7 +716,7 @@ Request `MoveRequest`:
 | `moved` | Every moved **file** (for folders, all descendants), as old and new paths |
 | `createdFolders` | Missing parents of `to` that the move created, outermost first. The caller adds them itself, because its own `folder.created` events are not echoed. `[]` in a dry run. |
 | `linkUpdates` | Notes whose text was (or, in a dry run, would be) rewritten. Paths are post-move. `version` is the new version, or `null` when `dryRun`. **The calling client applies these itself**, because its own `file.changed` events are not echoed: refresh the open sessions and update the tree versions. |
-| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string, or a link in a document indexed for backlinks that is not a note, such as a task title in a `.tasks` list, §20.9), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
+| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string, or a document indexed for backlinks that is not a note and cannot be rewritten, such as a `.tasks` list that is not valid or was written by a newer version, §20.9), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
 | `commitId` | The **last** commit made (the link-update commit when there is one, otherwise the rename commit). `null` when `dryRun`, when git is disabled, when nothing was committed (an empty folder), or when the commit failed and is being retried |
 
 | Errors |
@@ -2177,7 +2177,7 @@ Every night (`notes.tasks.archive-cron`, 03:20), tasks closed more than 90 days 
 - A `[[Note]]` (or Markdown link) in a task's title or notes, and each path in `links`, make the list file a backlink source of that note (§11.2). `#tags` in titles and notes and the entries of `tags` count in `GET /api/tags` and `tag:` search.
 - `GET /api/search` can return a list file; its `matches` are lines of task text.
 - A list file is not a note: `GET /api/notes/meta` answers `409 type-mismatch`, it never appears in unlinked mentions, and it does not count in `/api/status` `vault.notes`.
-- Renaming or moving a note does not rewrite links in task files; such a file is reported in `MoveResult.failed` with `not-rewritable`, and the link can be fixed by editing the task.
+- Renaming or moving a note rewrites the links to it in task files as in notes: `[[links]]` and Markdown links in titles and notes are rewritten by the rules of §10.3, and each path in `links` becomes the file's new path. A task changed this way gets a new `updatedAt`; the file is listed in `MoveResult.linkUpdates` (with the number of links) and announced with `file.changed`, not task events, so clients refetch their task views (§20.8). A list file the task API would not write (not valid, or from a newer version), or a title the new link would make longer than 500 characters, is left as it is and reported in `failed` with `not-rewritable`; its links can be fixed by editing the task.
 
 **Tasks in notes** (conventions of the clients; the server treats these as ordinary links and embeds):
 

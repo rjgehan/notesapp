@@ -1,6 +1,7 @@
 package com.rjgehan.notes.tasks;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 
 import com.rjgehan.notes.api.dto.BacklinkGroup;
@@ -9,6 +10,7 @@ import com.rjgehan.notes.api.dto.FailedReason;
 import com.rjgehan.notes.api.dto.MoveResult;
 import com.rjgehan.notes.api.dto.OnConflict;
 import com.rjgehan.notes.api.dto.SearchResponse;
+import com.rjgehan.notes.api.dto.Task;
 import com.rjgehan.notes.api.error.ErrorCode;
 import com.rjgehan.notes.index.NoteService;
 import com.rjgehan.notes.index.SearchService;
@@ -88,13 +90,64 @@ class TaskIndexingTest {
 	}
 
 	@Test
-	void renamingALinkedNoteReportsTheTaskFileInsteadOfRewritingIt() throws Exception {
-		String before = this.fx.read("Tasks/Inbox.tasks");
+	void renamingALinkedNoteRewritesTheLinksInTasks() throws Exception {
+		MoveResult dryRun = this.fx.vault.moves.move("Plumber.md", "Contacts/Plumber Bob.md", null, true,
+				TestVault.ALICE, "c-notes-1");
+		assertThat(dryRun.failed()).isEmpty();
+		assertThat(dryRun.linkUpdates()).extracting((u) -> u.path() + " " + u.links())
+			.containsExactly("Tasks/Inbox.tasks 1");
+		this.fx.vault.clock.advance(Duration.ofMinutes(5));
+		MoveResult moved = this.fx.vault.moves.move("Plumber.md", "Contacts/Plumber Bob.md", null, false,
+				TestVault.ALICE, "c-notes-1");
+		assertThat(moved.failed()).isEmpty();
+		assertThat(moved.linkUpdates()).extracting((u) -> u.path() + " " + u.links())
+			.containsExactly("Tasks/Inbox.tasks 1");
+		Task task = this.fx.tasks.query("search", null, null, null, null, "leak", null, null, null, null, null)
+			.tasks()
+			.get(0);
+		assertThat(task.title()).isEqualTo("Call [[Plumber Bob]] about the leak #home");
+		assertThat(task.updatedAt()).isEqualTo(this.fx.vault.clock.instant());
+		// The task is still a backlink of the note at its new path.
+		assertThat(this.notes.backlinks("Contacts/Plumber Bob.md", false).linked()).extracting(BacklinkGroup::source)
+			.containsExactly("Tasks/Inbox.tasks");
+		// The other task, which links nowhere that moved, is untouched.
+		Task other = this.fx.tasks.query("search", null, null, null, null, "back", null, null, null, null, null)
+			.tasks()
+			.get(0);
+		assertThat(other.updatedAt()).isNotEqualTo(this.fx.vault.clock.instant());
+	}
+
+	@Test
+	void movingARelatedNoteRewritesItsPathInLinks() throws Exception {
+		MoveResult moved = this.fx.vault.moves.move("Projects", "Archive/Projects", null, false, TestVault.ALICE,
+				"c-notes-1");
+		assertThat(moved.failed()).isEmpty();
+		assertThat(moved.linkUpdates()).extracting((u) -> u.path()).containsExactly("Tasks/Inbox.tasks");
+		Task task = this.fx.tasks.query("search", null, null, null, null, "leak", null, null, null, null, null)
+			.tasks()
+			.get(0);
+		assertThat(task.links()).containsExactly("Archive/Projects/Plan.md");
+		// Unknown fields and the file's format survive.
+		assertThat(this.fx.read("Tasks/Inbox.tasks")).startsWith("{\n  \"type\": \"notesapp-tasks\",\n")
+			.contains("\"Archive/Projects/Plan.md\"");
+		assertThat(this.notes.backlinks("Archive/Projects/Plan.md", false).linked()).extracting(BacklinkGroup::source)
+			.containsExactly("Tasks/Inbox.tasks");
+	}
+
+	@Test
+	void aTaskFileThatCannotBeRewrittenIsReportedAndLeftAlone() throws Exception {
+		// A file written by a newer version of NotesApp is never changed.
+		String newer = """
+				{"type": "notesapp-tasks", "version": 2, "list": {"id": "NEWER", "name": "Newer", "order": "b0"},
+				 "tasks": [{"id": "N1", "title": "Ask the [[Plumber]]", "status": "open", "priority": 0}]}
+				""";
+		this.fx.vault.files.createText("Tasks/Newer.tasks", newer, OnConflict.FAIL, TestVault.ALICE, "c-notes-1");
 		MoveResult moved = this.fx.vault.moves.move("Plumber.md", "Contacts/Plumber Bob.md", null, false,
 				TestVault.ALICE, "c-notes-1");
 		assertThat(moved.failed()).extracting((f) -> f.path() + " " + f.reason())
-			.containsExactly("Tasks/Inbox.tasks " + FailedReason.NOT_REWRITABLE);
-		assertThat(this.fx.read("Tasks/Inbox.tasks")).isEqualTo(before);
+			.containsExactly("Tasks/Newer.tasks " + FailedReason.NOT_REWRITABLE);
+		assertThat(moved.linkUpdates()).extracting((u) -> u.path()).containsExactly("Tasks/Inbox.tasks");
+		assertThat(this.fx.read("Tasks/Newer.tasks")).isEqualTo(newer);
 	}
 
 	@Test

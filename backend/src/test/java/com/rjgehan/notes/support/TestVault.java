@@ -119,7 +119,7 @@ public final class TestVault implements AutoCloseable {
 		this.fs = fsFactory.apply(this.properties);
 		this.kinds = new FileKinds(this.properties);
 		this.paths = new VaultPaths(this.index, this.fs);
-		this.indexer = new FileIndexer(this.fs, this.kinds, List.of(new TaskDocumentIndexer(JSON)));
+		this.indexer = new FileIndexer(this.fs, this.kinds, List.of(new TaskDocumentIndexer(JSON, this.clock)));
 		this.hub = new RecordingEventHub(this.properties, this.clock);
 		this.git = new FailingGitStore(this.fs, this.properties, this.clock);
 		this.batcher = new CommitBatcher(this.git, this.index, this.fs, this.hub, this.clock, this.properties);

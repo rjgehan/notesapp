@@ -5,7 +5,7 @@ import { isProblem } from '../api/client';
 import { api } from '../api/endpoints';
 import { currentSettings, currentTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
-import type { FileEntry, MoveResult, Settings } from '../api/types';
+import type { FailedUpdate, FileEntry, MoveResult, Settings } from '../api/types';
 import { newIdempotencyKey } from '../state/clientId';
 import { clearPendingNote, startPendingNote, usePendingNote } from '../state/pendingNote';
 import { toast } from '../state/toasts';
@@ -177,9 +177,23 @@ function linkSummary(r: MoveResult): string {
   return n === 0 ? '' : ` · updated links in ${n} ${n === 1 ? 'note' : 'notes'}`;
 }
 
+const FAILED_REASON: Record<string, string> = {
+  'not-utf8': 'not valid UTF-8',
+  'not-rewritable': 'a property link that cannot be rewritten',
+  'span-mismatch': 'changed meanwhile',
+  'io-error': 'storage error',
+};
+
+/** Why a move did not update the links in a file (MoveResult.failed), in words. */
+export function failedReason(f: FailedUpdate): string {
+  // A task list the server will not rewrite: not valid, or written by a newer version (API.md §20.9).
+  if (f.reason === 'not-rewritable' && extensionOf(f.path) === 'tasks') return 'a task list that cannot be changed here; edit the links in its tasks';
+  return FAILED_REASON[f.reason] ?? f.reason;
+}
+
 function reportFailures(r: MoveResult): void {
   if (r.failed.length === 0) return;
-  const names = r.failed.map((f) => displayName(f.path)).join(', ');
+  const names = r.failed.map((f) => `${displayName(f.path)} (${failedReason(f)})`).join(', ');
   toast(`Links could not be updated in ${names}`, { kind: 'error', timeout: 8000 });
 }
 

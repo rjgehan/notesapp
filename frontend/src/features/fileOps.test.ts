@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './settings';
-import { nameWithExtension, newNoteFolder, validateNewName } from './fileOps';
+import { failedReason, nameWithExtension, newNoteFolder, validateNewName } from './fileOps';
 
 describe('nameWithExtension', () => {
   it('keeps the extension when only the basename is edited', () => {
@@ -37,5 +37,13 @@ describe('newNoteFolder (API.md §5 newNoteLocation)', () => {
     expect(newNoteFolder('Daily/2026-10-16.md', s('current'))).toBe('Daily');
     expect(newNoteFolder(null, s('current'))).toBe('');
     expect(newNoteFolder('Daily/2026-10-16.md', s('folder'))).toBe('Inbox');
+  });
+});
+
+describe('failedReason (MoveResult.failed)', () => {
+  it('says why, and points a task list the server would not rewrite to its tasks', () => {
+    expect(failedReason({ path: 'Notes/Plan.md', reason: 'not-rewritable' })).toBe('a property link that cannot be rewritten');
+    expect(failedReason({ path: 'Tasks/Home.tasks', reason: 'not-rewritable' })).toBe('a task list that cannot be changed here; edit the links in its tasks');
+    expect(failedReason({ path: 'Tasks/Home.tasks', reason: 'io-error' })).toBe('storage error');
   });
 });
