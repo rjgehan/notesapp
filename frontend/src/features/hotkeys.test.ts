@@ -69,3 +69,49 @@ describe('global hotkeys', () => {
     expect(ev.defaultPrevented).toBe(false);
   });
 });
+
+describe('customized hotkeys (DESIGN §6.25)', () => {
+  it('runs a command on the key this device chose, even in the editor, and not on its old key', async () => {
+    const { setHotkey } = await import('./hotkeyPrefs');
+    const run = vi.fn();
+    const command = { id: 'test.custom', name: 'Custom', hotkey: 'Mod-Alt-j', run };
+    registerCommand(command);
+    setHotkey(command, 'Mod-Shift-u');
+    const editor = document.createElement('div');
+    editor.className = 'cm-editor';
+    document.body.appendChild(editor);
+    press(editor, { key: 'U', code: 'KeyU', shiftKey: true, ...mod });
+    expect(run).toHaveBeenCalledTimes(1);
+    press(document.body, { key: 'j', code: 'KeyJ', altKey: true, ...mod });
+    expect(run).toHaveBeenCalledTimes(1);
+    setHotkey(command, null);
+    press(document.body, { key: 'U', code: 'KeyU', shiftKey: true, ...mod });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives an editor-bound command a global key only once it is customized', async () => {
+    const { setHotkey } = await import('./hotkeyPrefs');
+    const run = vi.fn();
+    const command = { id: 'test.editorOnly', name: 'Editor only', editorHotkey: 'Mod-Alt-y', run };
+    registerCommand(command);
+    press(document.body, { key: 'y', code: 'KeyY', altKey: true, ...mod });
+    expect(run).not.toHaveBeenCalled();
+    setHotkey(command, 'Mod-Alt-y');
+    // Its default: still the editor's job.
+    press(document.body, { key: 'y', code: 'KeyY', altKey: true, ...mod });
+    expect(run).not.toHaveBeenCalled();
+    setHotkey(command, 'Mod-Alt-h');
+    press(document.body, { key: 'h', code: 'KeyH', altKey: true, ...mod });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves keys alone while Settings records one', () => {
+    const run = vi.fn();
+    registerCommand({ id: 'test.recorded', name: 'Recorded', hotkey: 'Mod-Alt-m', run });
+    const recorder = document.createElement('button');
+    recorder.setAttribute('data-hotkey-recorder', '');
+    document.body.appendChild(recorder);
+    press(recorder, { key: 'm', code: 'KeyM', altKey: true, ...mod });
+    expect(run).not.toHaveBeenCalled();
+  });
+});

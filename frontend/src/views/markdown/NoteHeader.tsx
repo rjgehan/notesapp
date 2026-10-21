@@ -8,6 +8,7 @@ import { BookmarkToggle } from '../../components/BookmarkToggle';
 import { SaveStatus } from '../../components/SaveStatus';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
 import { displayName, folderOf } from '../../features/paths';
+import { keyHint, useHotkeyOverrides } from '../../features/hotkeyPrefs';
 import { keyLabel } from '../../features/platform';
 import type { NoteMode } from '../../state/ui';
 import type { SessionSnapshot } from '../../sync/DocumentSession';
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export function ModeToggle({ mode, onToggle }: { mode: NoteMode; onToggle(): void }) {
+  useHotkeyOverrides();
   const next = mode === 'edit' ? 'reading' : 'editing';
   return (
     <button
@@ -31,7 +33,7 @@ export function ModeToggle({ mode, onToggle }: { mode: NoteMode; onToggle(): voi
       className="icon-button mode-toggle"
       onClick={onToggle}
       aria-label={`Switch to ${next} view`}
-      title={`Switch to ${next} view (${keyLabel('Mod-e')})`}
+      title={`Switch to ${next} view${keyHint('editor.toggleMode', keyLabel)}`}
     >
       {mode === 'edit' ? <BookOpen size={17} /> : <Pencil size={17} />}
     </button>
@@ -39,6 +41,7 @@ export function ModeToggle({ mode, onToggle }: { mode: NoteMode; onToggle(): voi
 }
 
 export function NoteHeader({ path, snapshot, mode, modes, onToggleMode, editable }: Props) {
+  useHotkeyOverrides();
   const breakpoint = useBreakpoint();
   const phone = breakpoint === 'phone';
   const title = displayName(path);
@@ -50,10 +53,10 @@ export function NoteHeader({ path, snapshot, mode, modes, onToggleMode, editable
           <span className="note-header-nav">
             {breakpoint === 'desktop' && (
               <>
-                <button type="button" className="icon-button" aria-label="Navigate back" title={`Navigate back (${keyLabel('Mod-Alt-ArrowLeft')})`} onClick={() => runCommand('nav.back', { activePath: path })}>
+                <button type="button" className="icon-button" aria-label="Navigate back" title={`Navigate back${keyHint('nav.back', keyLabel)}`} onClick={() => runCommand('nav.back', { activePath: path })}>
                   <ArrowLeft size={16} />
                 </button>
-                <button type="button" className="icon-button" aria-label="Navigate forward" title={`Navigate forward (${keyLabel('Mod-Alt-ArrowRight')})`} onClick={() => runCommand('nav.forward', { activePath: path })}>
+                <button type="button" className="icon-button" aria-label="Navigate forward" title={`Navigate forward${keyHint('nav.forward', keyLabel)}`} onClick={() => runCommand('nav.forward', { activePath: path })}>
                   <ArrowRight size={16} />
                 </button>
               </>

@@ -23,6 +23,7 @@ import type { DiscardedRecord } from '../../sync/drafts';
 import { documents, draftStore } from '../../sync/instance';
 import { useBreakpoint } from '../layout/useBreakpoint';
 import { OrphanDraftList } from '../OrphanDrafts';
+import { HotkeysSection } from './HotkeysSection';
 import { usePageTitle } from './usePageTitle';
 import { toastError } from '../../features/errors';
 import { SettingsWriter } from '../../features/settingsWriter';
@@ -32,6 +33,7 @@ const SECTIONS = [
   { id: 'daily', title: 'Daily notes' },
   { id: 'templates', title: 'Templates' },
   { id: 'editor', title: 'Editor' },
+  { id: 'hotkeys', title: 'Hotkeys' },
   { id: 'device', title: 'This device' },
   { id: 'about', title: 'About' },
 ] as const;
@@ -545,7 +547,7 @@ export default function SettingsPage() {
             </h1>
             {saving && <span className="muted">Saving…</span>}
           </header>
-          {section !== 'device' && section !== 'about' && (
+          {section !== 'device' && section !== 'hotkeys' && section !== 'about' && (
             <>
               {readOnly && (
                 <div className="banner banner-warning" role="status">
@@ -564,6 +566,7 @@ export default function SettingsPage() {
           {section === 'daily' && <DailySection {...props} />}
           {section === 'templates' && <TemplatesSection {...props} />}
           {section === 'editor' && <EditorSection {...props} />}
+          {section === 'hotkeys' && <HotkeysSection />}
           {section === 'device' && <DeviceSection />}
           {section === 'about' && <AboutSection />}
         </section>

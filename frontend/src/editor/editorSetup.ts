@@ -6,6 +6,7 @@ import { bracketMatching, indentOnInput, syntaxHighlighting, type LanguageSuppor
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightActiveLine, keymap, placeholder } from '@codemirror/view';
+import { isCustomized } from '../features/hotkeyPrefs';
 import { isIOS, modKey } from '../features/platform';
 import { headingSource, tagSource, wikilinkSource } from './completion';
 import { noteContext, type NoteContext } from './context';
@@ -82,18 +83,29 @@ function common(hooks: EditorHooks): Extension[] {
   ];
 }
 
+/**
+ * A default key of the editor, which steps aside when this device gave the command another key
+ * (Settings, Hotkeys; DESIGN §6.25): the global handler then runs the command on its new key.
+ */
+function ifDefault(id: string, run: (view: EditorView) => boolean): (view: EditorView) => boolean {
+  return (view) => !isCustomized(id) && run(view);
+}
+
+/** The search panel's keys, with Mod-f following the `editor.find` command's key. */
+const findKeymap = searchKeymap.map((b) => (b.key === 'Mod-f' && b.run ? { ...b, run: ifDefault('editor.find', b.run) } : b));
+
 function baseKeymaps(): Extension {
   return [
     Prec.highest(
       keymap.of([
-        { key: 'Mod-Alt-ArrowLeft', run: () => {
+        { key: 'Mod-Alt-ArrowLeft', run: ifDefault('nav.back', () => {
           window.history.back();
           return true;
-        }, preventDefault: true },
-        { key: 'Mod-Alt-ArrowRight', run: () => {
+        }), preventDefault: true },
+        { key: 'Mod-Alt-ArrowRight', run: ifDefault('nav.forward', () => {
           window.history.forward();
           return true;
-        }, preventDefault: true },
+        }), preventDefault: true },
       ]),
     ),
   ];
@@ -136,15 +148,15 @@ export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[
     pasteAndDrop,
     baseKeymaps(),
     keymap.of([
-      { key: 'Mod-s', run: saveNow, preventDefault: true },
-      { key: 'Mod-Enter', run: followLinkAtCursor },
-      { key: 'Mod-l', run: toggleCheckbox, preventDefault: true },
-      { key: 'Mod-b', run: toggleBold, preventDefault: true },
-      { key: 'Mod-i', run: toggleItalic, preventDefault: true },
-      { key: 'Mod-k', run: insertMarkdownLink, preventDefault: true },
-      { key: 'Mod-e', run: toggleMode, preventDefault: true },
+      { key: 'Mod-s', run: ifDefault('editor.save', saveNow), preventDefault: true },
+      { key: 'Mod-Enter', run: ifDefault('editor.followLink', followLinkAtCursor) },
+      { key: 'Mod-l', run: ifDefault('editor.toggleCheckbox', toggleCheckbox), preventDefault: true },
+      { key: 'Mod-b', run: ifDefault('editor.bold', toggleBold), preventDefault: true },
+      { key: 'Mod-i', run: ifDefault('editor.italic', toggleItalic), preventDefault: true },
+      { key: 'Mod-k', run: ifDefault('editor.insertLink', insertMarkdownLink), preventDefault: true },
+      { key: 'Mod-e', run: ifDefault('editor.toggleMode', toggleMode), preventDefault: true },
     ]),
-    keymap.of([...closeBracketsKeymap, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
+    keymap.of([...closeBracketsKeymap, ...findKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
   ];
 }
 
@@ -155,10 +167,10 @@ export function plainTextExtensions(hooks: EditorHooks & { save(): void }, langu
     language ?? [],
     language ? syntaxHighlighting(obsidianHighlight) : [],
     baseKeymaps(),
-    keymap.of([{ key: 'Mod-s', run: () => {
+    keymap.of([{ key: 'Mod-s', run: ifDefault('editor.save', () => {
           hooks.save();
           return true;
-        }, preventDefault: true }]),
-    keymap.of([...closeBracketsKeymap, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
+        }), preventDefault: true }]),
+    keymap.of([...closeBracketsKeymap, ...findKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
   ];
 }
