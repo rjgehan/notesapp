@@ -19,6 +19,8 @@ export const queryKeys = {
   /** Under status(), so every invalidation of the status refreshes the status page too. */
   statusDetails: () => ['status', 'details'] as const,
   templates: () => ['templates'] as const,
+  /** The link graph (API.md §11.4), refreshed by tree changes while a graph view is open. */
+  graph: () => ['graph'] as const,
 };
 
 export const STALE = {

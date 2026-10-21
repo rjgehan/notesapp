@@ -71,6 +71,7 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     resolveLinks: (req) => call(() => ({ resolved: vault.resolveTargets(req.source, req.targets) })),
     search: (q, opts = {}) => call(() => vault.search(q, opts.limit, opts.sort, opts.prefix ?? false)),
     getTags: () => call(() => ({ tags: vault.getTags() })),
+    getGraph: (since) => call(() => vault.getGraph(since)),
     listTrash: () => call(() => ({ entries: vault.listTrash() })),
     restoreTrash: (id, req) => call(() => vault.restoreTrash(id, req, clientId)),
     purgeTrashEntry: (id) => call(() => void vault.purgeTrash(id, clientId)),

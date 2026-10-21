@@ -255,6 +255,20 @@ export interface ResolveRequest { source: VaultPath; targets: string[] }
 export interface ResolvedLink { path: VaultPath | null; createPath: VaultPath | null }
 export interface ResolveResponse { resolved: Record<string, ResolvedLink> }
 
+// ---------- graph (§11.4) ----------
+export type GraphNodeType = 'note' | 'attachment' | 'unresolved';
+export interface GraphNode {
+  path: VaultPath;   // the file; for 'unresolved', the link target as first written, without '.md'
+  type: GraphNodeType;
+  tags: string[];    // notes only: display casing, without '#', sorted case-insensitively
+}
+export interface GraphResponse {
+  version: string;     // opaque; changes when a node, an edge or a note's tags change
+  unchanged: boolean;  // `since` equals `version`: nodes and edges are empty, keep the graph you have
+  nodes: GraphNode[];
+  edges: number[];     // flat triples [source, target, count, ...]: node indexes, links from source to target
+}
+
 // ---------- search / tags (§12) ----------
 export interface SearchMatch { line: number; text: string; ranges: TextRange[] }
 export interface SearchHit {

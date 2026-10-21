@@ -9,6 +9,7 @@ import type {
   CreateFileRequest,
   FileEntry,
   FolderResult,
+  GraphResponse,
   HistoryContent,
   HistoryResponse,
   HistoryRestoreRequest,
@@ -86,6 +87,8 @@ export interface Endpoints {
   resolveLinks(req: ResolveRequest): Promise<ResolveResponse>;
   search(q: string, opts?: SearchOptions): Promise<SearchResponse>;
   getTags(): Promise<TagsResponse>;
+  /** The link graph (API.md §11.4); with `since`, an unchanged graph comes back empty with `unchanged: true`. */
+  getGraph(since?: string): Promise<GraphResponse>;
   listTrash(): Promise<TrashListResponse>;
   restoreTrash(id: string, req?: RestoreRequest): Promise<RestoreResult>;
   purgeTrashEntry(id: string): Promise<void>;
@@ -140,6 +143,7 @@ export const httpEndpoints: Endpoints = {
   resolveLinks: (req) => apiFetch('/api/links/resolve', { method: 'POST', json: req }),
   search: (q, opts = {}) => apiFetch('/api/search' + query({ q, limit: opts.limit, sort: opts.sort, prefix: opts.prefix })),
   getTags: () => apiFetch('/api/tags'),
+  getGraph: (since) => apiFetch('/api/graph' + query({ since })),
   listTrash: () => apiFetch('/api/trash'),
   restoreTrash: (id, req) => apiFetch(`/api/trash/${encodeURIComponent(id)}/restore`, { method: 'POST', json: req ?? {} }),
   purgeTrashEntry: (id) => apiFetch(`/api/trash/${encodeURIComponent(id)}`, { method: 'DELETE' }),

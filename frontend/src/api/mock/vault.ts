@@ -38,6 +38,8 @@ import type {
   StatusDetails,
   StatusResponse,
   TagCount,
+  GraphNode,
+  GraphResponse,
   TemplatesResponse,
   TextFile,
   TrashEntry,
@@ -992,6 +994,58 @@ export class MockVault {
         return new RegExp(`(?<![\\p{L}\\p{N}])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'u').test(hay);
       }
     }
+  }
+
+  /** The link graph (API.md §11.4), built from scratch on every call; the version hashes it. */
+  getGraph(since?: string): GraphResponse {
+    const excluded = (p: string) => this.settings.files.excludedPaths.some((e) => {
+      const prefix = e.replace(/\/+$/, '').toLowerCase();
+      const lower = p.toLowerCase();
+      return prefix !== '' && (lower === prefix || lower.startsWith(prefix + '/'));
+    });
+    const index = this.linkIndex();
+    const paths = [...this.files.keys()].filter((p) => !excluded(p)).sort();
+    const ids = new Map<string, number>();
+    const nodes: GraphNode[] = [];
+    for (const path of paths) {
+      ids.set(path, nodes.length);
+      const note = kindOf(path) === 'note';
+      const tags = note ? [...new Set(this.scanOf(this.files.get(path)!).tags)].sort((a, b) => a.localeCompare(b)) : [];
+      nodes.push({ path, type: note ? 'note' : 'attachment', tags });
+    }
+    const unresolved = new Map<string, number>();
+    const counts = new Map<string, number>();
+    for (const path of paths) {
+      if (kindOf(path) !== 'note') continue;
+      const s = ids.get(path)!;
+      for (const link of this.scanOf(this.files.get(path)!).links) {
+        const resolved = resolve(link.target, path, index);
+        let t: number | undefined;
+        if (resolved !== null) {
+          if (resolved === path) continue;
+          t = ids.get(resolved);
+        } else {
+          const name = link.target.trim().replace(/\.md$/i, '').trim();
+          if (!name) continue;
+          t = unresolved.get(name.toLowerCase());
+          if (t === undefined) {
+            t = nodes.length;
+            unresolved.set(name.toLowerCase(), t);
+            nodes.push({ path: name, type: 'unresolved', tags: [] });
+          }
+        }
+        if (t === undefined) continue;
+        const key = `${s},${t}`;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+    const edges = [...counts]
+      .map(([key, n]) => [...key.split(',').map(Number), n])
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+      .flat();
+    const version = blobId(new TextEncoder().encode(JSON.stringify([nodes, edges])));
+    if (since === version) return { version, unchanged: true, nodes: [], edges: [] };
+    return { version, unchanged: false, nodes, edges };
   }
 
   getTags(): TagCount[] {

@@ -662,6 +662,14 @@ Stored in `.notesapp/bookmarks.json`, in a format compatible with Obsidian's `bo
 
 ### 16. Graph view *(declined for v1)*
 
+**Status:** built (wave 3, branch `feat/graph-import`). The global graph is the page `/x/graph` (ribbon, drawer, *Open Graph*); the local graph is a right-sidebar panel (*Open local graph*, the phone ⋯ menu and bottom sheet) with a depth of 1 to 5. Filters (search, tags as nodes, attachments, existing files only, orphans, folder, tag), color groups, display (arrows, text fade, node size, link thickness) and forces (center, repel, link force, link distance) follow Obsidian's `graph.json`. Hover highlights a node's neighbours; click or tap opens it; pinch and drag work on the iPhone; live updates arrive through SSE. Design in DESIGN §5.5.12 and §6.21, API in API.md §11.4. Deviations and additions:
+
+- **Renderer: d3-force 3.0.0 (ISC) and an own canvas renderer**, not `force-graph`. The layout runs in a Web Worker, so a 10,000-note graph never blocks the page, and the renderer batches all links and every node color into a handful of canvas calls (about 4 ms per frame at 10,000 notes). It is one lazy chunk.
+- **Refreshes are cheap.** `GET /api/graph` has a version that changes only when links, tags or files change, and `?since=` answers "unchanged" with an empty body, so the graph refreshes after every save without moving.
+- **Filters match names, paths, aliases and tags, not note text**, with the search grammar (`tag:`, `path:`, `file:`, `-`, phrases). They are instant, and they work on attachments, unresolved links and tags too. A folder and a tag filter are added to Obsidian's.
+- **Graph settings are per device** (`localStorage`), like the theme; an imported vault's `.obsidian/graph.json` can be applied from the compatibility report (item 24).
+- **Excluded files** (`settings.files.excludedPaths`) are left out of the graph, as in Obsidian.
+
 **One line:** an interactive global and local (1–2 hop) graph of notes and links, filterable by folder and tag.
 
 | Value | Effort | Depends on |
