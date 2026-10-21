@@ -448,6 +448,28 @@ interface Task {
 
 ### 6. Spreadsheets with Google-Sheets-style formulas *(big three a)*
 
+**Status:** built (wave 1)
+
+All three phases are built; DESIGN §6.21 has the design.
+
+- **6a.** The GPL-3.0 licence and generated third-party notices; the `.sheet` format with its validating parser and stable serializer; the HyperFormula engine adapter (cached values, named ranges, multiple sheets, undo and redo, recalculation on an engine change); the cell-level merge; the spreadsheet view on Glide Data Grid (formula bar, A1 headers, range selection, TSV copy and paste, fill, column resizing, frozen rows and columns, bold rows, sheet tabs, named ranges, "New spreadsheet").
+- **6b.** `![[Budget.sheet]]`, `![[Budget.sheet#Summary]]` and `![[Budget.sheet#Budget!A1:C10]]` (and named ranges) render through the view's `loadEmbed()` from the cached values, without the engine; a click opens the spreadsheet at that sheet or range. On the server, `SheetDocumentIndexer` (through the `DocumentIndexer` extension point, the same commit as items 4 and 5) indexes cell text and cached values, and `[[Note]]` strings in cells become backlinks.
+- **6c.** CSV import (into a new sheet or a new file) and export (the current sheet); number formats per cell, row or column (currency, percent, decimals, dates, custom codes) in the grid and in embeds, and typed input that recognizes them; bar, line and pie charts of a range, stored in the sheet JSON and drawn as plain SVG; xlsx import and export with SheetJS 0.20.3 from cdn.sheetjs.com, pinned by its integrity hash and lazy-loaded.
+
+Deviations, and why:
+
+- HyperFormula is pinned at **3.4.0**, not 3.5.0, because 3.5.0 (published 2026-10-09) is less than two weeks old (same GPL-3.0-only licence; a later upgrade recalculates each sheet once). Glide Data Grid is pinned at **6.0.4-alpha24**, not 6.0.3: 6.0.3 declares React 16 to 18 as peers, and only the 6.0.4 line accepts React 19.
+- Glide has no frozen top rows, so frozen rows are drawn in its header: they are edited in the formula bar rather than in place, and a range selection stops at them. On phones a cell is edited in the formula bar (tap a selected cell), and columns are resized with a width dialog as well as by dragging.
+- Embeds in **Live Preview**: Live Preview does not render any embeds yet (item 10b). Sheet embeds are built as the view's `loadEmbed()` and handle their own clicks, so they work wherever embeds are hydrated: in the reading view today, and in Live Preview once 10b renders embeds through the same `loadEmbed`.
+- Embeds show at most 100 rows and 26 columns (and say so), and an embed of a whole sheet also shows its charts.
+- The format goes beyond the spec in three compatible ways, documented in DESIGN §6.21.1: cells take `fmt` (before the row's and the column's); each sheet takes `charts`, keyed by time-ordered ids so charts merge per chart; and a sheet takes `structure`, a marker that changes when rows or columns are inserted or deleted, so a merge never misplaces cells another device added meanwhile. Files without charts or such edits keep their exact earlier layout.
+- Rows and columns can be inserted and deleted (references follow, as in Google Sheets); sorting and filtering a range in place are not built yet (the `SORT` and `FILTER` functions are).
+- Charts show in a folding pane below the grid rather than floating over it as in Google Sheets; at most eight series (the palette's colours) and 500 categories; a pie folds slices beyond eight into Other.
+- Number formats cover Excel's and Google Sheets' codes except conditions (`[>100]`, ignored) and fractions. Typed dates read as ISO (`2026-10-17`) and US (`10/17/2026`) dates.
+- Search indexes numbers as the Automatic format writes them (`1937.5`), not in their number format. As for every indexed document, renaming a note does not rewrite `[[links]]` in cells; the move reports the sheet as `not-rewritable`.
+- CSV export writes values as they show (`$1,450.00`), as Google Sheets does; importing that back reads the number and its format.
+- xlsx: SheetJS Community Edition writes no styles, so only number formats, column widths and row heights carry over; merged cells, comments, frozen panes, charts and sheet-scoped names are not, and imports say what they left out. Sheet names longer than Excel's 31 characters are cut on export, with formulas following.
+
 **One line:** spreadsheet files in the vault, with a fast grid, about 400 Excel-compatible functions (`=SUM`, `=VLOOKUP`, `=IF`, ...), multiple sheets and named ranges, embeddable in notes.
 
 | Value | Effort | Depends on |

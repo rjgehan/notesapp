@@ -24,10 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Task lists and drawings side by side, each through its own {@link DocumentIndexer} (ROADMAP items 4 and 5, DESIGN
- * §6.8): one vault feeds search, tags and backlinks from both, and a rename rewrites the links each can write back (a
+ * Task lists, drawings and spreadsheets side by side, each through its own {@link DocumentIndexer} (ROADMAP items 4,
+ * 5 and 6, DESIGN §6.8): one vault feeds search, tags and backlinks from both, and a rename rewrites the links each can write back (a
  * {@code .tasks} list as a whole, an {@code .excalidraw.md} drawing's Markdown as a note's) while an {@code .excalidraw}
- * drawing is reported as {@code not-rewritable} and left as it is.
+ * drawing and a {@code .sheet} are reported as {@code not-rewritable} and left as they are.
  */
 class DocumentIndexersTest {
 
@@ -52,6 +52,17 @@ class DocumentIndexersTest {
 			  ],
 			  "appState": {"viewBackgroundColor": "#ffffff"},
 			  "files": {}
+			}
+			""";
+
+	private static final String BUDGET = """
+			{
+			  "type": "notesapp-sheet",
+			  "version": 1,
+			  "sheets": [
+			    {"id": "s1", "name": "Costs", "cells": {"A1": {"v": "Pay [[Plumber]] the deposit"}, "A2": {"v": "Budget per [[Plan#Goals]]"}}}
+			  ],
+			  "named": {}
 			}
 			""";
 
@@ -112,6 +123,7 @@ class DocumentIndexersTest {
 		write("Tasks/Home.tasks", LIST);
 		write("Drawings/House.excalidraw", HOUSE);
 		write("Drawings/Shed.excalidraw.md", SHED);
+		write("Money/Budget.sheet", BUDGET);
 		this.vault = TestVault.start(this.dir);
 		this.notes = new NoteService(this.vault.paths, this.vault.index, this.vault.kinds, this.vault.settings);
 		this.search = new SearchService(this.vault.index, this.vault.settings);
@@ -147,18 +159,19 @@ class DocumentIndexersTest {
 		assertThat(found("paint")).containsExactlyInAnyOrder("Tasks/Home.tasks", "Drawings/Shed.excalidraw.md");
 		assertThat(found("tag:home")).containsExactlyInAnyOrder("Tasks/Home.tasks", "Drawings/House.excalidraw");
 		assertThat(found("tag:shed")).containsExactly("Drawings/Shed.excalidraw.md");
+		assertThat(found("deposit")).containsExactly("Money/Budget.sheet");
 		// The JSON of a document is never searchable (a Markdown drawing is a note, whose text is).
 		assertThat(found("isDeleted")).containsExactly("Drawings/Shed.excalidraw.md");
 		assertThat(found("notesapp")).isEmpty();
 
 		assertThat(sources("Plumber.md")).containsExactlyInAnyOrder("Tasks/Home.tasks", "Drawings/House.excalidraw",
-				"Drawings/Shed.excalidraw.md");
-		assertThat(sources("Projects/Plan.md")).containsExactly("Tasks/Home.tasks");
+				"Drawings/Shed.excalidraw.md", "Money/Budget.sheet");
+		assertThat(sources("Projects/Plan.md")).containsExactlyInAnyOrder("Tasks/Home.tasks", "Money/Budget.sheet");
 		assertThat(sources("Painter.md")).containsExactly("Drawings/Shed.excalidraw.md");
 
-		// The list and the JSON drawing are documents; the Markdown drawing is a note.
+		// The list, the JSON drawing and the sheet are documents; the Markdown drawing is a note.
 		assertThat(this.vault.index.stats().notes()).isEqualTo(4);
-		for (String document : List.of("Tasks/Home.tasks", "Drawings/House.excalidraw")) {
+		for (String document : List.of("Tasks/Home.tasks", "Drawings/House.excalidraw", "Money/Budget.sheet")) {
 			assertThatThrownBy(() -> this.notes.meta(document)).isInstanceOfSatisfying(NotesException.class,
 					(ex) -> assertThat(ex.code()).isEqualTo(ErrorCode.TYPE_MISMATCH));
 		}
@@ -172,7 +185,8 @@ class DocumentIndexersTest {
 		assertThat(dryRun.linkUpdates()).extracting((u) -> u.path() + " " + u.links())
 			.containsExactlyInAnyOrder("Tasks/Home.tasks 2", "Drawings/Shed.excalidraw.md 2");
 		assertThat(dryRun.failed()).extracting((f) -> f.path() + " " + f.reason())
-			.containsExactly("Drawings/House.excalidraw " + FailedReason.NOT_REWRITABLE);
+			.containsExactlyInAnyOrder("Drawings/House.excalidraw " + FailedReason.NOT_REWRITABLE,
+					"Money/Budget.sheet " + FailedReason.NOT_REWRITABLE);
 		assertThat(read("Tasks/Home.tasks")).isEqualTo(LIST);
 		assertThat(read("Drawings/Shed.excalidraw.md")).isEqualTo(SHED);
 
@@ -181,7 +195,8 @@ class DocumentIndexersTest {
 		assertThat(moved.linkUpdates()).extracting((u) -> u.path() + " " + u.links())
 			.containsExactlyInAnyOrder("Tasks/Home.tasks 2", "Drawings/Shed.excalidraw.md 2");
 		assertThat(moved.failed()).extracting((f) -> f.path() + " " + f.reason())
-			.containsExactly("Drawings/House.excalidraw " + FailedReason.NOT_REWRITABLE);
+			.containsExactlyInAnyOrder("Drawings/House.excalidraw " + FailedReason.NOT_REWRITABLE,
+					"Money/Budget.sheet " + FailedReason.NOT_REWRITABLE);
 
 		// The list is rewritten by its indexer: titles and notes; its related note did not move.
 		String list = read("Tasks/Home.tasks");
@@ -192,8 +207,9 @@ class DocumentIndexersTest {
 		assertThat(read("Drawings/Shed.excalidraw.md"))
 			.isEqualTo(SHED.replace("Fix the shed with [[Plumber]] ^Ab12Cd34", "Fix the shed with [[Plumber Bob]] ^Ab12Cd34")
 				.replace("Rr11Ss22: [[Plumber]]", "Rr11Ss22: [[Plumber Bob]]"));
-		// The JSON drawing is left as it is.
+		// The JSON drawing and the spreadsheet are left as they are.
 		assertThat(read("Drawings/House.excalidraw")).isEqualTo(HOUSE);
+		assertThat(read("Money/Budget.sheet")).isEqualTo(BUDGET);
 
 		assertThat(sources("Contacts/Plumber Bob.md")).containsExactlyInAnyOrder("Tasks/Home.tasks",
 				"Drawings/Shed.excalidraw.md");
@@ -208,11 +224,11 @@ class DocumentIndexersTest {
 		this.vault.moves.move("Tasks/Home.tasks", "Tasks/Home.excalidraw", null, false, TestVault.ALICE, CLIENT);
 		assertThat(this.vault.index.file("Tasks/Home.excalidraw")).isNotNull();
 		assertThat(found("leak")).isEmpty();
-		assertThat(sources("Projects/Plan.md")).isEmpty();
+		assertThat(sources("Projects/Plan.md")).containsExactly("Money/Budget.sheet");
 		// And back: a list again.
 		this.vault.moves.move("Tasks/Home.excalidraw", "Tasks/Home.tasks", null, false, TestVault.ALICE, CLIENT);
 		assertThat(found("leak")).containsExactly("Tasks/Home.tasks");
-		assertThat(sources("Projects/Plan.md")).containsExactly("Tasks/Home.tasks");
+		assertThat(sources("Projects/Plan.md")).containsExactlyInAnyOrder("Tasks/Home.tasks", "Money/Budget.sheet");
 	}
 
 	@Test
@@ -240,7 +256,8 @@ class DocumentIndexersTest {
 				.containsExactlyInAnyOrder("Tasks/Work.tasks 2", "Drawings/Wall.excalidraw.md 1");
 			assertThat(result.failed()).extracting((f) -> f.path() + " " + f.reason())
 				.containsExactlyInAnyOrder("Drawings/Board.excalidraw " + FailedReason.NOT_REWRITABLE,
-						"Drawings/Wall.excalidraw.md " + FailedReason.NOT_REWRITABLE);
+						"Drawings/Wall.excalidraw.md " + FailedReason.NOT_REWRITABLE,
+						"Money/Budget.sheet " + FailedReason.NOT_REWRITABLE);
 		}
 		// The list is rewritten through its indexer: still a valid list, its task updated.
 		String rewritten = read("Tasks/Work.tasks");

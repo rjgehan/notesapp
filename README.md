@@ -11,6 +11,7 @@ A self-hosted, single-user notes web app modelled closely on Obsidian. The vault
 - **Find things.** Quick switcher, command palette, full-text search (phrases, `tag:`, `path:`, negation), backlinks and unlinked mentions, outline and tags panels.
 - **Organise.** Rename and move with automatic link updates (and undo), trash with restore, attachments by paste, drop or upload, daily notes and templates.
 - **Drawings.** Excalidraw drawings as vault files: new `.excalidraw` drawings, and Obsidian Excalidraw `.excalidraw.md` files edited in place. Touch and Apple Pencil on iPhone and iPad, images stored as vault attachments, edits from two devices merged automatically, and changes from another device shown live. `![[Diagram.excalidraw|400]]` embeds a drawing in a note as an image that opens the editor; a drawing's texts are searchable and its links show up as backlinks; the Obsidian plugin's embedded notes, drawings and LaTeX show as static images.
+- **Spreadsheets.** `.sheet` files open in a fast grid with about 400 Google-Sheets-style functions (HyperFormula), a formula bar, several sheets, named ranges, frozen rows and columns, fill, number formats (currency, percent, decimals, dates), bar, line and pie charts, and copy and paste with other spreadsheets. Embed a sheet, a range or its charts in a note with `![[Budget.sheet]]`, `![[Budget.sheet#Summary]]` or `![[Budget.sheet#Budget!A1:C10]]`; cells are searchable and `[[links]]` in them are backlinks. Import and export CSV and Excel (.xlsx) files. Spreadsheets autosave, sync live and keep their history like notes, and edits of different cells on two devices merge by themselves.
 - **Tasks** *(roadmap item 4; reminder delivery comes with item 9)*. Structured to-do lists kept in the vault as readable `.tasks` JSON files under `Tasks/`: due and start dates, priorities, tags, subtasks, sections, repeating tasks (RFC 5545 rules, from the due date or from completion, read back as text such as "every 2 weeks on Monday", set from common choices, words or a raw RRULE), reminders stored for later delivery, and a yearly archive of tasks completed more than 90 days ago.
   - **Views.** Today (overdue, due and started tasks); Upcoming (the next 14 days by day, with a week strip); a page per list with sections, subtasks, drag to reorder and inline editing, or the same list as a **Kanban board** with its sections or the statuses as columns and cards that drag between and within them; a Completed log; a Filter page by tag, priority and list (bookmarkable). A detail sheet covers every field.
   - **Capture.** Quick add from anywhere (`Mod-Alt-T`, or the floating + on the phone) reads `Pay rent tomorrow 9am every month !high #home @Bills [[Apartment]]` into chips before saving. **Convert checkbox to task** turns the `- [ ]` line under the cursor into a task in the Inbox and leaves a link to it (Obsidian Tasks emoji dates and priorities come along).
@@ -36,6 +37,7 @@ A Spring Boot 4 backend (Java 21 bytecode, run on JDK 25) serves the REST and SS
 | `.github/` | CI, image publishing, Dependabot |
 | `Dockerfile` | Three stages: frontend build, backend build (JDK 21), JDK 25 runtime with an AOT cache |
 | `docs/` | Design, API contract, deployment runbook, roadmap |
+| `scripts/` | `third-party-notices.mjs`, which regenerates `THIRD_PARTY_NOTICES.md` |
 
 ## Local development (Windows)
 
@@ -85,3 +87,9 @@ Rolling back, pausing updates, backups and everything else on the server side ar
 - [docs/DEPLOY.md](docs/DEPLOY.md): homeserver runbook (first deploy, operations, troubleshooting)
 - [docs/CASAOS.md](docs/CASAOS.md): installing on CasaOS by pasting one compose file, and its optional alerts, mirror and backups
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes after v1
+
+## Licence
+
+NotesApp is free software under the GNU General Public License, version 3 only ([LICENSE](LICENSE), SPDX `GPL-3.0-only`). The spreadsheet formula engine, HyperFormula, is used under its GPL-3.0 licence option, which is why the whole repository is GPL-3.0 (decided 2026-10-17, [ROADMAP](docs/ROADMAP.md) item 6). Running your own image needs nothing further; if you ever distribute NotesApp, distribute its source under the same licence.
+
+Third-party packages and their licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). It is generated: after changing dependencies, run `node scripts/third-party-notices.mjs` from the repository root.

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -107,6 +107,7 @@ Besides notes, the server indexes the content of some structured text files (DES
 |---|---|---|
 | `.tasks` lists (§20.9) | The list's name; each task's title, tags, related notes (`links`) and notes | Those in titles and notes, and each path in `links` |
 | `.excalidraw` drawings (DESIGN §6.8.1) | Each text element's text, each element link (web links excluded), each image stored as a vault attachment, frame names | None: the drawing is reported as `not-rewritable` |
+| `.sheet` spreadsheets (§12.3) | What each cell shows (its text or number, or its formula's cached result), sheet names, chart titles | None: the spreadsheet is reported as `not-rewritable` |
 | `.excalidraw.md` drawings | A note, scanned as one; also the texts and links that only its drawing JSON holds | Those in its Markdown, as in any note; not those only its JSON holds (`not-rewritable`) |
 
 - `GET /api/search` (§12.1) can return a document; its `matches` are lines of the indexed text, never of the file's JSON.
@@ -799,7 +800,7 @@ Request `MoveRequest`:
 | `moved` | Every moved **file** (for folders, all descendants), as old and new paths |
 | `createdFolders` | Missing parents of `to` that the move created, outermost first. The caller adds them itself, because its own `folder.created` events are not echoed. `[]` in a dry run. |
 | `linkUpdates` | Notes whose text was (or, in a dry run, would be) rewritten. Paths are post-move. `version` is the new version, or `null` when `dryRun`. **The calling client applies these itself**, because its own `file.changed` events are not echoed: refresh the open sessions and update the tree versions. |
-| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string, or a link in an indexed document that the server cannot write back, §1.8: any link of an `.excalidraw` drawing, a link only an `.excalidraw.md` drawing's JSON holds, or a link in a `.tasks` list that is not valid or was written by a newer version, §20.9), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
+| `failed` | Notes whose links could not be updated, as `{path, reason}`; the move itself still happened. `reason` is `not-utf8` (the note is not valid UTF-8 and is never rewritten), `not-rewritable` (a frontmatter link whose source text does not match its parsed value, such as an escaped quoted string, or a link in an indexed document that the server cannot write back, §1.8: any link of an `.excalidraw` drawing or a `.sheet` spreadsheet, a link only an `.excalidraw.md` drawing's JSON holds, or a link in a `.tasks` list that is not valid or was written by a newer version, §20.9), `span-mismatch` (the note changed in a way that invalidated the plan) or `io-error`. |
 | `commitId` | The **last** commit made (the link-update commit when there is one, otherwise the rename commit). `null` when `dryRun`, when git is disabled, when nothing was committed (an empty folder), or when the commit failed and is being retried |
 
 | Errors |
@@ -924,7 +925,7 @@ Request `ResolveRequest`:
 
 ### 12.1 `GET /api/search?q={query}[&limit=50][&sort=relevance][&prefix=true]`
 
-This is full-text search over notes and over the indexed documents of §1.8: the tasks of `.tasks` lists (§20.9) and the texts of `.excalidraw` drawings. A hit's `path` is then the document, and `matches` are lines of its indexed text, never of its JSON. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
+This is full-text search over notes and over the indexed documents of §1.8: the tasks of `.tasks` lists (§20.9), the texts of `.excalidraw` drawings and the cells of `.sheet` spreadsheets (§12.3). A hit's `path` is then the document, and `matches` are lines of its indexed text, never of its JSON. Notes whose path matches `settings.files.excludedPaths` (case-insensitive prefix) are never returned.
 
 | Parameter | Meaning |
 |---|---|
@@ -997,6 +998,18 @@ All clauses must match (AND). `OR`, parentheses and regular expressions are not 
 - `total` is the number of distinct notes (documents included) with this tag or any descendant.
 - A parent that only exists through nesting has `count: 0`.
 - Display casing is the first one seen.
+
+### 12.3 Spreadsheets in search, backlinks and tags
+
+`.sheet` files (DESIGN §6.21) are indexed documents (§1.8), indexed through the `DocumentIndexer` extension point (DESIGN §6.8): what each cell shows (its text or number, or the cached result of its formula, as stored in the file), the sheet names and the chart titles become searchable text, one line per cell, and the links and tags in it count like a note's. Formulas, error results, number formats and the JSON around the values are not indexed.
+
+- A `[[Note]]` (or Markdown link) in a cell's text or cached result makes the spreadsheet a backlink source of that note (§11.2); the mention's `context` is the cell's text. `#tags` in cells count in `GET /api/tags` and `tag:` search.
+- `GET /api/search` can return a spreadsheet; its `matches` are lines of cell text, and their `line` numbers count lines of that text, not of the file.
+- A spreadsheet is not a note: `GET /api/notes/meta` answers `409 type-mismatch`, it never appears in unlinked mentions, and it does not count in `/api/status` `vault.notes`.
+- Renaming or moving a note, or renaming a heading (§22), does not rewrite links in spreadsheets; such a file is reported in `failed` with `not-rewritable`, and the cell can be edited by hand.
+- A file that is not a readable spreadsheet (not JSON, another `type`, a newer format `version`) is listed and served, but not content-indexed.
+
+Nothing else in the API changes for spreadsheets: they are text files read and saved through §8 with the version and conflict protocol of §4.
 
 ---
 

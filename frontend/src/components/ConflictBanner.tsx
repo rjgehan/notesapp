@@ -6,7 +6,7 @@ import { lazy, Suspense, useState } from 'react';
 import { isProblem } from '../api/client';
 import { api } from '../api/endpoints';
 import { navigateTo } from '../features/navigation';
-import { noteRoute } from '../features/paths';
+import { isNotePath, noteRoute } from '../features/paths';
 import { toast } from '../state/toasts';
 import type { DocumentSession } from '../sync/DocumentSession';
 import { applyRestoreResult } from '../sync/applyEvents';
@@ -56,7 +56,7 @@ export function ConflictBanner({ session, merge }: Props) {
           <span>
             {conflict.source === 'draft'
               ? 'Unsaved changes from an earlier visit conflict with the version on the server.'
-              : 'This note was changed on another device while you were editing it.'}
+              : `This ${isNotePath(session.path) ? 'note' : 'file'} was changed on another device while you were editing it.`}
             {conflict.historyBlocked && (
               <strong className="conflict-banner-warning">
                 {' '}

@@ -57,6 +57,7 @@ import { eventStream } from '../sync/liveSync';
 import { registerTasks } from '../tasks/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
+import { registerSheetView } from '../views/sheet/register';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
 
 let registered = false;
@@ -147,6 +148,7 @@ export function registerBuiltins(): void {
     modes: ['edit'],
     load: () => import('../views/TextView'),
   });
+  registerSheetView();
   registerView({
     id: 'image',
     match: (e) => (e.kind === 'image' ? 2 : 0),

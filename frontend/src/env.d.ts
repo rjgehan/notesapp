@@ -14,6 +14,9 @@ interface Window {
   EXCALIDRAW_ASSET_PATH?: string | string[];
 }
 
+/** Glide Data Grid's lazily loaded cell editor (vite.config.ts), loaded ahead by the spreadsheet view. */
+declare module 'glide-overlay-editor';
+
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }

@@ -59,6 +59,15 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      // Glide Data Grid's cell editor, a lazy chunk of the grid: the spreadsheet view loads it when
+      // the grid mounts, so the first keystrokes of the first edit are not lost while it downloads
+      // (DESIGN §6.21.5). The package exports no such path; this is the file its own import loads.
+      {
+        find: /^glide-overlay-editor$/,
+        replacement: fileURLToPath(
+          new URL('./node_modules/@glideapps/glide-data-grid/dist/esm/internal/data-grid-overlay-editor/data-grid-overlay-editor.js', import.meta.url),
+        ),
+      },
       // Mermaid's optional ELK layout: elkjs is EPL-2.0 (not GPL-compatible) and 1.4 MB, so it is
       // left out of the bundle; diagrams use the dagre layout (src/render/rich/mermaid.ts).
       { find: /^elkjs\/lib\/elk\.bundled\.js$/, replacement: fileURLToPath(new URL('./src/render/rich/elkStub.ts', import.meta.url)) },
@@ -92,6 +101,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Glide's cell editor is not loaded ahead in tests (src/test/glideOverlayEditor.ts).
+    alias: { 'glide-overlay-editor': fileURLToPath(new URL('./src/test/glideOverlayEditor.ts', import.meta.url)) },
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
   },

@@ -58,7 +58,7 @@ registry = new DocumentRegistry({
     if (activePath() === from) openPath(to, null, { replace: true });
   },
   caughtUp: () => useUi.getState().caughtUp,
-  // Conflicts on files whose view merges semantically (drawings) resolve without the banner.
+  // Conflicts on files whose view merges semantically (drawings, sheets) resolve without the banner.
   mergeFor: (path) => {
     const entry = currentTree().byPath.get(path);
     if (!entry) return undefined;

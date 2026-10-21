@@ -5,10 +5,11 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Lets a structured text type ({@code .tasks} lists, Excalidraw drawings; sheets and canvases later) feed full-text
- * search, backlinks and tags without teaching {@link MarkdownScanner} its format (DESIGN §6.8). A Spring bean that
- * implements it is picked up by {@link FileIndexer}, which calls the first one that {@link #supports} a file whenever
- * it indexes it: at startup, after an app write, and when the watcher or the rescan sees an external change.
+ * Lets a structured text type ({@code .tasks} lists, Excalidraw drawings, {@code .sheet} spreadsheets; canvases later)
+ * feed full-text search, backlinks and tags without teaching {@link MarkdownScanner} its format (DESIGN §6.8). A Spring
+ * bean that implements it is picked up by {@link FileIndexer}, which calls the first one that {@link #supports} a file
+ * whenever it indexes it: at startup, after an app write, and when the watcher or the rescan sees an external change.
+ * No two indexers support the same name.
  * <p>
  * The indexer renders what is searchable as Markdown {@linkplain Document#blocks() blocks}; each block is scanned with
  * the note rules on its own (so a code fence or a {@code %%} comment opened in one block never hides the next) and
