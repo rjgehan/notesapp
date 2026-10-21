@@ -32,6 +32,21 @@ describe('quick add parsing (ROADMAP item 4)', () => {
     ]);
   });
 
+  it('reads an hour without am/pm as the next time the clock shows it', () => {
+    // Saturday 17 October 2026, 16:45.
+    const afternoon = (text: string) => parseQuickAdd(text, { now: new Date(2026, 9, 17, 16, 45), lists }).due;
+    expect(afternoon('Call mom at 5 about May trip')).toBe('2026-10-17T17:00');
+    expect(afternoon('Call mom at 5:30')).toBe('2026-10-17T17:30');
+    expect(afternoon('Call mom today at 5')).toBe('2026-10-17T17:00');
+    expect(afternoon('Call mom at 4:30')).toBe('2026-10-18T04:30');
+    // Typed with am/pm, or as a 24-hour time, it stays as typed.
+    expect(afternoon('Call mom at 5am')).toBe('2026-10-18T05:00');
+    expect(afternoon('Call mom at 17')).toBe('2026-10-17T17:00');
+    expect(afternoon('Call mom tomorrow at 9')).toBe('2026-10-18T09:00');
+    // In the morning the morning hour is next.
+    expect(parse('Call mom at 11').due).toBe('2026-10-17T11:00');
+  });
+
   it('keeps an all-day date without a time', () => {
     expect(parse('Dentist oct 30').due).toBe('2026-10-30');
     expect(parse('Dentist oct 30').title).toBe('Dentist');

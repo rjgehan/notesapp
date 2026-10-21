@@ -138,6 +138,25 @@ function findList(text: string, at: number, lists: ParseOptions['lists']): { nam
   return { name: existing?.name ?? name, id: existing?.id ?? null, to: at + 1 + name.length };
 }
 
+/**
+ * chrono's date, with an hour typed without am/pm read as the next time the clock shows it:
+ * "at 5" typed at 16:45 is 17:00 today, not 05:00 tomorrow (chrono's forward date). With a day
+ * ("today at 5"), the afternoon hour is taken when the morning one has already passed.
+ */
+function withNextHour(r: ReturnType<typeof casual.parse>[number], now: Date): Date {
+  const date = r.start.date();
+  const hour = r.start.get('hour');
+  if (!r.start.isCertain('hour') || r.start.isCertain('meridiem') || hour === null || hour < 1 || hour > 11) return date;
+  const afternoon = new Date(date);
+  afternoon.setHours(hour + 12);
+  if (r.start.isCertain('day') || r.start.isCertain('weekday')) return date < now && afternoon > now ? afternoon : date;
+  const morningToday = new Date(now);
+  morningToday.setHours(hour, r.start.get('minute') ?? 0, r.start.get('second') ?? 0, 0);
+  const afternoonToday = new Date(morningToday);
+  afternoonToday.setHours(hour + 12);
+  return [morningToday, afternoonToday].find((d) => d > now) ?? date;
+}
+
 export function parseQuickAdd(text: string, opts: ParseOptions): ParsedTask {
   const ignore = opts.ignore ?? new Set<string>();
   const parts: ParsedPart[] = [];
@@ -202,7 +221,7 @@ export function parseQuickAdd(text: string, opts: ParseOptions): ParsedTask {
     const raw = text.slice(r.index, r.index + r.text.length);
     const key = partKey('due', raw);
     if (ignore.has(key)) continue;
-    const day = dayjs(r.start.date());
+    const day = dayjs(withNextHour(r, opts.now));
     due = r.start.isCertain('hour') ? day.format('YYYY-MM-DDTHH:mm') : day.format('YYYY-MM-DD');
     take({ kind: 'due', text: raw, from: r.index, to: r.index + r.text.length, key });
     break;
