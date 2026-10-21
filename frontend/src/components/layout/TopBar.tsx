@@ -1,7 +1,7 @@
 // Phone and tablet top bar (DESIGN §6.16): ☰, the note title with the connection dot,
 // switcher/search, mode toggle and ⋯ (palette, panels, file actions, template, today, reload).
 // On tablets it also toggles the right sidebar overlay.
-import { CalendarDays, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
+import { CalendarDays, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
@@ -115,6 +115,11 @@ export function TopBar() {
         <span className="top-bar-name">{title}</span>
       </div>
       {phone && path && descriptor?.textual && <TopBarSaveStatus key={path} path={path} />}
+      {phone && getCommand('capture.quick') && (
+        <button type="button" className="icon-button" aria-label="Quick capture" title="Quick capture" onClick={() => runCommand('capture.quick', { activePath: path })}>
+          <Plus size={20} />
+        </button>
+      )}
       {getCommand('app.quickSwitcher') && (
         <button type="button" className="icon-button" aria-label="Quick switcher" title="Quick switcher" onClick={() => runCommand('app.quickSwitcher', { activePath: path })}>
           <FileSearch size={20} />

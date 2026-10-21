@@ -5,6 +5,7 @@ import { clientId } from '../../state/clientId';
 import { ApiError, TransientError } from '../client';
 import { installEndpoints, type Endpoints } from '../endpoints';
 import type { FileEntry, Problem } from '../types';
+import { mockCapture } from './capture';
 import { mimeOf, MockVault } from './vault';
 
 type FailureKind = 'network' | '502' | 'busy' | 'io-error';
@@ -62,6 +63,13 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     uploadAttachment: (name, source, body, opts) =>
       call(() => vault.uploadAttachment(name, source, body, clientId, opts?.idempotencyKey)),
     createFolder: (path) => call(() => vault.createFolder(path, clientId)),
+    capture: (req) => call(() => mockCapture(vault, req, null, clientId)),
+    captureFile: (name, body, params) =>
+      call(async () => {
+        const source = params.target === 'daily' ? null : 'Inbox.md';
+        const attachment = await vault.uploadAttachment(name, source, body, clientId);
+        return mockCapture(vault, { ...params, url: null, title: null }, attachment, clientId);
+      }),
     deleteFolder: (path) => call(() => vault.deleteFolder(path, clientId)),
     move: (req) => call(() => vault.move(req, clientId)),
     getNoteMeta: (path) => call(() => vault.getNoteMeta(path)),

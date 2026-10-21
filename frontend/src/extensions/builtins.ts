@@ -12,6 +12,7 @@ import {
   FileText,
   Files,
   History,
+  Inbox,
   LayoutTemplate,
   Link2,
   ListTree,
@@ -187,6 +188,8 @@ export function registerBuiltins(): void {
   registerCommand({ id: 'app.quickSwitcher', name: 'Open quick switcher', hotkey: 'Mod-o', icon: FileSearch, run: () => useUi.getState().setOverlay('switcher') });
   registerCommand({ id: 'app.commandPalette', name: 'Open command palette', hotkey: 'Mod-p', icon: CommandIcon, run: () => useUi.getState().setOverlay('palette') });
   registerCommand({ id: 'app.resync', name: 'Reload vault from server', run: () => eventStream.resyncNow() });
+  // Quick capture (DESIGN §6.22): works everywhere, the editor included (features/hotkeys.ts).
+  registerCommand({ id: 'capture.quick', name: 'Quick capture', hotkey: 'Mod-Shift-Space', icon: Inbox, run: () => useUi.getState().setOverlay('capture') });
 
   // ---------- files ----------
   registerCommand({ id: 'file.newNote', name: 'Create new note', hotkey: 'Mod-Alt-n', icon: FilePlus, run: (c) => createNote(newNoteFolder(c.activePath)) });

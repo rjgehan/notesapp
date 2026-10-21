@@ -79,3 +79,15 @@ describe('service worker caches', () => {
     expect(overflow([1, 2], 3)).toEqual([]);
   });
 });
+
+describe('share target', () => {
+  it('keeps what another app shares (POST navigation to the share target)', () => {
+    expect(classify(req('/capture/share', { method: 'POST', mode: 'navigate', destination: 'document' }), ORIGIN, PRECACHED)).toBe('share');
+    expect(classify(req('/capture/share', { method: 'POST', mode: 'cors' }), ORIGIN, PRECACHED)).toBe('network');
+    expect(classify(req('/api/capture', { method: 'POST', mode: 'cors' }), ORIGIN, PRECACHED)).toBe('network');
+  });
+
+  it('serves the capture page offline like any client route', () => {
+    expect(classify(req('/capture?share=abc', { mode: 'navigate', destination: 'document' }), ORIGIN, PRECACHED)).toBe('navigate');
+  });
+});

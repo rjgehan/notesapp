@@ -6,6 +6,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../api/queryKeys';
 import type {
   AttachmentResult,
+  CaptureResult,
   FileDeletedEvent,
   FileEntry,
   FileEvent,
@@ -20,7 +21,7 @@ import type {
   Settings,
   TrashEntry,
 } from '../api/types';
-import { isWithin } from '../features/paths';
+import { folderOf, isWithin } from '../features/paths';
 import type { DocumentSession } from './DocumentSession';
 import type { DraftStore } from './drafts';
 import type { MoveMap } from './moves';
@@ -190,4 +191,18 @@ export function applyHistoryRestoreResult(t: SyncTarget, r: HistoryRestoreResult
 function restoredInto(t: SyncTarget, file: FileEntry): void {
   refreshFileQuery(t.qc, file.path);
   void t.documents.get(file.path)?.onRemoteChanged(file, { quiet: true });
+}
+
+/**
+ * Own quick capture (API.md §8.5): the server appended to the note (its new text is not in the
+ * response), so this tab treats it like another device's change: an open, clean session
+ * re-reads it; the capture flushes the session first, so it is clean (DESIGN §6.22).
+ */
+export function applyCaptureResult(t: SyncTarget, r: CaptureResult): void {
+  if (r.created) t.moves.created(r.file.path);
+  addFolders(t.qc, r.attachment ? [...r.createdFolders, folderOf(r.attachment.path)].filter((f) => f !== '') : r.createdFolders);
+  upsertFiles(t.qc, r.attachment ? [r.file, r.attachment] : [r.file]);
+  if (r.attachment) t.moves.created(r.attachment.path);
+  restoredInto(t, r.file);
+  invalidateContentQueries(t.qc, r.file.path);
 }

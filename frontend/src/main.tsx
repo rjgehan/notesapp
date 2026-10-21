@@ -9,6 +9,7 @@ import { installViewportVars } from './editor/mobileViewport';
 import { registerBuiltins } from './extensions/builtins';
 import { installInputModality } from './features/focus';
 import { clearStaleOverlayEntry } from './features/overlayHistory';
+import { installCaptureSync } from './features/captureSync';
 import { installHotkeys } from './features/hotkeys';
 import { prepareReload, registerServiceWorker, setOfflineMedia } from './pwa/serviceWorker';
 import { installPreloadErrorHandler, setReloadPreparer } from './state/buildCheck';
@@ -45,6 +46,7 @@ async function boot(): Promise<void> {
   installOnlineListener();
   documents.installLifecycle(() => currentBreakpoint() === 'desktop');
   void startLiveSync();
+  installCaptureSync();
 
   // Navigations render synchronously (no transitions), so an input shown by a tap or key handler
   // can take focus within the same user gesture, which iOS needs to open the keyboard (§6.13).

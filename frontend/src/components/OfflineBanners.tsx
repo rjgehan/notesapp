@@ -2,6 +2,7 @@
 // device's snapshot, and notes whose edits made offline now conflict with a newer version.
 import { CloudOff, History, TriangleAlert } from 'lucide-react';
 import { useLocation } from 'react-router';
+import { useCaptureQueue } from '../features/captureSync';
 import { formatDateTime } from '../features/format';
 import { openPath } from '../features/navigation';
 import { displayName, pathFromLocation } from '../features/paths';
@@ -23,11 +24,13 @@ export function OfflineBanners({ offline }: { offline: boolean }) {
   const snapshotAt = useOffline((s) => s.treeSnapshotAt);
   const dismissReview = useOffline((s) => s.dismissReview);
   const review = useReviewList();
+  const captures = useCaptureQueue((s) => s.waiting);
   return (
     <>
       {offline && (
         <div className="banner banner-warning" role="status">
           <CloudOff size={14} aria-hidden /> Offline: edits are saved on this device and will sync when the connection returns.
+          {captures > 0 && ` ${captures} ${captures === 1 ? 'capture is' : 'captures are'} waiting.`}
         </div>
       )}
       {snapshotAt !== null && (

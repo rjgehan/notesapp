@@ -1,6 +1,7 @@
 // Routes (DESIGN §6.4) inside the application shell.
 import { lazy, Suspense, useEffect, useRef, type ComponentType } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router';
+import { CapturePage } from './components/capture/CapturePage';
 import { AppShell } from './components/layout/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HomePage } from './components/pages/HomePage';
@@ -57,7 +58,18 @@ export default function App() {
   useExtensionsVersion();
   usePendingNoteGuard();
   const pending = usePendingNote((s) => s.pending);
+  const { pathname } = useLocation();
   const pages = registeredPages().map((p) => ({ route: p.route, Page: pageComponent(p) }));
+  // Quick capture (DESIGN §6.22) is a page of its own, outside the app shell: the share target,
+  // the home-screen shortcut and the desktop app's capture window open it.
+  if (pathname === '/capture') {
+    return (
+      <>
+        <NavigationBridge />
+        <CapturePage />
+      </>
+    );
+  }
   return (
     <AppShell>
       <NavigationBridge />

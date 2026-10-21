@@ -10,6 +10,8 @@
 //   at most 300 (switched off with the device's offline preference).
 // - The API is never answered from a cache; offline reading of notes is the app's own IndexedDB
 //   copy (src/offline), which knows how old it is.
+// - A share from another app (Web Share Target, POST /capture/share) is kept in Cache Storage and
+//   the browser is sent to the capture page (DESIGN §6.22); nothing is posted to the server.
 import {
   classify,
   CONFIG_CACHE,
@@ -21,6 +23,8 @@ import {
   OFFLINE_PAGE,
   overflow,
   SHELL_PAGE,
+  SHARE_CACHE,
+  shareKey,
   SHELL_PREFIX,
   shellCacheName,
   shouldServeShellFor,
@@ -154,6 +158,34 @@ async function media(event: FetchEvent): Promise<Response> {
   return res;
 }
 
+// ---------- shares from other apps ----------
+
+function field(form: FormData, name: string): string | null {
+  const value = form.get(name);
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+async function receiveShare(request: Request): Promise<Response> {
+  try {
+    const form = await request.formData();
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
+    const cache = await caches.open(SHARE_CACHE);
+    const meta = {
+      title: field(form, 'title'),
+      text: field(form, 'text'),
+      url: field(form, 'url'),
+      files: files.map((f, i) => ({ name: f.name, type: f.type, key: `${shareKey(id)}/file/${i}` })),
+      at: Date.now(),
+    };
+    await Promise.all(files.map((f, i) => cache.put(meta.files[i].key, new Response(f, { headers: { 'Content-Type': f.type || 'application/octet-stream' } }))));
+    await cache.put(shareKey(id), new Response(JSON.stringify(meta), { headers: { 'Content-Type': 'application/json' } }));
+    return Response.redirect(`/capture?share=${encodeURIComponent(id)}`, 303);
+  } catch {
+    return Response.redirect('/capture?share=lost', 303);
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   const route = classify(
@@ -164,6 +196,7 @@ self.addEventListener('fetch', (event) => {
   if (route === 'navigate') event.respondWith(navigate(request));
   else if (route === 'shell') event.respondWith(fromShell(request));
   else if (route === 'media') event.respondWith(media(event));
+  else if (route === 'share') event.respondWith(receiveShare(request));
 });
 
 // ---------- messages from pages ----------

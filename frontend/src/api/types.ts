@@ -142,6 +142,25 @@ export interface AttachmentResult {
   markdown: string;
 }
 
+// ---------- quick capture (§8.5, §8.6) ----------
+export type CaptureTarget = 'inbox' | 'daily';
+export interface CaptureRequest {
+  text?: string | null;
+  target?: CaptureTarget;         // default 'inbox'
+  url?: string | null;            // a shared link (http/https becomes a Markdown link)
+  title?: string | null;          // the link's label
+  date?: string;                  // YYYY-MM-DD, the device's day
+  time?: string;                  // HH:mm, the device's time
+  tz?: string;                    // IANA zone, used for what date/time leave out
+}
+export interface CaptureResult {
+  file: FileEntry;                // the note the entry was appended to
+  created: boolean;               // the capture created the note (201)
+  createdFolders: VaultPath[];
+  target: CaptureTarget;
+  attachment: FileEntry | null;   // POST /api/capture/file only
+}
+
 // ---------- folders / move (§10) ----------
 export interface CreateFolderRequest { path: VaultPath }
 export interface FolderResult { folder: FolderEntry; createdFolders: VaultPath[] }

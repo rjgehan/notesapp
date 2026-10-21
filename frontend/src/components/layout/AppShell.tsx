@@ -3,7 +3,7 @@
 // Tablet: icon rail + workspace, both sidebars as overlays. Desktop: ribbon, resizable sidebars,
 // workspace and status bar. Touch devices get the editing toolbar as the last grid row. The shell
 // also hosts the overlays, the app-level file input and the polite live region.
-import { CalendarDays, FilePlus, Moon, RefreshCw, Settings, Sun, Trash, TriangleAlert } from 'lucide-react';
+import { CalendarDays, FilePlus, Inbox, Moon, RefreshCw, Settings, Sun, Trash, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { setFilePicker } from '../../features/attachments';
 import { runCommand } from '../../features/commands';
@@ -13,6 +13,7 @@ import { activePath } from '../../features/navigation';
 import { reloadForNewBuild } from '../../state/buildCheck';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
 import { LEFT_WIDTH, RIGHT_WIDTH, useUi } from '../../state/ui';
+import { CaptureDialog } from '../capture/CaptureDialog';
 import { MoveDialog } from '../explorer/MoveDialog';
 import { OfflineBanners } from '../OfflineBanners';
 import { CommandPalette } from '../overlays/CommandPalette';
@@ -64,6 +65,7 @@ function Overlays() {
       {overlay === 'palette' && <CommandPalette />}
       {overlay === 'templates' && <TemplatePicker mode="insert" />}
       {overlay === 'templates-new' && <TemplatePicker mode="new" />}
+      {overlay === 'capture' && <CaptureDialog />}
       <MoveDialog />
       <Dialogs />
     </>
@@ -128,6 +130,9 @@ function DrawerActions() {
         </button>
         <button type="button" className="button" onClick={() => run('daily.today')}>
           <CalendarDays size={16} aria-hidden /> Today
+        </button>
+        <button type="button" className="button" onClick={() => run('capture.quick')}>
+          <Inbox size={16} aria-hidden /> Capture
         </button>
       </div>
       {pages.length > 0 && (

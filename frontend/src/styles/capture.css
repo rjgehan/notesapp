@@ -1,0 +1,175 @@
+/* Quick capture: the dialog, the /capture page and its settings (DESIGN §6.22). */
+
+.capture-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.capture-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.capture-target {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.capture-target button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.capture-target button.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: var(--shadow-s);
+}
+
+/* 16 px at least, so iOS does not zoom into the field. */
+textarea.text-input.capture-text {
+  min-height: 7.5em;
+  font-family: var(--font-text);
+  font-size: max(16px, 1em);
+  line-height: 1.45;
+}
+
+.capture-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capture-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 2px 2px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.capture-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.capture-chip .icon-button {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.capture-actions {
+  align-items: center;
+}
+
+.capture-spacer {
+  flex: 1;
+}
+
+.modal-panel.capture-dialog {
+  width: min(560px, 100%);
+}
+
+.capture-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  /* The page is its own scroller: the app keeps html and body from scrolling (DESIGN §6.16). */
+  height: var(--vvh, 100dvh);
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: var(--background-primary);
+}
+
+.capture-page .capture-form {
+  padding: 0;
+}
+
+.capture-notice {
+  margin: 0 0 12px;
+}
+
+.capture-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 0;
+  text-align: center;
+}
+
+.capture-done-icon {
+  color: var(--text-success);
+}
+
+.capture-done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+@media (pointer: coarse) {
+  .capture-target button,
+  .capture-actions .button {
+    min-height: 44px;
+  }
+}
+
+/* Settings › Quick capture */
+
+.capture-steps {
+  margin: 0 0 16px;
+  padding-left: 1.4em;
+  line-height: 1.6;
+}
+
+.capture-steps li + li {
+  margin-top: 6px;
+}
+
+.capture-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.capture-copy code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  font-size: var(--font-ui-small);
+  white-space: pre;
+}

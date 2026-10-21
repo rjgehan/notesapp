@@ -6,7 +6,7 @@ import { activePath } from './navigation';
 import { isApple } from './platform';
 
 /** Hotkeys that work even while the editor or a text field has focus. */
-const ALWAYS_GLOBAL = new Set(['Mod-o', 'Mod-p', 'Mod-Shift-f', 'Mod-,', 'Mod-Alt-ArrowLeft', 'Mod-Alt-ArrowRight']);
+const ALWAYS_GLOBAL = new Set(['Mod-o', 'Mod-p', 'Mod-Shift-f', 'Mod-,', 'Mod-Alt-ArrowLeft', 'Mod-Alt-ArrowRight', 'Mod-Shift-Space']);
 
 function normalize(spec: string): string {
   const parts = spec.split('-');
@@ -25,7 +25,8 @@ export function eventSpec(e: KeyboardEvent): string | null {
   if (e.shiftKey) parts.push('Shift');
   // With Alt held, macOS produces composed characters in `key`; use the physical key instead.
   let key = e.key;
-  if (e.altKey && /^Key[A-Z]$/.test(e.code)) key = e.code.slice(3).toLowerCase();
+  if (key === ' ') key = 'Space';
+  else if (e.altKey && /^Key[A-Z]$/.test(e.code)) key = e.code.slice(3).toLowerCase();
   else if (e.altKey && /^Digit\d$/.test(e.code)) key = e.code.slice(5);
   if (parts.length === 0 && !/^F\d+$/.test(key)) return null;
   return [...parts, key.length === 1 ? key.toLowerCase() : key].join('-');

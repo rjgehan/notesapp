@@ -9,6 +9,15 @@ export const MEDIA_CACHE = 'notesapp-media';
 /** The worker's own settings (whether note images are kept offline). */
 export const CONFIG_CACHE = 'notesapp-config';
 export const CONFIG_KEY = '/__notesapp/sw-config';
+/** What another app shared, until the capture page has read it (features/sharedItems.ts). */
+export const SHARE_CACHE = 'notesapp-share';
+/** The installed app's share target (manifest `share_target.action`). */
+export const SHARE_TARGET = '/capture/share';
+
+export function shareKey(id: string): string {
+  return `/__share/${encodeURIComponent(id)}`;
+}
+
 /** At most this many images; the oldest go first. */
 export const MEDIA_MAX_ENTRIES = 300;
 /** A navigation the network has not answered by then is served the cached app shell. */
@@ -30,7 +39,7 @@ export function staleShellCaches(names: readonly string[], current: string): str
  * navigations (a raw file opened in a tab, `/api/…?download=true`) are never given the shell.
  */
 export function isSpaRoute(pathname: string): boolean {
-  if (pathname === '/' || pathname === '/search' || pathname === '/trash' || pathname === '/settings') return true;
+  if (pathname === '/' || pathname === '/search' || pathname === '/trash' || pathname === '/settings' || pathname === '/capture') return true;
   return pathname.startsWith('/n/') || pathname.startsWith('/settings/') || pathname.startsWith('/x/');
 }
 
@@ -53,14 +62,13 @@ export interface RequestFacts {
   hasRange: boolean;
 }
 
-export type Route = 'navigate' | 'shell' | 'media' | 'network';
+export type Route = 'navigate' | 'shell' | 'media' | 'share' | 'network';
 
 /**
  * How the worker answers a request. Everything not listed goes to the network untouched; in
  * particular the API (`no-store`, versioned, the conflict protocol) never comes from a cache.
  */
 export function classify(req: RequestFacts, origin: string, precached: ReadonlySet<string>): Route {
-  if (req.method !== 'GET') return 'network';
   let url: URL;
   try {
     url = new URL(req.url);
@@ -68,6 +76,9 @@ export function classify(req: RequestFacts, origin: string, precached: ReadonlyS
     return 'network';
   }
   if (url.origin !== origin) return 'network';
+  // Another app shared something with the installed app (DESIGN §6.22): the worker keeps it.
+  if (req.method === 'POST' && req.mode === 'navigate' && url.pathname === SHARE_TARGET) return 'share';
+  if (req.method !== 'GET') return 'network';
   if (req.mode === 'navigate') return isSpaRoute(url.pathname) ? 'navigate' : 'network';
   if (req.hasRange) return 'network';
   if (url.search === '' && precached.has(url.pathname)) return 'shell';

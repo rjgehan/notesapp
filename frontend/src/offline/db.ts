@@ -3,11 +3,13 @@
 //
 // - `notes`: copies of recently opened notes for offline reading, keyed by path.
 // - `meta`: the last tree snapshot (`key: 'tree'`).
+// - `captures`: quick captures waiting for the server (DESIGN §6.22), in the order they were made.
 
 export const OFFLINE_DB = 'notesapp-offline';
-export const OFFLINE_DB_VERSION = 1;
+export const OFFLINE_DB_VERSION = 2;
 export const NOTES = 'notes';
 export const META = 'meta';
+export const CAPTURES = 'captures';
 
 export function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -32,6 +34,7 @@ export function openOfflineDb(factory: IDBFactory, name: string = OFFLINE_DB, on
       const db = req.result;
       if (!db.objectStoreNames.contains(NOTES)) db.createObjectStore(NOTES, { keyPath: 'path' });
       if (!db.objectStoreNames.contains(META)) db.createObjectStore(META, { keyPath: 'key' });
+      if (!db.objectStoreNames.contains(CAPTURES)) db.createObjectStore(CAPTURES, { keyPath: 'id', autoIncrement: true });
     };
     req.onsuccess = () => {
       const db = req.result;

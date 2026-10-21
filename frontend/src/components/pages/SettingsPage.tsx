@@ -24,6 +24,7 @@ import { useUi } from '../../state/ui';
 import type { DiscardedRecord } from '../../sync/drafts';
 import { documents, draftStore } from '../../sync/instance';
 import { useBreakpoint } from '../layout/useBreakpoint';
+import { CaptureSettings } from '../capture/CaptureSettings';
 import { OrphanDraftList } from '../OrphanDrafts';
 import { usePageTitle } from './usePageTitle';
 import { toastError } from '../../features/errors';
@@ -34,6 +35,7 @@ const SECTIONS = [
   { id: 'daily', title: 'Daily notes' },
   { id: 'templates', title: 'Templates' },
   { id: 'editor', title: 'Editor' },
+  { id: 'capture', title: 'Quick capture' },
   { id: 'device', title: 'This device' },
   { id: 'about', title: 'About' },
 ] as const;
@@ -599,7 +601,7 @@ export default function SettingsPage() {
             </h1>
             {saving && <span className="muted">Saving…</span>}
           </header>
-          {section !== 'device' && section !== 'about' && (
+          {section !== 'device' && section !== 'about' && section !== 'capture' && (
             <>
               {readOnly && (
                 <div className="banner banner-warning" role="status">
@@ -618,6 +620,7 @@ export default function SettingsPage() {
           {section === 'daily' && <DailySection {...props} />}
           {section === 'templates' && <TemplatesSection {...props} />}
           {section === 'editor' && <EditorSection {...props} />}
+          {section === 'capture' && <CaptureSettings />}
           {section === 'device' && <DeviceSection />}
           {section === 'about' && <AboutSection />}
         </section>
