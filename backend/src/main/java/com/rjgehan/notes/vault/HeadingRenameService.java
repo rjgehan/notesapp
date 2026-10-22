@@ -132,11 +132,13 @@ public class HeadingRenameService {
 			if (!dryRun) {
 				this.reconciler.reconcileLocked(path);
 			}
+			// Indexed documents (.sheet, .canvas, .tasks, .excalidraw) have a NoteRecord too, but no editable headings.
+			var file = this.index.file(path.nfc());
 			NoteRecord note = this.index.note(path.nfc());
-			if (note == null) {
-				if (this.index.file(path.nfc()) == null) {
-					throw NotesException.notFound(path.nfc());
-				}
+			if (file == null) {
+				throw NotesException.notFound(path.nfc());
+			}
+			if (note == null || file.kind() != FileKind.NOTE) {
 				throw NotesException.typeMismatch(path.nfc(), "note", "Only notes have headings: " + path.nfc());
 			}
 			checkHeadings(note, oldHeading, newHeading);
