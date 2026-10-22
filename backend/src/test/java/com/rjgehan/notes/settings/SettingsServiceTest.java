@@ -271,6 +271,42 @@ class SettingsServiceTest {
 	}
 
 	@Test
+	void remindersAreOffByDefaultAndValidatedFieldByField() throws Exception {
+		ObjectNode tree = body(Settings.defaults());
+		tree.remove("reminders");
+		Files.createDirectories(this.file.getParent());
+		Files.writeString(this.file, TestVault.JSON.writeValueAsString(tree));
+		service().load();
+		assertThat(service().isReadOnly()).isFalse();
+		assertThat(service().current().reminders()).isEqualTo(RemindersSettings.defaults());
+		assertThat(RemindersSettings.defaults().anyRoute()).isFalse();
+		assertThat(RemindersSettings.defaults().ntfyTitleOnly()).isTrue();
+
+		ObjectNode bad = body(Settings.defaults());
+		ObjectNode reminders = (ObjectNode) bad.get("reminders");
+		reminders.put("webPush", "yes");
+		reminders.put("dailyNoteTime", "25:00");
+		assertThatThrownBy(() -> service().update(bad, service().get().version(), TestVault.ALICE, "client-a1"))
+			.isInstanceOfSatisfying(NotesException.class, (ex) -> {
+				@SuppressWarnings("unchecked")
+				List<FieldError> errors = (List<FieldError>) ex.getBody().getProperties().get("errors");
+				assertThat(errors).extracting(FieldError::field)
+					.containsExactlyInAnyOrder("settings.reminders.webPush", "settings.reminders.dailyNoteTime");
+			});
+
+		ObjectNode on = body(Settings.defaults());
+		((ObjectNode) on.get("reminders")).put("ntfy", true).put("dailyNote", true).put("dailyNoteTime", "07:30");
+		service().update(on, service().get().version(), TestVault.ALICE, "client-a1");
+		assertThat(service().current().reminders())
+			.isEqualTo(new RemindersSettings(false, true, true, false, true, "07:30"));
+		// An old page sends no "reminders": they stay as they were.
+		ObjectNode old = defaultsWith("files", "useWikilinks", false);
+		old.remove("reminders");
+		service().update(old, service().get().version(), TestVault.BOB, "client-b1");
+		assertThat(service().current().reminders().ntfy()).isTrue();
+	}
+
+	@Test
 	void aiSettingsAreValidatedFieldByField() throws Exception {
 		service().load();
 		ObjectNode tree = body(Settings.defaults());

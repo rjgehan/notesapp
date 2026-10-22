@@ -60,7 +60,7 @@ DESIGN.md has the details.
 | 6 | **Spreadsheets with Google-Sheets-style formulas** *(big three a)* | H | L | |
 | 7 | Quick capture inbox and the iPhone Share Sheet *(built 2026-10-21, `feat/pwa-capture`)* | H | M | |
 | 8 | Installable PWA and offline mode *(declined for v1; built 2026-10-21, `feat/pwa-capture`)* | H | L | |
-| 9 | Reminders and push notifications | H | M | 4; 8 for Web Push |
+| 9 | Reminders and push notifications *(built 2026-10-21, `feat/reminders`)* | H | M | 4; 8 for Web Push |
 | 11 | Tabs and split panes *(declined for v1)* | M | M | |
 | 12 | Bookmarks (starred) and a recent-files pane | M | S | |
 | 13 | Properties editor (typed frontmatter UI) | M | M | |
@@ -296,7 +296,7 @@ Errors show in the block as the message and line number, with the code visible.
 
 ### 4. Structured to-do tracking, not Markdown *(big three c)*
 
-**Status:** built (wave 1): phases 4a and 4b, as below; phase 4c (reminder delivery) comes with item 9, as planned. Reminders are already stored, edited and moved with repeating tasks, so item 9 only adds delivery. Deviations from this spec, and why:
+**Status:** built (wave 1): phases 4a and 4b, as below; phase 4c (reminder delivery) built with item 9 (2026-10-21): reminders fire through the routes of item 9, and the detail sheet offers presets (at the due time, 15 minutes or 1 hour before, the morning of an all-day due date, the evening before, in an hour, tomorrow at 9:00) besides a custom time. Deviations from this spec, and why:
 
 - **Embeds in Live Preview.** `![[Home.tasks]]` is interactive in the reading view, through the view registry's `loadEmbed`. Live Preview (item 10) renders no embeds until its phase 10b, which mounts them through that same hook, so task embeds need no change then. Embeds also take `#Section` or `#^<task id>` to show part of a list.
 - **Convert checkbox to task** leaves `- [[Inbox.tasks#^<task id>|Title]]`: a link to the list's file with the task's id as an Obsidian block reference, because a task has no note of its own. NotesApp opens the task from it, even after the task moved to another list, and Obsidian keeps it as a link to the file. The line keeps its list marker. The Obsidian Tasks plugin's emoji dates, priorities and 🔁 rules become task fields, which this spec did not ask for, so a vault that used that plugin keeps its dates.
@@ -397,7 +397,7 @@ interface Task {
   - `#tag`, `@List` and `[[link]]` are recognized.
 - Parsed parts appear as chips before you save.
 
-**Reminders.** These come from item 9: Web Push in the installed PWA (item 8), or ntfy. Phase 4c therefore needs your choice of route first (see item 9).
+**Reminders.** These come from item 9: Web Push in the installed PWA (item 8), ntfy, or in the app; every route is built and switched on in Settings (item 9).
 
 **Integration with notes.**
 
@@ -690,6 +690,16 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
   - **ntfy**: self-hosted or ntfy.sh. The topic, server URL and token come from `/data/secrets/ntfy.json`, never from the vault.
 
   A reminder is marked delivered once at least one channel accepts it, and missed reminders are delivered when the server starts.
+
+**Status:** built (2026-10-21) with phase 4c of item 4. Design in DESIGN §5.26 (server) and §6.38 (client), contract in API.md §28, setup in DEPLOY.md *Reminders* and CASAOS.md *Reminders*. The in-app, Web Push and ntfy routes are built, each a switch in **Settings › Reminders**, all off by default; the desktop route waits for item 41. Deviations and additions:
+
+- **Web Push with JDK cryptography**, no library: RFC 8291 `aes128gcm` encryption and an ES256 VAPID token, tested against RFC 8291 Appendix A. The key pair and the subscribed devices are in `/data/secrets/push.json`, created by the app on first use; a device whose subscription expired is dropped.
+- **The window for missed reminders is 24 hours.** Older ones are not sent after a long outage. While every route is off, nothing accumulates: switching a route on later does not send a day of old reminders. Delivery is at least once: a crash between sending and saving may repeat one.
+- **Time zone.** Reminder times are local, so each device reports its zone at startup and the latest report wins (the server's UTC until one does). Daylight-saving gaps move a reminder forward by the gap; overlaps fire it once.
+- **ntfy sends the task's title only** by default (*Title only*), because with ntfy.sh the text leaves the tailnet; switching it off adds the due date and the start of the notes. Reminders may have their own topic (`"reminders": {"topic": …}` in `ntfy.json`).
+- **Snooze (10 minutes) and Done** are notification buttons on desktop Chrome, Edge and Android. iOS web push has no buttons, so on the iPhone a tap opens the task. Done completes the task only while it still has that reminder, so a late tap never completes the next occurrence of a repeating task.
+- **Daily-note nudges** are built: at a time you choose, only when today's daily note does not exist yet; tapping opens (or creates) it.
+- **Not verified on a real iPhone** in development: subscribing from the Home Screen app (iOS 16.4+), delivery with the app closed, and a tap opening the task.
 
 ### 11. Tabs and split panes *(declined for v1)*
 

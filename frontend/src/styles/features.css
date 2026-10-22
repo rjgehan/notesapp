@@ -2135,6 +2135,15 @@ mark.match {
   }
 }
 
+/* Settings › Reminders (DESIGN §6.38): a time field or buttons beside a switch. */
+.setting-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* ---------- folder templates (Settings › Templates, ROADMAP item 30) ---------- */
 
 .folder-templates {

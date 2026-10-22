@@ -52,7 +52,17 @@ class NtfyConfigFileTest {
 		assertThat(config).isNotNull();
 		assertThat(config.server()).isEqualTo(URI.create("https://ntfy.example.com"));
 		assertThat(config.token()).isEqualTo(TOKEN);
+		assertThat(config.remindersTopic()).isEqualTo("later");
 		assertThat(config.alerts().topic()).isEqualTo("ops-alerts");
+	}
+
+	@Test
+	void remindersUseTheDefaultTopicUnlessTheyNameTheirOwn() {
+		assertThat(parse("{\"topic\": \"t\"}").config().remindersTopic()).isEqualTo("t");
+		assertThat(parse("{\"topic\": \"t\", \"reminders\": {}}").config().remindersTopic()).isEqualTo("t");
+		assertThat(parse("{\"topic\": \"t\", \"reminders\": {\"topic\": \"bad topic\"}}").problem())
+			.contains("reminders.topic");
+		assertThat(parse("{\"topic\": \"t\", \"reminders\": true}").problem()).contains("\"reminders\"");
 	}
 
 	@Test

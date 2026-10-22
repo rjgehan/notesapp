@@ -170,11 +170,15 @@ public class SettingsService {
 					Map.of("reason", String.valueOf(current.reason())));
 		}
 		SettingsCodec.Parsed parsed = SettingsCodec.read(settings);
-		if (settings != null && settings.isObject() && settings.get("ai") == null) {
-			// A page from before settings.ai existed (it reloads once it notices the new build) keeps what is set.
+		if (settings != null && settings.isObject()
+				&& (settings.get("ai") == null || settings.get("reminders") == null)) {
+			// A page from before settings.ai or settings.reminders existed (it reloads once it notices the new build)
+			// keeps what is set.
 			Settings s = parsed.settings();
 			parsed = new SettingsCodec.Parsed(new Settings(s.schemaVersion(), s.files(), s.dailyNotes(), s.templates(),
-					s.editor(), current.settings().ai()), parsed.errors());
+					s.editor(), (settings.get("ai") == null) ? current.settings().ai() : s.ai(),
+					(settings.get("reminders") == null) ? current.settings().reminders() : s.reminders()),
+					parsed.errors());
 		}
 		List<FieldError> errors = new ArrayList<>(parsed.errors());
 		if (baseVersion == null || baseVersion.isBlank()) {
