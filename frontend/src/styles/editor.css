@@ -772,6 +772,54 @@ th.cm-lp-cell {
   pointer-events: none;
 }
 
+/* ---------- formulas (ROADMAP 39, DESIGN §6.42) ---------- */
+
+/* The formula bar: the edited cell's name and its formula's result. */
+.cm-lp-formula-bar {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cm-lp-formula-bar[hidden] {
+  display: none;
+}
+
+.cm-lp-formula-bar-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.cm-lp-formula-bar .cm-lp-cell-value {
+  color: var(--text-normal);
+}
+
+.cm-lp-cell-value.cm-formula-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.cm-formula-error {
+  color: var(--text-error);
+  font-family: var(--font-mono);
+  cursor: help;
+}
+
+/* An inline formula's result: plain text with a faint underline, so it reads as computed. */
+.cm-formula-inline {
+  border-bottom: 1px dotted var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 @media (pointer: coarse) {
   .cm-lp-grip-row {
     width: 18px;
@@ -1159,4 +1207,111 @@ th.cm-lp-cell {
   font-family: var(--font-interface);
   font-size: 12px;
   cursor: pointer;
+}
+
+/* ---------- script and Dataview blocks (ROADMAP items 40 and 17, DESIGN §6.43) ---------- */
+
+/* What a script showed, in the reading look, with ↻ and </> at its top right (on hover, always on touch). */
+.cm-lp-script {
+  position: relative;
+  padding: 2px 0;
+  white-space: normal;
+  cursor: text;
+  min-height: 24px;
+}
+
+.cm-lp-locked .cm-lp-script {
+  cursor: auto;
+}
+
+.cm-lp-script-bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  z-index: 1;
+}
+
+.cm-lp-script:hover .cm-lp-script-bar,
+.cm-lp-script:focus-within .cm-lp-script-bar {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cm-lp-script-bar {
+    opacity: 0.8;
+  }
+}
+
+.cm-lp-script-button {
+  font: 12px var(--font-interface);
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 1px 6px;
+  min-width: 24px;
+  cursor: pointer;
+}
+
+.cm-lp-script-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.cm-lp-script-button.is-run {
+  color: var(--text-normal);
+  margin-top: 4px;
+}
+
+.cm-lp-script.is-running .cm-lp-script-button.is-rerun {
+  animation: cm-lp-script-spin 1s linear infinite;
+}
+
+@keyframes cm-lp-script-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cm-lp-script-output > :first-child {
+  margin-top: 0;
+}
+
+.cm-lp-script-output > :last-child {
+  margin-bottom: 0;
+}
+
+.cm-lp-script-status {
+  color: var(--text-faint);
+  font: 12px var(--font-interface);
+}
+
+.cm-lp-script-error {
+  color: var(--text-error);
+  font: 12px var(--font-mono);
+  white-space: pre-wrap;
+  margin-top: 4px;
+}
+
+.cm-lp-script-code {
+  font: 12px var(--font-mono);
+  background: var(--code-bg);
+  border-radius: var(--radius-s);
+  padding: 6px 8px;
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+}
+
+.cm-lp-script-ask .cm-lp-script-code {
+  margin-top: 0;
+}
+
+.cm-lp-script-noimage {
+  color: var(--text-faint);
+  font-style: italic;
 }

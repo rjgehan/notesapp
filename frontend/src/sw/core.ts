@@ -116,13 +116,21 @@ export function isPdfjsAsset(url: string): boolean {
 }
 
 /**
+ * A font's fallback format (KaTeX's CSS lists .woff and .ttf after .woff2): every browser the app
+ * supports loads the .woff2, so precaching the others would only download about 0.8 MB for nothing.
+ */
+export function isLegacyFont(url: string): boolean {
+  return /\.(?:ttf|woff|eot)$/i.test(url);
+}
+
+/**
  * The files the worker precaches: everything the build wrote except source maps, the worker itself,
- * Excalidraw's fonts and PDF.js's assets.
+ * Excalidraw's fonts, PDF.js's assets and fallback font formats.
  */
 export function precacheUrls(files: readonly string[]): string[] {
   return files
     .map((f) => '/' + f.replace(/\\/g, '/').replace(/^\/+/, ''))
-    .filter((u) => !u.endsWith('.map') && u !== '/sw.js' && !u.startsWith('/.') && u !== '/robots.txt' && !isExcalidrawFont(u) && !isPdfjsAsset(u))
+    .filter((u) => !u.endsWith('.map') && u !== '/sw.js' && !u.startsWith('/.') && u !== '/robots.txt' && !isExcalidrawFont(u) && !isPdfjsAsset(u) && !isLegacyFont(u))
     .sort();
 }
 

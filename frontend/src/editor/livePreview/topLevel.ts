@@ -1,5 +1,6 @@
 // The note's top-level blocks that Live Preview shows as block widgets (ROADMAP 10b, 10c): tables
-// (grids), comment blocks, and the rich blocks (callouts, `$$` math, Mermaid; ROADMAP item 3). One
+// (grids), comment blocks, and the rich blocks (callouts, `$$` math, Mermaid; ROADMAP item 3; script
+// and Dataview blocks, items 40 and 17). One
 // walk over the top level of the Lezer tree per tree, shared by
 // the state fields that need them, with a cursor (no node objects), so a keystroke in a
 // 10,000-line note costs little here.
@@ -22,7 +23,8 @@ export interface TopLevelBlock {
   rich?: RichKind;
 }
 
-export type RichKind = 'callout' | 'math' | 'mermaid';
+/** `script` and `dataview` are fenced blocks the app runs (ROADMAP items 40 and 17, DESIGN §6.43). */
+export type RichKind = 'callout' | 'math' | 'mermaid' | 'script' | 'dataview';
 
 /** A blockquote whose first line is a callout header (`> [!type]`, with an optional `|metadata`, fold and title). */
 const CALLOUT_START = /^[ \t]*>[ \t]?\[![^\]|\s]+(?:\|[^\]]*)?\][+-]?(?:[ \t]|$)/;
@@ -85,8 +87,10 @@ function richKind(state: EditorState, name: string, from: number, to: number, in
   if (name === 'Blockquote') return CALLOUT_START.test(state.doc.lineAt(from).text) ? 'callout' : null;
   if (name === 'FencedCode') {
     const node = info();
-    // Only an info string of mermaid's length is read: a keystroke reads no other code block again (10c).
-    return node && node.to <= to && node.to - node.from === 7 && state.doc.sliceString(node.from, node.to).toLowerCase() === 'mermaid' ? 'mermaid' : null;
+    // Only an info string of these words' lengths is read: a keystroke reads no other code block again (10c).
+    if (!node || node.to > to || node.to - node.from < 6 || node.to - node.from > 8) return null;
+    const word = state.doc.sliceString(node.from, node.to).toLowerCase();
+    return word === 'mermaid' || word === 'script' || word === 'dataview' ? word : null;
   }
   return null;
 }

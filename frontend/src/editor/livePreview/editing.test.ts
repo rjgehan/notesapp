@@ -32,7 +32,6 @@ function context(overrides: Partial<NoteContext> = {}): NoteContext {
     vaultTags: async () => [],
     recentPaths: () => [],
     save: () => {},
-   
     insertFiles: () => {},
     linkTo: (p) => `[[${p}]]`,
     showMenu: () => {},

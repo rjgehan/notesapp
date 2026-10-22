@@ -43,7 +43,7 @@ final class ObsidianPlugins {
 			Map.entry("templates", k("Templates", Support.SUPPORTED, "{{title}}, {{date}} and {{time}}; the settings are imported.")),
 			Map.entry("note-composer", k("Note composer", Support.UNSUPPORTED, "Merging and splitting notes is not offered.")),
 			Map.entry("command-palette", k("Command palette", Support.SUPPORTED, "Mod-P.")),
-			Map.entry("slash-command", k("Slash commands", Support.PLANNED, "Use the command palette meanwhile.", 31)),
+			Map.entry("slash-command", k("Slash commands", Support.SUPPORTED, "Type / at a line start or after a space: blocks, callouts, code, math, links, dates and the app's commands, with fuzzy filtering.")),
 			Map.entry("editor-status", k("Editor status", Support.SUPPORTED, "The status bar.")),
 			Map.entry("bookmarks", k("Bookmarks", Support.SUPPORTED, "Obsidian's bookmarks.json is shown until the first change; NotesApp then keeps its own copy in the same format.")),
 			Map.entry("markdown-importer", k("Format converter", Support.UNSUPPORTED, "Not offered.")),
@@ -62,7 +62,7 @@ final class ObsidianPlugins {
 			Map.entry("bases", k("Bases", Support.UNSUPPORTED, ".base files are listed but not shown as tables.")));
 
 	static final Map<String, Known> COMMUNITY = Map.ofEntries(
-			Map.entry("dataview", k("Dataview", Support.PLANNED, "Queries show as code blocks; scripts and query blocks are planned.", 40)),
+			Map.entry("dataview", k("Dataview", Support.PARTIAL, "```dataview queries run with a subset of the query language: TABLE, LIST and TASK with FROM (tags, a folder, a link), WHERE, SORT and LIMIT. ```dataviewjs and inline queries show as code; a ```script block does what dataviewjs does, in a sandbox.")),
 			Map.entry("templater-obsidian", k("Templater", Support.UNSUPPORTED, "<% %> commands stay as text; core {{date}} and {{title}} placeholders work.")),
 			Map.entry("obsidian-excalidraw-plugin", k("Excalidraw", Support.PARTIAL, ".excalidraw and .excalidraw.md drawings open in Excalidraw and sync; embedded notes, LaTeX and PDF pages show as static images.")),
 			Map.entry("obsidian-kanban", k("Kanban", Support.PARTIAL, "Notes with kanban-plugin in their properties open as boards: drag cards between lanes, edit cards, add, rename and reorder lanes, archive; the file stays in the plugin's format and its settings block is kept as is. The plugin's settings, date picker and lane options are not offered.")),

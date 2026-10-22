@@ -65,6 +65,10 @@ class RemindersIntegrationTest {
 		assertThat(settings.get("ntfyTitleOnly").asBoolean()).isTrue();
 
 		JsonNode status = this.api.get("/api/reminders/status").ok(200);
+		// A fresh vault reads reminders in the server's zone, reported as an IANA id ("UTC", not "Z").
+		assertThat(status.get("zone").asString()).isEqualTo("UTC");
+		assertThat(status.get("zoneReported").asBoolean()).isFalse();
+		assertThat(status.get("serverZone").asString()).isEqualTo("UTC");
 		assertThat(status.get("webPush").get("available").asBoolean()).isTrue();
 		assertThat(status.get("ntfy").get("configured").asBoolean()).isFalse();
 		assertThat(status.get("ntfy").get("reason").asString()).contains("ntfy.json");

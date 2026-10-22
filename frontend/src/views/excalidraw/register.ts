@@ -1,12 +1,19 @@
 // Drawings (ROADMAP item 5, DESIGN §6.8.1), registered through the view registry like every
 // built-in view: `.excalidraw` (score 11) with "New drawing", and Obsidian Excalidraw's
 // `.excalidraw.md` (14, which beats `.md`). Both are textual, so autosave, drafts, conflicts,
-// history and live sync come from the DocumentSession; `merge` reconciles elements. The editor
-// and the `![[drawing]]` embed (exportToSvg) are lazy chunks; this module stays small.
+// history and live sync come from the DocumentSession; `merge` reconciles elements. The editor,
+// the `![[drawing]]` embed (exportToSvg) and the format with its merge are lazy chunks; this module
+// stays small. The merge loads with the view's chunks (views/lazyMerge.ts).
 import { Shapes } from 'lucide-react';
+import { lazyMerge, withMerge } from '../lazyMerge';
 import { registerView } from '../registry';
-import { newDrawingContent } from './format';
-import { mergeDrawingTexts } from './merge';
+import { newDrawingContent } from './newDrawing';
+
+/** The merges of `.excalidraw` and `.excalidraw.md` drawings. */
+export const drawingMerges = {
+  excalidraw: lazyMerge(() => import('./merge').then((m) => (base: string, mine: string, theirs: string) => m.mergeDrawingTexts('excalidraw', base, mine, theirs))),
+  markdown: lazyMerge(() => import('./merge').then((m) => (base: string, mine: string, theirs: string) => m.mergeDrawingTexts('markdown', base, mine, theirs))),
+};
 
 /**
  * Excalidraw loads its fonts from here (window.EXCALIDRAW_ASSET_PATH): copied out of the package
@@ -23,10 +30,10 @@ export function registerDrawingViews(): void {
     icon: Shapes,
     textual: true,
     modes: ['edit'],
-    load: () => import('./ExcalidrawView'),
-    loadEmbed: () => import('./DrawingEmbed'),
+    load: withMerge(drawingMerges.excalidraw, () => import('./ExcalidrawView')),
+    loadEmbed: withMerge(drawingMerges.excalidraw, () => import('./DrawingEmbed')),
     create: { label: 'drawing', extension: 'excalidraw', initialContent: newDrawingContent },
-    merge: (base, mine, theirs) => mergeDrawingTexts('excalidraw', base, mine, theirs),
+    merge: drawingMerges.excalidraw.merge,
   });
   registerView({
     id: 'excalidraw-md',
@@ -34,8 +41,8 @@ export function registerDrawingViews(): void {
     icon: Shapes,
     textual: true,
     modes: ['edit'],
-    load: () => import('./ExcalidrawView'),
-    loadEmbed: () => import('./DrawingEmbed'),
-    merge: (base, mine, theirs) => mergeDrawingTexts('markdown', base, mine, theirs),
+    load: withMerge(drawingMerges.markdown, () => import('./ExcalidrawView')),
+    loadEmbed: withMerge(drawingMerges.markdown, () => import('./DrawingEmbed')),
+    merge: drawingMerges.markdown.merge,
   });
 }

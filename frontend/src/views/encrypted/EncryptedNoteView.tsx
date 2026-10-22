@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { SaveStatus } from '../../components/SaveStatus';
 import { NO_RECOVERY } from '../../components/overlays/EncryptionDialogs';
 import { plainTextExtensions } from '../../editor/editorSetup';
-import { remoteTransaction } from '../../editor/remote';
+import { remoteTransaction } from '../../editor/remoteDiff';
 import { markdownNoteLanguage } from '../../editor/language';
 import { decryptPayload, type WriteKey } from '../../features/encryption/cipher';
 import { createKey, lock, onLock, openCached, readPayload, unlock } from '../../features/encryption/keyring';

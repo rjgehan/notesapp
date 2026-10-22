@@ -17,6 +17,8 @@ export interface LivePreviewConfig {
   checkboxes: boolean;
   /** Images from other sites load as they show (the per-device preference); otherwise on a click. */
   remoteImages?: boolean;
+  /** Script and Dataview blocks (ROADMAP items 40 and 17): the per-device preference; `auto` when absent. */
+  scripts?: 'auto' | 'ask' | 'off';
 }
 
 export interface BuildContext extends LivePreviewConfig {

@@ -16,6 +16,8 @@ import { renderLiveMarkdown, renderLiveMath } from '../render/liveRich';
 import { usePrefs } from '../state/prefs';
 import type { DocumentSession } from '../sync/DocumentSession';
 import { clearActiveEditor, setActiveEditor } from './activeEditor';
+// The palette's editor commands (extensions/builtins.ts) run from here once an editor exists.
+import './kit';
 import { vaultChanged, type NoteContext } from './context';
 import { noteExtensions, type EditorHooks } from './editorSetup';
 import { maybeShowTabEscapeHint } from './tabEscapeHint';
@@ -42,6 +44,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
   const vim = vimWanted(usePrefs((s) => s.vimMode));
   const syntaxVisibility = usePrefs((s) => s.syntaxVisibility);
   const loadRemoteImages = usePrefs((s) => s.loadRemoteImages);
+  const scripts = usePrefs((s) => s.scripts);
   const tree = useTree().data;
   const callbacks = useRef({ onView });
   // Only the active pane's editor is the active editor and takes focus when mounted (DESIGN §6.40).
@@ -79,6 +82,8 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       renderMarkdown: (el, block) => renderLiveMarkdown(el, block, session.path),
       renderMath: renderLiveMath,
       blocks: editorBlocks,
+      // Scripts in notes (ROADMAP items 40 and 17): the runner is a chunk of its own, loaded by the first block.
+      runScript: (request) => import('../scripts/noteScripts').then((m) => m.runNoteScript(session.path, request)),
     };
     const hooks: EditorHooks = {
       onLocalChange: () => session.markDirty(),
@@ -87,7 +92,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       spellcheck,
       autocorrect,
       vim,
-      livePreview: preview ? { visibility: syntaxVisibility, locked: preview === 'locked', checkboxes: !readOnly, remoteImages: loadRemoteImages } : null,
+      livePreview: preview ? { visibility: syntaxVisibility, locked: preview === 'locked', checkboxes: !readOnly, remoteImages: loadRemoteImages, scripts } : null,
     };
     const state = session.prepareState((st) => st.update({ effects: StateEffect.reconfigure.of(extensions(ctx, hooks)) }).state);
     // Every transaction goes through the session, which keeps the file's editors in other panes equal.
@@ -113,7 +118,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
     };
     // `autoFocus` only matters at mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, readOnly, preview, syntaxVisibility, loadRemoteImages, spellcheck, autocorrect, vim, extensions]);
+  }, [session, readOnly, preview, syntaxVisibility, loadRemoteImages, scripts, spellcheck, autocorrect, vim, extensions]);
 
   // Link decorations re-resolve when the vault changes.
   useEffect(() => {

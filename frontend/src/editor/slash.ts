@@ -15,42 +15,16 @@ import { CODE_NODES, inFrontmatter } from './linkAt';
 import { tableCellHost } from './livePreview/table/facets';
 import { editorSlashItems } from './slashItems';
 import { vimModeOf } from './vimMode';
+import { registeredSlashItems, type SlashItem } from './slashRegistry';
 
-/**
- * `block` items change or insert whole lines, so a table cell (where the text is one line of a
- * row) offers only the `inline` ones, which insert text at the cursor.
- */
-export type SlashScope = 'block' | 'inline';
-
-export interface SlashItem {
-  id: string;
-  label: string;
-  /** Other words the filter matches (`h1`, `todo`, `hr`). */
-  keywords?: string;
-  /** Shown on the right of the option, unless `hint` gives something more useful (a date's value). */
-  group: string;
-  hint?(state: EditorState): string;
-  scope: SlashScope;
-  /** Order in the unfiltered menu (lower first). */
-  order: number;
-  /** Hidden when false: an item that needs the open note's session, a command whose `when` fails. */
-  when?(view: EditorView): boolean;
-  /** Runs at the cursor, where the typed `/query` was (it is removed first). */
-  run(view: EditorView): void;
-}
-
-const registered = new Map<string, SlashItem>();
-
-/** Adds an item to the `/` menu (the app's commands: templates, attachments, voice notes, …). */
-export function registerSlashItem(item: SlashItem): void {
-  registered.set(item.id, item);
-}
+// The item type and the app's registrations live in slashRegistry.ts (eager, small).
+export { registerSlashItem, type SlashItem, type SlashScope } from './slashRegistry';
 
 /** Every item, the editor's own and the registered ones, in menu order. */
 export function slashItems(): SlashItem[] {
   const all = new Map<string, SlashItem>();
   for (const item of editorSlashItems()) all.set(item.id, item);
-  for (const item of registered.values()) all.set(item.id, item);
+  for (const item of registeredSlashItems()) all.set(item.id, item);
   return [...all.values()].sort((a, b) => a.order - b.order);
 }
 

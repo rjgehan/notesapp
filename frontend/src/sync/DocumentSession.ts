@@ -3,21 +3,20 @@
 //
 // The live content is CodeMirror's Text inside the session's EditorState (LF-only). Strings are
 // produced only for saves and drafts. `baseText` is the content at `version`, kept for merges.
-import { history } from '@codemirror/commands';
 import { EditorState, Transaction, type Annotation, type ChangeSpec, type Extension, type StateEffect } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { errorMessage, isProblem, isStorageProblem, isTransient, isVersionConflict, type ApiError } from '../api/client';
 import type { Endpoints } from '../api/endpoints';
 import type { FileEntry, TextFile, Version, WriteResult } from '../api/types';
-import { markdownNoteLanguage } from '../editor/language';
-import { tableBlocks } from '../editor/livePreview/table';
-import { applyRemoteTextToState, isComposing, paneSync, remoteChanges, remoteTransaction, sessionEdit, textReplace, waitForComposition } from '../editor/remote';
+import { tableRanges } from '../editor/livePreview/table/facets';
+import { isComposing, paneSync, sessionEdit, textReplace, waitForComposition } from '../editor/remote';
 import { trackedRange, trackedRangesField, trackRange, untrackRange } from '../editor/tracked';
 import { addUpload, endUpload, pendingUploads, uploadsField } from '../editor/uploads';
 import { detectEol, fromLf, toLf, type Eol } from '../features/eol';
 import { isNotePath } from '../features/paths';
 import { DRAFT_MAX_AGE_MS, type DraftRecord, type DraftStore } from './drafts';
 import type { MoveMap } from './moves';
+import { loadedSessionKit, loadSessionKit, sessionKit } from './sessionKitHandle';
 import { entryAtPath } from './treePatch';
 
 export type SessionStatus =
@@ -208,9 +207,16 @@ export class DocumentSession {
     return this.loadPromise;
   }
 
-  /** Undo history, pending uploads, tracked ranges, and the note language so headings and links are readable without an editor. */
+  /**
+   * Undo history, pending uploads, tracked ranges, and the note language so headings and links are
+   * readable without an editor. The history and the language come with the session kit, which the
+   * load waits for: the empty state before it has only the fields.
+   */
   private baseExtensions(): Extension[] {
-    return isNotePath(this.path) ? [history(), uploadsField, trackedRangesField, markdownNoteLanguage()] : [history(), uploadsField, trackedRangesField];
+    const kit = loadedSessionKit();
+    const fields = [uploadsField, trackedRangesField];
+    if (!kit) return fields;
+    return isNotePath(this.path) ? [kit.history(), ...fields, kit.markdownNoteLanguage()] : [kit.history(), ...fields];
   }
 
   // ---------- observation ----------
@@ -373,7 +379,7 @@ export class DocumentSession {
     const { from, to } = state.selection.main;
     // In Live Preview the selection rests on a table's open cell: a template or an attachment goes
     // after the table, never into its text (the table's edge rules keep it apart).
-    const table = tableBlocks(state).find((t) => (from > t.from && from < t.to) || (to > t.from && to < t.to));
+    const table = tableRanges(state).find((t) => (from > t.from && from < t.to) || (to > t.from && to < t.to));
     if (table) return { from: table.to, to: table.to };
     return { from, to };
   }
@@ -413,7 +419,7 @@ export class DocumentSession {
 
   /** `state` (an earlier state of this file) with `latest`'s text and selection, the difference not undoable. */
   private caughtUp(state: EditorState, latest: EditorState): EditorState {
-    const next = applyRemoteTextToState(state, latest.doc.toString());
+    const next = sessionKit().applyRemoteTextToState(state, latest.doc.toString());
     const head = Math.min(latest.selection.main.head, next.doc.length);
     const anchor = Math.min(latest.selection.main.anchor, next.doc.length);
     return next.update({ selection: { anchor, head }, annotations: Transaction.addToHistory.of(false) }).state;
@@ -467,7 +473,7 @@ export class DocumentSession {
   setText(text: string): void {
     if (!this.isEditable()) return;
     this.settleSerializer();
-    this.applyEdit(remoteChanges(this.editorState.doc.toString(), text), { annotations: [textReplace.of(true)] });
+    this.applyEdit(sessionKit().remoteChanges(this.editorState.doc.toString(), text), { annotations: [textReplace.of(true)] });
   }
 
   /**
@@ -478,7 +484,7 @@ export class DocumentSession {
     const serialize = this.serializer;
     if (!serialize) return;
     this.serializer = null;
-    const spec = remoteTransaction(this.editorState, serialize('save'));
+    const spec = sessionKit().remoteTransaction(this.editorState, serialize('save'));
     if (!spec) return;
     if (this.view) this.view.dispatch(spec);
     else this.state = this.state.update(spec).state;
@@ -499,7 +505,11 @@ export class DocumentSession {
   private async load(): Promise<void> {
     let file: TextFile;
     try {
+      // The file and the session kit (CodeMirror's history, language and diff) load together.
+      const kit = loadedSessionKit() ? null : loadSessionKit();
+      kit?.catch(() => undefined); // awaited below, once the file is here
       file = await (this.deps.loadFile ? this.deps.loadFile(this.path) : this.deps.api.readFile(this.path));
+      if (kit) await kit;
     } catch (e) {
       if (this.disposed) return;
       this.error = isProblem(e, 'too-large')
@@ -598,10 +608,10 @@ export class DocumentSession {
 
   private applyRemoteNow(text: string): void {
     if (this.view) {
-      const spec = remoteTransaction(this.view.state, text);
+      const spec = sessionKit().remoteTransaction(this.view.state, text);
       if (spec) this.view.dispatch(spec);
     } else {
-      const spec = remoteTransaction(this.state, text);
+      const spec = sessionKit().remoteTransaction(this.state, text);
       if (spec) this.state = this.state.update(spec).state;
     }
     this.serializer = null;
@@ -625,7 +635,7 @@ export class DocumentSession {
   private replaceBuffer(text: string, undoable: boolean): void {
     const annotations = [sessionEdit.of(true), textReplace.of(true), Transaction.userEvent.of('input.replace')];
     if (!undoable) annotations.push(Transaction.addToHistory.of(false));
-    const spec = { changes: remoteChanges(this.editorState.doc.toString(), text), annotations };
+    const spec = { changes: sessionKit().remoteChanges(this.editorState.doc.toString(), text), annotations };
     if (this.view) this.view.dispatch(spec);
     else this.state = this.state.update(spec).state;
     this.serializer = null;

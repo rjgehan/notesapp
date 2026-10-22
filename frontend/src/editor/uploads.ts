@@ -1,9 +1,9 @@
 // Pending attachment uploads (DESIGN §6.6 #10). A pending upload is a position in the editor
 // state, shown as a widget, never document text: saves, drafts and other devices never see a
 // placeholder, so an upload interrupted by a killed tab leaves nothing behind in the note.
-// The position maps through every change (local or remote) until the upload resolves.
+// The position maps through every change (local or remote) until the upload resolves. The
+// widgets are uploadsView.ts's, in the editor; this field is also a session's, without one.
 import { StateEffect, StateField, type EditorState } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 
 export interface PendingUpload {
   id: number;
@@ -25,27 +25,6 @@ export const addUpload = StateEffect.define<PendingUpload>({
  */
 export const endUpload = StateEffect.define<{ id: number; from?: number; end?: number }>();
 
-class UploadWidget extends WidgetType {
-  readonly label: string;
-  constructor(label: string, verb = 'Uploading') {
-    super();
-    this.label = `${verb} ${label}…`;
-  }
-  override eq(other: UploadWidget): boolean {
-    return other.label === this.label;
-  }
-  toDOM(): HTMLElement {
-    const el = document.createElement('span');
-    el.className = 'cm-upload-placeholder';
-    el.setAttribute('aria-live', 'polite');
-    el.textContent = this.label;
-    return el;
-  }
-  override ignoreEvent(): boolean {
-    return false;
-  }
-}
-
 export const uploadsField = StateField.define<readonly PendingUpload[]>({
   create: () => [],
   update(value, tr) {
@@ -60,13 +39,6 @@ export const uploadsField = StateField.define<readonly PendingUpload[]>({
     }
     return next;
   },
-  provide: (field) =>
-    EditorView.decorations.from(field, (uploads): DecorationSet =>
-      Decoration.set(
-        uploads.map((u) => Decoration.widget({ widget: new UploadWidget(u.label, u.verb), side: -1 }).range(u.pos)),
-        true,
-      ),
-    ),
 });
 
 /** The pending uploads of a state (none when the field is not configured). */

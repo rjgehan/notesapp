@@ -24,6 +24,7 @@
     "@codemirror/view": "^6.43.14",
     "@excalidraw/excalidraw": "0.18.1",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
+    "@jitl/quickjs-singlefile-browser-release-asyncify": "0.32.0",
     "@joplin/turndown-plugin-gfm": "1.0.68",
     "@lezer/common": "^1.5.3",
     "@lezer/highlight": "^1.2.5",
@@ -46,13 +47,14 @@
     "markdown-it": "^15.0.3",
     "mermaid": "12.2.0",
     "pdfjs-dist": "6.4.299",
+    "quickjs-emscripten-core": "0.32.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router": "^8.4.0",
     "rrule": "2.8.1",
     "ts-fsrs": "5.4.2",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "turndown": "7.2.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "yaml": "^2.9.1",
     "zustand": "^5.0.15"
   },
@@ -78,5 +80,11 @@
     "typescript-eslint": "^8.71.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "@excalidraw/mermaid-to-excalidraw": {
+      "mermaid": "$mermaid"
+    },
+    "katex": "$katex"
   }
 }

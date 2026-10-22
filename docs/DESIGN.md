@@ -1236,6 +1236,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 - Excalidraw drawings (ROADMAP item 5) needed no change: fonts are self-hosted and its worker is same-origin (§6.8.1).
 - **`'wasm-unsafe-eval'`** (added with ROADMAP item 32) lets the app compile WebAssembly: PDF.js's JPEG 2000, JBIG2 and ICC colour decoders and its PostScript-function compiler (§6.8.3), and Excalidraw's font subsetting. It allows no JavaScript `eval` or `new Function`; injected script still cannot run (`script-src 'self'`), and the WebAssembly the app compiles is fetched from `'self'` (`connect-src 'self'`). A worker's policy comes from its own script's response, which carries the same header. Without it PDF.js falls back to slower JavaScript decoders, which on a 300-page scan on the iPhone is the difference that matters.
 - **PDF.js** (§6.8.3) works under the rest of the policy as it is: its worker is a same-origin module script (`worker-src 'self'`, served as `text/javascript`, which `nosniff` requires); CMaps, standard fonts and decoders are fetched from `/assets/pdfjs-<version>/`; fonts embedded in a PDF become `FontFace`s from bytes (or `data:` URLs, `font-src data:`); the document's own JavaScript never runs (no scripting manager, and `quickjs-eval` is not shipped).
+- **The script sandbox worker** (ROADMAP item 40, §6.43.1) gets a policy of its own in place of the app's, on `/assets/scriptSandbox.worker-*.js` (a dedicated worker's CSP comes from its script's response): `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'`. QuickJS compiles there; nothing in it can fetch, open a socket or start a worker.
 
 **2. `FunnelRequestFilter`**: any request carrying `Tailscale-Funnel-Request` (it came through Tailscale Funnel) is refused with `403 funnel-request`, health endpoints included; only the separate publish server may be behind Funnel (§5.28).
 
@@ -1866,9 +1867,22 @@ The `package.json` dependency set is exactly the research list plus `"yaml": "^2
 `vite.config.ts`:
 
 - Proxy `/api` to `http://127.0.0.1:8080`. Use the explicit IPv4 address, because Node on Windows may resolve `localhost` to `::1`, while the backend binds 127.0.0.1. Set `changeOrigin: false` so the backend's Host and Origin checks see the host the browser used.
-- `build.sourcemap: true`.
+- `build.sourcemap`: off. Production builds carry no source maps (they were about 40 MB of the image, and the server would hand them to anyone); `NOTES_SOURCEMAPS=1 npm run build` writes hidden ones (no `sourceMappingURL` comment) to debug a build locally.
+- `bundleBudget` (`vite-plugin-budget.ts`) fails the build when the main chunk's JavaScript exceeds its budget (§6.1.1).
+- The bare `mermaid` import resolves to `src/render/rich/mermaidShared.ts` for every importer (§6.7.1); `elkjs/lib/elk.bundled.js` to a stub.
 - The build reads `VITE_BUILD_SHA` (set by the Dockerfile; `dev` otherwise) into `import.meta.env`, for the version check of §6.18.
 - Vitest config through `/// <reference types="vitest/config" />` with the jsdom environment.
+
+#### 6.1.1 The main chunk (initial JavaScript)
+
+What a page loads before it can render anything is the entry chunk and every chunk it imports statically. It is kept to the app shell: the router, React Query, the stores, the sync layer without CodeMirror, the registries with their small descriptors, and the overlays that must take the focus inside a gesture (quick switcher, command palette, search field, prompt and other dialogs with a text field, quick capture, quick add; §6.13). Everything else is a lazy chunk:
+
+- **CodeMirror** (view, language, parsers, commands, merge's diff) is not in it. A `DocumentSession` keeps its text in an `EditorState` (`@codemirror/state` is in the main chunk) and loads its other CodeMirror parts, the undo history, the note language and the remote diff, from `sync/sessionKit.ts` at the same time as its file; it touches text only once both arrived (`sessionKitHandle.ts`).
+- **Editor commands** that the palette and the shell run (formatting, folds, find, table, `/` menu, heading rename, encrypted sections, keeping the caret above the keyboard) come from `editor/kit.ts`, which every editor imports (`NoteEditor`, a canvas card's editor). A command runs on an editor, and with an editor its kit is loaded, so the command still runs synchronously inside the key press or tap; without one it loads the kit first. The `/` menu's app items register in `editor/slashRegistry.ts`.
+- **The phone's editing toolbar** and the **`/clip` page** are lazy chunks.
+- **View merges** (drawings, spreadsheets) load with their view's chunks (`views/lazyMerge.ts`): a session of such a file belongs to a view that has loaded, and a conflict before the merge arrived shows the banner, as for a view without one. New files of these views are created from constant texts.
+
+`vite-plugin-budget.ts` measures the main chunk on every build and fails it above **350 KiB gzip** (it is about 250 KiB: 26 files, 780 KiB raw; it was 608 KiB gzip before this budget). Opening a note then loads the Markdown view's chunk with CodeMirror, Live Preview and the renderer in parallel with the note's text (about 620 KiB gzip in all).
 
 `index.html`:
 
@@ -1913,13 +1927,15 @@ frontend/src/
 │   │                         registerEventHandler; builtins.ts registers every v1 view, panel and command through them
 ├── calendar/               ROADMAP item 14 (§6.32): model.ts, repeats.ts, prefs.ts, api.ts, useCalendarData.ts,
 │                             routes.ts, actions.ts, register.ts, ui/ (the /x/calendar page and the Calendar panel)
+├── formulas/                 ROADMAP item 39 (§6.42): model.ts (pure), engine.ts (lazy chunk, HyperFormula), load.ts
+├── scripts/                  ROADMAP items 40 and 17 (§6.43): the QuickJS sandbox worker and its API, runner, dql.ts, noteScripts.ts (lazy)
 ├── flashcards/               ROADMAP item 34 (§6.34): parse.ts, ids.ts, reviews.ts, schedule.ts (ts-fsrs), deck.ts,
 │                             session.ts, stats.ts, store.ts (records, outbox), register.ts, ui/ (the /x/flashcards page)
 ├── habits/                   ROADMAP item 35 (§6.35): model.ts, progress.ts, frontmatterEdit.ts, write.ts, actions.ts,
 │                             useHabits.ts, register.ts, ui/ (the /x/habits page and the Habits panel)
 ├── views/                    FILE-TYPE → VIEW REGISTRY (§6.8)
 │   ├── registry.ts
-│   ├── excalidraw/           drawings (§6.8.1): register.ts (descriptors, eager), format.ts and merge.ts (pure, eager),
+│   ├── excalidraw/           drawings (§6.8.1): register.ts and newDrawing.ts (eager), format.ts and merge.ts (lazy),
 │   │                         files.ts, controller.ts, env.ts, fonts.ts, ExcalidrawView.tsx (the editor, lazy),
 │   │                         DrawingEmbed.tsx (![[drawing]], lazy), svg.ts, images.ts, statics.ts, theme.ts
 │   ├── pdf/                  PDFs (§6.8.3): register.ts (descriptor and commands, eager), subpath.ts, active.ts,
@@ -1928,7 +1944,7 @@ frontend/src/
 │   ├── FileView.tsx          route target: picks descriptor, lazy-loads it, error boundary
 │   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, save status, the ⋯ menu with "Show Markdown source"), noteMenu.tsx, PropertiesTable.tsx
 │   ├── ImageView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
-│   ├── sheet/                register.ts (the descriptor, main bundle); SheetView, SheetEditor, SheetGrid, FormulaBar,
+│   ├── sheet/                register.ts (the descriptor, main bundle; the format and merge load with the view); SheetView, SheetEditor, SheetGrid, FormulaBar,
 │   │                         SheetTabs, SheetDialogs, ChartsPane, importExport, gridModel, theme, useSheetDocument
 │   │                         (lazy chunk, §6.21.5); SheetEmbed (loadEmbed, §6.21.7) and SheetChart (§6.21.9)
 │   ├── canvas/               JSON Canvas boards (§6.8.2): register.ts in the main bundle, the rest a lazy chunk
@@ -2356,7 +2372,7 @@ The model records the table's **style**: `padded` (every row has every cell and 
 
 **Insertions from outside the editor.** A template or an attachment inserted while a cell is open goes after the table, never into its text (`DocumentSession.insertionRange`).
 
-**Formulas later (ROADMAP 39).** The `tableCellFormatters` facet takes functions that, given a table's contents (`rows[0]` is the header) and alignments, return each cell's display instead of its Markdown (`{text, className?, title?}`), or null. The grid renders a display in a `cm-lp-cell-value` span; editing the cell shows its text (the formula). Formatters run when a table renders; dispatching `refreshTables` redraws every table (for an engine that has finished loading). Columns are A, B, … in the cells' labels.
+**Formulas (ROADMAP 39, §6.42).** The `tableCellFormatters` facet takes functions that, given a table's contents (`rows[0]` is the header), alignments, start (`from`) and the note's state, return each cell's display instead of its Markdown (`{text, className?, title?}`), or null. The grid renders a display in a `cm-lp-cell-value` span; editing the cell shows its text (the formula), and the display of the cell being edited shows in the grid's **formula bar** (`cm-lp-formula-bar`: the cell's name, `B5`, and its result, updated as you type). Formatters run when a table renders; dispatching `refreshTables` redraws every table (for an engine that has finished loading), and `redrawTableDisplays(view)` redraws only the displays (an edit of another table changed a result). Columns are A, B, … in the cells' labels.
 
 **Inserting a table.** "Insert table" (the palette, and the phone toolbar's table button) inserts an empty table with a header row and two columns and rows (`newTableText`, padded), on the caret's line when it is blank or after it, with the blank lines that keep it apart from the text around it, and opens its first cell (in source mode the caret goes into it). In a table cell it only says it cannot. On the phone, the toolbar shows Previous and Next cell in a cell, and hides the tools that insert whole lines.
 
@@ -2491,6 +2507,8 @@ Built in `render/rich/`, styled by `styles/rich.css`. Both load with the reading
 | **Mermaid** ```` ```mermaid ```` | Fence renderer: `<div class="mermaid-block" data-mermaid>` holding the source. | Mermaid 12.2 with `securityLevel: 'strict'` (labels encoded, no click handlers or links), `secure` keys a diagram's `%%{init}%%` or frontmatter `config:` cannot change (`securityLevel`, `layout`, `themeCSS`, `dompurifyConfig`, limits), the `dark`/`default` theme by app theme (re-rendered when the theme changes), then an SVG DOMPurify config (SVG, its scoped `<style>`, HTML labels in `<foreignObject>`; no scripts, handlers, links, `@import` or remote `url()`/`href`). Errors show inline as text above the source. Wide diagrams shrink to 60 % at most, then scroll sideways. |
 
 **Layout engine.** Mermaid 12 defaults to the ELK layout, whose `elkjs` is EPL-2.0 (not GPL-compatible) and 1.4 MB. `vite.config.ts` aliases `elkjs/lib/elk.bundled.js` to a stub that throws, Mermaid is initialized with `layout: 'dagre'` (Mermaid's classic layout, which Obsidian also uses), and `layout` is a secure key, so `layout: elk` in a diagram is ignored rather than failing.
+
+**One Mermaid.** Excalidraw's "Mermaid to Excalidraw" (`@excalidraw/mermaid-to-excalidraw`, §6.8.1) depends on Mermaid 11 with its own KaTeX; `package.json`'s `overrides` give it the app's Mermaid 12.2.0 and every package KaTeX 0.19.0, so each ships once. Mermaid keeps one global configuration, so `vite.config.ts` points the bare `mermaid` import at `render/rich/mermaidShared.ts`: the app (`mermaid.ts`) and everyone else (Excalidraw) get facades that each keep their own configuration and apply it, always with `layout: 'dagre'`, before each of their calls, which run one at a time so a configuration never changes under a rendering.
 
 **Placeholders and patching.** The HTML never depends on which lazy modules are loaded, so a block's patch key is the same on every render, and `hydrateRich` marks what it hydrated (a `WeakSet`): an edit elsewhere never re-renders a diagram or formula. When a block is re-inserted because it changed, hydration uses the already-loaded modules synchronously (KaTeX, loaded grammars, Mermaid's per-theme SVG cache), so it appears without a flash. The placeholder attributes `data-math`, `data-mermaid` and `data-lang` are app-reserved like the embed attributes: the sanitizer strips them from raw HTML, so a note cannot forge a placeholder.
 
@@ -2636,7 +2654,7 @@ A new type adds a `@Component` with names that no other indexer `supports` (the 
 
 #### 6.8.1 Drawings (ROADMAP item 5)
 
-Excalidraw drawings are textual views over the file's `DocumentSession`, so autosave, drafts, conflicts, history, trash and live sync are the session's. The code is in `views/excalidraw/`: `register.ts`, `format.ts` and `merge.ts` are small and eager (the session's merge runs in the main chunk); `ExcalidrawView.tsx` (the editor) and `DrawingEmbed.tsx` (`![[drawing]]`) are lazy chunks, which share the Excalidraw package and the modules both use (`svg.ts`, `images.ts`, `statics.ts`, `env.ts`) in a third. On the server, `drawings.ExcalidrawDocumentIndexer` feeds drawings into search, backlinks and tags.
+Excalidraw drawings are textual views over the file's `DocumentSession`, so autosave, drafts, conflicts, history, trash and live sync are the session's. The code is in `views/excalidraw/`: `register.ts` and `newDrawing.ts` are small and eager; `format.ts` and `merge.ts` are a lazy chunk that loads with the view's chunks, so the session's merge is there before a drawing's session can conflict (`views/lazyMerge.ts`, §6.1.1); `ExcalidrawView.tsx` (the editor) and `DrawingEmbed.tsx` (`![[drawing]]`) are lazy chunks, which share the Excalidraw package and the modules both use (`svg.ts`, `images.ts`, `statics.ts`, `env.ts`) in a third. On the server, `drawings.ExcalidrawDocumentIndexer` feeds drawings into search, backlinks and tags.
 
 **Registration** (`register.ts`, called by `builtins.ts`).
 
@@ -3628,7 +3646,7 @@ The app installs to the iPhone Home Screen (Safari, Share › Add to Home Screen
 | `POST /capture/share` navigation (share target, §6.27) | Kept in Cache Storage; `303` to `/capture?share=<id>` |
 | Everything else, the whole API included | Not touched: API responses stay `no-store` and never come from a cache |
 
-- **Install** precaches every built file except source maps, `robots.txt` and Excalidraw's fonts: the shell and every lazy chunk, CodeMirror's language modes included, so nothing the app may load is missing offline. With drawings, spreadsheets, tasks and rich Markdown merged that is about 560 files and 16 MB (about 5 MB compressed; it was 165 files and 2.6 MB on its own branch), downloaded once per device and then only as files change. Excalidraw's self-hosted fonts (§6.8.1; about 230 files and 12 MB, mostly CJK subsets loaded for the characters a drawing shows) are left out (`isExcalidrawFont`): the browser's HTTP cache keeps the ones a drawing used (immutable, versioned path), and a drawing offline falls back to a system font for characters never shown before. Hashed bundles still in the previous shell cache are copied, not downloaded again. Any failure fails the install and the previous worker stays in charge. Then `skipWaiting()`.
+- **Install** precaches every built file except source maps (production builds have none, §6.1), `robots.txt`, Excalidraw's fonts and fallback font formats (`.woff`, `.ttf`: KaTeX's CSS lists them after each `.woff2`, which every supported browser uses; `isLegacyFont`, about 0.8 MB): the shell and every lazy chunk, CodeMirror's language modes included, so nothing the app may load is missing offline. With drawings, spreadsheets, tasks and rich Markdown merged that is about 560 files and 16 MB (about 5 MB compressed; it was 165 files and 2.6 MB on its own branch), downloaded once per device and then only as files change. Excalidraw's self-hosted fonts (§6.8.1; about 230 files and 12 MB, mostly CJK subsets loaded for the characters a drawing shows) are left out (`isExcalidrawFont`): the browser's HTTP cache keeps the ones a drawing used (immutable, versioned path), and a drawing offline falls back to a system font for characters never shown before. Hashed bundles still in the previous shell cache are copied, not downloaded again. Any failure fails the install and the previous worker stays in charge. Then `skipWaiting()`.
 - **Activate** deletes older `notesapp-shell-*` caches and claims the open pages.
 - Registration (`src/pwa/serviceWorker.ts`) only in production builds, with `updateViaCache: 'none'`; the server sends `sw.js` with `no-cache` and `Service-Worker-Allowed: /`, and the manifest as `application/manifest+json` with `no-cache` (§5.14). An installed app can stay open for weeks without navigating, so it also checks for a new worker when it comes back to the foreground, at most hourly. A development page unregisters any worker a preview left behind.
 
@@ -4036,7 +4054,86 @@ A value that does not fit its type (`due: soon` for a date) shows as written, wi
 
 **Tests** (Vitest): `yamlEdit.test.ts` (byte stability, comments, CRLF, quoting, add/remove/rename/move), `model.test.ts` (types, fitting, conversion, property clauses parsed and matched as on the server, `[[` detection), `rename.test.ts` (the dry run, confirmation and result), `ui/PropertiesEditor.test.tsx` (each type's editor commits only its property; rename, add, mismatch, invalid YAML, the row menu), and `blocks.test.ts` (an edit is one undo step, shown in place, never opens the YAML; locked notes get no editor).
 
+### 6.42 Formulas in notes (ROADMAP item 39)
+
+Spreadsheet math in ordinary notes, with item 6's engine (HyperFormula under GPL-3.0, §6.21), so a function behaves the same in a note table and in a `.sheet` file. The file always holds exactly what was typed: results are computed from the text each time it changes, and are never written back (search finds the formula text).
+
+**Tables.** Every top-level Markdown table (a Live Preview grid, §6.6.1) is a sheet: columns A, B, …; the header is row 1, so the first data row is row 2. A cell whose text starts with `=` (not `==`, which is a highlight) is a formula: `=B2*C2`, `=SUM(B2:B5)`, `=AVERAGE(B:B)`, `=IF(C3>100, "over", "ok")`. Other cells go to the engine as a spreadsheet reads typed text, after their wrapping Markdown (`**1450**`) and thousands separators (`1,450`) are removed: numbers, `10%`, `$5`, dates, `TRUE`, text. Live Preview and locked notes show the result in the cell (`cm-formula-value`, the formula on hover); clicking the cell edits the formula, and the grid's formula bar shows the cell's name and its result, recalculated as you type. Errors show the usual codes in the error colour (`#DIV/0!`, `#REF!`, `#NAME?`, `#VALUE!`, `#CYCLE!`, `#ERROR!` for a formula that cannot be read), with the engine's message (or a short explanation) on hover. An array result (`=SEQUENCE(3)`) spills into the empty cells below and beside it. Source mode shows the text as typed.
+
+**Inline.** Inline code that starts with `=` is a formula: `` `=1450*12` `` shows `17,400` while the selection is elsewhere (a click shows the code, as inline math does); a locked note always shows the result. Obsidian shows it as code, so the file reads sensibly there. An inline expression the engine cannot read, or a Dataview inline query (`` `= this.file.name` ``: a name with a dot), stays as code. Bare cell references in an inline formula have no table to refer to; it names one (below).
+
+**Named tables and formats (39b).** A table named with an Obsidian block id, a `^budget` line under it (after a blank line, since a line right under a table is one of its rows; the same line `[[Note#^budget]]` links to, §6.37), is the sheet `budget` everywhere in the note: `` `=budget!B5` ``, `` `=SUM(budget!B2:B4)*12` ``, or a cell of another table. Tables without an id are `Table1`, `Table2`, … in note order (a name an id already took is skipped); these names change when tables are added above, so named tables are the reliable way. A comment line `%% formats: B=currency C=percent D=#,##0.0 %%` under the table (after the blank line, before or after the id line) gives columns a number format: a preset name (`number`, `integer`, `decimal`, `percent`, `currency`, `currencyRounded`, `financial`, `scientific`, `date`, `dateUs`, `dateLong`, `time`, `datetime`, `duration`) or a format code of the sheets (§6.21.8). It applies to the column's numbers, typed or computed (the header aside). Obsidian hides the comment. Without a format a result shows in the format of its type (a date as `yyyy-mm-dd`, a percentage, a currency amount) or in the sheets' Automatic format with thousands separators from five digits on (`1725`, `17,400`).
+
+**Off switch.** `formulas: false` (or `no`, `off`) in a note's frontmatter turns its formulas off: cells and code that start with `=` show as typed.
+
+**Implementation** (`formulas/`, `editor/livePreview/formulas.ts`).
+
+- `formulas/model.ts` (pure): what counts as a formula, the engine input of a cell, the id and formats lines, sheet names, the off switch and number display.
+- `formulas/engine.ts` is a **lazy chunk** (`formulas/load.ts`; HyperFormula is shared with the sheets' chunk). It loads the first time a note with a formula (or a formats line) shows; notes without formulas never load it. `computeNote(model)` builds one HyperFormula instance (item 6's `engineConfig()`) with one sheet per table and a hidden `_inline` sheet; inline formulas become cells of `_inline` as they are first shown, so their result type (date, percent) is known too. `evaluate()` gives raw values to scripts (item 40b, §6.39).
+- `formulaField` (a state field) keeps the note's tables as the engine sees them: their cells (from the grid's own table model), block ids and formats. Tables an edit did not touch are reused, so typing in a long note slices no table; the model, and with it its `version`, changes only when a table's text, id or formats change, or the frontmatter switch does. Results are computed once per model (a `WeakMap`), on first use.
+- The `tableCellFormatters` entry shows results only in tables that hold a formula or a formats line; plain tables keep their Markdown rendering. When the version changes, every grid of the note redraws its displays (`redrawTableDisplays`), so a table that reads another one updates when that one is edited.
+- A view plugin decorates the visible inline formulas (replace widgets, `cm-formula-inline`), and requests the engine when a formula is visible; when it has loaded, the note's tables and inline formulas redraw.
+- Formulas compute in the note's own editor (Live Preview and locked). Embedded notes and rendered blocks (§6.7) show formulas as typed.
+
 ---
+
+### 6.43 Scripts in notes and Dataview-style queries (ROADMAP items 40 and 17)
+
+A note can compute what it shows: a ```` ```script ```` block holds JavaScript that reads the vault (read-only) and shows Markdown, lists and tables; a ```` ```dataview ```` block holds a query in a subset of Dataview's query language (imported Obsidian vaults bring many). Both run **in the browser**, in a sandbox; the server only lists notes' metadata (API.md §40). The file always keeps exactly what was typed: output is never written to the note.
+
+#### 6.43.1 The sandbox
+
+Three layers, each enough on its own to keep a script away from the page, the network and the vault's write endpoints:
+
+1. **QuickJS** (`quickjs-emscripten`, MIT; the asyncify single-file variant, whose WebAssembly is inlined, so it fetches nothing). Every run gets a fresh runtime with no DOM, network, timers or storage. It gets the API prelude (`scripts/guest/prelude.js`) and two functions the prelude takes out of the global object before the script runs: `__host` (an API call, answered by the page with JSON) and `__emit` (one item of output, as JSON). Limits (`scripts/protocol.ts`): 250 ms of CPU (an interrupt handler; the time API calls wait for the page does not count), 32 MB of heap, 512 KB of stack, 200 API calls, 2000 output items and 512 KB of output.
+2. **A dedicated worker** (`scriptSandbox.worker.ts`), started once and reused, one run at a time. Before anything runs it removes `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `importScripts`, IndexedDB, caches, `BroadcastChannel` and the worker constructors from its global scope. A run that has not finished after 15 s of wall time (API calls included) gets the worker terminated; the next run starts a new one.
+3. **The worker's own CSP** (API.md §40.2, `SecurityHeadersFilter`, §5.14): `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'none'`. The build names the worker `assets/scriptSandbox.worker-<hash>.js`, which the filter's rule matches.
+
+The page (`runner.ts`, `host.ts`) checks every message from the worker (its type, its run, the output's shape: `checkItem`) and every API call's arguments (unknown calls and filters are refused). Nothing a script produces is HTML, code or a function on the page's side: output is data (`OutputItem`), which `output.ts` turns into **escaped Markdown** (text is backslash-escaped; only strings a script passes to `show()` are read as Markdown; links and embeds become wikilinks, which resolve inside the vault only). That Markdown renders through the reading pipeline (`NoteContext.renderMarkdown`: markdown-it, DOMPurify, the embeds) **with remote images off**, so raw HTML loses scripts, forms, inputs, `javascript:` links and CSS `url()`s, and `<img>` and media from other sites become placeholders, which are then **removed** (`stripRemote`, outside embedded notes). Nothing a script writes can make the browser load a URL, so what it read cannot leave in an image request. Links to other sites stay links (following one is the user's click).
+
+Without Worker support (unit tests) the runner runs the same sandbox on the page; QuickJS isolates the script there too.
+
+#### 6.43.2 The script API
+
+| | |
+|---|---|
+| `today()`, `now()`, `date("2026-10-22")` | Dates in the device's local wall time: `.year`, `.month`, `.day`, `.weekday`, `.format("dddd D MMMM")`, `.add(3, "days")`, `.daysUntil(d)`, `.isBefore(d)`, … |
+| `note("Title" or path)`, `thisNote()` | A note's metadata or null: `path`, `title`, `folder`, `tags`, `aliases`, `props` (frontmatter), `modified`, `size`, `links`, `.text()`, `.tasks()` |
+| `notes({tag, folder, prop, linksTo, search, limit})` | Notes from `GET /api/notes/query` (default limit 500); `prop` as `"status"`, `"status!=done"` or `{status: "open"}` |
+| `tasks({…, done})` | The checkbox tasks of the matching notes, each with its `note` |
+| `show(…values)` | Strings are Markdown; numbers, dates and booleans text; notes links; arrays lists; other objects JSON in a code block |
+| `list(items)`, `table(rows, columns)`, `embed(note)` | A list, a table (rows that are notes give their properties by column name; `title` links), an embed |
+| `fn.SUM(1, 2)`, `formula("=budget!B2*2")` | Item 39's spreadsheet functions (HyperFormula with the `.sheet` configuration). `formula()` sees this note's tables (§6.42), `fn` does not. An error code throws |
+| `query("TABLE … FROM …")` | A Dataview query's result (§6.43.4), to `show()` |
+
+An error stops the script; what it showed before stays, with the error and the script's **line** under it (from QuickJS's stack). A run records the notes it read by path (`reads.paths`) and, when it listed notes (`notes()`, `tasks()`, `query()`, or `note()` of a note that does not exist yet), is **broad**.
+
+#### 6.43.3 In the editor
+
+`topLevel.ts` recognises a top-level fenced block whose info string is `script` or `dataview` (not `dataviewjs`, which stays code) as a rich block kind, and `rich.ts` shows it as a `ScriptBlockWidget` (`editor/livePreview/scripts.ts`) under the callouts' rules: in a locked note always; while editing whenever the selection does not touch the block (with the caret in it, the code shows and is edited as any code block).
+
+- The widget shows the output only, with **↻** (run again) and **</>** at its top right (on hover; always on touch screens). **</>** puts the caret in the block while editing; in a locked note it shows the code under the output.
+- `NoteContext.runScript` (`scripts/noteScripts.ts`, a lazy chunk loaded by the first block) runs a block; a dataview block is the script `show(query("…"))`. The host answers from `GET /api/notes/query`, the open notes' current text (their `DocumentSession`) or else the file, the tree's link resolution, and the editor's formula engine (`formulaEngine()` and the note's `formulaResults`).
+- **Results are kept** per note, kind and code (up to 200, for the page's lifetime), so a block that scrolls out and back, or that the caret enters and leaves, does not run again. A result goes **stale** when a note it read changes: `scripts/register.ts` registers event handlers (§6.8) for `file.created`, `file.changed`, `file.deleted`, `entry.moved`, `folder.deleted` and `resync` and calls `invalidateScripts(paths)` (a folder or a resync: any note). A broad result, or one in the changed note itself (its tables feed `formula()`), is stale for any such change. Stale blocks that show run again **1 s** later (several changes, one run); others run when they next show. At **local midnight** every result goes stale (`today()`), and **↻** runs a block at once.
+- **Settings › This device › Scripts in notes** (`prefs.scripts`, per device): *Run as the note shows* (`auto`, the default), *Ask before running* (`ask`: the code and a **Run** button; a click is remembered for the block until the page reloads), *Off* (`off`: the blocks stay code).
+- The `/` menu (§6.6.2) offers **Script block** and **Dataview query**, which insert a small example with the caret on its first line.
+- Embedded notes, published notes and the other views show the blocks as code: scripts run only in the note's own editor.
+
+#### 6.43.4 Dataview-style queries (`scripts/dql.ts`)
+
+A parser and evaluator for a subset of the Dataview Query Language, over the notes the endpoint returns. It never uses `eval`: queries are data.
+
+```
+TABLE [WITHOUT ID] expr [AS "Name"], …  |  LIST [expr]  |  TASK
+[FROM #tag and "folder" and [[Note]]]
+[WHERE expr]  [SORT expr [ASC|DESC], …]  [LIMIT n]
+```
+
+FROM's sources become the endpoint's `tag`, `folder` and `linksTo` filters. Expressions: properties by name, `file.name`, `file.path`, `file.folder`, `file.link`, `file.mtime` (local time, shown as `2026-10-22 11:56`), `file.mday`, `file.tags`, `file.size`, `file.aliases`, `file.outlinks`, and in TASK queries `text`, `completed`, `status`, `line`; literals and `[[links]]`; `= != < <= > >= and or ! + - * /`; and `contains`, `date` (`"today"`, `"now"`, a date), `default`, `length`, `lower`, `upper`, `number`, `string`, `round`, `startswith`, `endswith`. GROUP BY, FLATTEN, CALENDAR, OR and `-` between sources are errors; ```` ```dataviewjs ```` and inline `= …` queries stay code. The compatibility report (§5.23) lists those, and reports the Dataview plugin as *partial*.
+
+#### 6.43.5 Tests
+
+`sandbox.test.ts` (the API, the limits, and escapes: the global object, `Function` and indirect `eval`, imports, prototype pollution towards the page, output and call floods, runaway loops, memory and recursion), `host.test.ts` (filters and arguments checked, `__proto__` keys, unknown calls), `output.test.ts` (escaping, wikilinks only), `dql.test.ts`, `noteScripts.test.ts` (a block end to end in the sandbox; which events make results stale), `register.test.ts` (the `/` items), `editor/livePreview/scripts.test.ts` (output, code at the caret, ↻ and </>, errors with lines, remote images removed, debounced reruns for relevant notes only, ask and off, dataview, formulas with the note's tables); backend `NotesQueryIntegrationTest`, `SecurityIntegrationTest` (the worker's CSP) and `CompatScannerTest`. Checked in a real browser against the production build served by the jar: the worker's file name matches the CSP rule, WebAssembly compiles under it, the worker loads no other file, reruns follow another device's save, and a script's remote images, CSS URLs, inputs, `<script>` and `javascript:` links leave no request and nothing to click.
 
 ## 7. Infrastructure
 

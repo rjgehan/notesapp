@@ -12,7 +12,7 @@ import { activeEditor, setActiveEditor } from '../../activeEditor';
 import type { EditorMenuEntry, NoteContext } from '../../context';
 import { noteExtensions } from '../../editorSetup';
 import { markdownNoteLanguage } from '../../language';
-import { remoteTransaction } from '../../remote';
+import { remoteTransaction } from '../../remoteDiff';
 import type { LivePreviewConfig } from '../decorations';
 import { tableEdit } from './facets';
 import { gridOf, type TableGrid } from './grid';
@@ -55,7 +55,6 @@ function context(menus: Menu[], overrides: Partial<NoteContext> = {}): NoteConte
     vaultTags: async () => [],
     recentPaths: () => [],
     save: () => {},
-   
     insertFiles: () => {},
     linkTo: (p) => `[[${p}]]`,
     showMenu: (_at, label, items) => menus.push({ label, items }),

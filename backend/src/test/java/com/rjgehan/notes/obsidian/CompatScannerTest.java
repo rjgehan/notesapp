@@ -30,7 +30,8 @@ class CompatScannerTest {
 	@Test
 	void findsUnsupportedSyntaxOutsideCode() {
 		Map<String, CompatIssue> issues = scanFixture();
-		assertThat(where(issues.get("dataview"))).containsExactly("Home.md:19", "Projects/Plan.md:6");
+		// Plan.md's ```dataview TABLE runs since ROADMAP item 17; Home.md's inline query does not.
+		assertThat(where(issues.get("dataview"))).containsExactly("Home.md:19");
 		assertThat(where(issues.get("plugin-blocks"))).containsExactly("Projects/Plan.md:15");
 		assertThat(where(issues.get("tasks-query"))).containsExactly("Projects/Plan.md:19");
 		// Callouts, Mermaid and math render since ROADMAP item 3: no longer findings.
@@ -43,7 +44,7 @@ class CompatScannerTest {
 		assertThat(where(issues.get("html-removed"))).containsExactly("Home.md:20");
 		// Block references and embeds work since ROADMAP item 20: no longer a finding (missing blocks still are).
 		assertThat(issues).doesNotContainKey("block-references");
-		assertThat(issues.get("dataview").roadmapItem()).isEqualTo(40);
+		assertThat(issues.get("dataview").roadmapItem()).isNull();
 		assertThat(issues.get("dataview").category()).isEqualTo(CompatIssue.Category.SYNTAX);
 	}
 
@@ -100,6 +101,34 @@ class CompatScannerTest {
 		assertThat(issue.noteCount()).isEqualTo(1);
 		assertThat(issue.occurrences()).hasSize(CompatScanner.MAX_OCCURRENCES);
 		assertThat(issue.truncated()).isTrue();
+	}
+
+	@Test
+	void reportsOnlyDataviewQueriesTheSubsetDoesNotRun() {
+		VaultIndex index = new VaultIndex();
+		index.put(ObsidianFixture.note("Q.md", String.join("\n", "```dataview", "LIST FROM #a AND \"Projects\"", "WHERE x > 1",
+				"SORT file.name DESC", "```", "", "```dataview", "TABLE length(rows) GROUP BY status", "```", "", "```dataviewjs",
+				"dv.list([])", "```", "", "```script", "show(1)", "```", "", "```dataview", "CALENDAR file.mtime")));
+		CompatIssue issue = CompatScanner
+			.scan(index.noteViews(), index.filesUnder(""), List.of(), ObsidianFixture.KINDS::kindOf)
+			.stream()
+			.filter((i) -> i.id().equals("dataview"))
+			.findFirst()
+			.orElseThrow();
+		assertThat(where(issue)).containsExactly("Q.md:6", "Q.md:10", "Q.md:18");
+		assertThat(issue.occurrences().get(0).text()).contains("GROUP BY");
+	}
+
+	@Test
+	void tellsTheDataviewSubsetFromTheRest() {
+		assertThat(CompatScanner.dataviewUnsupported("TABLE file.name FROM #project")).isFalse();
+		assertThat(CompatScanner.dataviewUnsupported("task from [[Home]] where !completed")).isFalse();
+		assertThat(CompatScanner.dataviewUnsupported("LIST WHERE file.size - 1 > 0")).isFalse();
+		assertThat(CompatScanner.dataviewUnsupported("")).isFalse();
+		assertThat(CompatScanner.dataviewUnsupported("LIST FROM #a OR #b")).isTrue();
+		assertThat(CompatScanner.dataviewUnsupported("LIST FROM #a AND -#b")).isTrue();
+		assertThat(CompatScanner.dataviewUnsupported("LIST FROM \"x\" FLATTEN tags")).isTrue();
+		assertThat(CompatScanner.dataviewUnsupported("CALENDAR file.mtime")).isTrue();
 	}
 
 	@Test

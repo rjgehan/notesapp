@@ -51,7 +51,7 @@ DESIGN.md has the details.
 |---|---|---|---|---|
 | 1 | Nightly and off-site backups *(declined for v1; recommended first after v1)* | H | S | |
 | 10 | **Live Preview editing: no visible Markdown, tables as a grid** *(your pick, 2026-10-17)* | H | L | 3 helps |
-| 39 | **Formulas in notes: spreadsheet math in tables and text** *(new)* | H | M | 10a; item 6's engine decision |
+| 39 | **Formulas in notes: spreadsheet math in tables and text** *(new; built 2026-10-21, `feat/formulas`)* | H | M | 10a; item 6's engine decision |
 | 40 | **Scripts in notes: blocks that run and show their result** *(new)* | H | L | 10; 39 for formula functions |
 | 2 | Mirror the vault's git history to a private GitHub repo | M | S | |
 | 3 | Rich Markdown pack: callouts, code highlighting, math, Mermaid *(declined for v1; **built 2026-10-21**)* | H | M | |
@@ -182,7 +182,9 @@ Known leftovers, low severity, left for later:
 - **10b:** inline images and embeds, the frontmatter block, footnotes and comments; the reading view becomes "lock editing".
 - **10c:** iPhone polish, and a performance pass on long notes (a 10,000-line test note).
 
-### 39. Formulas in notes: spreadsheet math in tables and text *(new, 2026-10-17)*
+### 39. Formulas in notes: spreadsheet math in tables and text *(new, 2026-10-17; built 2026-10-21, `feat/formulas`)*
+
+**Built** (39a and 39b, DESIGN §6.42): formulas in table cells with a formula bar, inline formulas, named tables (`^budget`), per-column formats in a `%% formats: B=currency C=percent %%` line, and `formulas: false`. Tables without an id are `Table1`, `Table2`, … Numbers show in the sheets' Automatic format, with thousands separators from five digits on. Formulas compute in the note's own Live Preview and locked view; embedded notes show them as typed.
 
 **One line:** Excel- and Google-Sheets-style formulas inside ordinary notes. A table cell containing `=SUM(B2:B5)` shows its result, and inline `` `=1450*12` `` shows `17,400`. The file keeps the formula you typed.
 
@@ -222,7 +224,16 @@ renders as a grid whose last cell shows `1725`.
 - **39a:** formulas in table cells, and inline formulas that don't refer to tables.
 - **39b:** named tables and inline references to them; per-column number formats (currency, percent, decimals), stored in a `%%` comment line under the table so Obsidian ignores it.
 
-### 40. Scripts in notes: blocks that run and show their result *(new, 2026-10-17)*
+### 40. Scripts in notes: blocks that run and show their result *(new, 2026-10-17; built 2026-10-22, `feat/formulas`)*
+
+**Status:** 40a and 40b built (2026-10-22, with item 17); 40c (write actions) not built. Design in DESIGN §6.43, the endpoint in API.md §40. Checked in a real browser against the production build; not yet on a real iPhone. Deviations and additions:
+
+- The sandbox is three layers: QuickJS (the single-file asyncify build, WebAssembly inlined), a dedicated worker that drops its network and storage globals, and a CSP of its own on the worker's script (`connect-src 'none'`). Limits: 250 ms of CPU, 32 MB, 200 API calls, 2000 output items, 15 s of wall time (then the worker is replaced).
+- Output is escaped Markdown rendered with remote images off, and the remaining click-to-load placeholders are removed, so a script cannot send what it read to another site through an image.
+- Scripts run in Live Preview and locked notes (the reading view is locked Live Preview since item 10b); embedded and published notes show the code.
+- A per-device setting (Settings › This device › Scripts in notes): run, ask first, or off. The `/` menu inserts a script block or a Dataview query.
+- Results are kept per note and code for the page's lifetime, so scrolling and moving the caret do not rerun a block; reruns after a relevant change are debounced by 1 s.
+- `notes/query` also takes `path` and `tasks` (for `note()`, `tasks()` and TASK queries) and returns aliases, size and resolved links; `tasks()` is in the API.
 
 **One line:** a code block that runs and shows its output in place, for content that changes by itself. For example, "on Mondays, show my Monday notes", "list my `#project` notes that aren't done", or a countdown.
 
@@ -810,7 +821,9 @@ Stored in `.notesapp/bookmarks.json`, in a format compatible with Obsidian's `bo
 
 `GET /api/graph`, built from the existing `LinkGraph`, rendered with `force-graph` 1.52.0 (MIT, canvas).
 
-### 17. Dataview-style query blocks
+### 17. Dataview-style query blocks *(built 2026-10-22 with item 40)*
+
+**Status:** built (2026-10-22, `feat/formulas`), as the update below says, plus ```` ```dataview ```` blocks themselves, which run as `show(query(…))` scripts (DESIGN §6.43.4): TABLE (WITHOUT ID, AS), LIST, TASK, FROM tags, a folder and a link joined with AND, WHERE, SORT, LIMIT, and a dozen functions. Evaluated in the browser over `GET /api/notes/query`, not on the server. Not supported: GROUP BY, FLATTEN, CALENDAR, OR and `-` between sources, `dataviewjs` (a `script` block does the same in the sandbox), inline `= …` queries; the compatibility report lists queries that use them, and the Dataview plugin is reported partial.
 
 **One line:** ```` ```query ```` blocks such as `TABLE due, status FROM #project WHERE status != "done" SORT due`, evaluated on the server over frontmatter, file metadata and tasks, rendered live in the reading view.
 
@@ -984,7 +997,7 @@ Plugs into the view registry. `.canvas` is already a text kind.
 - Integration tests request `/api/tree`, `/api/files?path=…`, `/n/x` and `/` on 8081 and expect 404.
 - Prerequisite: the v1 identity and Host allowlists (DESIGN §5.13) are in place.
 
-**Status: built 2026-10-21** on `feat/publish` (DESIGN §5.28, API.md §26), switched off: `NOTES_PUBLISH_ENABLED` defaults to `false` in the app, `docker-compose.yml`, `.env.example` and `casaos-compose.yml`, and the shipped `serve.json` has no Funnel entry; `deploy/tailscale/serve.funnel.json.example` (CasaOS: `NOTES_PUBLISH_FUNNEL`) is the opt-in, documented in DEPLOY.md and CASAOS.md "Public publishing". The publish server is a JDK `HttpServer` on `127.0.0.1:8081` that serves only snapshots listed in `.notesapp/publish.json` (stored outside the vault in `/data/publish`), `404` for everything else; the app answers `403 funnel-request` to anything carrying `Tailscale-Funnel-Request`. Snapshots are rendered on the server (commonmark-java) with no app JavaScript and a CSP without scripts: frontmatter, comments, raw HTML and vault queries are left out, links to unpublished notes become plain text without their folder, and only the attachments the note embeds are copied. Publish, republish (title, address) and unpublish from the note header, the ⋯ menu or the palette, and a list in Settings › Publishing. The integration tests request `/api/tree`, `/api/files?path=…`, `/n/x`, `/`, unreferenced attachments, `.notesapp` and `.git` paths (escaped and dot-segment variants too) on the publish server and get `404`. Not yet: math and Mermaid show as source on public pages; a snapshot links to another published note only if that note was published first (republish to update).
+**Status: built 2026-10-21** on `feat/publish` (DESIGN §5.28, API.md §26), switched off: `NOTES_PUBLISH_ENABLED` defaults to `false` in the app, `docker-compose.yml`, `.env.example` and `casaos-compose.yml`, and the shipped `serve.json` has no Funnel entry; `deploy/tailscale/serve.funnel.json.example` (CasaOS with its own Tailscale container: `NOTES_PUBLISH_FUNNEL`; the simple CasaOS layout on the host's Tailscale: `NOTES_PUBLISH_ADDRESS=0.0.0.0`, a published port and `tailscale funnel` on the host, 2026-10-22) is the opt-in, documented in DEPLOY.md and CASAOS.md "Public publishing". The publish server is a JDK `HttpServer` on `127.0.0.1:8081` that serves only snapshots listed in `.notesapp/publish.json` (stored outside the vault in `/data/publish`), `404` for everything else; the app answers `403 funnel-request` to anything carrying `Tailscale-Funnel-Request`. Snapshots are rendered on the server (commonmark-java) with no app JavaScript and a CSP without scripts: frontmatter, comments, raw HTML and vault queries are left out, links to unpublished notes become plain text without their folder, and only the attachments the note embeds are copied. Publish, republish (title, address) and unpublish from the note header, the ⋯ menu or the palette, and a list in Settings › Publishing. The integration tests request `/api/tree`, `/api/files?path=…`, `/n/x`, `/`, unreferenced attachments, `.notesapp` and `.git` paths (escaped and dot-segment variants too) on the publish server and get `404`. Not yet: math and Mermaid show as source on public pages; a snapshot links to another published note only if that note was published first (republish to update).
 
 ### 27. Per-note encryption
 

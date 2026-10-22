@@ -10,6 +10,8 @@ import { useLayoutEffect, useRef } from 'react';
 import { currentSettings, currentTree, fetchNoteMeta, fetchTags } from '../../api/hooks';
 import { openContextMenu } from '../../components/overlays/openContextMenu';
 import { clearActiveEditor, setActiveEditor } from '../../editor/activeEditor';
+// The palette's editor commands run on this editor too (extensions/builtins.ts).
+import '../../editor/kit';
 import { headingSource, tagSource, wikilinkSource } from '../../editor/completion';
 import { noteContext, type NoteContext } from '../../editor/context';
 import { followLinkAtCursor, toggleCheckbox } from '../../editor/editorCommands';

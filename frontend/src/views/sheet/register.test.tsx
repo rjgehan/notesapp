@@ -5,9 +5,8 @@ import type { FileEntry } from '../../api/types';
 import { allCommands } from '../../features/commands';
 import { activeSheet, setActiveSheet, type SheetActions } from '../../sheets/activeSheet';
 import { parseSheet } from '../../sheets/format';
-import { mergeSheetText } from '../../sheets/merge';
 import { viewFor } from '../registry';
-import { matchSheet, registerSheetView, SHEET_COMMANDS } from './register';
+import { matchSheet, registerSheetView, SHEET_COMMANDS, sheetMerge } from './register';
 import { sheetTheme, useSheetTheme } from './theme';
 
 function entry(path: string): FileEntry {
@@ -26,7 +25,7 @@ describe('the sheet view descriptor', () => {
     expect(matchSheet('a/B.SHEET')).toBe(6);
     expect(matchSheet('notes.sheet.md')).toBe(0);
     const d = viewFor(entry('Budget.sheet'));
-    expect(d).toMatchObject({ id: 'sheet', textual: true, modes: ['edit'], icon: FileSpreadsheet, merge: mergeSheetText });
+    expect(d).toMatchObject({ id: 'sheet', textual: true, modes: ['edit'], icon: FileSpreadsheet, merge: sheetMerge.merge });
     expect(d.create?.label).toBe('spreadsheet');
     expect(d.create?.extension).toBe('sheet');
     const created = parseSheet(d.create!.initialContent());
@@ -35,6 +34,18 @@ describe('the sheet view descriptor', () => {
     expect((await d.load()).default).toBeTypeOf('function');
     // Embeds load their own small chunk (§6.21.7).
     expect((await d.loadEmbed!()).default).toBeTypeOf('function');
+  });
+
+  it('merges cells once the merge has loaded with the view (a chunk of its own)', async () => {
+    registerSheetView();
+    const d = viewFor(entry('Budget.sheet'));
+    const base = d.create!.initialContent();
+    const set = (cell: string, v: string) => base.replace('"cells": {}', `"cells": { "${cell}": { "v": "${v}" } }`);
+    await d.load();
+    await sheetMerge.ready();
+    const merged = d.merge!(base, set('A1', 'mine'), set('B2', 'theirs'));
+    const file = parseSheet(merged!);
+    expect(file.ok && Object.keys(file.file.sheets[0].cells).sort()).toEqual(['A1', 'B2']);
   });
 
   it('offers number formats, charts, import and export on the open sheet, and import as a new file anywhere', () => {

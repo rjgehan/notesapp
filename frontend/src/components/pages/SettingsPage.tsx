@@ -22,7 +22,7 @@ import { vimAvailable } from '../../editor/vimMode';
 import { clearOfflineCopies, noteCache } from '../../offline/offlineStore';
 import { setOfflineMedia } from '../../pwa/serviceWorker';
 import { pageBuild } from '../../state/buildCheck';
-import { ENCRYPTION_LOCK_CHOICES, usePrefs, type SyntaxVisibility, type ThemePref } from '../../state/prefs';
+import { ENCRYPTION_LOCK_CHOICES, usePrefs, type ScriptsPref, type SyntaxVisibility, type ThemePref } from '../../state/prefs';
 import { toast } from '../../state/toasts';
 import { useUi } from '../../state/ui';
 import type { DiscardedRecord } from '../../sync/drafts';
@@ -907,6 +907,18 @@ function DeviceSection() {
       </Row>
       <Row label="Load remote images" description="Off: images from other sites show a placeholder until tapped.">
         <Toggle label="Load remote images" checked={prefs.loadRemoteImages} onChange={(loadRemoteImages) => prefs.update({ loadRemoteImages })} />
+      </Row>
+      <Row label="Scripts in notes" description="Script and Dataview blocks run in a sandbox that can read your notes but not change them or reach the network. Ask: a Run button first. Off: they show as code.">
+        <Select<ScriptsPref>
+          label="Scripts in notes"
+          value={prefs.scripts}
+          options={[
+            ['auto', 'Run as the note shows'],
+            ['ask', 'Ask before running'],
+            ['off', 'Off (show the code)'],
+          ]}
+          onChange={(scripts) => prefs.update({ scripts })}
+        />
       </Row>
       <Row
         label="Vim key bindings"
