@@ -20,6 +20,7 @@ import { vaultChanged, type NoteContext } from './context';
 import { noteExtensions, type EditorHooks } from './editorSetup';
 import { maybeShowTabEscapeHint } from './tabEscapeHint';
 import { attachVim, vimWanted } from './vimMode';
+import { usePaneActive } from '../workspace/PaneContext';
 
 export interface NoteEditorProps {
   session: DocumentSession;
@@ -44,10 +45,19 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
   const loadRemoteImages = usePrefs((s) => s.loadRemoteImages);
   const tree = useTree().data;
   const callbacks = useRef({ onToggleMode, onView });
+  // Only the active pane's editor is the active editor and takes focus when mounted (DESIGN §6.38).
+  const paneActive = usePaneActive();
+  const paneActiveRef = useRef(paneActive);
 
   useLayoutEffect(() => {
     callbacks.current = { onToggleMode, onView };
+    paneActiveRef.current = paneActive;
   });
+
+  // The pane became active: its editor is the one palette commands and the toolbar act on.
+  useLayoutEffect(() => {
+    if (paneActive && view.current) setActiveEditor(view.current);
+  }, [paneActive]);
 
   useLayoutEffect(() => {
     const parent = host.current;
@@ -82,19 +92,20 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       livePreview: preview ? { visibility: syntaxVisibility, locked: preview === 'locked', checkboxes: !readOnly, remoteImages: loadRemoteImages } : null,
     };
     const state = session.prepareState((st) => st.update({ effects: StateEffect.reconfigure.of(extensions(ctx, hooks)) }).state);
-    const v = new EditorView({ state, parent });
+    // Every transaction goes through the session, which keeps the file's editors in other panes equal.
+    const v = new EditorView({ state, parent, dispatchTransactions: (trs, ev) => session.routeTransactions(ev, trs) });
     view.current = v;
     // The first vim editor loads its chunk, then switches it on.
     attachVim(v, vim);
     session.attach(v);
-    setActiveEditor(v);
+    if (paneActiveRef.current) setActiveEditor(v);
     const onFocus = () => {
       setActiveEditor(v);
       maybeShowTabEscapeHint();
     };
     v.contentDOM.addEventListener('focus', onFocus);
     callbacks.current.onView?.(v);
-    if (autoFocus || wantsNoteFocus()) v.focus();
+    if (paneActiveRef.current && (autoFocus || wantsNoteFocus())) v.focus();
     return () => {
       v.contentDOM.removeEventListener('focus', onFocus);
       clearActiveEditor(v);

@@ -24,6 +24,7 @@ import './styles/reading.css';
 import './styles/features.css';
 import './styles/bookmarks.css';
 import './styles/hotkeys.css';
+import './workspace/workspace.css';
 import './styles/mobile.css';
 
 async function boot(): Promise<void> {

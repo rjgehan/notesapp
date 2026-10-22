@@ -12,6 +12,7 @@ import { folderTemplateOutput, placeTemplateCursor } from './folderTemplates';
 import { createPath, resolve } from './links';
 import { noteRoute, pathFromLocation } from './paths';
 import { toastError } from './errors';
+import { takeNewTabGesture } from '../workspace/gesture';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -24,7 +25,22 @@ export function setNavigator(fn: Navigate): void {
   navigateFn = fn;
 }
 
+/** Opens a route in a new tab (the workspace, ROADMAP item 11); null until it registers. */
+let newTabOpener: ((to: string) => void) | null = null;
+
+export function setNewTabOpener(fn: ((to: string) => void) | null): void {
+  newTabOpener = fn;
+}
+
+/**
+ * Navigates the active tab, or opens a new tab when the click or key press being handled asked
+ * for one (Mod-click, middle click, Mod-Enter; DESIGN §6.38).
+ */
 export function navigateTo(to: string, opts?: { replace?: boolean }): void {
+  if (!opts?.replace && newTabOpener && takeNewTabGesture()) {
+    newTabOpener(to);
+    return;
+  }
   navigateFn(to, opts);
 }
 

@@ -1,0 +1,367 @@
+/* Tabs and split panes (ROADMAP item 11, DESIGN §6.38). Sizes in px (no rem: rootFontSize.test.ts). */
+
+.ws-layout {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ws-pane {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--background-primary);
+}
+
+.ws-pane.has-left {
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.ws-pane.has-top {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.ws-pane-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- tab strip ---------- */
+
+.ws-tab-bar {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  height: 34px;
+  padding: 0 4px;
+  gap: 2px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.app-shell.is-desktop .ws-pane:not(.has-top) > .ws-tab-bar {
+  padding-top: 4px;
+  height: 38px;
+}
+
+.ws-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.ws-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.ws-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 200px;
+  min-width: 72px;
+  max-width: 200px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ws-tab:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.ws-tab.is-active {
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+/* The tab the URL shows, when there is more than one pane. */
+.ws-pane.is-split.is-active .ws-tab.is-focused::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+}
+
+.ws-tab:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+.ws-tab.is-pinned {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 140px;
+  padding-right: 8px;
+}
+
+.ws-tab.is-missing .ws-tab-title {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+
+.ws-tab.drop-before {
+  box-shadow: inset 2px 0 0 var(--interactive-accent);
+}
+
+.ws-tab.drop-after {
+  box-shadow: inset -2px 0 0 var(--interactive-accent);
+}
+
+.ws-tab-icon {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.ws-tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ws-tab-pin {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.ws-tab-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-faint);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ws-tab:hover .ws-tab-close,
+.ws-tab.is-active .ws-tab-close {
+  opacity: 1;
+}
+
+.ws-tab-close:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+@media (pointer: coarse) {
+  .ws-tab-close {
+    opacity: 1;
+  }
+}
+
+.ws-tab-bar .icon-button {
+  align-self: center;
+  min-width: 26px;
+  min-height: 26px;
+  color: var(--text-muted);
+}
+
+.ws-tab-actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  padding-left: 4px;
+  flex: none;
+}
+
+/* ---------- dividers and drop zones ---------- */
+
+.ws-divider {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+
+.ws-divider.is-row {
+  width: 7px;
+  margin-left: -3px;
+  cursor: col-resize;
+}
+
+.ws-divider.is-column {
+  height: 7px;
+  margin-top: -3px;
+  cursor: row-resize;
+}
+
+.ws-divider:hover,
+.ws-divider:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+}
+
+body.is-resizing-rows {
+  cursor: row-resize;
+  user-select: none;
+}
+
+.ws-drop-zone {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+  border: 2px solid var(--interactive-accent);
+  inset: 6px;
+}
+
+.ws-drop-zone.is-left {
+  right: 50%;
+}
+
+.ws-drop-zone.is-right {
+  left: 50%;
+}
+
+.ws-drop-zone.is-up {
+  bottom: 50%;
+}
+
+.ws-drop-zone.is-down {
+  top: 50%;
+}
+
+/* ---------- pages ---------- */
+
+.ws-new-tab-recent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 24px;
+}
+
+.ws-new-tab-recent h3 {
+  margin: 0 0 4px;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ws-shown-elsewhere p {
+  color: var(--text-muted);
+}
+
+/* ---------- phone: the tabs button and the switcher ---------- */
+
+.top-bar-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 3px;
+  border: 2px solid currentColor;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ws-switcher {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 max(12px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(12px, env(safe-area-inset-left));
+}
+
+.ws-switcher-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0 8px;
+}
+
+.ws-switcher-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.ws-switcher-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.ws-switcher-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-m);
+}
+
+.ws-switcher-row.is-active {
+  background: var(--background-modifier-hover);
+}
+
+.ws-switcher-row .icon-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.ws-switcher-open {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 16px;
+  text-align: left;
+}
+
+.ws-switcher-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ws-switcher-title,
+.ws-switcher-folder {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ws-switcher-folder {
+  color: var(--text-muted);
+  font-size: 13px;
+}
