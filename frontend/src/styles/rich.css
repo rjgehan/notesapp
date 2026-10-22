@@ -274,11 +274,14 @@ pre.code-block:hover > .code-copy,
   white-space: pre-wrap;
 }
 
+/* A wide formula scrolls sideways. `contain: inline-size` keeps its width out of the column's
+   minimum width, so in Live Preview it never widens the editor past a phone's screen. */
 .markdown-rendered .math-block,
 .markdown-rendered .math-display {
   display: block;
   overflow-x: auto;
   overflow-y: hidden;
+  contain: inline-size;
 }
 
 .markdown-rendered .math-block {
@@ -312,6 +315,9 @@ pre.code-block:hover > .code-copy,
 .mermaid-block > .mermaid-svg {
   overflow-x: auto;
   overflow-y: hidden;
+  /* The min-width stays inside this scroller: it never widens the note (Live Preview's editor
+     sizes to its widest content otherwise, past a phone's screen). */
+  contain: inline-size;
 }
 
 .mermaid-block > .mermaid-svg > svg {

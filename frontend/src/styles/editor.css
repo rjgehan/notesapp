@@ -31,6 +31,13 @@
   padding: 0;
 }
 
+/* Wrapped text never needs more width than the note. Without this the content is as wide as its
+   widest widget (a code block or a diagram in an embedded note, a callout, a wide formula), so on a
+   phone every line ran past the right edge of the screen; such a widget scrolls in its own box. */
+.note-editor .cm-editor .cm-content.cm-lineWrapping {
+  min-width: 0;
+}
+
 .note-editor .cm-editor .cm-cursor,
 .note-editor .cm-editor .cm-dropCursor {
   border-left: 2px solid var(--interactive-accent);

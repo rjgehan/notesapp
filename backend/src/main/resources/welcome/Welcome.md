@@ -15,6 +15,7 @@ This vault is a folder of plain Markdown files on your own server. Everything yo
 - Create a note with **New note** (`Mod-Alt-N`) or open the quick switcher (`Mod-O`) and type a name that does not exist yet.
 - Link notes with double brackets: [[My first note]]. A link to a note that does not exist is shown as unresolved; following it creates the note.
 - Link to a heading with `[[Note#Heading]]`, and show other text with `[[Note|label]]`.
+- `Mod`-click a link (tap it on a phone) to follow it. Click inside its text to edit it: the whole link shows as typed, so you can change where it goes.
 - Paste or drop an image to embed it: it is stored in `Attachments/` and inserted as `![[image.png]]`.
 - Renaming or moving a note updates the links that point to it.
 - The **Backlinks** panel lists the notes that link here, and plain-text mentions you can turn into links.
