@@ -101,7 +101,7 @@ public class SearchService {
 		for (VaultIndex.SearchHit hit : outcome.hits().subList(0, Math.min(limit, outcome.hits().size()))) {
 			NoteRecord note = hit.note();
 			String basename = PathNames.basenameOf(PathNames.nameOf(note.path()));
-			SnippetBuilder.Snippets snippets = SnippetBuilder.build(basename, note.text(), note.parse(),
+			SnippetBuilder.Snippets snippets = SnippetBuilder.build(basename, note.searchText(), note.parse(),
 					outcome.patterns(), outcome.regexes(), outcome.budget(), hit.kind() == FileKind.PDF);
 			results.add(new SearchHit(note.path(), basename, hit.kind(), Math.round(hit.score() * 100) / 100.0,
 					hit.mtime(), snippets.titleRanges(), snippets.matches(), snippets.moreMatches()));
