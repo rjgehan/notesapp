@@ -25,7 +25,7 @@ services:
   tailscale:
     image: tailscale/tailscale:stable
     container_name: notesapp-tailscale
-    # Writes serve.json (HTTPS :443 → the app on 127.0.0.1:8080, tailnet only) and makes the data
+    # Writes serve.json (HTTPS :443 → the app at notesapp:8080 on the private notes-internal network, tailnet only) and makes the data
     # folder writable by the app's uid 1000, then hands over to Tailscale's normal entrypoint. Only with
     # NOTES_PUBLISH_FUNNEL=true below does serve.json also get :8443 → the read-only publish server on
     # 127.0.0.1:8081 with Funnel allowed for that port alone (public publishing, docs/CASAOS.md).
@@ -40,8 +40,8 @@ services:
         {
           "TCP": { "443": { "HTTPS": true }, "8443": { "HTTPS": true } },
           "Web": {
-            "notes.CHANGE-ME.ts.net:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:8080" } } },
-            "notes.CHANGE-ME.ts.net:8443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:8081" } } }
+            "notes.CHANGE-ME.ts.net:443": { "Handlers": { "/": { "Proxy": "http://notesapp:8080" } } },
+            "notes.CHANGE-ME.ts.net:8443": { "Handlers": { "/": { "Proxy": "http://notesapp:8081" } } }
           },
           "AllowFunnel": { "notes.CHANGE-ME.ts.net:443": false, "notes.CHANGE-ME.ts.net:8443": true }
         }
@@ -50,7 +50,7 @@ services:
         cat > /config/serve.json <<'JSON'
         {
           "TCP": { "443": { "HTTPS": true } },
-          "Web": { "notes.CHANGE-ME.ts.net:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:8080" } } } },
+          "Web": { "notes.CHANGE-ME.ts.net:443": { "Handlers": { "/": { "Proxy": "http://notesapp:8080" } } } },
           "AllowFunnel": { "notes.CHANGE-ME.ts.net:443": false }
         }
         JSON
@@ -63,12 +63,14 @@ services:
       TS_STATE_DIR: /var/lib/tailscale
       TS_SERVE_CONFIG: /config/serve.json
       TS_AUTH_ONCE: "true"
-      TS_USERSPACE: "false"                     # kernel mode is required by the app's startup check
+      TS_USERSPACE: "false"
       TS_ENABLE_HEALTH_CHECK: "true"
       TS_LOCAL_ADDR_PORT: 127.0.0.1:9002
       # Public publishing (docs/CASAOS.md "Public publishing"): "true" adds the Funnel entry for the publish
       # server to serve.json. Off. Needs NOTES_PUBLISH_ENABLED="true" on notes as well; either alone exposes nothing.
       NOTES_PUBLISH_FUNNEL: "false"
+    networks:
+      - notes-internal
     volumes:
       - /DATA/AppData/notesapp/tailscale:/var/lib/tailscale
       - /DATA/AppData/notesapp/data:/notes-data
@@ -89,15 +91,20 @@ services:
   notes:
     image: ghcr.io/rjgehan/notesapp:latest
     container_name: notesapp
-    network_mode: service:tailscale             # only reachable through Tailscale; no ports
+    # Its own container on the private notes-internal network: no ports are published, so only the
+    # tailscale container (tailscale serve) can reach it. CasaOS cannot run network_mode: service:… apps.
+    networks:
+      - notes-internal
     depends_on:
       tailscale:
         condition: service_healthy
     environment:
       TZ: America/New_York
-      NOTES_ALLOWED_HOSTS: notes.CHANGE-ME.ts.net
+      NOTES_ALLOWED_HOSTS: notes.CHANGE-ME.ts.net,notesapp:8080
       NOTES_IDENTITY_ALLOWED_LOGINS: you@example.com   # your Tailscale login; comma-separate several
-      NOTES_TAILSCALE_WATCHDOG_ENABLED: "true"
+      SERVER_ADDRESS: 0.0.0.0                   # listen on notes-internal (still no published ports)
+      NOTES_SECURITY_REQUIRE_TAILSCALE_INTERFACE: "false"   # Tailscale runs in its own container here
+      NOTES_TAILSCALE_WATCHDOG_ENABLED: "false"
       # Files larger than this stay in the vault and in backups but out of git history (0 = version
       # everything; otherwise at least 5MB, or the app refuses to start).
       NOTES_GIT_LARGE_FILE_THRESHOLD: 25MB
@@ -145,6 +152,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     logging: *logging
     restart: unless-stopped
+
+networks:
+  notes-internal: {}
 
 x-casaos:
   architectures:
