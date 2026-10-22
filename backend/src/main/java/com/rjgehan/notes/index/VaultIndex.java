@@ -138,6 +138,14 @@ public class VaultIndex {
 		return read(() -> this.notes.get(path));
 	}
 
+	/**
+	 * Every note, in no order: a snapshot for scans of the frontmatter (the calendar's dated notes, ROADMAP item 14)
+	 * that run without the lock. Records are immutable.
+	 */
+	public List<NoteRecord> notes() {
+		return read(() -> new ArrayList<>(this.notes.values()));
+	}
+
 	/** True for an indexed folder; the root {@code ""} always exists. */
 	public boolean isFolder(String path) {
 		return path.isEmpty() || read(() -> this.folders.contains(path));

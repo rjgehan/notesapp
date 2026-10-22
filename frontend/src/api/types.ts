@@ -859,3 +859,17 @@ export interface HabitsResponse {
   dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
   daily: DailyNoteValues[];     // daily notes with simple frontmatter values
 }
+
+// ---------- Calendar (API.md §25, ROADMAP item 14) ----------
+export interface DatedNote {
+  path: VaultPath;
+  day: LocalDate;               // the date part of value
+  property: string;             // the frontmatter key, as written: 'date'
+  value: string;                // as written: '2026-10-21', '2026-10-21T09:30' or '[[2026-10-21]]'
+}
+export interface DatedNotesResponse {
+  from: LocalDate;
+  to: LocalDate;
+  properties: string[];         // the properties read, ['date'] by default
+  notes: DatedNote[];           // by day, then path; a note once per day
+}

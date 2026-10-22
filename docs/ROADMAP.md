@@ -64,7 +64,7 @@ DESIGN.md has the details.
 | 11 | Tabs and split panes *(declined for v1)* | M | M | |
 | 12 | Bookmarks (starred) and a recent-files pane | M | S | |
 | 13 | Properties editor (typed frontmatter UI) | M | M | |
-| 14 | Calendar view | M | M | 4 optional |
+| 14 | Calendar view *(built 2026-10-21, `feat/calendar`)* | M | M | 4 optional |
 | 15 | Kanban boards *(built 2026-10-21, `feat/kanban`)* | M | M | 4 |
 | 16 | Graph view *(declined for v1)* | M | M | |
 | 17 | Dataview-style query blocks *(shrinks to a `query()` helper inside 40)* | M | S | 40; 13 helps |
@@ -739,6 +739,15 @@ Stored in `.notesapp/bookmarks.json`, in a format compatible with Obsidian's `bo
 | Value | Effort | Depends on |
 |---|---|---|
 | M | M | 4 optional |
+
+**Status:** built (wave 3, branch `feat/calendar`). `/x/calendar` (ribbon, drawer, *Open Calendar: this week*) shows a month of six weeks or a week, and the right panel **Calendar** (the bottom sheet on phones) a compact month like Obsidian's Calendar plugin. Each day shows its daily note, its tasks (by due date, else start date, with checks to complete them and *Add task*), the notes a frontmatter property dates on it, and the coming occurrences of repeating tasks. Tapping a day opens its daily note, or creates it from the daily-note template rendered for that day. Design in DESIGN §6.32, API in API.md §25. Deviations and additions:
+
+- **Dated notes come from a new endpoint**, `GET /api/notes/by-date?from&to&property`, read from the index's parsed frontmatter: `date` by default, or up to five properties chosen per device (*Note date properties* in the page's options). Dates, date-times, wikilinks to a day (`"[[2026-10-21]]"`) and lists of them count; templates are left out.
+- **Repeating tasks are projected** on later days (faint, without a check) when they repeat from their due date; tasks repeating from completion are not, since their next date depends on when they are done.
+- **Daily notes of any format**, week-based ones included, are found by formatting each day, never by parsing names. Another day's note renders `{{date}}` as that day and `{{time}}` as now, as Obsidian does.
+- **Keyboard and touch:** a WAI-ARIA date grid (arrows, Home/End, Page Up/Down, Shift for a year, Enter opens); a sideways swipe turns the month; 44 px targets on touch screens. The address keeps the focused day and the view (`?date=2026-10-21&view=week`).
+- **Per-device options**: the first day of the week (the language's by default), week numbers (ISO 8601 for Monday weeks), the date properties.
+- Not built: dragging tasks between days, multi-day events, a year view.
 
 ### 15. Kanban boards
 

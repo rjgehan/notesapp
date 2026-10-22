@@ -4,8 +4,8 @@ import { isProblem } from '../api/client';
 import { api } from '../api/endpoints';
 import { currentSettings, currentTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
-import type { DailyNotesSettings } from '../api/types';
-import { findFileIgnoreCase } from '../api/vaultTree';
+import type { DailyNotesSettings, FileEntry } from '../api/types';
+import { findFileIgnoreCase, type VaultTree } from '../api/vaultTree';
 import { newIdempotencyKey } from '../state/clientId';
 import { toast } from '../state/toasts';
 import { applyWriteResult } from '../sync/treePatch';
@@ -54,12 +54,35 @@ export function isDailyNote(path: string | null): boolean {
 }
 
 /**
+ * The daily note of `day` in the tree (case-insensitive), or undefined. The path is computed by
+ * formatting the day, never by parsing names, so any format works, week-based ones (`gggg-[W]ww`)
+ * included, which dayjs cannot parse back.
+ */
+export function dailyNoteEntry(settings: Pick<DailyNotesSettings, 'format' | 'folder'>, tree: VaultTree, day: Dayjs): FileEntry | undefined {
+  return findFileIgnoreCase(tree, dailyNotePath(settings, day));
+}
+
+/** `day` at the time of day of `now`: what `{{date}}` and `{{time}}` render in another day's note. */
+export function atTimeOf(day: Dayjs, now: Dayjs): Dayjs {
+  return day.hour(now.hour()).minute(now.minute()).second(now.second()).millisecond(now.millisecond());
+}
+
+/**
  * "Open today's daily note" (API.md §15.2): open it, or create it (201 and 409 both open it).
  * Resolves true when a note was opened; false when it failed (a toast says why) or the template's
  * questions were cancelled.
  */
-export async function openTodaysDailyNote(now: Dayjs = dayjs()): Promise<boolean> {
+export function openTodaysDailyNote(now: Dayjs = dayjs()): Promise<boolean> {
+  return openDailyNote(now);
+}
+
+/**
+ * The daily note of any day (the calendar, ROADMAP item 14), by the procedure of API.md §15.2:
+ * the template renders that day, at the current time of day.
+ */
+export async function openDailyNote(day: Dayjs): Promise<boolean> {
   const s = currentSettings().dailyNotes;
+  const now = atTimeOf(day, dayjs());
   const name = dailyNoteName(s, now);
   const path = joinPath(s.folder, name + '.md');
   const hit = findFileIgnoreCase(currentTree(), path);
@@ -72,7 +95,7 @@ export async function openTodaysDailyNote(now: Dayjs = dayjs()): Promise<boolean
     try {
       // Templates (and the YAML library behind them) load on first use.
       const { renderTemplateFile } = await import('./templates');
-      const rendered = await renderTemplateFile(s.template, lastSegment(name));
+      const rendered = await renderTemplateFile(s.template, lastSegment(name), now);
       // Cancelling the template's questions creates nothing.
       if (!rendered) return false;
       out = rendered;

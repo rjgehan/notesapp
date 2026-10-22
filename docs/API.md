@@ -2731,6 +2731,20 @@ export interface HabitsResponse {
   dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
   daily: DailyNoteValues[];     // daily notes with simple frontmatter values
 }
+
+// ---------- Calendar (API.md §25, ROADMAP item 14) ----------
+export interface DatedNote {
+  path: VaultPath;
+  day: LocalDate;               // the date part of value
+  property: string;             // the frontmatter key, as written: 'date'
+  value: string;                // as written: '2026-10-21', '2026-10-21T09:30' or '[[2026-10-21]]'
+}
+export interface DatedNotesResponse {
+  from: LocalDate;
+  to: LocalDate;
+  properties: string[];         // the properties read, ['date'] by default
+  notes: DatedNote[];           // by day, then path; a note once per day
+}
 ```
 
 ---
@@ -2816,6 +2830,7 @@ export interface HabitsResponse {
 | GET | `/api/ai/status` | | 200 `AiStatus` | 24.4 |
 | POST | `/api/ai/ask` | `AiAskRequest` | 200 `text/event-stream` | 24.2 |
 | POST | `/api/ai/summarize` | `AiSummarizeRequest` | 200 `text/event-stream` | 24.3 |
+| GET | `/api/notes/by-date?from=&to=&property=` | | 200 `DatedNotesResponse` | 25.1 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
 **SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions) and `/capture` (quick capture, DESIGN §6.27). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
@@ -2862,6 +2877,7 @@ export interface HabitsResponse {
 | `TaskEvent`, `TaskDeletedEvent`, `ListChangedEvent` | Same names in `com.rjgehan.notes.events` | Content events: `origin` is serialized and drives echo suppression. `TaskEvent` covers `task.created` and `task.changed`. |
 | `FlashcardConfig`, `FlashcardCardState`, `FlashcardCard`, `FlashcardsResponse`, `FlashcardReview`, `FlashcardReviewRequest`, `FlashcardUndoRequest`, `FlashcardPruneRequest`, `FlashcardConfigUpdateRequest`, `FlashcardWriteResult`, `FlashcardNote`, `FlashcardNotesResponse` | Same (§34) | `FlashcardCardState.phase` is the enum `FlashcardPhase`; `FlashcardConfigUpdateRequest.config` is a `JsonNode`, validated field by field; `FlashcardReview` and `FlashcardUndoRequest` take `at` as a string, parsed as an ISO-8601 instant |
 | `HabitNote`, `DailyNoteValues`, `HabitsResponse` | Same (§35) | `HabitNote.properties` is a `Map<String, @Nullable Object>` (the frontmatter as parsed, §5.5.3 of DESIGN); `DailyNoteValues.values` holds `Boolean`, `Number` and `String` values only |
+| `DatedNote`, `DatedNotesResponse` | Same (§25) | Built by `calendar.DatedNoteService` from the index's parsed frontmatter |
 | `FlashcardsChangedEvent` | Same name in `com.rjgehan.notes.events` | An extension event (§34.7): it echoes `origin` like a content event, and `cards` maps removed records to `null` |
 | `AiSettings` | Same name in `com.rjgehan.notes.settings` | `model` is a `String` checked against `AiSettings.MODELS` |
 | `AiAskRequest`, `AiSummarizeRequest`, `AiTurn`, `AiPrompt`, `AiStatus`, `AiModelInfo`, `AiSource`, `AiStartEvent`, `AiDeltaEvent`, `AiRestartEvent`, `AiUsage`, `AiDoneEvent`, `AiErrorEvent` | Same | Every request component is `@Nullable` (the service validates and applies defaults). `AiStatus.state` is the enum `AiState` (`off`, `not-configured`, `over-budget`, `ready`). The stream events are written by `AiController` through an `SseEmitter`, not through `EventHub`. |
@@ -3312,6 +3328,30 @@ The response to §24.2 and §24.3 is `text/event-stream` with `Cache-Control: no
 | `error` | `AiErrorEvent` `{code, message}` | The end, after a failure: `auth` (the token or key was refused), `rate-limited` (also a subscription's usage limit), `overloaded`, `bad-request`, `unavailable` (network, timeout), `busy` (two answers are already being written), `internal-error`. `message` never contains the key or note text. |
 
 A stream that ends without `done` or `error` was cut off. Closing the connection (Stop) stops the answer on the server too; what was generated until then is still counted in the month's spend, estimated at four characters per token.
+
+---
+
+## 25. Calendar: notes dated by a property (ROADMAP item 14)
+
+The calendar (DESIGN §6.32) shows each day's daily note (found in the tree, §7), its tasks (§20) and the notes whose frontmatter dates them. Only the last needs the server: it reads the index's parsed frontmatter (DESIGN §5.5.3), so a month is one request whatever the size of the vault.
+
+### 25.1 `GET /api/notes/by-date?from=&to=&property=`
+
+| Parameter | Rule |
+|---|---|
+| `from`, `to` | Required, `YYYY-MM-DD`, `to` not before `from`, at most 366 days apart; both ends included |
+| `property` | Optional: up to 5 comma-separated frontmatter keys of at most 64 characters, matched ignoring case. Default `date` (Obsidian's Date and Date & time property type) |
+
+A value dates a note when it is a string holding a date (`2026-10-21`), a date-time (`2026-10-21T09:30`, `2026-10-21 09:30:15`, with optional fraction and offset; the day is its date part as written, never converted to another zone), or a wikilink to a day (`"[[2026-10-21]]"`, `"[[2026-10-21|Wednesday]]"`), or a list of up to 50 such strings. Other values, impossible dates and notes with invalid YAML are skipped. Notes in the templates folder (whose dates are placeholders) and `.excalidraw.md` drawings are left out. A note is listed once per day, with the first property that names that day.
+
+`200 DatedNotesResponse`, sorted by `day`, then `path`:
+
+```json
+{ "from": "2026-10-01", "to": "2026-10-31", "properties": ["date"],
+  "notes": [ { "path": "Meetings/Kickoff.md", "day": "2026-10-21", "property": "date", "value": "2026-10-21T09:30" } ] }
+```
+
+`400 bad-request` names the first bad parameter. The answer is not pushed: clients refetch it after `file.*`, `entry.moved` and `folder.deleted` events for notes (§16.4), debounced.
 
 ---
 

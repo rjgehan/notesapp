@@ -226,17 +226,21 @@ export type TitledTemplate = (title: string) => TemplateOutput;
  * "New note from template" renders it before the note has its name, and again once the name is
  * known. Resolves null when the questions were cancelled; rejects when the file cannot be read.
  */
-export async function templateRenderer(templatePath: string): Promise<TitledTemplate | null> {
+export async function templateRenderer(templatePath: string, at?: Dayjs): Promise<TitledTemplate | null> {
   const settings = currentSettings();
   const content = await readTemplate(templatePath);
   const answers = await askPrompts(content, displayName(templatePath));
   if (!answers) return null;
-  const now = dayjs();
+  const now = at ?? dayjs();
   return (title) => renderTemplateOutput(content, { title, now, settings: settings.templates, answers });
 }
 
-/** Renders a template file for a new note titled `title` (daily notes); null when cancelled. */
-export async function renderTemplateFile(templatePath: string, title: string): Promise<TemplateOutput | null> {
-  const render = await templateRenderer(templatePath);
+/**
+ * Renders a template file for a new note titled `title` (daily notes); null when cancelled. `now` is
+ * the moment its `{{date}}` and `{{time}}` stand for: the daily note of another day, created from the
+ * calendar (DESIGN §6.32), renders that day at the current time of day, as Obsidian does.
+ */
+export async function renderTemplateFile(templatePath: string, title: string, now?: Dayjs): Promise<TemplateOutput | null> {
+  const render = await templateRenderer(templatePath, now);
   return render ? render(title) : null;
 }
