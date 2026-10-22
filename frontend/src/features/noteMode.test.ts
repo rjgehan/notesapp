@@ -12,7 +12,7 @@ import { syncTarget } from '../sync/liveSync';
 import { getCommand, runCommand } from './commands';
 import { createNote } from './fileOps';
 import { wantsNoteFocus } from './focus';
-import { currentNoteMode, isEditingMode, noteModeOf, setNoteMode, showLivePreview, toggleSourceMode, viewModeFor } from './noteMode';
+import { currentNoteMode, isEditingMode, modeSwitchLine, noteModeOf, setNoteMode, showLivePreview, toggleSourceMode, viewModeFor } from './noteMode';
 import { DEFAULT_SETTINGS } from './settings';
 
 /** The store key of `path` in the active pane. */
@@ -152,6 +152,14 @@ describe('Show Markdown source, the escape hatch', () => {
     setNoteMode('source');
     expect(wantsNoteFocus()).toBe(true);
     note.remove();
+  });
+});
+
+describe('the scroll position across a mode switch', () => {
+  it('keeps the top of the note at the top (the title and properties stay in view), else the top line', () => {
+    expect(modeSwitchLine(0, 3)).toBeNull();
+    expect(modeSwitchLine(1, 3)).toBeNull();
+    expect(modeSwitchLine(240, 12)).toBe(12);
   });
 });
 

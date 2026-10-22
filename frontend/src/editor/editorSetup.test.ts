@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setHotkey } from '../features/hotkeyPrefs';
 import { isApple } from '../features/platform';
 import { destroyEditors, noteEditor, testContext } from '../test/noteEditor';
-import { plainTextExtensions } from './editorSetup';
+import { decryptedNoteExtensions, plainTextExtensions } from './editorSetup';
 
 const views: EditorView[] = [];
 afterEach(() => {
@@ -57,5 +57,31 @@ describe('Mod-E in a note (DESIGN §6.6.1, §6.25)', () => {
     const editing = note();
     modE(editing);
     expect(editing.state.doc.toString()).toBe('word');
+  });
+});
+
+describe('the decrypted text of an encrypted note (DESIGN §6.33)', () => {
+  function decrypted(doc: string, locked = false): EditorView {
+    const hooks = { onLocalChange: () => {}, onBlur: () => {}, readOnly: locked, spellcheck: false, autocorrect: false, save: () => {} };
+    const extensions = decryptedNoteExtensions(hooks, { visibility: 'hide-all', locked, checkboxes: !locked, remoteImages: false, scripts: 'off' });
+    const view = new EditorView({ state: EditorState.create({ doc, selection: { anchor: doc.length }, extensions }), parent: document.body });
+    views.push(view);
+    return view;
+  }
+
+  it('shows in Live Preview like every note: markup hides, links show as text, spellcheck stays off', () => {
+    const view = decrypted('# Plan\n\n**PIN** and [[Welcome|home]]\n');
+    expect(view.dom.classList.contains('cm-live-preview')).toBe(true);
+    const shown = view.contentDOM.textContent ?? '';
+    expect(shown).toContain('PIN and home');
+    expect(shown).not.toContain('**');
+    expect(shown).not.toContain('[[');
+    expect(view.contentDOM.getAttribute('spellcheck')).toBe('false');
+  });
+
+  it('read-only, it renders locked', () => {
+    const view = decrypted('**b**', true);
+    expect(view.state.readOnly).toBe(true);
+    expect(view.dom.classList.contains('cm-lp-locked')).toBe(true);
   });
 });

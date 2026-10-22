@@ -54,6 +54,14 @@ export function viewModeFor(mode: ViewMode, modes: readonly ViewMode[]): ViewMod
   return near.find((m) => modes.includes(m)) ?? modes[0] ?? 'read';
 }
 
+/**
+ * The line a mode switch keeps at the top: none while the note is scrolled to its top, so the
+ * title and the properties (or the frontmatter) stay in view instead of scrolling under the bar.
+ */
+export function modeSwitchLine(scrollTop: number, topLine: number): number | null {
+  return scrollTop <= 1 ? null : topLine;
+}
+
 let topLineProbe: (() => number | null) | null = null;
 let pendingLine: number | null = null;
 

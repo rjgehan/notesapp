@@ -70,6 +70,8 @@ describe('EncryptedNoteView (item 27)', () => {
     // No cloud spell checker or autocorrect sees decrypted text.
     expect(content.getAttribute('spellcheck')).toBe('false');
     expect(content.getAttribute('autocorrect')).toBe('off');
+    // Like every note, it shows in Live Preview (DESIGN §6.6.1).
+    expect(container.querySelector('.cm-editor.cm-live-preview')).not.toBeNull();
 
     const view = EditorView.findFromDOM(content)!;
     act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: '\nthird line' }, userEvent: 'input' }));

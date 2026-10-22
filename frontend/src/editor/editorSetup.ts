@@ -245,6 +245,39 @@ export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[
   ];
 }
 
+/**
+ * The decrypted text of an encrypted note (`.mdenc`, DESIGN §6.33): the plain-text editor with
+ * Markdown, in Live Preview (§6.6.1) like every note when `preview` is given. It has no note
+ * context, so nothing in it reaches the app: links and embeds show as text styled as links (no
+ * file is fetched for an embed), callouts and math stay text, and a table cell edits with
+ * spellcheck and autocorrect off like the rest of the decrypted text.
+ */
+export function decryptedNoteExtensions(hooks: EditorHooks & { save(): void }, preview: LivePreviewConfig | null): Extension[] {
+  const editable = preview !== null && !preview.locked;
+  return [
+    plainTextExtensions(hooks, markdownNoteLanguage()),
+    lineClassPlugin,
+    preview ? livePreview(preview) : [],
+    editable
+      ? tableCellSetup.of(() => [
+          isIOS ? [] : drawSelection(),
+          cellLanguage,
+          syntaxHighlighting(obsidianHighlight),
+          livePreviewInline({ ...preview, locked: false }),
+          EditorView.lineWrapping,
+          EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off', enterkeyhint: 'next' }),
+          closeBrackets(),
+          markupPairs,
+          formatting(),
+          keymap.of([...closeBracketsKeymap, ...defaultKeymap]),
+        ])
+      : [],
+    formatting(),
+    markupPairs,
+    listRenumbering,
+  ];
+}
+
 /** Plain text files (`text` view): the same editing basics, with an optional language. */
 export function plainTextExtensions(hooks: EditorHooks & { save(): void }, language: LanguageSupport | null): Extension[] {
   return [

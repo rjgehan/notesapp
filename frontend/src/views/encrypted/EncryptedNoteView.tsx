@@ -9,15 +9,15 @@ import { KeyRound, Lock, LockOpen, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { SaveStatus } from '../../components/SaveStatus';
 import { NO_RECOVERY } from '../../components/overlays/EncryptionDialogs';
-import { plainTextExtensions } from '../../editor/editorSetup';
+import { decryptedNoteExtensions } from '../../editor/editorSetup';
 import { remoteTransaction } from '../../editor/remoteDiff';
-import { markdownNoteLanguage } from '../../editor/language';
 import { decryptPayload, type WriteKey } from '../../features/encryption/cipher';
 import { createKey, lock, onLock, openCached, readPayload, unlock } from '../../features/encryption/keyring';
 import { FormatError, parseEncryptedFile, saltId, type EncryptedFile, type Payload } from '../../features/encryption/meld';
 import { decryptToMarkdown, ENCRYPTED_NOTE_WARNING, encryptedFileText } from '../../features/encryption/notes';
 import { lastSegment } from '../../features/paths';
 import { askPassphrase } from '../../state/dialogs';
+import { usePrefs } from '../../state/prefs';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import type { FileViewProps } from '../registry';
 import { setActiveEncrypted, type EncryptedControls } from './active';
@@ -62,6 +62,7 @@ export default function EncryptedNoteView({ path }: FileViewProps) {
   const ownText = useRef<string | null>(null);
   const encryption = useRef({ seq: 0, dirty: false, timer: null as ReturnType<typeof setTimeout> | null, pending: Promise.resolve() });
   const name = lastSegment(path);
+  const syntaxVisibility = usePrefs((s) => s.syntaxVisibility);
   const readOnly = !snapshot.loaded || snapshot.status === 'readonly' || snapshot.lossy;
 
   // ---------- encryption of edits ----------
@@ -185,7 +186,8 @@ export default function EncryptedNoteView({ path }: FileViewProps) {
   useLayoutEffect(() => {
     if (phase.kind !== 'unlocked' || !host.current || !unlocked.current) return;
     const u = unlocked.current;
-    const extensions = plainTextExtensions(
+    // Live Preview, like every note (DESIGN §6.6.1); read-only, it renders locked.
+    const extensions = decryptedNoteExtensions(
       {
         onLocalChange: scheduleEncrypt,
         onBlur: () => void encryptNow().then(() => session.flush()),
@@ -195,7 +197,7 @@ export default function EncryptedNoteView({ path }: FileViewProps) {
         spellcheck: false,
         autocorrect: false,
       },
-      markdownNoteLanguage(),
+      { visibility: syntaxVisibility, locked: readOnly, checkboxes: !readOnly, remoteImages: false, scripts: 'off' },
     );
     const view = new EditorView({
       state: EditorState.create({ doc: editor.current?.state.doc.toString() ?? u.text, extensions: [extensions, placeholder('Write here; it is encrypted before it leaves this page.')] }),
@@ -212,7 +214,7 @@ export default function EncryptedNoteView({ path }: FileViewProps) {
       }
       view.destroy();
     };
-  }, [phase.kind, readOnly, scheduleEncrypt, encryptNow, session]);
+  }, [phase.kind, readOnly, scheduleEncrypt, encryptNow, session, syntaxVisibility]);
 
   // Lock (manual, idle, hidden page) and leaving the view.
   useEffect(

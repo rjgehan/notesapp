@@ -14,7 +14,7 @@ import { blockSubpathId, findBlock, scanBlocks } from '../../features/blocks';
 import { NoteEditor } from '../../editor/NoteEditor';
 import { setSearchHighlight } from '../../editor/searchHighlight';
 import { wantsNoteFocus } from '../../features/focus';
-import { isEditingMode, setTopLineProbe, showLivePreview, takePendingModeLine } from '../../features/noteMode';
+import { isEditingMode, modeSwitchLine, setTopLineProbe, showLivePreview, takePendingModeLine } from '../../features/noteMode';
 import { useNoteScroll } from '../../features/noteScroll';
 import { highlightTerms } from '../../features/searchTerms';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
@@ -76,7 +76,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
       const v = editorView.current;
       if (!el || !v) return null;
       const block = v.lineBlockAtHeight(el.getBoundingClientRect().top - v.documentTop);
-      return v.state.doc.lineAt(block.from).number - 1;
+      return modeSwitchLine(el.scrollTop, v.state.doc.lineAt(block.from).number - 1);
     });
     return () => setTopLineProbe(null);
   }, [scroller, paneActive]);
