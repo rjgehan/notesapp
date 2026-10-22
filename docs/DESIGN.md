@@ -1855,9 +1855,22 @@ The `package.json` dependency set is exactly the research list plus `"yaml": "^2
 `vite.config.ts`:
 
 - Proxy `/api` to `http://127.0.0.1:8080`. Use the explicit IPv4 address, because Node on Windows may resolve `localhost` to `::1`, while the backend binds 127.0.0.1. Set `changeOrigin: false` so the backend's Host and Origin checks see the host the browser used.
-- `build.sourcemap: true`.
+- `build.sourcemap`: off. Production builds carry no source maps (they were about 40 MB of the image, and the server would hand them to anyone); `NOTES_SOURCEMAPS=1 npm run build` writes hidden ones (no `sourceMappingURL` comment) to debug a build locally.
+- `bundleBudget` (`vite-plugin-budget.ts`) fails the build when the main chunk's JavaScript exceeds its budget (§6.1.1).
+- The bare `mermaid` import resolves to `src/render/rich/mermaidShared.ts` for every importer (§6.7.1); `elkjs/lib/elk.bundled.js` to a stub.
 - The build reads `VITE_BUILD_SHA` (set by the Dockerfile; `dev` otherwise) into `import.meta.env`, for the version check of §6.18.
 - Vitest config through `/// <reference types="vitest/config" />` with the jsdom environment.
+
+#### 6.1.1 The main chunk (initial JavaScript)
+
+What a page loads before it can render anything is the entry chunk and every chunk it imports statically. It is kept to the app shell: the router, React Query, the stores, the sync layer without CodeMirror, the registries with their small descriptors, and the overlays that must take the focus inside a gesture (quick switcher, command palette, search field, prompt and other dialogs with a text field, quick capture, quick add; §6.13). Everything else is a lazy chunk:
+
+- **CodeMirror** (view, language, parsers, commands, merge's diff) is not in it. A `DocumentSession` keeps its text in an `EditorState` (`@codemirror/state` is in the main chunk) and loads its other CodeMirror parts, the undo history, the note language and the remote diff, from `sync/sessionKit.ts` at the same time as its file; it touches text only once both arrived (`sessionKitHandle.ts`).
+- **Editor commands** that the palette and the shell run (formatting, folds, find, table, `/` menu, heading rename, encrypted sections, keeping the caret above the keyboard) come from `editor/kit.ts`, which every editor imports (`NoteEditor`, a canvas card's editor). A command runs on an editor, and with an editor its kit is loaded, so the command still runs synchronously inside the key press or tap; without one it loads the kit first. The `/` menu's app items register in `editor/slashRegistry.ts`.
+- **The phone's editing toolbar** and the **`/clip` page** are lazy chunks.
+- **View merges** (drawings, spreadsheets) load with their view's chunks (`views/lazyMerge.ts`): a session of such a file belongs to a view that has loaded, and a conflict before the merge arrived shows the banner, as for a view without one. New files of these views are created from constant texts.
+
+`vite-plugin-budget.ts` measures the main chunk on every build and fails it above **350 KiB gzip** (it is about 250 KiB: 26 files, 780 KiB raw; it was 608 KiB gzip before this budget). Opening a note then loads the Markdown view's chunk with CodeMirror, Live Preview and the renderer in parallel with the note's text (about 620 KiB gzip in all).
 
 `index.html`:
 
@@ -1908,7 +1921,7 @@ frontend/src/
 │                             useHabits.ts, register.ts, ui/ (the /x/habits page and the Habits panel)
 ├── views/                    FILE-TYPE → VIEW REGISTRY (§6.8)
 │   ├── registry.ts
-│   ├── excalidraw/           drawings (§6.8.1): register.ts (descriptors, eager), format.ts and merge.ts (pure, eager),
+│   ├── excalidraw/           drawings (§6.8.1): register.ts and newDrawing.ts (eager), format.ts and merge.ts (lazy),
 │   │                         files.ts, controller.ts, env.ts, fonts.ts, ExcalidrawView.tsx (the editor, lazy),
 │   │                         DrawingEmbed.tsx (![[drawing]], lazy), svg.ts, images.ts, statics.ts, theme.ts
 │   ├── pdf/                  PDFs (§6.8.3): register.ts (descriptor and commands, eager), subpath.ts, active.ts,
@@ -1917,7 +1930,7 @@ frontend/src/
 │   ├── FileView.tsx          route target: picks descriptor, lazy-loads it, error boundary
 │   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, source and lock toggles, save status), PropertiesTable.tsx
 │   ├── ImageView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
-│   ├── sheet/                register.ts (the descriptor, main bundle); SheetView, SheetEditor, SheetGrid, FormulaBar,
+│   ├── sheet/                register.ts (the descriptor, main bundle; the format and merge load with the view); SheetView, SheetEditor, SheetGrid, FormulaBar,
 │   │                         SheetTabs, SheetDialogs, ChartsPane, importExport, gridModel, theme, useSheetDocument
 │   │                         (lazy chunk, §6.21.5); SheetEmbed (loadEmbed, §6.21.7) and SheetChart (§6.21.9)
 │   ├── canvas/               JSON Canvas boards (§6.8.2): register.ts in the main bundle, the rest a lazy chunk
@@ -2458,6 +2471,8 @@ Built in `render/rich/`, styled by `styles/rich.css`. Both load with the reading
 
 **Layout engine.** Mermaid 12 defaults to the ELK layout, whose `elkjs` is EPL-2.0 (not GPL-compatible) and 1.4 MB. `vite.config.ts` aliases `elkjs/lib/elk.bundled.js` to a stub that throws, Mermaid is initialized with `layout: 'dagre'` (Mermaid's classic layout, which Obsidian also uses), and `layout` is a secure key, so `layout: elk` in a diagram is ignored rather than failing.
 
+**One Mermaid.** Excalidraw's "Mermaid to Excalidraw" (`@excalidraw/mermaid-to-excalidraw`, §6.8.1) depends on Mermaid 11 with its own KaTeX; `package.json`'s `overrides` give it the app's Mermaid 12.2.0 and every package KaTeX 0.19.0, so each ships once. Mermaid keeps one global configuration, so `vite.config.ts` points the bare `mermaid` import at `render/rich/mermaidShared.ts`: the app (`mermaid.ts`) and everyone else (Excalidraw) get facades that each keep their own configuration and apply it, always with `layout: 'dagre'`, before each of their calls, which run one at a time so a configuration never changes under a rendering.
+
 **Placeholders and patching.** The HTML never depends on which lazy modules are loaded, so a block's patch key is the same on every render, and `hydrateRich` marks what it hydrated (a `WeakSet`): an edit elsewhere never re-renders a diagram or formula. When a block is re-inserted because it changed, hydration uses the already-loaded modules synchronously (KaTeX, loaded grammars, Mermaid's per-theme SVG cache), so it appears without a flash. The placeholder attributes `data-math`, `data-mermaid` and `data-lang` are app-reserved like the embed attributes: the sanitizer strips them from raw HTML, so a note cannot forge a placeholder.
 
 **In Live Preview** (ROADMAP item 10, §6.6.1): callouts, `$$` blocks and Mermaid blocks render through this pipeline block by block (`render/liveRich.ts`), and inline math through `renderMath`; highlighted code is the editor's own.
@@ -2602,7 +2617,7 @@ A new type adds a `@Component` with names that no other indexer `supports` (the 
 
 #### 6.8.1 Drawings (ROADMAP item 5)
 
-Excalidraw drawings are textual views over the file's `DocumentSession`, so autosave, drafts, conflicts, history, trash and live sync are the session's. The code is in `views/excalidraw/`: `register.ts`, `format.ts` and `merge.ts` are small and eager (the session's merge runs in the main chunk); `ExcalidrawView.tsx` (the editor) and `DrawingEmbed.tsx` (`![[drawing]]`) are lazy chunks, which share the Excalidraw package and the modules both use (`svg.ts`, `images.ts`, `statics.ts`, `env.ts`) in a third. On the server, `drawings.ExcalidrawDocumentIndexer` feeds drawings into search, backlinks and tags.
+Excalidraw drawings are textual views over the file's `DocumentSession`, so autosave, drafts, conflicts, history, trash and live sync are the session's. The code is in `views/excalidraw/`: `register.ts` and `newDrawing.ts` are small and eager; `format.ts` and `merge.ts` are a lazy chunk that loads with the view's chunks, so the session's merge is there before a drawing's session can conflict (`views/lazyMerge.ts`, §6.1.1); `ExcalidrawView.tsx` (the editor) and `DrawingEmbed.tsx` (`![[drawing]]`) are lazy chunks, which share the Excalidraw package and the modules both use (`svg.ts`, `images.ts`, `statics.ts`, `env.ts`) in a third. On the server, `drawings.ExcalidrawDocumentIndexer` feeds drawings into search, backlinks and tags.
 
 **Registration** (`register.ts`, called by `builtins.ts`).
 
@@ -3595,7 +3610,7 @@ The app installs to the iPhone Home Screen (Safari, Share › Add to Home Screen
 | `POST /capture/share` navigation (share target, §6.27) | Kept in Cache Storage; `303` to `/capture?share=<id>` |
 | Everything else, the whole API included | Not touched: API responses stay `no-store` and never come from a cache |
 
-- **Install** precaches every built file except source maps, `robots.txt` and Excalidraw's fonts: the shell and every lazy chunk, CodeMirror's language modes included, so nothing the app may load is missing offline. With drawings, spreadsheets, tasks and rich Markdown merged that is about 560 files and 16 MB (about 5 MB compressed; it was 165 files and 2.6 MB on its own branch), downloaded once per device and then only as files change. Excalidraw's self-hosted fonts (§6.8.1; about 230 files and 12 MB, mostly CJK subsets loaded for the characters a drawing shows) are left out (`isExcalidrawFont`): the browser's HTTP cache keeps the ones a drawing used (immutable, versioned path), and a drawing offline falls back to a system font for characters never shown before. Hashed bundles still in the previous shell cache are copied, not downloaded again. Any failure fails the install and the previous worker stays in charge. Then `skipWaiting()`.
+- **Install** precaches every built file except source maps (production builds have none, §6.1), `robots.txt`, Excalidraw's fonts and fallback font formats (`.woff`, `.ttf`: KaTeX's CSS lists them after each `.woff2`, which every supported browser uses; `isLegacyFont`, about 0.8 MB): the shell and every lazy chunk, CodeMirror's language modes included, so nothing the app may load is missing offline. With drawings, spreadsheets, tasks and rich Markdown merged that is about 560 files and 16 MB (about 5 MB compressed; it was 165 files and 2.6 MB on its own branch), downloaded once per device and then only as files change. Excalidraw's self-hosted fonts (§6.8.1; about 230 files and 12 MB, mostly CJK subsets loaded for the characters a drawing shows) are left out (`isExcalidrawFont`): the browser's HTTP cache keeps the ones a drawing used (immutable, versioned path), and a drawing offline falls back to a system font for characters never shown before. Hashed bundles still in the previous shell cache are copied, not downloaded again. Any failure fails the install and the previous worker stays in charge. Then `skipWaiting()`.
 - **Activate** deletes older `notesapp-shell-*` caches and claims the open pages.
 - Registration (`src/pwa/serviceWorker.ts`) only in production builds, with `updateViaCache: 'none'`; the server sends `sw.js` with `no-cache` and `Service-Worker-Allowed: /`, and the manifest as `application/manifest+json` with `no-cache` (§5.14). An installed app can stay open for weeks without navigating, so it also checks for a new worker when it comes back to the foreground, at most hourly. A development page unregisters any worker a preview left behind.
 

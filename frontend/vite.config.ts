@@ -4,11 +4,17 @@ import react from '@vitejs/plugin-react'
 import { createReadStream, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
+import { bundleBudget } from './vite-plugin-budget.ts'
 import { serviceWorker } from './vite-plugin-sw.ts'
 
 // The Dockerfile sets VITE_BUILD_SHA; everywhere else the build is "dev", which the
 // backend also reports outside the image, so the version check never fires (DESIGN §6.18).
 const buildSha = process.env.VITE_BUILD_SHA || 'dev'
+
+// Source maps are not built for production (about 40 MB in the image, and the server would serve
+// them to anyone who asks). NOTES_SOURCEMAPS=1 builds hidden ones (no sourceMappingURL comment) for
+// debugging a build locally (DESIGN §6.1.1).
+const sourcemap = process.env.NOTES_SOURCEMAPS === '1' ? 'hidden' : false
 
 // The dev backend's address, IPv4 on purpose: Node on Windows may resolve "localhost" to ::1 while the
 // backend binds 127.0.0.1. Override it when :8080 is taken; the backend's notes.allowed-hosts must then
@@ -116,7 +122,14 @@ function clipperDevPlugin(): Plugin {
 
 export default defineConfig({
   // The service worker is built after the app, from the files the build wrote (DESIGN §6.26).
-  plugins: [react(), packageAssetsPlugin(), clipperDevPlugin(), serviceWorker({ entry: 'src/sw/sw.ts', buildSha })],
+  // The main chunk's budget (DESIGN §6.1.1): the build fails when the initial JavaScript exceeds it.
+  plugins: [
+    react(),
+    packageAssetsPlugin(),
+    clipperDevPlugin(),
+    bundleBudget({ entry: 'index.html', maxGzipKiB: 350 }),
+    serviceWorker({ entry: 'src/sw/sw.ts', buildSha }),
+  ],
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(buildSha),
     'import.meta.env.VITE_EXCALIDRAW_ASSETS': JSON.stringify('/' + excalidrawAssets),
@@ -156,7 +169,7 @@ export default defineConfig({
     },
   },
   build: {
-    sourcemap: true,
+    sourcemap,
     rolldownOptions: {
       output: {
         // React and the router change rarely: in their own chunk they stay cached across deploys.
