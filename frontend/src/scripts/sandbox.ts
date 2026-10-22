@@ -107,7 +107,7 @@ export async function runInSandbox(run: SandboxRun, callHost: HostCaller, cpuLim
         halt.stop ??= new Stop('output', 'The script showed too much; the rest is left out');
         return context.newError(halt.stop.message);
       }
-      let item: OutputItem | null = null;
+      let item: OutputItem | null;
       try {
         item = checkItem(JSON.parse(json));
       } catch {

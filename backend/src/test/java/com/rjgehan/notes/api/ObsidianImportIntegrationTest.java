@@ -125,7 +125,7 @@ class ObsidianImportIntegrationTest {
 			assertThat(report.get("graph").has("scale")).isFalse();
 
 			Map<String, JsonNode> plugins = byId(report.get("plugins"), "id");
-			assertThat(plugins.get("dataview").get("status").asString()).isEqualTo("planned");
+			assertThat(plugins.get("dataview").get("status").asString()).isEqualTo("partial");
 			assertThat(plugins.get("dataview").get("kind").asString()).isEqualTo("community");
 			assertThat(plugins.get("some-unknown-plugin").get("status").asString()).isEqualTo("unknown");
 			assertThat(plugins.get("graph").get("status").asString()).isEqualTo("supported");
@@ -139,8 +139,9 @@ class ObsidianImportIntegrationTest {
 			JsonNode dataview = issues.get("dataview");
 			assertThat(dataview.get("category").asString()).isEqualTo("syntax");
 			assertThat(dataview.get("severity").asString()).isEqualTo("warning");
-			assertThat(dataview.get("roadmapItem").asInt()).isEqualTo(40);
-			assertThat(dataview.get("count").asInt()).isEqualTo(2);
+			// ```dataview queries run since ROADMAP item 17: only the inline query is left (Plan.md's TABLE runs).
+			assertThat(dataview.path("roadmapItem").isIntegralNumber()).isFalse();
+			assertThat(dataview.get("count").asInt()).isEqualTo(1);
 			assertThat(dataview.get("truncated").asBoolean()).isFalse();
 			assertThat(dataview.get("occurrences").get(0).get("path").asString()).isEqualTo("Home.md");
 			assertThat(report.get("totals").get("notes").asInt()).isGreaterThanOrEqualTo(9);

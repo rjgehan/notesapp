@@ -4,7 +4,7 @@ import { create } from 'zustand';
 export type ThemePref = 'dark' | 'light' | 'system';
 /** Markdown markup in Live Preview (DESIGN §6.6.1): always hidden, or shown for the element at the cursor. */
 export type SyntaxVisibility = 'hide-all' | 'reveal-at-cursor';
-/** Scripts in notes (DESIGN §6.39): run when a note shows, run on a click, or show as code. */
+/** Scripts in notes (DESIGN §6.42): run when a note shows, run on a click, or show as code. */
 export type ScriptsPref = 'auto' | 'ask' | 'off';
 
 export interface Prefs {

@@ -101,7 +101,7 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 	}
 
 	static boolean isScriptSandbox(String path) {
-		return path.startsWith(SCRIPT_SANDBOX_PREFIX) && path.endsWith(".js") && path.indexOf('/', 1 + "/assets".length) < 0;
+		return path.startsWith(SCRIPT_SANDBOX_PREFIX) && path.endsWith(".js") && path.indexOf('/', 1 + "/assets".length()) < 0;
 	}
 
 	/** The raw-file endpoints and the event stream set their own {@code Cache-Control}. */

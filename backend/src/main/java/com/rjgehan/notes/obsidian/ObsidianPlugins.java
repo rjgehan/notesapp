@@ -62,7 +62,7 @@ final class ObsidianPlugins {
 			Map.entry("bases", k("Bases", Support.UNSUPPORTED, ".base files are listed but not shown as tables.")));
 
 	static final Map<String, Known> COMMUNITY = Map.ofEntries(
-			Map.entry("dataview", k("Dataview", Support.PLANNED, "Queries show as code blocks; scripts and query blocks are planned.", 40)),
+			Map.entry("dataview", k("Dataview", Support.PARTIAL, "```dataview queries run with a subset of the query language: TABLE, LIST and TASK with FROM (tags, a folder, a link), WHERE, SORT and LIMIT. ```dataviewjs and inline queries show as code; a ```script block does what dataviewjs does, in a sandbox.")),
 			Map.entry("templater-obsidian", k("Templater", Support.UNSUPPORTED, "<% %> commands stay as text; core {{date}} and {{title}} placeholders work.")),
 			Map.entry("obsidian-excalidraw-plugin", k("Excalidraw", Support.PARTIAL, ".excalidraw and .excalidraw.md drawings open in Excalidraw and sync; embedded notes, LaTeX and PDF pages show as static images.")),
 			Map.entry("obsidian-kanban", k("Kanban", Support.PARTIAL, "Notes with kanban-plugin in their properties open as boards: drag cards between lanes, edit cards, add, rename and reorder lanes, archive; the file stays in the plugin's format and its settings block is kept as is. The plugin's settings, date picker and lane options are not offered.")),

@@ -444,8 +444,8 @@ export function livePreview(config: LivePreviewConfig): Extension {
     tables({ locked: config.locked, remoteImages: config.remoteImages }),
     livePreviewInline(config),
     footnoteTooltips(),
-    // Callouts, math and Mermaid, rendered by the app (ROADMAP item 3).
-    richMarkdown({ locked: config.locked, remoteImages: config.remoteImages ?? true, checkboxes: config.checkboxes }),
+    // Callouts, math and Mermaid, rendered by the app (ROADMAP item 3); script and Dataview blocks, run by it (items 40 and 17).
+    richMarkdown({ locked: config.locked, remoteImages: config.remoteImages ?? true, checkboxes: config.checkboxes, scripts: config.scripts }),
     // Block ids (` ^id`, ROADMAP item 20) hide, as in the reading of the note.
     hiddenBlockIds(config.locked),
     // Formulas in tables and inline code (ROADMAP item 39).

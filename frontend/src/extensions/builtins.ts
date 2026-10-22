@@ -80,6 +80,7 @@ import { registerDrawingViews } from '../views/excalidraw/register';
 import { registerPdfView } from '../views/pdf/register';
 import { startVoiceNote, transcribeAtCursor } from '../features/voice/voiceNotes';
 import { registerAi } from '../features/ai/register';
+import { registerScripts } from '../scripts/register';
 import { registerPublish } from '../components/publish/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerSheetView } from '../views/sheet/register';
@@ -462,6 +463,8 @@ export function registerBuiltins(): void {
 
   // ---------- roadmap features, through the same extension points ----------
   registerTasks();
+  // Script and Dataview blocks: reruns on note changes and their `/` items (ROADMAP items 40 and 17, DESIGN §6.42).
+  registerScripts();
   // The `/` menu's app items (DESIGN §6.6.2), after the commands they run.
   registerAppSlashItems();
   onViewsChanged(registerEmbedSlashItems);
