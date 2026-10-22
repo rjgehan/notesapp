@@ -4,8 +4,8 @@
 #
 # Data lives under /DATA/AppData/notesapp:
 #   data/vault       your notes (plain Markdown + git history), editable over SSH as uid 1000
-#   data/secrets/    optional, outside the vault: ntfy.json (app alerts), mirror-token (GitHub mirror),
-#                    claude-token or anthropic-key (Ask your vault, Claude)
+#   data/secrets/    optional, outside the vault: ntfy.json (app alerts, reminders), mirror-token (GitHub mirror),
+#                    claude-token or anthropic-key (Ask your vault, Claude), push.json (Web Push, made by the app)
 #   tailscale/       Tailscale node identity + HTTPS certs (never delete)
 #   backup/          only with the optional NotesApp Backup app (casaos-backup-compose.yml)
 #

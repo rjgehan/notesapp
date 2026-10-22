@@ -85,6 +85,24 @@ EOF
 
 No restart is needed. On the status page, *App alerts* then says "sent to ntfy at https://ntfy.sh"; press **Send a test alert**.
 
+### Reminders (Web Push, ntfy, in the app)
+
+Task reminders (set in a task's details) and an optional daily-note nudge (DEPLOY.md *Reminders*). Every way of delivering them is **off until you switch it on** in NotesApp's **Settings › Reminders**; nothing needs to change in CasaOS for Web Push or in-app reminders.
+
+- **Web Push to the iPhone** (iOS 16.4 or later): open `https://notes.<tailnet>.ts.net` in Safari, **Share › Add to Home Screen**, open NotesApp from the Home Screen icon, then **Settings › Reminders › Subscribe this device** and allow notifications. Switch on **Send by Web Push** and press **Send a test** next to the device. The app creates its push key in `/DATA/AppData/notesapp/data/secrets/push.json` on first use. Desktop Chrome, Edge and Firefox subscribe the same way, from a tab.
+- **ntfy** (the ntfy app, no Home Screen app needed): it uses the `ntfy.json` of *App alerts* above. To keep reminders apart from app problems, give them their own topic, subscribe to it in the ntfy app, and add it to the file:
+
+  ```sh
+  sudo -u '#1000' sh -c 'umask 077 && cat > /DATA/AppData/notesapp/data/secrets/ntfy.json' <<'EOF'
+  { "server": "https://ntfy.sh", "topic": "notes-<hex>", "reminders": { "topic": "notes-remind-<hex>" } }
+  EOF
+  ```
+
+  Then switch on **Send through ntfy**. **Title only** (on by default) sends just the task's title: with ntfy.sh that title still leaves your tailnet.
+- **In the app:** **Show in open tabs** shows reminders in any open NotesApp tab (and as a browser notification after **Allow**).
+
+Reminders use the time zone your devices report; **Settings › Reminders › Status** shows it, and the next reminders.
+
 ### GitHub mirror
 
 Pushes the vault's git history to a **private** GitHub repository about 10 minutes after you stop editing (DEPLOY.md *Mirror to GitHub*; your notes then also live on GitHub). Create the empty private repository and the fine-grained token exactly as in DEPLOY.md steps 1 and 2, then:

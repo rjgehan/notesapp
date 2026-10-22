@@ -293,7 +293,7 @@ Then from your devices:
 | What | Where |
 |---|---|
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
-| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/claude-token` (Ask your vault, uid 1000, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts, uid 1000, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
+| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/claude-token` (Ask your vault, uid 1000, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts and reminders, uid 1000, mode 600), `/srv/notes/data/secrets/push.json` (the reminders' Web Push key and devices, created by the app) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
 | Tailscale identity and certificates | volume `tailscale-state` |
 | Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
@@ -409,7 +409,7 @@ EOF
 
 - **With an access token** (a reserved topic on ntfy.sh, or a self-hosted server with access control), add `"token": "tk_…"`. A token is only sent over `https://`, or over `http://` to a tailnet host.
 - **A self-hosted ntfy on the tailnet:** `"server": "https://ntfy.<tailnet>.ts.net"`.
-- **A separate topic for app problems,** for example once the reminders of ROADMAP item 9 use the main one: `"alerts": { "topic": "notes-ops-<hex>" }`. `"alerts": false` switches the alerts off and keeps the file.
+- **A separate topic for app problems,** for example when the reminders use the main one (*Reminders*): `"alerts": { "topic": "notes-ops-<hex>" }`; reminders take `"reminders": { "topic": "notes-remind-<hex>" }`. `"alerts": false` switches the alerts off and keeps the file.
 - **With a plain (not bind-backed) volume:** `docker compose exec -T notes sh -c 'umask 077 && mkdir -p /data/secrets && cat > /data/secrets/ntfy.json' < ntfy.json`.
 
 No restart is needed: the app reads the file again whenever it changes.
@@ -417,6 +417,32 @@ No restart is needed: the app reads the file again whenever it changes.
 **3. Test it.** On the status page, *App alerts* says "sent to ntfy at https://ntfy.sh", or what is wrong with the file. Press **Send a test alert**: the phone shows *NotesApp: test alert*.
 
 The backups (`NOTES_BACKUP_NTFY_URL`) and Watchtower (`WATCHTOWER_NOTIFICATION_URL`) keep their own settings in `.env`; all three can post to the same topic.
+
+### Reminders
+
+Task reminders and the daily-note nudge (ROADMAP items 9 and 4c, DESIGN §5.26). One scheduler in the app delivers each reminder at its time through the routes switched on in **Settings › Reminders**; all of them are off by default, and a reminder counts as delivered once one route takes it. Reminders missed while the app was down (up to a day) are delivered when it starts. Times are read in the time zone the devices report (the latest one wins); the status there shows it.
+
+**Web Push** reaches subscribed devices with the app closed: the iPhone and iPad through the app added to the Home Screen (**iOS 16.4 or later**: Safari › Share › *Add to Home Screen*, open it from the icon), and desktop Chrome, Edge and Firefox from a tab. In **Settings › Reminders**, press **Subscribe this device**, allow notifications, switch on **Send by Web Push**, and press **Send a test** next to the device.
+
+- Nothing to configure on the server. On first use the app creates its VAPID key pair in `/srv/notes/data/secrets/push.json` (uid 1000, mode 600), next to `ntfy.json`; the subscribed devices are kept there too. Losing the file only means subscribing the devices again.
+- Messages go from the app to the browser vendors' push services (Apple, Google, Mozilla), so **the app needs outbound HTTPS** to them, like the mirror. Each message is encrypted for its device: the push service sees neither the title nor the notes, only that a message was sent.
+- The VAPID contact defaults to `https://<first NOTES_ALLOWED_HOSTS host>`. Should a push service refuse it (`BadJwtToken`, `403` in the device's last error), set `NOTES_REMINDERS_VAPID_SUBJECT=mailto:you@example.com` on the `notes` service.
+- A device whose subscription expired (`404`/`410` from its push service) is removed; subscribe it again. On the iPhone, notification buttons do not exist: tapping the notification opens the task. Snooze and Done buttons work on desktop.
+
+**ntfy** uses the `ntfy.json` of *App alerts*, to its default topic, or to a topic of its own:
+
+```json
+{ "server": "https://ntfy.sh", "topic": "notes-<hex>", "token": "tk_…",
+  "alerts": { "topic": "notes-ops-<hex>" }, "reminders": { "topic": "notes-remind-<hex>" } }
+```
+
+Switch on **Send through ntfy** and press its **Send a test**. **Title only** (on by default) sends the task's title and nothing else; with ntfy.sh, that title leaves the tailnet. With a self-hosted ntfy on the tailnet you may switch it off to get the due date and the start of the notes too (on iOS, instant delivery still passes message ids and timing through ntfy.sh, ROADMAP item 9).
+
+**In the app**: **Show in open tabs** shows a reminder in every open NotesApp tab, with a browser notification after **Allow**. Nothing arrives while every tab is closed, so pair it with one of the others.
+
+**The daily-note nudge** (**Daily-note nudge**, at 09:00 unless changed) reminds you when today's daily note does not exist yet.
+
+The scheduler's state is `.notesapp/reminders.json` in the vault, kept out of git.
 
 ### Backups
 
