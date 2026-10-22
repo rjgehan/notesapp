@@ -2,7 +2,7 @@
 // switcher/search, the lock toggle and ⋯ (palette, panels, source mode, file actions, template,
 // today, reload).
 // On tablets it also toggles the right sidebar overlay.
-import { CalendarDays, CloudUpload, CodeXml, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Star, StarOff, Sun, Trash, TriangleAlert, Waypoints } from 'lucide-react';
+import { CalendarDays, CloudUpload, CodeXml, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, Globe, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Star, StarOff, Sun, Trash, TriangleAlert, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { matchPath, useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
@@ -16,6 +16,8 @@ import { displayName, pathFromLocation } from '../../features/paths';
 import { usePendingNote } from '../../state/pendingNote';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
 import { useUi, type ViewMode } from '../../state/ui';
+import { useWorkspace } from '../../workspace/store';
+import { TAB_SWITCHER } from '../../workspace/TabSwitcher';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import { ModeToggle } from '../../views/markdown/NoteHeader';
 import { isMarkdownViewPath, viewFor } from '../../views/registry';
@@ -91,6 +93,7 @@ function MoreMenu({ path, mode, onClose }: { path: string | null; mode: ViewMode
       {hasFile && command('file.rename', 'Rename', <Pencil size={16} />)}
       {hasFile && command('file.move', 'Move to…', <FolderInput size={16} />)}
       {hasFile && command('file.delete', 'Delete', <Trash size={16} />)}
+      {note && command('file.publish', 'Publish to the web', <Globe size={16} />)}
       {note && command('templates.insert', 'Insert template', <LayoutTemplate size={16} />)}
       {command('daily.today', 'Today', <CalendarDays size={16} />)}
       <div className="menu-separator" role="separator" />
@@ -105,6 +108,19 @@ function TopBarSaveStatus({ path }: { path: string }) {
   const session = useDocumentSession(path);
   const snapshot = useSessionSnapshot(session);
   return <SaveStatus snapshot={snapshot} compact />;
+}
+
+/** The phone's way to its tabs (DESIGN §6.40): the count of open tabs; a tap shows them all. */
+function TabsButton() {
+  const count = useWorkspace((s) => Object.values(s.ws.panes).reduce((n, p) => n + p.tabs.length, 0));
+  const label = count === 1 ? 'Show open tabs (1 tab)' : 'Show open tabs (' + count + ' tabs)';
+  return (
+    <button type="button" className="icon-button top-bar-tabs" aria-label={label} title="Tabs" onClick={() => useUi.getState().setOverlay(TAB_SWITCHER)}>
+      <span className="top-bar-tab-count" aria-hidden>
+        {count > 99 ? '∞' : count}
+      </span>
+    </button>
+  );
 }
 
 export function TopBar() {
@@ -161,6 +177,7 @@ export function TopBar() {
           <PanelRight size={20} />
         </button>
       )}
+      {phone && <TabsButton />}
       <div className="menu-anchor">
         <button type="button" className="icon-button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
           <Ellipsis size={20} />

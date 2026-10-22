@@ -85,6 +85,24 @@ EOF
 
 No restart is needed. On the status page, *App alerts* then says "sent to ntfy at https://ntfy.sh"; press **Send a test alert**.
 
+### Reminders (Web Push, ntfy, in the app)
+
+Task reminders (set in a task's details) and an optional daily-note nudge (DEPLOY.md *Reminders*). Every way of delivering them is **off until you switch it on** in NotesApp's **Settings › Reminders**; nothing needs to change in CasaOS for Web Push or in-app reminders.
+
+- **Web Push to the iPhone** (iOS 16.4 or later): open `https://notes.<tailnet>.ts.net` in Safari, **Share › Add to Home Screen**, open NotesApp from the Home Screen icon, then **Settings › Reminders › Subscribe this device** and allow notifications. Switch on **Send by Web Push** and press **Send a test** next to the device. The app creates its push key in `/DATA/AppData/notesapp/data/secrets/push.json` on first use. Desktop Chrome, Edge and Firefox subscribe the same way, from a tab.
+- **ntfy** (the ntfy app, no Home Screen app needed): it uses the `ntfy.json` of *App alerts* above. To keep reminders apart from app problems, give them their own topic, subscribe to it in the ntfy app, and add it to the file:
+
+  ```sh
+  sudo -u '#1000' sh -c 'umask 077 && cat > /DATA/AppData/notesapp/data/secrets/ntfy.json' <<'EOF'
+  { "server": "https://ntfy.sh", "topic": "notes-<hex>", "reminders": { "topic": "notes-remind-<hex>" } }
+  EOF
+  ```
+
+  Then switch on **Send through ntfy**. **Title only** (on by default) sends just the task's title: with ntfy.sh that title still leaves your tailnet.
+- **In the app:** **Show in open tabs** shows reminders in any open NotesApp tab (and as a browser notification after **Allow**).
+
+Reminders use the time zone your devices report; **Settings › Reminders › Status** shows it, and the next reminders.
+
 ### GitHub mirror
 
 Pushes the vault's git history to a **private** GitHub repository about 10 minutes after you stop editing (DEPLOY.md *Mirror to GitHub*; your notes then also live on GitHub). Create the empty private repository and the fine-grained token exactly as in DEPLOY.md steps 1 and 2, then:
@@ -134,6 +152,22 @@ Voice notes record without any setup (**Record voice note** in the command palet
 5. In the app, **Settings › This device** now says *New recordings are transcribed by whisper-asr at http://notesapp-whisper:9000*. Record a few words to try it.
 
 To turn it off, empty `NOTES_TRANSCRIPTION_URL`, then uninstall the NotesApp Whisper app if you like. NotesApp runs the same with or without it. Other engines (whisper.cpp's server, speaches, an API) are in DEPLOY.md *Voice notes*; an API key goes in `/DATA/AppData/notesapp/data/secrets/transcription-key`, never in an environment variable.
+
+### Public publishing
+
+**Off as installed; nothing is public.** Publishing shares chosen notes as read-only web pages with people outside your tailnet through Tailscale Funnel, without exposing the app: a separate server inside the container serves only the snapshots of notes you published, on `https://notes.<tailnet>.ts.net:8443`, while the app on `:443` stays tailnet-only and refuses anything that came through Funnel. DEPLOY.md *Public publishing* has the background (what a page contains, how to check it from outside). It takes three changes; any one alone exposes nothing:
+
+1. **Tailscale admin console → Access controls**: allow Funnel for the server, and (if your policy has the grants of DEPLOY.md step 6) let your own devices reach the public port too:
+   ```jsonc
+   "nodeAttrs": [ { "target": ["tag:notes"], "attr": ["funnel"] } ],
+   // in the NotesApp grant: "ip": ["tcp:443", "tcp:8443"]
+   ```
+2. CasaOS → NotesApp → **Settings**, the `tailscale` container: set `NOTES_PUBLISH_FUNNEL` to `true`. On its next start it writes a `serve.json` that adds `:8443` → `127.0.0.1:8081` (the publish server only) with Funnel allowed for that port alone; `:443` keeps Funnel off. If you edit the compose file instead, the Funnel `serve.json` is the `if` branch of the `tailscale` command, and `notes.CHANGE-ME.ts.net` must be your host name there too.
+3. The `notes` container: set `NOTES_PUBLISH_ENABLED` to `true`, and `NOTES_PUBLISH_BASE_URL` to `https://notes.<tailnet>.ts.net:8443` (only used for the links the app copies). **Save**.
+
+The `notes` log then says *Publish server listening on 127.0.0.1:8081*. Publish a note with the globe in its header, **Publish to the web** in the ⋯ menu, or the command palette; **Settings › Publishing** lists published notes with Republish and Unpublish. Snapshots are stored in `/DATA/AppData/notesapp/data/publish`, outside the vault.
+
+To turn it off, set `NOTES_PUBLISH_FUNNEL` back to `false` (the internet loses access as soon as the `tailscale` container restarts) and `NOTES_PUBLISH_ENABLED` to `false`. Unpublish notes in Settings › Publishing to delete their snapshots.
 
 ### Nightly backups
 

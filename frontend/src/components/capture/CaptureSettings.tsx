@@ -80,7 +80,7 @@ export function CaptureSettings() {
   const body = '{"text": <Shortcut Input>, "target": "inbox", "date": <Current Date as yyyy-MM-dd>, "time": <Current Date as HH:mm>}';
   return (
     <>
-      <p className="setting-note">
+      <p className="setting-note setting-prose">
         Captures go to the end of <strong>Inbox.md</strong> (at the top of the vault) or of today&rsquo;s daily note, one list item each with the time.
         Without a connection they wait on this device.
       </p>
@@ -124,7 +124,7 @@ export function CaptureSettings() {
         </li>
         <li>Optionally end with <em>Show Notification</em> (&ldquo;Added to Inbox&rdquo;).</li>
       </ol>
-      <p className="setting-note">
+      <p className="setting-note setting-prose">
         For photos, make a second shortcut that receives <em>Images</em> and posts the <em>File</em> (request body: File, Shortcut Input) to:
       </p>
       <CopyValue value={`${origin}/api/capture/file?name=photo.jpg&target=inbox&date=<yyyy-MM-dd>&time=<HH:mm>&text=<caption>`} label="the photo URL" />

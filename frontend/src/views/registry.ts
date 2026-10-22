@@ -48,6 +48,13 @@ export interface FileViewDescriptor {
   merge?(base: string, mine: string, theirs: string): string | null;
   /** Contributed to the palette while this view is active. */
   commands?: Command[];
+  /**
+   * Several panes may show the same file at once (ROADMAP item 11, DESIGN §6.40): the view reads
+   * the session's text on every change (CodeMirror editors share it live). A textual view that
+   * keeps its own model (spreadsheets, drawings) shows in one pane at a time; the others offer
+   * to show it there. Non-textual views always may.
+   */
+  sharedSession?: boolean;
 }
 
 const views: FileViewDescriptor[] = [];

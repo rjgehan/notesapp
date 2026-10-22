@@ -25,7 +25,7 @@ export type ErrorCode =
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
   | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
-  | 'block-not-found';
+  | 'block-not-found' | 'funnel-request' | 'publishing-off';
 
 export interface FieldError { field: string; message: string }
 
@@ -171,6 +171,15 @@ export interface AiSettings {
   maxContextChars: number;        // note text one request may carry, 4,000 to 400,000; default 60,000
   monthlyBudgetUsd: number;       // requests are refused once this month's estimated spend reaches it; default 5
 }
+/** Reminders and push notifications (§28). Every route is off by default. Optional in a request, like ai. */
+export interface RemindersSettings {
+  webPush: boolean;               // Web Push to the devices subscribed in Settings › Reminders
+  ntfy: boolean;                  // ntfy, configured in /data/secrets/ntfy.json
+  ntfyTitleOnly: boolean;         // with ntfy, the task's title only, never its notes; default true
+  inApp: boolean;                 // a toast and a browser notification in every open tab
+  dailyNote: boolean;             // nudge when today's daily note does not exist yet
+  dailyNoteTime: string;          // 'HH:mm', default '09:00'
+}
 export interface Settings {
   schemaVersion: 1;
   files: FilesSettings;
@@ -178,6 +187,7 @@ export interface Settings {
   templates: TemplatesSettings;
   editor: EditorSettings;
   ai: AiSettings;
+  reminders: RemindersSettings;
 }
 export interface SettingsResponse { settings: Settings; version: Version; readOnly: boolean }
 export interface SettingsUpdateRequest { settings: Settings; baseVersion: Version }
@@ -874,6 +884,64 @@ export interface DatedNotesResponse {
   notes: DatedNote[];           // by day, then path; a note once per day
 }
 
+// ---------- Reminders (API.md §28, ROADMAP items 9 and 4c) ----------
+export type ReminderRouteId = 'webPush' | 'ntfy' | 'inApp';
+export interface PushDevice {
+  id: string;
+  name: string;
+  createdAt: IsoInstant;
+  lastSuccessAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+}
+export interface UpcomingReminder { taskId: string; title: string; at: LocalDateTime }
+export interface RemindersStatus {
+  zone: string;                   // the IANA zone reminders are read in
+  zoneReported: boolean;          // false: no device reported one yet, the server's zone is used
+  serverZone: string;
+  webPush: { available: boolean; reason: string | null; publicKey: string | null; devices: PushDevice[] };
+  ntfy: { configured: boolean; reason: string | null; server: string | null; ownTopic: boolean };
+  inApp: { connections: number };
+  lastDeliveredAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+  upcoming: UpcomingReminder[];   // the next five, soonest first
+}
+export interface ReminderZoneRequest { zone: string }
+export interface PushKey { publicKey: string }   // base64url, the applicationServerKey
+export interface PushSubscriptionRequest { endpoint: string; keys: { p256dh: string; auth: string }; name: string }
+export interface ReminderTestRequest { route: ReminderRouteId; deviceId?: string }
+export interface ReminderTestResult { sent: boolean; error: string | null }
+export interface ReminderActionRequest { taskId: string; at: LocalDateTime; minutes?: number }   // minutes: snooze only, default 10
+export interface ReminderActionResult { changed: boolean; until: IsoInstant | null }
+/** `reminder.due` (§28.5), registered at runtime by the reminders feature. */
+export interface ReminderDueEvent {
+  key: string;
+  kind: 'task' | 'daily' | 'test';
+  taskId: string | null;
+  at: LocalDateTime | null;
+  title: string;
+  body: string;
+  url: string;                    // an app path, such as '/x/tasks/today?task=<id>'
+  sentAt: IsoInstant;
+}
+
+// ---------- Public publishing (API.md §26, ROADMAP item 26) ----------
+export type PublishedNoteState = 'current' | 'changed' | 'source-missing' | 'snapshot-missing';
+export interface PublishedNote {
+  path: VaultPath;              // follows moves and renames made in the app
+  slug: string;                 // the public page is /p/<slug>
+  title: string;
+  url: string;                  // baseUrl + '/p/' + slug, or only the path when there is no base URL
+  publishedAt: IsoInstant;
+  state: PublishedNoteState;    // changed: edited since publishing; the public page shows the snapshot
+}
+export interface PublishResponse {
+  enabled: boolean;             // NOTES_PUBLISH_ENABLED; false: nothing is served or publishable
+  baseUrl: string | null;       // NOTES_PUBLISH_BASE_URL without a trailing slash
+  notes: PublishedNote[];
+}
+export interface PublishRequest { path: VaultPath; slug?: string; title?: string }   // omitted: keep, or derive
 // ---------- Scripts in notes (API.md §40, ROADMAP items 40 and 17) ----------
 export interface NoteTask {
   line: number;                 // 0-based line in the note

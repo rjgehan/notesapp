@@ -30,11 +30,12 @@ import org.springframework.stereotype.Component;
  *   "server": "https://ntfy.sh",          // optional, ntfy.sh by default
  *   "topic": "notes-6f1c…",               // required: the default topic
  *   "token": "tk_…",                      // optional access token
- *   "alerts": { "enabled": true, "topic": "notes-ops-…" }   // optional (ROADMAP item 38)
+ *   "alerts": { "enabled": true, "topic": "notes-ops-…" },  // optional (ROADMAP item 38)
+ *   "reminders": { "topic": "notes-remind-…" }             // optional (ROADMAP item 9)
  * }
  * </pre>
  *
- * Other members (the reminders of ROADMAP item 9) are ignored here. Problems are described without the topic or the
+ * Other members are ignored. Problems are described without the topic or the
  * token. A token is sent only over {@code https}, or over {@code http} to a loopback or tailnet host, where WireGuard
  * encrypts it.
  */
@@ -186,8 +187,22 @@ public class NtfyConfigFile {
 				return Loaded.problem("has an \"alerts\" that is neither an object nor true or false");
 			}
 		}
-		return new Loaded(new NtfyConfig(server, topic, token, new NtfyConfig.Alerts(alertsEnabled, alertsTopic)),
-				null);
+		String remindersTopic = topic;
+		JsonNode reminders = root.get("reminders");
+		if (reminders != null && !reminders.isNull()) {
+			if (!reminders.isObject()) {
+				return Loaded.problem("has a \"reminders\" that is not an object");
+			}
+			String own = string(reminders, "topic");
+			if (own != null) {
+				if (!TOPIC.matcher(own).matches()) {
+					return Loaded.problem("needs a \"reminders.topic\" of 1 to 64 letters, digits, '-' or '_'");
+				}
+				remindersTopic = own;
+			}
+		}
+		return new Loaded(new NtfyConfig(server, topic, token, new NtfyConfig.Alerts(alertsEnabled, alertsTopic),
+				remindersTopic), null);
 	}
 
 	/** A string member, stripped; null when missing, null, blank or not a string. */

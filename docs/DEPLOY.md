@@ -293,7 +293,7 @@ Then from your devices:
 | What | Where |
 |---|---|
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
-| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/claude-token` (Ask your vault, uid 1000, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts, uid 1000, mode 600) and `/etc/watchtower/config.json` (root, mode 600) |
+| Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/claude-token` (Ask your vault, uid 1000, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts and reminders, uid 1000, mode 600), `/srv/notes/data/secrets/push.json` (the reminders' Web Push key and devices, created by the app) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
 | Tailscale identity and certificates | volume `tailscale-state` |
 | Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
@@ -409,7 +409,7 @@ EOF
 
 - **With an access token** (a reserved topic on ntfy.sh, or a self-hosted server with access control), add `"token": "tk_…"`. A token is only sent over `https://`, or over `http://` to a tailnet host.
 - **A self-hosted ntfy on the tailnet:** `"server": "https://ntfy.<tailnet>.ts.net"`.
-- **A separate topic for app problems,** for example once the reminders of ROADMAP item 9 use the main one: `"alerts": { "topic": "notes-ops-<hex>" }`. `"alerts": false` switches the alerts off and keeps the file.
+- **A separate topic for app problems,** for example when the reminders use the main one (*Reminders*): `"alerts": { "topic": "notes-ops-<hex>" }`; reminders take `"reminders": { "topic": "notes-remind-<hex>" }`. `"alerts": false` switches the alerts off and keeps the file.
 - **With a plain (not bind-backed) volume:** `docker compose exec -T notes sh -c 'umask 077 && mkdir -p /data/secrets && cat > /data/secrets/ntfy.json' < ntfy.json`.
 
 No restart is needed: the app reads the file again whenever it changes.
@@ -417,6 +417,32 @@ No restart is needed: the app reads the file again whenever it changes.
 **3. Test it.** On the status page, *App alerts* says "sent to ntfy at https://ntfy.sh", or what is wrong with the file. Press **Send a test alert**: the phone shows *NotesApp: test alert*.
 
 The backups (`NOTES_BACKUP_NTFY_URL`) and Watchtower (`WATCHTOWER_NOTIFICATION_URL`) keep their own settings in `.env`; all three can post to the same topic.
+
+### Reminders
+
+Task reminders and the daily-note nudge (ROADMAP items 9 and 4c, DESIGN §5.26). One scheduler in the app delivers each reminder at its time through the routes switched on in **Settings › Reminders**; all of them are off by default, and a reminder counts as delivered once one route takes it. Reminders missed while the app was down (up to a day) are delivered when it starts. Times are read in the time zone the devices report (the latest one wins); the status there shows it.
+
+**Web Push** reaches subscribed devices with the app closed: the iPhone and iPad through the app added to the Home Screen (**iOS 16.4 or later**: Safari › Share › *Add to Home Screen*, open it from the icon), and desktop Chrome, Edge and Firefox from a tab. In **Settings › Reminders**, press **Subscribe this device**, allow notifications, switch on **Send by Web Push**, and press **Send a test** next to the device.
+
+- Nothing to configure on the server. On first use the app creates its VAPID key pair in `/srv/notes/data/secrets/push.json` (uid 1000, mode 600), next to `ntfy.json`; the subscribed devices are kept there too. Losing the file only means subscribing the devices again.
+- Messages go from the app to the browser vendors' push services (Apple, Google, Mozilla), so **the app needs outbound HTTPS** to them, like the mirror. Each message is encrypted for its device: the push service sees neither the title nor the notes, only that a message was sent.
+- The VAPID contact defaults to `https://<first NOTES_ALLOWED_HOSTS host>`. Should a push service refuse it (`BadJwtToken`, `403` in the device's last error), set `NOTES_REMINDERS_VAPID_SUBJECT=mailto:you@example.com` on the `notes` service.
+- A device whose subscription expired (`404`/`410` from its push service) is removed; subscribe it again. On the iPhone, notification buttons do not exist: tapping the notification opens the task. Snooze and Done buttons work on desktop.
+
+**ntfy** uses the `ntfy.json` of *App alerts*, to its default topic, or to a topic of its own:
+
+```json
+{ "server": "https://ntfy.sh", "topic": "notes-<hex>", "token": "tk_…",
+  "alerts": { "topic": "notes-ops-<hex>" }, "reminders": { "topic": "notes-remind-<hex>" } }
+```
+
+Switch on **Send through ntfy** and press its **Send a test**. **Title only** (on by default) sends the task's title and nothing else; with ntfy.sh, that title leaves the tailnet. With a self-hosted ntfy on the tailnet you may switch it off to get the due date and the start of the notes too (on iOS, instant delivery still passes message ids and timing through ntfy.sh, ROADMAP item 9).
+
+**In the app**: **Show in open tabs** shows a reminder in every open NotesApp tab, with a browser notification after **Allow**. Nothing arrives while every tab is closed, so pair it with one of the others.
+
+**The daily-note nudge** (**Daily-note nudge**, at 09:00 unless changed) reminds you when today's daily note does not exist yet.
+
+The scheduler's state is `.notesapp/reminders.json` in the vault, kept out of git.
 
 ### Backups
 
@@ -795,6 +821,61 @@ A transcription takes a fraction of the recording's length on a modern CPU with 
 
 To turn transcription off, empty `NOTES_TRANSCRIPTION_URL`, remove `transcription` from `COMPOSE_PROFILES` and run `docker compose up -d --remove-orphans`.
 
+### Public publishing
+
+**Off as shipped; nothing is public.** Publishing (ROADMAP item 26, DESIGN §5.28) shares chosen notes as read-only web pages with people outside your tailnet, through [Tailscale Funnel](https://tailscale.com/kb/1223/funnel). The app itself never goes through Funnel: a second, separate server inside the container, which can serve nothing but the snapshots of the notes you published, listens on `127.0.0.1:8081`, and Funnel exposes that port alone, as `https://notes.<tailnet>.ts.net:8443`. The app on `:443` stays tailnet-only and refuses any request that came through Funnel (`403 funnel-request`). A published page is a snapshot made when you publish: later edits stay private until you republish. Frontmatter and comments are left out, links to notes you have not published show as plain text (no paths), and only the images, audio and video the note embeds are copied with it.
+
+It takes **two** switches, and either one alone exposes nothing:
+
+1. **Tailnet policy**: Funnel needs the `funnel` node attribute for `tag:notes`. In the policy file (step 6) add:
+
+   ```jsonc
+     "nodeAttrs": [
+       { "target": ["tag:notes"], "attr": ["funnel"] },
+     ],
+   ```
+
+   and, so that your own devices can open the public links too (from the tailnet the name resolves to the node, where the grants of step 6 allow only `:443`), extend the NotesApp grant to `"ip": ["tcp:443", "tcp:8443"]`.
+
+2. **The publish server**, in `deploy/.env`:
+
+   ```sh
+   NOTES_PUBLISH_ENABLED=true
+   NOTES_PUBLISH_BASE_URL=https://notes.<tailnet>.ts.net:8443   # only for the links the app copies
+   ```
+
+3. **The Funnel entry**: replace `deploy/tailscale/serve.json` with the shipped variant, which adds `:8443` → `127.0.0.1:8081` with `AllowFunnel` true for that port only (`:443` keeps `false`):
+
+   ```sh
+   cp deploy/tailscale/serve.json deploy/tailscale/serve.json.tailnet-only
+   cp deploy/tailscale/serve.funnel.json.example deploy/tailscale/serve.json
+   ```
+
+   It reads:
+
+   ```json
+   {
+     "TCP": { "443": { "HTTPS": true }, "8443": { "HTTPS": true } },
+     "Web": {
+       "${TS_CERT_DOMAIN}:443": {
+         "Handlers": { "/": { "Proxy": "http://127.0.0.1:8080" } }
+       },
+       "${TS_CERT_DOMAIN}:8443": {
+         "Handlers": { "/": { "Proxy": "http://127.0.0.1:8081" } }
+       }
+     },
+     "AllowFunnel": { "${TS_CERT_DOMAIN}:443": false, "${TS_CERT_DOMAIN}:8443": true }
+   }
+   ```
+
+4. `docker compose up -d` (recreates `notes` with the new environment; `tailscale` picks up `serve.json` by itself). `docker compose logs notes | grep "Publish server"` shows *Publish server listening on 127.0.0.1:8081*, and `docker compose exec tailscale tailscale funnel status` lists `https://notes.<tailnet>.ts.net:8443 (Funnel on)` proxying to `http://127.0.0.1:8081` and `:443` as tailnet only.
+
+**Publishing a note**: the globe in the note's header, **Publish to the web** in the ⋯ menu, or the command palette. Choose the title and the address (`/p/<address>`) and publish; the dialog shows the public link and, later, whether the note changed since. **Settings › Publishing** lists every published note with Republish and Unpublish. Unpublishing deletes the page at once. The snapshots live in `/data/publish` (in the `notes-data` volume, outside the vault, so they are backed up); `.notesapp/publish.json` in the vault lists them.
+
+**Check it from outside the tailnet** (a phone on mobile data): the page opens; `https://notes.<tailnet>.ts.net:8443/`, `/api/tree` and `/n/anything` answer `Not found`; `https://notes.<tailnet>.ts.net/` does not answer at all.
+
+**Turning it off**: copy `serve.json.tailnet-only` back over `serve.json` (the internet loses access at once), set `NOTES_PUBLISH_ENABLED=false` and `docker compose up -d`. The published list and snapshots are kept; unpublish notes in Settings › Publishing (allowed while off) to delete them.
+
 ### Import an Obsidian vault
 
 NotesApp reads an Obsidian vault as it is (ROADMAP item 24): the same Markdown, wikilinks, embeds, tags, properties, daily notes and templates. `.obsidian/` is read but never written, so the vault keeps working in Obsidian; it stays hidden in NotesApp and is versioned except `workspace*.json`.
@@ -916,6 +997,14 @@ The `Host` the browser used is not in `NOTES_ALLOWED_HOSTS`: a typo, a renamed n
 ### `403 identity-not-allowed`
 
 The request's Tailscale login is not in `NOTES_IDENTITY_ALLOWED_LOGINS`. Compare with the [Users](https://login.tailscale.com/admin/users) page exactly. Requests from tagged devices (they carry no identity) and from users the node is shared with are refused by design.
+
+### `403 funnel-request`
+
+The request reached the app through Tailscale Funnel, which the app always refuses: `serve.json` allows Funnel on `:443`. Only `:8443` (the publish server) may have `AllowFunnel` true; restore `serve.json` from `serve.funnel.json.example` or the tailnet-only original ("Public publishing").
+
+### Published pages answer `Not found`
+
+Check, in order: `NOTES_PUBLISH_ENABLED=true` reached the container (`docker compose logs notes | grep -i publish`: *Publish server listening*, not *Public publishing is off*); the note is in **Settings › Publishing** and not marked *Page missing* (republish it); `tailscale funnel status` shows `:8443` with Funnel on (otherwise the tailnet policy lacks the `funnel` attribute). Any path other than `/p/<address>` answers `Not found` by design.
 
 ### Changes made over SSH appear late
 

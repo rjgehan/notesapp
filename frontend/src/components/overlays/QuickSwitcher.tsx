@@ -9,6 +9,7 @@ import { useBookmarks } from '../../features/bookmarkStore';
 import { createNamedNote } from '../../features/fileOps';
 import { afterOpen } from '../../features/focus';
 import { activePath, openPath, openSearch } from '../../features/navigation';
+import { keyLabel } from '../../features/platform';
 import { recentPaths } from '../../features/recent';
 import { switcherItems, type SwitcherItem } from '../../features/switcher';
 import { useUi } from '../../state/ui';
@@ -90,6 +91,11 @@ export function QuickSwitcher() {
           <span>
             <kbd>⇧↵</kbd> create
           </span>
+          {!phone && (
+            <span>
+              <kbd>{keyLabel('Mod')}↵</kbd> new tab
+            </span>
+          )}
           <span>
             <kbd>esc</kbd> close
           </span>

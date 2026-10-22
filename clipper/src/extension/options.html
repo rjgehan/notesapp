@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NotesApp clipper options</title>
+    <link rel="stylesheet" href="ui.css" />
+  </head>
+  <body class="options">
+    <h1>NotesApp clipper</h1>
+    <form id="form">
+      <label for="appUrl">NotesApp address</label>
+      <input id="appUrl" name="appUrl" type="url" placeholder="https://notes.your-tailnet.ts.net" required autocomplete="off" />
+      <p class="small">The address you open NotesApp at, over Tailscale. The clipper opens it to save each clip.</p>
+
+      <label for="folder">Folder</label>
+      <input id="folder" name="folder" type="text" placeholder="Clippings" autocomplete="off" />
+
+      <label class="check"><input id="downloadImages" name="downloadImages" type="checkbox" /> Save the article’s images as attachments</label>
+      <p class="small">Needs access to all sites, which the browser asks for when you save, so the clipper can download the images. Otherwise images stay links to the web.</p>
+
+      <label class="check"><input id="autoSave" name="autoSave" type="checkbox" /> Save without the preview</label>
+      <p class="small">NotesApp opens in a background tab, saves the clip and closes again.</p>
+
+      <button type="submit" class="primary">Save</button>
+      <p id="status" class="status" role="status"></p>
+    </form>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -167,6 +167,10 @@ NotesApp/                              (monorepo; branch main)
 │   ├── index.html, vite.config.ts, eslint.config.js, tsconfig.json, tsconfig.app.json, tsconfig.node.json
 │   ├── public/                        favicon.svg, apple-touch-icon.png, robots.txt, theme-boot.js (§6.17)
 │   └── src/                           (structure in §6.2)
+├── clipper/                           web clipper (ROADMAP item 19, §6.27.1): its own package, esbuild build and tests
+│   ├── src/core/                      extract (Readability), markdown (turndown), note (name, frontmatter)
+│   ├── src/web/                       clipper.js (for /clip), shortcut.js (iOS Shortcut), bookmarklet.js
+│   └── src/extension/                 Manifest V3 extension: background, content, popup, options (dist/chrome, dist/firefox)
 ├── deploy/                            WP-Infra
 │   ├── docker-compose.yml             tailscale + notes + watchtower; optional backup + backup-scheduler (§7.10)
 │   ├── backup/                        restic-job.sh, nightly.sh, scheduler.sh and their tests (§7.10)
@@ -205,6 +209,7 @@ NotesApp/                              (monorepo; branch main)
 | `.notesapp/bookmarks.json` | Bookmarks (§5.21), in Obsidian's `bookmarks.json` format | hidden | committed, like the settings |
 | `.notesapp/searches.json` | Saved searches (§5.5.10, API.md §12.4) | hidden | committed, so they sync and have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
+| `.notesapp/reminders.json` | The reminder scheduler's state: baseline, zone, delivered reminders, snoozes (§5.26) | hidden | **excluded** |
 | `.notesapp/srs.json` | Flashcard answers, their cached FSRS state and the flashcard settings (§5.34) | hidden | committed |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
 | `.notesapp/cache/` | Derived caches: `search-text/` holds the extracted text of PDFs (§5.5.10) | hidden | excluded |
@@ -213,7 +218,7 @@ NotesApp/                              (monorepo; branch main)
 | `.obsidian/` | Obsidian's settings, from an imported vault or if the vault is ever opened in Obsidian. Read for the import and the compatibility report (§5.23), never written. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
-**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), an optional transcription API key (item 33, §5.24), `claude-token` and `anthropic-key`, the Claude Code token and the Anthropic API key of Ask your vault (item 18, §5.25), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties (`NOTES_AI_API_KEY_FILE` points the API key there in the plain-compose deploy).
+**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), an optional transcription API key (item 33, §5.24), `claude-token` and `anthropic-key`, the Claude Code token and the Anthropic API key of Ask your vault (item 18, §5.25), and `push.json`, the Web Push key pair and subscribed devices of the reminders (item 9, §5.26). Operator secrets come from compose `secrets:` files read through `*_FILE` properties (`NOTES_AI_API_KEY_FILE` points the API key there in the plain-compose deploy).
 
 ### 4.2 File kinds
 
@@ -319,6 +324,7 @@ The app owns this file: it rewrites it at every startup, and it keeps its last s
 .notesapp/cache/
 .notesapp/tmp/
 .notesapp/trash.json
+.notesapp/reminders.json
 .trash/
 .obsidian/workspace*.json
 .notesapp-*.tmp
@@ -406,6 +412,7 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `WebConfig` | `WebMvcConfigurer`: registers `ApiGuardInterceptor` on `/api/**`, the `/assets/**` immutable resource handler, and `IdentityArgumentResolver`. |
 | | `SpaController` | Serves `classpath:/static/index.html` (no-cache) for client routes `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**` and `/x/**` (pages registered by extensions, §6.8). |
 | | `SecurityHeadersFilter` | `OncePerRequestFilter`, highest precedence: sets the security headers in §5.14, `Cache-Control: no-store` on API JSON, and `X-Notes-Build`. |
+| | `FunnelRequestFilter` | Next: `403 funnel-request` for any request carrying `Tailscale-Funnel-Request`, health included (§5.28). |
 | | `HostAndIdentityFilter` | Next in precedence: the Host allowlist (`421 unknown-host`) and the identity allowlist (`403 identity-not-allowed`); health paths are exempt (§5.13). |
 | | `RequestSizeFilter` | Rejects JSON bodies over `notes.limits.max-json-body` with `413` before they are read (§5.14). |
 | | `ApiGuardInterceptor` | Mutating `/api/**` requests: requires `X-Client-Id`, validates Origin and `Sec-Fetch-Site`. |
@@ -467,6 +474,7 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `EventIds` | Formats and parses `bootId.seq`. |
 | `search` | `SavedSearchService` | Saved searches in `.notesapp/searches.json`, with a version token (API.md §12.4). |
 | `settings` | `Settings` (+ nested records), `SettingsService`, `SettingsSeed` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12); a missing file starts from the defaults plus every `SettingsSeed` (§5.23). |
+| `publish` | `PublishService`, `PublishRenderer`, `PublishPage`, `SnapshotStore`, `PublishServer` | Public publishing (§5.28): `.notesapp/publish.json`, the snapshot renderer, the snapshots outside the vault and the separate publish server on 8081. |
 | `bookmarks` | `BookmarkService`, `BookmarkCodec` | Load, check and save `.notesapp/bookmarks.json` with a version token; re-key bookmarks after moves and trash restores (§5.21). |
 | `vault` | `HeadingRenameService` | Rewrites `[[Note#Heading]]` links (and heading bookmarks) after a heading is renamed (§5.22). |
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
@@ -474,6 +482,9 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
 | `notify` | `NtfyConfig`, `NtfyConfigFile` | `ntfy.json` in `notes.secrets-dir`: the server, the default topic, an optional token and the `alerts` section; read again when it changes (§5.18.1). Shared with the reminders of ROADMAP item 9. |
 | | `NtfyClient` | Publishes one message as JSON to the server's root URL, with the token as `Authorization: Bearer`; never follows a redirect. |
+| `reminders` | `ReminderScheduler` | Reminders and the daily-note nudge (ROADMAP items 9 and 4c, §5.26): what is due, the ledger in `.notesapp/reminders.json`, retries, snooze and done. |
+| | `ReminderRoute`, `WebPushRoute`, `NtfyRoute`, `InAppRoute` | The delivery routes, each switched on in `settings.reminders`. |
+| | `WebPushCrypto`, `WebPushSender`, `PushStore` | RFC 8291 encryption and VAPID with JDK crypto, one push request, and `push.json` (the key pair and devices) in `notes.secrets-dir`. |
 | `ai` | `AiService`, `PromptBuilder`, `QueryTerms`, `Excerpts` | Ask your vault and summaries (ROADMAP item 18, §5.25): availability and budget checks, retrieval over the search index, the prompt with its caps and the rebuild of earlier turns, the stream of events. |
 | | `AiProviders`, `ClaudeGateway`, `ClaudeCodeGateway`, `AnthropicGateway`, `FakeGateway` | The two providers and one streamed answer: Claude Code run headless with the subscription (the default), the Messages API through the official SDK, or canned for development (`notes.ai.fake`). |
 | | `ApiKeyFile`, `UsageLedger`, `AiModels`, `AiProperties` | The credential files, the Claude Code token or the API key (read again when they change), the monthly spend in `.notesapp/cache/ai-usage.json`, the models and their prices, `notes.ai.*`. |
@@ -1213,7 +1224,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `no-referrer` |
 | `X-Frame-Options` | `DENY` |
-| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Cross-Origin-Opener-Policy` | `same-origin`, except `unsafe-none` on the web clipper's `/clip` page, which the bookmarklet's window must keep its handle on (§6.27.1) |
 | `Cross-Origin-Resource-Policy` | `same-origin` |
 | `Permissions-Policy` | `camera=(), microphone=(self), geolocation=(), payment=()`. The microphone is the app's own, for voice notes (ROADMAP item 33, §6.30); no frame it shows gets it |
 | `Cache-Control` | `no-store` for every `/api/**` response, except the raw endpoints (item 6 sets their own) and `/api/events` (`no-cache, no-transform`). Note text then never persists in the disk cache of `mac` or `beach`, and back/forward navigation never shows stale JSON. |
@@ -1226,7 +1237,9 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 - **`'wasm-unsafe-eval'`** (added with ROADMAP item 32) lets the app compile WebAssembly: PDF.js's JPEG 2000, JBIG2 and ICC colour decoders and its PostScript-function compiler (§6.8.3), and Excalidraw's font subsetting. It allows no JavaScript `eval` or `new Function`; injected script still cannot run (`script-src 'self'`), and the WebAssembly the app compiles is fetched from `'self'` (`connect-src 'self'`). A worker's policy comes from its own script's response, which carries the same header. Without it PDF.js falls back to slower JavaScript decoders, which on a 300-page scan on the iPhone is the difference that matters.
 - **PDF.js** (§6.8.3) works under the rest of the policy as it is: its worker is a same-origin module script (`worker-src 'self'`, served as `text/javascript`, which `nosniff` requires); CMaps, standard fonts and decoders are fetched from `/assets/pdfjs-<version>/`; fonts embedded in a PDF become `FontFace`s from bytes (or `data:` URLs, `font-src data:`); the document's own JavaScript never runs (no scripting manager, and `quickjs-eval` is not shipped).
 
-**2. `HostAndIdentityFilter`**: the Host and identity allowlists of §5.13 (`421`, `403`).
+**2. `FunnelRequestFilter`**: any request carrying `Tailscale-Funnel-Request` (it came through Tailscale Funnel) is refused with `403 funnel-request`, health endpoints included; only the separate publish server may be behind Funnel (§5.28).
+
+**2a. `HostAndIdentityFilter`**: the Host and identity allowlists of §5.13 (`421`, `403`).
 
 **3. `RequestSizeFilter`** on JSON endpoints (every `/api/**` path except the raw uploads `/api/files/raw`, `/api/attachments` and `/api/capture/file`): a `Content-Length` above `notes.limits.max-json-body` (16 MiB) is rejected with `413 too-large` before the body is read; chunked bodies are counted while reading and cut off at the same limit. Without it, one buggy client or a pasted multi-hundred-MB string would be deserialized in full before the text size check, exhaust the heap, and, through `ExitOnOutOfMemoryError`, kill in-flight saves. The limit must stay above the largest text size limit plus JSON escaping overhead; the app checks this at startup.
 
@@ -1291,6 +1304,7 @@ public record NotesProperties(
     @DefaultValue("/data/secrets") Path secretsDir /* NOTES_SECRETS_DIR: ntfy.json and other secrets the app holds (§4.1) */,
     @DefaultValue Tasks tasks /* ROADMAP item 4: the archive rollover, §5.20 */,
     @DefaultValue Search search /* notes.search.*, §5.5.10 */,
+    @DefaultValue Publish publish /* notes.publish.*: enabled (false), address (127.0.0.1), port (8081), dir (/data/publish), base-url, max-asset-size (25MB); §5.28 */,
     @DefaultValue({"md","markdown","txt","json","canvas","excalidraw","sheet","tasks","csv","tsv","yaml","yml","mdenc"}) List<String> textExtensions,
     @DefaultValue("true") boolean welcomeNote,
     @DefaultValue("dev") String buildSha /* NOTES_BUILD_SHA, set by the image; shown in /api/status, hello and X-Notes-Build */) {
@@ -1393,7 +1407,7 @@ notes.security.require-tailscale-interface=false
 logging.level.com.rjgehan.notes=DEBUG
 ```
 
-`notes.ai.*` (Ask your vault, ROADMAP item 18) is its own record, `AiProperties`, so it does not widen this one; its keys are in §5.25.
+`notes.ai.*` (Ask your vault, ROADMAP item 18) is its own record, `AiProperties`, so it does not widen this one; its keys are in §5.25. The reminders (item 9, §5.26) read two optional keys directly: `notes.reminders.vapid-subject` (`NOTES_REMINDERS_VAPID_SUBJECT`, the VAPID contact; default `https://<first allowed host>`) and `notes.reminders.tick` (15s).
 
 For phone testing against dev (§9.1 step 4), `NOTES_ALLOWED_HOSTS` overrides the list and adds `rgpc.<tailnet>.ts.net:5173`. Integration tests set `notes.allowed-hosts`, `notes.identity.allow-default` and `notes.security.require-tailscale-interface` explicitly.
 
@@ -1459,14 +1473,15 @@ The stable markers above are pushed to ntfy by the app itself, so a problem reac
 
 ```json
 { "server": "https://ntfy.sh", "topic": "notes-<random>", "token": "tk_…",
-  "alerts": { "enabled": true, "topic": "notes-ops-<random>" } }
+  "alerts": { "enabled": true, "topic": "notes-ops-<random>" },
+  "reminders": { "topic": "notes-remind-<random>" } }
 ```
 
-- `server` defaults to `https://ntfy.sh`; `topic` is required (ntfy's rule: 1 to 64 letters, digits, `-` or `_`); `token` is optional. `alerts` is optional: `false` or `{"enabled": false}` switches the alerts off, and its `topic` overrides the default one. Item 9 adds its own section; unknown members are ignored.
+- `server` defaults to `https://ntfy.sh`; `topic` is required (ntfy's rule: 1 to 64 letters, digits, `-` or `_`); `token` is optional. `alerts` is optional: `false` or `{"enabled": false}` switches the alerts off, and its `topic` overrides the default one. `reminders.topic` is the reminders' own topic (item 9, §5.26); without it they use the default topic. Unknown members are ignored.
 - Alerts are on whenever the file exists and is valid. `NtfyConfigFile` reads it when an alert is due and when the status page asks, and parses it again only when its size or modification time changed, so editing it needs no restart.
 - Problems ("ntfy.json needs a "topic" …") are shown on the status page. They never quote the topic or the token, and `NtfyConfig.toString()` leaves both out. A URL with credentials is refused. A token is accepted only with `https://`, or with `http://` to a loopback or tailnet host (`*.ts.net`, a bare MagicDNS name, 100.64.0.0/10, `fd7a:115c:a1e0::/48`), where WireGuard encrypts it.
 - The file is outside the vault (§4.1), so it never reaches git, the trash or the mirror. It is in the `notes-data` volume, so the encrypted backups hold it (§7.10).
-- **Why not a compose secret,** like the mirror token? `ntfy.json` belongs to the app: item 9 switches its channels in Settings and may write the file, which a read-only compose secret cannot allow, and editing it should not need a redeploy.
+- **Why not a compose secret,** like the mirror token? `ntfy.json` belongs to the app: item 9 switches its channels in Settings and a later version may write the file, which a read-only compose secret cannot allow, and editing it should not need a redeploy.
 
 **The watchdog exit.** `TAILSCALE_WATCHDOG_EXIT` is logged just before the JVM exits in an orphaned network namespace (§7.6), from which nothing can be sent. At `ApplicationReadyEvent`, `AppAlerts` reads `.watchdog-exits`: an exit up to 10 minutes before this JVM started is why it started, and that alert is sent now.
 
@@ -1670,6 +1685,38 @@ Questions about the notes answered by Claude with citations, summaries of a note
 
 **Tests.** `ClaudeCodeGatewayTest` with the CLI replaced by a fake process (the locked-down command line and environment, the stream-json lines, an older CLI without partial messages, a refused token, a usage limit, a crash with its stderr scrubbed, cancellation and the timeout); `AiServiceTest` (the providers, availability, retrieval, exclusions, caps, the byte-for-byte rebuild of earlier turns, summaries, suggestions, the stream of events, the spend guard, a browser leaving part way) with a recording gateway; `AnthropicGatewayTest` against a local HTTP server that replays recorded Messages API streams (the request's shape, the key as a bearer token, the fallback, refusals, error mapping without the key, stopping on a listener's exception); `ExcerptsTest`, `QueryTermsTest`, the settings tests, and `AiIntegrationTest` (the HTTP contract with `notes.ai.fake`). No test calls Anthropic.
 
+### 5.26 Reminders and push notifications (ROADMAP items 9 and 4c)
+
+Task reminders (`Task.reminders`, local `YYYY-MM-DDTHH:mm`, §5.20) and a daily-note nudge, delivered by one scheduler through three routes, each switched on in Settings (`settings.reminders`, all off by default, the ROADMAP decision of 2026-10-17: build every route, pick later). The contract is API.md §28; the code is the `reminders` package and `ReminderController`; the client side is §6.38. The desktop app's native notifications (item 41) are a fourth route for later, behind the same `ReminderRoute` interface.
+
+**The scheduler** (`ReminderScheduler`) starts on `ApplicationReadyEvent`, after the settings and the index are loaded, and ticks every 15 seconds (`notes.reminders.tick`) on its own daemon thread.
+
+- **Due.** A task reminder is due when its local time, read in the reminders zone, is in `(now − 24 h, now]`, after the **baseline**, and its key `task:<id>:<at>` is not in the ledger. Only open, unarchived tasks in unarchived lists count (`TaskService.withReminders`). Local times resolve with `ZonedDateTime.ofLocal(…, null)`: in a spring-forward gap a 02:30 reminder fires at 03:30; in the autumn overlap it takes the earlier offset, so it fires once.
+- **The zone** is the IANA zone the devices report at startup (`PUT /api/reminders/zone`); the latest report wins, which suits one person whose devices share a zone. Until one reports, the server's clock zone (UTC) is used.
+- **Delivered** once at least one route that is on accepts the message; its key then goes into the ledger. Routes are tried in turn; one that fails does not stop the others. A reminder no route accepted is retried after 30 seconds, doubling up to 15 minutes, until it leaves the 24-hour window. At most 20 reminders go out per tick, oldest first.
+- **At least once.** The ledger is saved after the sends, so a crash between them repeats that reminder rather than losing it. Push messages carry a `Topic` (a hash of the key), so a repeat still waiting at the push service replaces the first.
+- **Baseline.** With every route off, the baseline follows the clock (saved at most every 10 minutes), so switching a route on later does not deliver a day of old reminders at once. With a route on, it stays put, so reminders that fell due while the server was down (within 24 hours) are delivered when it starts, as the ROADMAP asks.
+- **Snooze** adds `{taskId, at, until}` to the state; it fires like a reminder with the key `snooze:<id>:<at>:<until>` (the body says "(snoozed)") and is then dropped. **Done** completes the task through `TaskService.complete` with `base: {due, start}` taken from the task as it is now, and only while the task is open and still has a reminder (or a snooze) at `at`, so a late tap after another device completed or rolled the task forward changes nothing, and a repeating task rolls forward once.
+- **Daily-note nudge** (`settings.reminders.dailyNote`, at `dailyNoteTime`, default 09:00, key `daily:<date>`): due like a reminder; when today's daily note (the settings' folder and format, `MomentFormat`) already exists it is marked delivered without sending. It opens `/?open=daily`.
+
+**State: `.notesapp/reminders.json`**, written atomically (temporary file, then a move) and kept out of git through the managed `info/exclude` (§4.6), like `trash.json`, because it changes with every delivery:
+
+```json
+{ "version": 1, "baseline": "2026-10-16T12:00:00Z", "zone": "Europe/Berlin",
+  "delivered": { "task:01JA…:2026-10-16T09:00": "2026-10-16T07:00:04Z", "daily:2026-10-16": "…" },
+  "snoozes": [ { "taskId": "01JA…", "at": "2026-10-16T09:00", "until": "2026-10-16T07:10:04Z" } ] }
+```
+
+Ledger entries are pruned after 48 hours (twice the window), snoozes a day after they were due. A missing or unreadable file starts from now (with a WARN), so a corrupted file never floods.
+
+**Routes** (`ReminderRoute`: `id`, `enabled(settings)`, `deliver(message, settings)`, never throwing):
+
+- **Web Push** (`WebPushRoute`, `WebPushSender`, `PushStore`, `WebPushCrypto`). JDK cryptography only, no new dependency: the message is encrypted per device with RFC 8291 in RFC 8188's `aes128gcm` coding (ECDH P-256 with a fresh sender key, HKDF-SHA256, AES-128-GCM, one record with the `0x02` delimiter; tested against RFC 8291 Appendix A), and authorized with a VAPID token (RFC 8292: an ES256 JWT signed with `SHA256withECDSAinP1363Format`, `aud` the push service's origin, `exp` 12 hours, `sub` `notes.reminders.vapid-subject` or else `https://<first allowed host>`). Headers: `TTL: 86400`, `Urgency: high`, `Topic`. Redirects are not followed. `201`/`2xx` is accepted; `404` or `410` removes the device; anything else is recorded on the device and the route fails over to the next. The payload is JSON (title, body, tag, kind, url, taskId, at; API.md §28.2), at most 3,993 bytes, so push services see neither the title nor the notes. **`/data/secrets/push.json`** (`PushStore`, outside the vault, §4.1, written owner-only where the file system allows) holds the VAPID key pair, created on the first `POST /api/push/key`, and the devices (endpoint, keys, name, last success and error). An endpoint must be `https`; at most 50 devices. A subscription is a capability to notify that device, so the endpoints never leave the server (the API shows names and ids).
+- **ntfy** (`NtfyRoute`) reuses `NtfyClient` and `ntfy.json` (§5.18.1), with the topic of its `reminders.topic` or the default one, priority 4, tag `bell`, and a click URL on the first allowed host. **Title only** (`ntfyTitleOnly`, on by default) sends the task's title with the body "Task reminder", never the notes or the due line, because with ntfy.sh the text leaves the tailnet; the title itself still does, which Settings says.
+- **In-app** (`InAppRoute`) publishes `reminder.due` (`ReminderDueEvent`) to `EventHub`; it is accepted only while at least one event stream is connected, so with every tab closed another route, or a later tick, delivers it.
+
+**Tests.** `WebPushCryptoTest` (the RFC 8291 Appendix A vector both ways, a fresh round trip, key encodings, invalid points, a VAPID JWT the public key verifies), `WebPushTest` (the store's validation and file, a send to a local HTTP server whose body the device key decrypts and whose VAPID token verifies, 500 recorded, 410 removing the device; the ntfy route's title-only and full bodies and click URL), `ReminderSchedulerTest` (delivered once across a restart, missed reminders after downtime, the 24-hour window, the moving baseline, retry backoff, zones and DST, snooze and done, the daily nudge, upcoming, an unreadable state file), `NtfyConfigFileTest` (`reminders.topic`), `SettingsServiceTest` (the optional group and its validation) and `RemindersIntegrationTest` (status, zone, key, subscribe and unsubscribe, test, snooze, done completing a task once).
+
 ### 5.27 Encrypted notes on the server (ROADMAP item 27)
 
 Encryption happens only in the browser (§6.33); the server never sees a passphrase, a key or a plaintext, and has nothing to configure. Its part is to store ciphertext as ordinary text and to keep that ciphertext out of what it derives from notes.
@@ -1683,6 +1730,48 @@ Encryption happens only in the browser (§6.33); the server never sees a passphr
 - **Not protected by the server**: the hint (plain text by design), file names and sizes, and when a note changed. Git history keeps every earlier version: a note encrypted after it was saved in plain form keeps its plain versions in history (the client warns).
 
 **Tests.** `EncryptedSectionsTest` (every prefix and suffix, offsets kept by blanking, no false matches, single lines, `.mdenc` as text, search by word, regular expression and `line:` never matching ciphertext or hints while the rest of the note is found) and `AiServiceTest.encryptedSectionsAndNotesAreNeverSent` (a note summary, a selection and a folder summary carry `[encrypted]`, never the base64, and the folder's `.mdenc` is not a source).
+
+### 5.28 Public publishing through Tailscale Funnel (ROADMAP item 26)
+
+**Decision (2026-10-17): built switched off.** Nothing is public until the server owner does two things: sets `NOTES_PUBLISH_ENABLED=true` (`notes.publish.enabled`, default `false`), which starts the publish server, and replaces `serve.json` with the Funnel variant (`deploy/tailscale/serve.funnel.json.example`; on CasaOS `NOTES_PUBLISH_FUNNEL: "true"`), which lets the internet reach that server's port. Either step alone exposes nothing (DEPLOY.md and CASAOS.md "Public publishing"). `PublishDeployDefaultsTest` holds the shipped defaults: the property, both compose files, `.env.example` and `serve.json`.
+
+**A separate server, not a second connector.** An extra Tomcat connector would serve the same servlet context: every controller, all of `/api/**` and the SPA would answer on it, unauthenticated. `PublishServer` is instead a JDK `HttpServer` (module `jdk.httpserver`, part of the JRE) bound to `notes.publish.address:port` (`127.0.0.1:8081`), started as a `SmartLifecycle` only when enabled, on virtual threads. It shares no filter, handler or resource with the app, and answers only:
+
+| Request | Response |
+|---|---|
+| `GET`/`HEAD /p/<slug>` | the snapshot page, `text/html; charset=utf-8` |
+| `GET`/`HEAD /p/<slug>/<asset>` | an attachment of that snapshot (`Accept-Ranges: bytes`; single ranges, which iPhone video needs) |
+| `GET`/`HEAD /p/-/style.css` | the one stylesheet (`-` is never a slug) |
+| anything else, any other method | `404` `Not found` (the JDK server itself answers `400` to a malformed request target) |
+
+Paths are matched raw against `/p/[a-z0-9-]{1,80}` and `/p/[a-z0-9-]{1,80}/[0-9a-f]{20}\.[a-z0-9]{1,10}`, never decoded, so escapes, dot segments and `;` parameters match nothing. A matching slug or asset is then served only if `SnapshotStore.served()` lists it (the slugs of `publish.json` entries whose snapshot exists, and each one's asset names), from `<notes.publish.dir>/<slug>/` after a normalize-and-`startsWith` check, without following symlinks. Every response carries `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` (attachments add `sandbox`), so no script runs and nothing loads from elsewhere, plus `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Resource-Policy: same-origin`, `X-Robots-Tag: noindex, nofollow` and `Cache-Control: no-cache` with an `ETag`, so an unpublish takes effect at once.
+
+**The app refuses Funnel traffic.** `FunnelRequestFilter` (after `SecurityHeadersFilter`, before `QueryParametersFilter`, `HostAndIdentityFilter` and every other filter) answers `403 funnel-request` to any request carrying `Tailscale-Funnel-Request`, whatever its value or path, health endpoints included. Tailscale adds that header to everything arriving through Funnel, so even a `serve.json` that funnelled `:443` by mistake would expose nothing; the Host and identity allowlists of §5.13 would refuse it as well.
+
+**Snapshots, never live reads.** Publishing (`PublishService.publish`) reads the note once through `FileService.readText` (path safety, reserved paths), renders it, and writes the page and its attachments to a staging folder that replaces `<dir>/<slug>` in one rename (`SnapshotStore.write`). The publish server never touches the vault. `notes.publish.dir` (default `/data/publish`, in the data volume beside the vault and so backed up; dev `../dev-publish`) is outside the vault, so snapshots are neither indexed nor versioned. `.notesapp/publish.json` lists the published notes and is committed with the normal batch:
+
+```json
+{ "notes": [ { "path": "Blog/Hello.md", "slug": "hello", "title": "Hello", "publishedAt": "2026-10-21T10:00:00Z",
+               "sourceVersion": "<blob id published>", "assets": ["0123456789abcdef0123.png"] } ] }
+```
+
+Hand-edited entries are taken only as far as they are well formed (a bad slug or asset name is dropped). A move or rename through the app re-keys the entry (`MoveService` calls `PublishService.moved`); the address stays. A deleted note keeps its public page until it is unpublished; the list shows it as `source-missing`. Unpublishing stops serving the slug first, then deletes the snapshot. Links between published notes are resolved when the linking note is rendered: publishing B later does not change A's snapshot until A is republished, and unpublishing B leaves A with a link that now answers `404`.
+
+**What a snapshot contains** (`PublishRenderer`, commonmark-java 0.30.1 with tables, strikethrough, task lists, footnotes, heading anchors and autolinks). The source is rewritten first with the offsets of `MarkdownScanner` (§5.5.2), then parsed, cleaned up and rendered by a renderer that overrides links, images and raw HTML:
+
+- Left out: frontmatter; `%% %%` and `<!-- -->` comments; HTML blocks and inline HTML (only `<br>` survives); fenced blocks that query the vault (`query`, `dataview`, `dataviewjs`, `tasks`, `base`, `bases`); block ids (`^id`). Encrypted sections (ROADMAP item 27, Meld Encrypt's `🔐β 💡hint💡<ciphertext> 🔐`, an unclosed one to the end of the note) become a "🔒 *encrypted*" placeholder, hint included, and are never decrypted; encrypted notes (`.mdenc`) cannot be published at all. A callout's marker becomes a bold title.
+- Wikilinks and Markdown links to notes: a link to `/p/<slug>[#heading-id]` only when the target is published (to the note itself: `#heading-id`); otherwise plain text: the alias, or the target's name **without its folder** (`Name > Heading`, as Obsidian shows it), escaped so it cannot become Markdown or HTML. Unresolved links are plain text too. No vault path ever reaches the page.
+- Embeds: an image, audio or video file the note embeds (`![[x.png|300]]`, `![alt](x.png)`) is copied into the snapshot as `<sha-256 prefix>.<ext>` (files over `notes.publish.max-asset-size`, 25MB, are left out). An embed of a published note becomes a link with its title; an embed of anything else leaves nothing, not even its name.
+- Other URLs: only `http(s)://` and `mailto:` become links (`rel="nofollow noopener noreferrer"`), plus in-page `#anchors`; `javascript:`, `data:`, `file:`, `obsidian:`, protocol-relative URLs and reference-style links to vault files are plain text. External images become links, never loads.
+- Internal links are rewritten to a per-render random marker scheme that only the renderer resolves, so text in the note cannot forge one.
+
+The page (`PublishPage`) is a fixed template: the escaped title as `<title>` and `<h1>`, the body, a "Published <date>" footer, `noindex` and `no-referrer` metas and the stylesheet link; light and dark follow `prefers-color-scheme`. Math, Mermaid and other client-rendered blocks show as their source.
+
+**API** (API.md §26, tailnet only): `GET /api/publish` (`enabled`, `baseUrl`, the notes and their state: `current`, `changed` since publishing, `source-missing`, `snapshot-missing`), `POST /api/publish {path, slug?, title?}` (publish or republish; the slug defaults to the current one or to one made from the title, `-2`… on a clash; `409 already-exists` for another note's slug; `409 publishing-off` while disabled), `DELETE /api/publish?path=` (allowed while disabled, to clean up). `notes.publish.base-url` (`NOTES_PUBLISH_BASE_URL`, the Funnel origin such as `https://notes.<tailnet>.ts.net:8443`) only makes the copied links absolute.
+
+**UI** (`components/publish`, `features/publish.ts`). A globe in the note header (desktop and tablet; shown while publishing is on, or for a published note) and "Publish to the web" in the ⋯ menu and the command palette (`file.publish`, plain notes only) open the publish dialog, registered with `registerOverlay` (§6.8): for an unpublished note, what becomes public, the title and the address (`/p/` + slug, checked like the server); for a published note, its public link (copy, open), its state and when it was published, Republish and Unpublish (confirmed). Settings › Publishing says whether publishing is on (and how it is turned on) and lists every published note with its link, state and path, Open note, Republish and Unpublish.
+
+**Tests.** `PublishRendererTest` (what must not leak: frontmatter, comments, raw HTML, private link targets and their folders, private embeds, unsafe URLs, forged markers, unescaped text; what must work: published links, anchors, assets, tables, task lists, footnotes, callouts), `PublishIntegrationTest` (the page and its asset with their headers; `404` from the publish server for `/`, `/api/tree`, `/api/files?path=…`, `/api/files/raw?path=…`, `/n/x`, the SPA's routes, health, unpublished slugs, a snapshot folder and files not listed in `publish.json`, an attachment only a private note embeds, `.notesapp/publish.json`, `.git/config`, escaped and dot-segment variants, and every method but `GET`/`HEAD`; republish, a new address, rename, unpublish; validation; `403 funnel-request` from the app), `PublishOffIntegrationTest` (the default: no listener on the configured port, `409 publishing-off`), `PublishDeployDefaultsTest`, and the frontend's `Publish.test.tsx`.
 
 ### 5.34 Flashcard review records (ROADMAP item 34)
 
@@ -1813,7 +1902,7 @@ frontend/src/
 │   │                         registerEventHandler; builtins.ts registers every v1 view, panel and command through them
 ├── calendar/               ROADMAP item 14 (§6.32): model.ts, repeats.ts, prefs.ts, api.ts, useCalendarData.ts,
 │                             routes.ts, actions.ts, register.ts, ui/ (the /x/calendar page and the Calendar panel)
-├── formulas/                 ROADMAP item 39 (§6.38): model.ts (pure), engine.ts (lazy chunk, HyperFormula), load.ts
+├── formulas/                 ROADMAP item 39 (§6.41): model.ts (pure), engine.ts (lazy chunk, HyperFormula), load.ts
 ├── flashcards/               ROADMAP item 34 (§6.34): parse.ts, ids.ts, reviews.ts, schedule.ts (ts-fsrs), deck.ts,
 │                             session.ts, stats.ts, store.ts (records, outbox), register.ts, ui/ (the /x/flashcards page)
 ├── habits/                   ROADMAP item 35 (§6.35): model.ts, progress.ts, frontmatterEdit.ts, write.ts, actions.ts,
@@ -1838,6 +1927,8 @@ frontend/src/
 ├── editor/
 │   ├── obsidianSyntax.ts     Lezer inline extension (WikiLink, Embed, Hashtag, Highlight ==x==, Comment %%x%%)
 │   ├── completion.ts         [[ / [[Note# / [[# / # completion sources
+│   ├── slash.ts, slashItems.ts  the / menu: its completion source, registry and the editor's items (§6.6.2)
+│   ├── listRenumber.ts, markupPairs.ts, headingFold.ts  editor niceties (§6.6.2)
 │   ├── editorSetup.ts        noteExtensions(): the full extension list (§6.6)
 │   ├── editorCommands.ts     toggle checkbox, bold, italic, insert link, follow link
 │   ├── vimMode.ts            vim's compartment, the editor command keys facet, the mode store (§6.36)
@@ -1895,6 +1986,7 @@ frontend/src/
 │   ├── panels/               SearchPanel, TagsPanel, BookmarksPanel, RecentPanel, BacklinksPanel, OutlinePanel, HistoryPanel (lazy)
 │   ├── overlays/             QuickSwitcher, CommandPalette, PromptDialog, ConfirmDialog, TemplatePicker, Toasts
 │   ├── capture/              CaptureForm, CaptureDialog, CapturePage (/capture), CaptureSettings (§6.27)
+│   ├── clip/                 ClipPage (/clip, the web clipper's hand-over), ClipperSettings (§6.27.1)
 │   ├── ConflictBanner.tsx, ConnectionIndicator.tsx, SaveStatus.tsx, ErrorBoundary.tsx, OfflineBanners.tsx
 │   └── pages/                HomePage, SearchPage (mobile), TrashPage, SettingsPage (lazy), NotFoundPage
 ├── styles/                   tokens.css (themes), app.css, editor.css, reading.css, mobile.css; rich.css (loaded with the reading-view chunk)
@@ -1935,6 +2027,8 @@ There is no `['resolve']` query: link resolution runs on the client over the tre
 - the mobile drawer and sheet state;
 - the SSE connection status and the `caughtUp` flag;
 - the global save summary.
+
+The workspace of tabs and split panes (ROADMAP item 11) has its own store, `workspace/store.ts`, persisted per device (§6.40).
 
 Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax visibility) live in `state/prefs.ts` (§5.12).
 
@@ -1999,7 +2093,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax vi
 - Encode with `encodeRoutePath(p) = p.split('/').map(encodeURIComponent).join('/')`, so `Daily Notes/2026-10-16.md` becomes `/n/Daily%20Notes/2026-10-16.md`.
 - Decode **from `location.pathname`** segment by segment with `decodeURIComponent`. Do not use `useParams()['*']`, so the client controls the decoding exactly.
 - These are deep links: they work from bookmarks, shared tailnet URLs and reloads. The server's `SpaController` serves `index.html` for `/n/**`, `/search`, `/trash`, `/settings/**` and `/x/**`.
-- Browser back and forward are the app's navigation history, as in Obsidian.
+- Browser back and forward are the app's navigation history, as in Obsidian. With tabs (§6.40) the URL is always the **active pane's** shown tab, and back and forward walk that tab's own history.
 - A remote move of the open note uses `replace`, so the stale URL does not stay in history.
 - **Overlays on touch devices** (drawer, bottom sheet, switcher, palette, dialogs) push a history entry when they open, so Safari's edge swipe or the back button closes them instead of leaving the note.
 - Pages registered by extensions (`registerPage`, §6.8) live under the reserved prefix `/x/`, for example `/x/tasks/today`.
@@ -2028,9 +2122,11 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax vi
     ├ <Workspace>
     │   ├ <TopBar/>           phone/tablet: ☰, title (+ connection dot), switcher/search button, lock toggle, ⋯ menu
     │   │                     (⋯ has Source mode / Live Preview for notes)
-    │   └ <WorkspaceScroll>   THE scroll container: the title and properties scroll away with the text, as in Obsidian
-    │       ├ <ConflictBanner/>  (sticky; only in conflict/deleted states)
-    │       └ <Routes> → <FileView path> | registered pages
+    │   └ <WorkspaceLayout>   panes of the split layout (§6.40; phone: the active pane only)
+    │       └ <PaneView> ×N    <TabStrip/> (not on phones) · <PaneContext> · its own router location
+    │           └ <WorkspaceScroll>   THE scroll container of the pane: the title and properties scroll away with the text
+    │               ├ <ConflictBanner/>  (sticky; only in conflict/deleted states)
+    │               └ <AppRoutes location={shown tab}> → <FileView path> | registered pages
     │             └ registry view, e.g. <MarkdownView>
     │                  ├ <NoteHeader>  <InlineTitle/> (edit = rename) · <SaveStatus/> · source toggle · lock toggle
     │                  │               (phone: only <InlineTitle/>; the TopBar already has the rest)
@@ -2042,6 +2138,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax vi
     ├ <StatusBar/>            desktop: <ConnectionIndicator/> · save summary · history warning · words/chars · backlink count
     ├ <MobileToolbar/>        touch devices; always mounted, shown while the editor is focused or the toolbar is in use
     └ overlays: <QuickSwitcher/> <CommandPalette/> <TemplatePicker/> <PromptDialog/> <ConfirmDialog/> <MoveDialog/> <Toasts/>
+                <TabSwitcher/> (phone, §6.40)
 ```
 
 ### 6.6 Editor: CodeMirror 6 extension list
@@ -2058,15 +2155,16 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax vi
 | 6 | `yamlFrontmatter({content: markdown({base: markdownLanguage, codeLanguages: languages, extensions: [ObsidianSyntax, MathSyntax], completeHTMLTags: false})})` | GFM, frontmatter, lazily loaded fence grammars, and the WikiLink, Embed, Hashtag, Highlight (`==x==`) and Comment (`%%x%%`) nodes. The tag and wikilink rules use the shared patterns of `features/syntax.ts` (API.md §15.6), including `\|` as the alias separator. `MathSyntax` (`editor/mathSyntax.ts`, ROADMAP item 3) adds InlineMath (`$x$`, and `$$x$$` inside a paragraph) and BlockMath (`$$` blocks) with the reading view's delimiter rules, so `$5 and $10` stays text and nothing inside math parses as a link, tag or emphasis. |
 | 7 | `syntaxHighlighting(obsidianHighlight)` + `lineClassPlugin` | Styled source mode: heading sizes, faint `#`/`**`/backtick marks, code-block and quote backgrounds, a highlight background for `==x==`, faint `%%comments%%`, math in a monospace accent colour with faint `$` marks, and a bold callout title line (`> [!type]`). Code tokens use `features/codeTokens.ts`, which the reading view's highlighter shares (§6.7.1), so fenced code looks the same in both modes. Nothing is hidden. Live Preview builds on the same styling. |
 | 7a | `livePreview(config)`, in Live Preview and locked mode only | Hides or replaces the markup (§6.6.1). Source mode leaves it out, so source mode is exactly item 7. |
-| 8 | `autocompletion({override: [wikilinkSource, headingSource, tagSource], icons: false})` | **`[[`** gives notes and aliases, pre-ranked with fuzzysort, with `filter: false` and **no `validFor`**: CodeMirror honours `validFor` only when it filters itself, so with both set the list froze after the first keystroke. The source re-runs on every keystroke and returns at most 50 options. The inserted text is `linkText(P, source, settings.newLinkFormat, style)` (§5.5.7), so two notes with the same name get a path-qualified link. With `useWikilinks: false`, the typed `[[query` is replaced by a Markdown link `[display](encodedPath)`. **`[[#`** and **`[[ThisNote#`** give headings from the open note's live Lezer tree; **`[[Other#`** uses `['meta', path]`. **`#`** gives tags. Completions use a custom `apply` that swallows the auto-inserted `]]`. |
+| 8 | `autocompletion({override: [slashSource, wikilinkSource, headingSource, tagSource], icons: false, tooltipClass: slashMenuClass})` | The `/` menu (§6.6.2). **`[[`** gives notes and aliases, pre-ranked with fuzzysort, with `filter: false` and **no `validFor`**: CodeMirror honours `validFor` only when it filters itself, so with both set the list froze after the first keystroke. The source re-runs on every keystroke and returns at most 50 options. The inserted text is `linkText(P, source, settings.newLinkFormat, style)` (§5.5.7), so two notes with the same name get a path-qualified link. With `useWikilinks: false`, the typed `[[query` is replaced by a Markdown link `[display](encodedPath)`. **`[[#`** and **`[[ThisNote#`** give headings from the open note's live Lezer tree; **`[[Other#`** uses `['meta', path]`. **`#`** gives tags. Completions use a custom `apply` that swallows the auto-inserted `]]`. |
 | 9 | `clickNavigation(nav)` + `unresolvedLinks` | `Mod`+click follows a link or tag (Shift adds nothing in v1, because there are no panes). A `ViewPlugin` marks wikilinks and internal Markdown links that the client resolver cannot resolve with `cm-unresolved` (faded), as Obsidian does. |
 | 10 | `pasteAndDrop(uploader, notePath)` | Image or PDF paste and drop, inserted at the **current selection** (which CodeMirror keeps after blur). While a file uploads, an "Uploading name…" **widget** marks its place: a position in the editor state, never document text, so autosave, drafts and other devices never see a placeholder and a tab killed mid-upload leaves nothing in the note. `AttachmentResult.markdown` (already in the configured link style) is inserted at the widget's mapped position, in the files' order, or the widget is removed on failure. Uploads in flight count as unsaved work (the `beforeunload` prompt, the new-build reload). Uploads send an `Idempotency-Key`. Internal explorer drag (`application/x-notesapp-path`) inserts a link built with `linkText`. Pasted rich text (HTML) becomes Markdown, and `Mod-Shift-V` pastes plain text (§6.6.1). |
 | 11 | `EditorView.contentAttributes` | `spellcheck` and `autocorrect` from the per-device preferences (§5.12), `autocapitalize=sentences`, `enterkeyhint=enter` |
 | 12 | `smartPunctuationGuard` | An input transaction filter for iOS Smart Punctuation, which WebKit reportedly ties to `spellcheck` (to be confirmed on the device, smoke item 22). Inside frontmatter, fenced or inline code, and for `--`/`---` at the start of a line, it reverts the substitutions: `—` back to `--`, curly double quotes to `"`, curly single quotes to `'`. Otherwise iOS would silently break frontmatter delimiters, YAML strings and `"[[Link]]"` property values. |
 | 13 | `EditorView.scrollMargins` + `cursorScrollMargin` | Keeps the caret clear of the sticky banner and the toolbar |
 | 14 | `EditorState.readOnly` / `EditorView.editable` | For `lossy` files, and for locked Live Preview |
-| 15 | Keymap, highest first | `Prec.highest`: `Mod-Alt-ArrowLeft` / `Mod-Alt-ArrowRight` (navigate back and forward; CodeMirror's `defaultKeymap` binds `Alt-ArrowLeft/Right` to syntax-wise cursor moves outside macOS). Then the app keymap (`Mod-s` flush, `Mod-Enter` follow, `Mod-l` toggle checkbox, and the formatting toggles of §6.6.1: `Mod-b`, `Mod-i`, `Mod-k`, `Mod-Shift-x`, `Mod-Shift-h`, `Mod-e`), then `closeBracketsKeymap`, `completionKeymap`, `searchKeymap`, `historyKeymap`, `defaultKeymap`, `indentWithTab` (`Esc` then `Tab` leaves the editor, §6.14). The app's command keys are also the `editorCommandKeys` facet, which vim mode runs before its own keys, and each steps aside when this device gave its command another key (§6.25); `Mod-e` is two of them, `editor.inlineCode` while editing and `editor.toggleMode` in a locked note |
+| 15 | Keymap, highest first | `Prec.highest`: `Mod-Alt-ArrowLeft` / `Mod-Alt-ArrowRight` (navigate back and forward; CodeMirror's `defaultKeymap` binds `Alt-ArrowLeft/Right` to syntax-wise cursor moves outside macOS). Then the app keymap (`Mod-s` flush, `Mod-Enter` follow, `Mod-l` toggle checkbox, the formatting toggles of §6.6.1: `Mod-b`, `Mod-i`, `Mod-k`, `Mod-Shift-x`, `Mod-Shift-h`, `Mod-e`, and the heading folds of §6.6.2: `Mod-Shift-[`, `Mod-Shift-]`), then `closeBracketsKeymap`, `completionKeymap`, `searchKeymap`, `historyKeymap`, `defaultKeymap`, `indentWithTab` (`Esc` then `Tab` leaves the editor, §6.14). The app's command keys are also the `editorCommandKeys` facet, which vim mode runs before its own keys, and each steps aside when this device gave its command another key (§6.25); `Mod-e` is two of them, `editor.inlineCode` while editing and `editor.toggleMode` in a locked note |
 | 16 | `EditorView.updateListener` | Calls `session.markDirty()` on `docChanged` when the transaction is not annotated `Transaction.remote` |
+| 16a | `markupPairs`, `listRenumbering`, `headingFolding()` | Typing markup over a selection, numbered lists that keep counting, heading folds (§6.6.2) |
 | 17 | `vimCompartment` (`editor/vimMode.ts`) | Empty, or vim mode when this device turned it on (§6.36): a lazy chunk at `Prec.highest` |
 
 The document is always **LF-only**; there is no `lineSeparator` facet. CRLF files are converted at the session boundary (§6.9), because CodeMirror counts a line break as one position whatever the separator, and `Text.toString()` always joins with `\n`.
@@ -2225,7 +2323,7 @@ The model records the table's **style**: `padded` (every row has every cell and 
 
 **Insertions from outside the editor.** A template or an attachment inserted while a cell is open goes after the table, never into its text (`DocumentSession.insertionRange`).
 
-**Formulas (ROADMAP 39, §6.38).** The `tableCellFormatters` facet takes functions that, given a table's contents (`rows[0]` is the header), alignments, start (`from`) and the note's state, return each cell's display instead of its Markdown (`{text, className?, title?}`), or null. The grid renders a display in a `cm-lp-cell-value` span; editing the cell shows its text (the formula), and the display of the cell being edited shows in the grid's **formula bar** (`cm-lp-formula-bar`: the cell's name, `B5`, and its result, updated as you type). Formatters run when a table renders; dispatching `refreshTables` redraws every table (for an engine that has finished loading), and `redrawTableDisplays(view)` redraws only the displays (an edit of another table changed a result). Columns are A, B, … in the cells' labels.
+**Formulas (ROADMAP 39, §6.41).** The `tableCellFormatters` facet takes functions that, given a table's contents (`rows[0]` is the header), alignments, start (`from`) and the note's state, return each cell's display instead of its Markdown (`{text, className?, title?}`), or null. The grid renders a display in a `cm-lp-cell-value` span; editing the cell shows its text (the formula), and the display of the cell being edited shows in the grid's **formula bar** (`cm-lp-formula-bar`: the cell's name, `B5`, and its result, updated as you type). Formatters run when a table renders; dispatching `refreshTables` redraws every table (for an engine that has finished loading), and `redrawTableDisplays(view)` redraws only the displays (an edit of another table changed a result). Columns are A, B, … in the cells' labels.
 
 **Inserting a table.** "Insert table" (the palette, and the phone toolbar's table button) inserts an empty table with a header row and two columns and rows (`newTableText`, padded), on the caret's line when it is blank or after it, with the blank lines that keep it apart from the text around it, and opens its first cell (in source mode the caret goes into it). In a table cell it only says it cannot. On the phone, the toolbar shows Previous and Next cell in a cell, and hides the tools that insert whole lines.
 
@@ -2277,6 +2375,41 @@ The toggles read the formatting that is there from the Live Preview model (`coll
 4. **Tidy**: no runs of blank lines, no trailing blanks (code blocks keep theirs).
 
 The Markdown replaces the selection as one undo step (`input.paste`). Pasted inside a line, a heading, list, quote, table, rule or code block starts on a line of its own; a table, code block or rule right under a paragraph gets a blank line (the paragraph would otherwise take a table or code block in, and a `---` would make it a setext heading); and a table, list or rule that ends the paste does not take in the rest of the line. A paste that fails to convert, or converts to nothing, inserts the plain text.
+
+### 6.6.2 Slash commands and editor niceties (ROADMAP 31)
+
+Small editing aids, in Live Preview and source mode (and, where it fits, in a table cell's editor and a locked note). Everything writes ordinary Markdown, so the file stays what Obsidian would write.
+
+**The `/` menu** (`editor/slash.ts`, `editor/slashItems.ts`, `extensions/slashItems.ts`). A `/` typed at the start of a line or after whitespace (also after a list marker or a quote's `>`) opens a menu of things to insert or turn the line into; letters, digits, `-` and `_` after it filter the menu (fuzzysort over each item's label and keywords: `/h2`, `/tabl`, `/todo`, `/hr`, `/python`). It is a completion source like `[[` and `#` (§6.6 #8: first in the `override` list, `filter: false`, no `validFor`), so the keys are the completion's: arrows, `Enter` or `Tab` to pick, `Esc` to close and keep the `/` as text. A query that matches nothing closes the menu, so `and/or`, `1/2` (no space before the slash) and `/usr/bin` stay text.
+
+- **Where it does not open**: in code (fenced, indented and inline), comments, HTML, math, links and their addresses, the frontmatter, a read-only or locked note, and while vim is in normal or visual mode (`vimModeOf`; there `/` is vim's search and never reaches the text).
+- **In a table** (a cell's editor in Live Preview, a table line in source mode) it offers only the items that insert text at the cursor (`scope: 'inline'`): links, embeds, block references, inline math and dates. The items that change or insert lines are left out, as the phone toolbar hides its line tools in a cell.
+- **Picking an item** removes the typed `/query`, then runs the item where it was. The items run the editor's existing commands rather than copies of them:
+
+| Group | Items | Runs |
+|---|---|---|
+| Text | Heading 1–6, Normal text | `setHeading` (§6.6.1 line commands) |
+| List | Bulleted list, Numbered list (continuing a list above), Checklist, Quote | `toggleBulletList`, `toggleNumberedList`, `toggleCheckbox`, `toggleQuote` |
+| Block | Callout (and Callout: Note, Info, Tip, Warning, Danger, Success, Question, To do, Example, Quote, Abstract, Failure, Bug), Table, Divider, Code block, Code: *language* (16 common ones; any other: Code block, then type it), Math block, Mermaid diagram | `insertBlock` (on a blank line, or after the line, kept apart by blank lines, as Insert table), `insertTable`, `insertHorizontalRule` |
+| Inline | Inline math | `$`…`$` around the cursor |
+| Link | Link, Internal link, Embed, Block reference | `toggleLink` (Mod-K), `insertWikilink`, `![[` and `[[#^` with their completion open (§6.37) |
+| Date | Today, Time, Date and time, Tomorrow, Yesterday | the date and time formats of Settings, Templates (as `{{date}}` and `{{time}}`), shown on the right |
+| App (registered) | Template…, Image…, Attachment…, New *drawing / spreadsheet / canvas / board* (embedded), Encrypted text…, Voice note, New task… | the palette commands `templates.insert`, `editor.insertAttachment`, `encryption.insertSection`, `voice.record`, `tasks.quickAdd` (shown while the command's `when` holds and the editor is the open note's); the phone toolbar's image picker; a new file of every view with a `create` descriptor (§6.8), named in a prompt, created where new notes go and embedded where the cursor was (a tracked range, §6.9) |
+
+- **Extension point**: `registerSlashItem(item)` (`editor/slash.ts`) adds an item: an id, a label, keywords, a group, a scope, an order and `run(view)`, with an optional `when(view)`. The app's items are registered in `extensions/slashItems.ts`, after the commands they run; the embedded-file items follow `onViewsChanged`.
+- **The palette and the phone**: "Insert… (the / menu)" (`editor.insertMenu`) and the phone toolbar's first button (`/`) type a slash (after a space when the cursor follows text) and open the menu. On a touch screen the menu's tooltip (class `cm-slash-menu`, from the completion's `tooltipClass`) is **docked above the editing toolbar**, the full width of the screen less 8 px each side, so it sits right over the keyboard whatever the caret's place (`--vv-top` and `--vvh`, §6.16); its rows are 40 px high, and when it opens the caret's line scrolls up to just above it (`slashMenuDocking`).
+
+**Lists.** Enter continues a list and Backspace on an empty item takes its marker off (lang-markdown's `markdownKeymap`, part of the note language since v1; Enter also renumbers the items after a new one). **Renumbering** (`editor/listRenumber.ts`, a transaction filter) also follows the edits that leave a numbered list out of order: deleting, cutting, moving, pasting or dropping lines, and indenting or outdenting items. The list counts on from where it started before the edit (also when its first item went), an item indented into a list of its own starts at 1, and the renumbering is part of the edit's undo step. Typing never renumbers, so a number being typed is left alone, and lists in code blocks, the frontmatter, HTML and math are never touched. A list is the items at one quote depth and indentation with one delimiter (`.` or `)`); blank lines and more indented lines (continuations, nested lists, code in an item) may sit between them. "Renumber numbered list" (`editor.renumberList`) fixes the list at the cursor from its first number.
+
+**Lines.** Move line up and down (`Alt-ArrowUp`, `Alt-ArrowDown`) and duplicate line (`Shift-Alt-ArrowDown`, and `Shift-Alt-ArrowUp` for a copy above) are CodeMirror's `defaultKeymap` commands, now also in the palette ("Move line up", "Move line down", "Duplicate line") for the phone; a move renumbers numbered lists as above.
+
+**Typing markup over a selection** (`editor/markupPairs.ts`, an input handler at `Prec.high`, in notes and table cells). `*`, `_`, `~`, `=`, a backtick or `$` typed over selected text wraps it and keeps it selected, so `*` twice makes `**bold**` and `=` twice `==highlight==`. It applies when every selected range is on one line and outside code; otherwise the character replaces the selection as usual. Brackets and quotes keep closeBrackets' wrapping (§6.6 #3).
+
+**Pasting a web address over selected text** makes it a link, `[text](url)` (lang-markdown's `pasteURLAsLink`, in the note language since v1; `www.` addresses get `https://`). A pasted address with nothing selected stays the address: fetching the page's title would need the server to fetch arbitrary web pages, a new kind of outbound connection (§2), and is not built.
+
+**Heading folds** (`editor/headingFold.ts`). A heading's section (up to the next heading of the same or a higher level: lang-markdown's fold service) folds and unfolds from a chevron in the margin left of the heading (the line's `::before`; shown on hover with a mouse, always, faintly, on a touch screen, where a tap on it does not open the keyboard), with **Fold heading** (`Mod-Shift-[`, the section the cursor is in) and **Unfold heading** (`Mod-Shift-]`), and with **Fold all headings** and **Unfold all headings** in the palette. A folded section shows a `…` that unfolds on a click. Folds are the editor's view state (CodeMirror's `codeFolding`): nothing is written to the note, they work in locked notes too, and they are forgotten when the note is closed. A cursor that a fold would hide goes to the end of the heading.
+
+**Table editing helpers** are the grid's (§6.6.1: Tab and Enter between cells, rows and columns added, moved and deleted from grips and menus, alignment) and Insert table; the `/` menu adds Table and the inline items inside cells.
 
 ### 6.7 Reading view
 
@@ -2365,6 +2498,8 @@ export interface FileViewDescriptor {
   create?: { label: string; extension: string; initialContent(): string }; // adds "New <label>" to explorer menu + palette
   merge?(base: string, mine: string, theirs: string): string | null;     // optional semantic 3-way merge for conflicts (null = fall back to banner)
   commands?: Command[];                          // contributed to the palette while this view is active
+  sharedSession?: boolean;                       // several panes may show the file at once (ROADMAP 11, §6.40): the view
+                                                 // reads the session's text on every change (CodeMirror editors)
 }
 export function registerView(d: FileViewDescriptor): void;
 export function viewFor(entry: FileEntry): FileViewDescriptor;   // never null: 'unsupported' matches everything with 1
@@ -2381,6 +2516,7 @@ export function registerPanel(p: PanelDescriptor): void;         // adds a sideb
 export function registerOverlay(o: OverlayDescriptor): void;     // mounts a dialog host in the shell, once
 export function registerCommand(c: Command): void;               // global: always in the palette, may have a hotkey
                                                                  // (Command.globalHotkey: it fires inside the editor too)
+export function registerSlashItem(item: SlashItem): void;         // editor/slash.ts: an item of the editor's / menu (§6.6.2)
 export function registerEventHandler(name: string, fn: (data: unknown, eventId: string) => void): void;
                                                                  // EventStream adds a listener for every registered name,
                                                                  // on the current EventSource and on every future one
@@ -2890,7 +3026,8 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 | Task list page | `Enter` or `Space` on a task opens its inline editor (`Esc` or Done closes it); `Alt-↑/↓` move it among its siblings; `Alt-→` makes it a subtask of the task above, `Alt-←` moves it out of its parent (§6.22) |
 | Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`, `Mod-Shift-X/H` (§6.6.1; `Mod-E` is inline code in the text and unlocks a locked note) and `Mod-Shift-V` (paste as plain text). In Live Preview the typing shortcuts of §6.6.1 apply; `Backspace`, `Delete` (and by word), `ArrowLeft` and `Enter` follow its cursor rules, and the arrow keys open a table's cells. In a table cell: `Tab`/`Shift-Tab` next and previous cell (a new row after the last), `Enter`/`Shift-Enter` the cell below and above, arrows across cell edges, `Esc` back to the note, `Shift-F10` the cell's menu (§6.6.1). **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. With **Vim key bindings** on (Settings › This device, §6.36): vim's keys, with the app's keys above taking precedence, in Live Preview and in source mode; `:w` saves, `:q` leaves the editor. |
 | Explorer (focused) | `↑/↓` move; `←/→` collapse and expand; `Enter` opens; `F2` renames; `Delete` deletes (with confirmation); `Mod-Alt-N` creates a new note in the focused folder |
-| Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Esc` |
+| Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Mod-Enter` (open in a new tab, §6.40), `Esc` |
+| Tabs and panes (§6.40) | New tab `Mod-Alt-T`, close tab `Mod-Alt-W`, reopen closed tab `Mod-Shift-T`, next and previous tab `Mod-Alt-PageDown`/`PageUp`, next and previous pane `Mod-Alt-]`/`[`; Mod-click or middle click opens in a new tab (Mod-Shift-click in an editable note); in a strip `←/→`, `Enter`, `Delete`, `Shift-F10` |
 | Conflict banner | Buttons reachable with `Tab`; `Esc` dismisses Compare |
 
 ### 6.15 File explorer
@@ -2914,7 +3051,7 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 
 | Breakpoint | Layout |
 |---|---|
-| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, **+** (quick capture, §6.27), a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, and ⋯ (Command palette, Backlinks, Outline, History, Bookmark, Rename, Move, Delete, Template, Today, Reload). **Drawer:** full-height, 88 % width, slides in from the left; Files, Search, Bookmarks, Tags and Recent files tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
+| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, **+** (quick capture, §6.27), a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, a **tabs button** with the number of open tabs (the tab switcher, §6.40), and ⋯ (Command palette, Backlinks, Outline, History, Bookmark, Rename, Move, Delete, Template, Today, Reload). Phones show one pane. **Drawer:** full-height, 88 % width, slides in from the left; Files, Search, Bookmarks, Tags and Recent files tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
 | **Tablet** `768–1199 px` | The ribbon is a collapsed icon rail (48 px) that is always visible, so every desktop entry point (switcher, search, Today, template, new note, palette, Trash, Settings) stays one tap away on an iPad. Both sidebars are overlays over the editor, toggled from the rail or the TopBar. |
 | **Desktop** `≥ 1200 px` | Ribbon (48 px), left sidebar (default 280 px, resizable 200–480), workspace (readable width 598 px, 46 em of the 13 px UI size, when `readableLineLength`), right sidebar (300 px, resizable). Status bar at the bottom. |
 
@@ -2926,7 +3063,7 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 - **MobileToolbar.** The last grid row, so it sits right above the keyboard, on `(pointer: coarse)`.
   - It is **always mounted**; a CSS class shows it from a debounced (150 ms) "editor focused or toolbar in use" state. Unmounting it on blur would remove a button before its click is delivered.
   - Every button has `tabIndex={-1}` and `onPointerDown={e => e.preventDefault()}`, so tapping it never moves focus: the editor keeps focus, the keyboard stays open, and the button dispatches straight to the `EditorView`.
-  - Buttons: `[[ ]]`, `#`, bold, italic, heading (each tap: text, heading 1, 2, 3, text), bulleted list, checkbox, link, table, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, **Record voice note** (§6.30; it puts the keyboard away for the recording panel), and hide keyboard (`blur`) (§6.6.1). In a table cell, Previous and Next cell replace the tools that change whole lines.
+  - Buttons: `/` (the insert menu, docked above the toolbar, §6.6.2), `[[ ]]`, `#`, bold, italic, heading (each tap: text, heading 1, 2, 3, text), bulleted list, checkbox, link, table, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, **Record voice note** (§6.30; it puts the keyboard away for the recording panel), and hide keyboard (`blur`) (§6.6.1). In a table cell, Previous and Next cell replace the tools that change whole lines.
   - The image button triggers the **app-level** hidden `<input type=file accept="image/*" multiple>` hosted by `AppShell`. The selection to insert at is remembered before the picker opens, because opening the picker blurs the editor; an input inside the toolbar would be lost with its `change` event.
 - **Typography and targets.** Editor and input font size is at least **16 px**, so iOS does not zoom on focus. Every tap target is at least **44×44 px**. `touch-action: manipulation` removes the tap delay.
 - **No hover-only UI.** Tree rows open their menu with long-press or `⋯` (§6.15).
@@ -3500,6 +3637,29 @@ Capture a thought, a link or a photo into `Inbox.md` (vault root) or today's dai
 
 **Risk.** The server remembers idempotency keys for an hour within one run; a capture whose response was lost just before a restart could, when retried, be appended twice. It is a visible duplicate line, never a loss.
 
+#### 6.27.1 Web clipper (ROADMAP item 19, 2026-10-21)
+
+Save a web page as a Markdown note in `Clippings/`: the readable article (Mozilla Readability 0.6.0) or only the selection, converted with turndown 7.2.4 and its GFM plugin (tables, strikethrough, task lists, fenced code with its language), under Obsidian Web Clipper's properties: `title`, `source`, `author`, `site`, `published` (a date), `created` (the device's date), `description` and `tags: [clippings]`. The note's name is the title made safe for the new-name rules (API.md §1.3): `/ \ |` become `-`, the other forbidden characters go, at most 200 bytes; a taken name gets ` 1`, ` 2` from `onConflict: "rename"`. **The server never fetches a page**: every client reads the page it is on, so the guarded server-side fetch of ROADMAP item 19 is not needed and not built.
+
+The code is the top-level `clipper/` package (its own `package.json`, esbuild build and Vitest tests; `npm run build` writes `clipper/dist/`). One core (`src/core`: `extract.ts`, `markdown.ts`, `note.ts`) serves three clients:
+
+| Client | Where it reads the page | How the note reaches the vault |
+|---|---|---|
+| **Browser extension** (Manifest V3; Chrome and Edge from `dist/chrome`, Firefox 128+ from `dist/firefox`) | `content.js`, injected on the click through `activeTab`, runs the core on the live page | The app's `/clip` page, in a new tab |
+| **Bookmarklet** (any desktop browser; Settings › Web clipper) | Nowhere: it sends the page's HTML and the selection's HTML | `/clip` extracts it (it loads `/clipper/clipper.js`) |
+| **iOS Shortcut** (Safari's share sheet; Settings › Web clipper) | Its *Run JavaScript on Web Page* step runs `/clipper/shortcut.js`, the core in one script | The Shortcut posts the script's result, a `CreateFileRequest`, to `POST /api/files` with `X-Client-Id: ios-shortcut-clipper` |
+
+- **Auth and origin.** Neither the extension nor the bookmarklet calls the API. A bookmarklet runs in the clipped site's origin: its `Origin` fails the CSRF rule (API.md §2), and the site's own CSP often blocks the request anyway. An extension's requests carry `Origin: chrome-extension://<id>` or `moz-extension://<random per install>` and a cross-site `Sec-Fetch-Site`; allowing them would mean a per-install server setting and a weaker rule. Instead both hand the clip to **`/clip`**, the app's own page, with `postMessage`, and `/clip` saves through the ordinary same-origin API (`POST /api/attachments` per downloaded image, then `POST /api/files`, each with an `Idempotency-Key`). The CSRF rules, the Host allowlist and the Tailscale identity check are unchanged; the extension needs no server configuration, only NotesApp's address. The iOS Shortcut is a plain HTTP client like the capture Shortcut (§6.27): a fixed client id and no `Origin`.
+- **The hand-over.** `/clip` (outside the shell, like `/capture`) loads `/clipper/clipper.js`, sets `data-notesapp-clip="ready"` on `<html>` and posts `notesapp-clip-ready` to itself and, with target `*` (it says nothing else), to its opener. It accepts the **first** valid `notesapp-clip` message (`v: 1`, every field type- and size-checked) from either:
+  - its **opener** (`event.source === window.opener`, any origin): the bookmarklet's `{kind: "html", url, title, html, selectionHtml}`. Any site could open `/clip` and post a page, so this is only ever a **preview**: nothing is written until the user presses Save, and the preview is the reading view's sanitized rendering (DOMPurify, remote images per the device preference). The HTML is parsed with `DOMParser` into an inert document (no script runs, no image loads). The bookmarklet posts only to the app's origin, and only after the window it opened said it is ready.
+  - its **own origin** (`event.origin === location.origin`): only the app itself and an extension's content script, which shares the page's window, can send that. The extension's `{kind: "clip", clip, images, folder, autoSave}` carries the extracted clip, base64 image bytes and its options; with *Save without the preview* it is saved at once and `/clip` posts `notesapp-clip-result` back, so the extension can close the background tab and show a check mark on its badge (a failed save brings the tab to the front instead).
+- **Cross-Origin-Opener-Policy.** The app's `same-origin` policy would put `/clip` in a new browsing context group and cut the bookmarklet's window reference, so the server sends `/clip` (that exact path) with `unsafe-none`; the CSP and every other header stay the app's. The service worker leaves `/clip` to the network (`isSpaRoute` excludes it), because the cached shell carries the app's policy. A site that sets `same-origin` itself also cuts the reference: `/clip` then waits four seconds and offers a paste area (select, copy, click, paste; the address and title come from the URL fragment the bookmarklet adds, which never reaches the server).
+- **Extension permissions.** `activeTab`, `scripting`, `storage`, `contextMenus`; no host access at install. Its options page asks for NotesApp's origin (to inject the hand-over script into the `/clip` tab) and, only when *Save the article's images as attachments* is on, for all sites (to download images in the background, without cookies: `credentials: "omit"`; at most 40 images, 10 MB each, 40 MB in all; only the image types the app shows). The address must be `https://`, or `http://` to `localhost` for development. Entry points: the toolbar popup (*Clip the page*, *Clip the selection*), the context menu, and `Alt+Shift+K` (opens the popup). The browser's own pages and the extension stores cannot be clipped.
+- **Images.** Remote images stay links (`![alt](https://…)`), shown or click-to-load per the device preference (§6.7), unless the extension downloaded them: then each becomes an attachment of the note-to-be (folder from the attachment settings, API.md §9.3) and its Markdown is replaced with the server's `markdown` embed; an image that fails stays a link. Inline `data:` images and `javascript:` links are dropped; links and images are made absolute against the page's address (or its `<base>`), lazy-loaded images use their `data-src` or `srcset`, and an `<iframe>`, `<video>` or `<audio>` Readability keeps becomes a link.
+- **Serving.** The Dockerfile's `clipper` stage builds the package and copies `dist/web` (`clipper.js`, `shortcut.js`, `bookmarklet.js`) to the server's static root under `/clipper/` (`no-cache`, same-origin scripts, so the app's `script-src 'self'` allows `clipper.js`). Settings › Web clipper reads `bookmarklet.js` (a percent-encoded `javascript:` URL with the origin left as a placeholder), fills in this origin and offers a button to drag to the bookmarks bar (its `href` is set through the DOM, since React refuses `javascript:` URLs; clicked inside the app, the CSP blocks it), copies `shortcut.js` for the Shortcut (fetched ahead, so the copy happens inside the tap, as iOS requires), and says when the server was built without the clipper. The Vite dev server serves `clipper/dist/web` the same way. The extension is not in a store; it is loaded unpacked ([CLIPPER.md](CLIPPER.md)).
+
+**Risks.** Readability's choices (what counts as the article, which title) are heuristics; the preview and the editable name are the remedy. A page that sets `Cross-Origin-Opener-Policy` loses the bookmarklet's direct hand-over (the paste fallback or the extension still works). A malicious page can open `/clip` with content of its choosing, but it is shown, never saved without the user's Save, and rendered through the reading view's sanitizer.
+
 ### 6.28 Graph view (ROADMAP item 16)
 
 Two views over the same data, both lazy chunks registered in `extensions/builtins.ts`:
@@ -3722,7 +3882,92 @@ The target's text comes from its open session when there is one, else from the f
 
 **Compatibility.** Ids round-trip byte for byte (the editor shows them as written; nothing reformats them), new ids use Obsidian's shape, and the report (§6.29) no longer lists block references, only links to blocks that are missing.
 
-### 6.38 Formulas in notes (ROADMAP item 39)
+### 6.38 Reminders (ROADMAP items 9 and 4c)
+
+The client side of §5.26, in `features/reminders/`, the service worker's `sw/push.ts`, Settings and the task detail sheet.
+
+- **Startup** (`startReminders()` in `main.tsx`): reports the device's zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`, `PUT /api/reminders/zone`, quiet on failure); opens the task of a `?task=<id>` address (a notification opened the app) and removes the parameter, so a reload does not open it again; and listens for the service worker's `notesapp:open-reminder` messages. `registerReminders()` (from `builtins.ts`) registers the `reminder.due` handler.
+- **In-app route** (`inApp.ts`): each `reminder.due` key is shown once per tab, and an event sent more than 15 minutes ago (a replay) not at all. It shows a toast that stays until dismissed, with **Open**, and, when the browser allows notifications, a system `Notification` tagged with the key, so several tabs make one. Browsers that allow notifications only from a service worker (iOS) keep the toast.
+- **Opening** (`open.ts`): `/x/tasks/today?task=<id>` navigates there and opens the task's detail sheet; `/?open=daily` opens today's daily note (`HomePage` treats it like `openOnStartup`, and an open tab calls `openTodaysDailyNote`). Only app paths are followed (`safeAppPath`).
+- **Service worker** (`sw.ts` with the pure `sw/push.ts`): `push` shows the decrypted JSON as a notification (a malformed message still shows one, since browsers penalise silent pushes); task reminders get **Snooze 10 min** and **Done** buttons and `requireInteraction`. `notificationclick` calls `POST /api/reminders/snooze` or `/done` for a button (with the worker's own `X-Client-Id`; if that fails it opens the task instead), otherwise focuses an open NotesApp tab and posts it the URL, or opens a window at it. iOS shows no notification buttons, so on the iPhone a tap always opens the task.
+- **This device** (`device.ts`): *Subscribe this device* asks for notification permission, `POST /api/push/key`, subscribes the worker's `PushManager` (`userVisibleOnly`, the VAPID key; an old subscription with another key is replaced) and posts it with a name from the user agent ("iPhone · Safari"); the returned id is kept in `localStorage` (`notesapp.push.device`) to mark and unsubscribe this device. `pushSupport()` tells apart a browser without Web Push from an iPhone or iPad Safari tab, which needs NotesApp added to the Home Screen first (iOS 16.4+). The service worker runs in built apps only, so the development server says so.
+- **Settings › Reminders** (`RemindersSection`): the switches of `settings.reminders` per route, with *Title only* for ntfy and the daily-note nudge with its time; the device list from `GET /api/reminders/status` (this device marked, last success or error, a per-device test, Remove); the ntfy configuration state and a test; browser-notification permission (*Allow*) and an in-app test; and the status: the zone in use (with "Use this device's" when it differs), the last delivery, the last problem and the next reminders. Tests work whether or not the route is on.
+- **Task detail** (`RemindersField`, `tasks/reminderPresets.ts`): *Add reminder…* offers presets relative to the due date (at the due time, 15 minutes or 1 hour before, 9:00 on an all-day due date, 18:00 the day before) and to now (in 1 hour, rounded to 5 minutes; tomorrow at 9:00), leaving out past times and ones the task has, plus *Custom time…* (a `datetime-local` field, as before). A note links to Settings › Reminders.
+
+**Tests** (Vitest): `sw/push.test.ts` (payload to notification, buttons to requests, unsafe URLs), `reminders.test.ts` (one toast per key, old replays ignored, Open opening the task, `?task=` at startup, device names, the VAPID key decoding), `reminderPresets.test.ts`, the Reminders section in `SettingsPage.test.tsx`, and a preset in `TaskDetail.test.tsx`.
+
+### 6.39 Desktop app (ROADMAP item 41)
+
+A Windows and macOS app in the top-level `desktop/` folder (its own `package.json`, lockfile, tests and build): an Electron 44 shell, packaged by electron-builder 26 (both MIT). It is **a thin shell around the server**: it bundles no copy of the frontend and loads the configured server origin, so every deploy updates the desktop UI, live sync is the same event stream (§6.18), and offline it is the service worker's cached app (§6.26). Install and usage: `docs/DESKTOP.md`.
+
+- **Files.** `src/main.js` (windows, tray, hotkey, IPC, lifecycle) wires up pure modules that are unit-tested with `node --test` without Electron: `serverUrl.js` (normalising and checking the address), `security.js` (navigation, permissions, IPC senders, renderer settings), `windowState.js`, `settings.js`, `title.js`. `src/preload.js` is the only bridge; `src/pages/` holds the shell's own setup and offline pages (strict CSP: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'`).
+- **Server address.** Asked on first launch (and under tray › Settings…). `https://` is added when missing and only the origin is kept; plain `http://` is accepted only for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`), because elsewhere it would not be a secure context and the service worker would not run. The check fetches `/manifest.webmanifest` without following redirects: it passes the same Host and identity admission as every other request (§5.13) and must name NotesApp, so `421` and `403` get their own messages (add the host to `NOTES_ALLOWED_HOSTS`; this Tailscale login is not allowed). When the server can't be reached at all (Tailscale off), **Save anyway** keeps the address. Settings live in `settings.json` in the user-data folder (`%APPDATA%\NotesApp`, `~/Library/Application Support/NotesApp`): the server origin, the capture shortcut, launch at login and the window bounds. No tokens: the server knows the computer by its tailnet identity.
+- **Renderer hardening.** Every window and popup: `contextIsolation`, `sandbox`, no `nodeIntegration` (also in workers and subframes), `webSecurity`, no insecure content, no `<webview>` (`will-attach-webview` is refused). The server's CSP applies unchanged: the shell never edits response headers.
+- **Navigation.** For every web contents: a main-frame navigation or redirect stays on the server origin (scheme, host and port); other `http(s):` and `mailto:` links open in the default browser or mail app; every other scheme (`file:`, `javascript:`, `data:`, custom protocols) is blocked. `window.open` to the server opens an app window with the same settings; anything else goes to the browser or nowhere.
+- **Permissions.** Requests and synchronous checks are granted only to the server origin, and only for `notifications`, `clipboard-sanitized-write` (the Copy buttons), `fullscreen`, and `media` when every requested type is audio (voice notes and dictation, §6.30). Everything else (camera, location, MIDI, device pickers, …) is denied.
+- **IPC.** `window.notesDesktop` (server pages) and `window.notesShell` (the shell's pages, `file:` URLs inside the package) are exposed by the preload depending on the page; main checks every message's sender frame against the server origin or the package's `pages/` folder, so a page can never use the other's API. Messages carry strings only, cut to fixed lengths.
+- **The page's side** (`frontend/src/desktop/bridge.ts`, installed from `main.tsx`, inert in a browser): it reports the connection state (`live`, `reconnecting`, `offline`, §6.18) for the window title (`Inbox · Notes — Reconnecting…`, `— Offline`); it handles the shell's commands `open-today` (tray), `navigate` (an in-app path only: `/…`, never `//…`), and `resume` (after sleep or unlock: `EventStream.reconnect()`, a fresh connection replaying from the last event id, revalidating open documents once caught up as `pageshow` does). The shell queues commands until the page's bridge has reported its first state. Inside the desktop app, `window.focus()` also asks the shell to show the window, so a notification's click handler brings the app back from the tray.
+- **Windows.** The main window remembers its normal bounds and maximized state (saved half a second after a move or resize, and on close) and comes back centred on the primary display when the saved position is no longer on any screen. Closing it keeps the app in the tray (the capture hotkey keeps working); Quit is in the tray menu, `Cmd+Q` on macOS. A second launch shows the running instance. Its page is never throttled in the background, so reminders and live sync stay on time while it sits in the tray.
+- **Quick capture.** A global shortcut (default `CommandOrControl+Shift+Space`, configurable, empty for none; a notification says when another app holds it) toggles a 520×440 always-on-top window that loads `/capture` (§6.27), centred on the display under the pointer. `Esc` or the page's Cancel hides it; hiding reloads a fresh form, so an unsent draft is discarded as in a dialog. The capture page's own links ("Open the note", "Open NotesApp") open in the main window instead. Its offline queue is the same IndexedDB as the main window's (one session). The global shortcut wins over the app's in-page `Mod-Shift-Space` while it is registered; both open a capture form.
+- **Notifications.** The server's pages use the web Notification API (allowed for the server origin only); reminders' in-app route (ROADMAP item 9) therefore shows native Windows and macOS notifications, and its click handler's `window.focus()` brings the window back. `notesDesktop.notify({ title, body, path })` shows one from the shell, whose click opens `path` in the main window. **Web Push does not work in Electron** (no push service); the app's always-running page receives `reminder.due` events over the event stream instead.
+- **Offline.** With the service worker installed the app opens from its cache and the title says Offline. Without one yet (first launch, another origin), a failed main-frame load shows the shell's page "Can't reach the server. Is Tailscale connected?" with Retry and Change server…; it retries every 15 s, when the network comes back, and after resume, and loads the app as soon as the manifest check passes.
+- **Tray.** Quick capture, Open NotesApp, Open today's note, Reload, Launch at login (a checkbox; the login item starts the app hidden in the tray), Settings…, the version, Quit. On Windows a click opens the app. macOS gets an application menu with Cut/Copy/Paste/Select All (which Electron needs for those shortcuts) and no Undo, Reload, Close or zoom shortcuts, so the app's own `Mod-Z`, `Mod-R`, `Mod-W` and `Mod--` keep working; Windows has no menu bar.
+- **Packaging and releases.** `desktop/electron-builder.yml`: a per-user NSIS installer (`NotesApp-Setup-<version>.exe`, not code-signed: SmartScreen asks once) and a universal dmg, ad-hoc signed only and not notarised (Gatekeeper steps in `docs/DESKTOP.md`). `.github/workflows/desktop.yml` runs only on `desktop-v*` tags (and by hand, publishing nothing): it creates the release, then a Windows and a macOS job run the shell's lint and tests, set the version from the tag, package, and attach the files with `gh release upload`. There is no auto-updater: the UI comes from the server.
+- **Tests.** `desktop/test/*.test.js` (`npm test`): address normalisation and every check failure, navigation classes and look-alike origins, permission requests and checks, IPC senders (including a `file:` page outside the package), renderer settings, window-state restore and clamping, settings sanitising and the atomic save (with a byte-order mark), titles. Frontend: `desktop/bridge.test.ts` and `EventStream.reconnect` in `api/events.test.ts`. Manual checklist (Windows, against the dev backend on `127.0.0.1:18330` and a `vite preview` on `127.0.0.1:5175`): first-run page rejects `http://` on a tailnet name and an unreachable address (offering Save anyway); Connect loads the app with `notesDesktop` and without `require`/`process`; the hotkey opens the capture window, Save appends to `Inbox.md`, "Open the note" opens it in the main window, Cancel hides it; `file:` navigations and `window.open` are refused; camera and location are denied, notifications granted; closing hides to the tray and a second launch or `window.focus()` shows it; with the server stopped a reload opens from the service worker's cache and the title says Offline, then Live again; a server address without a cached app shows the offline page, which reloads the app by itself once the server is back.
+
+### 6.40 Tabs and split panes (ROADMAP item 11)
+
+Several files open at once: tabs in panes, panes side by side or stacked, on desktop and tablet. Phones keep one pane and reach their tabs through a switcher. Everything lives in `src/workspace/`.
+
+**Model** (`model.ts`, pure functions, unit-tested). ROADMAP's shape, `panes: [{ tabs: [{path, mode}], active }]`, with a route in place of the path (a tab may show any page) and the mode left to `noteModes` (§6.6.1), which follow the file wherever it is shown:
+
+```ts
+interface Tab  { id; route /* pathname + search + hash */; pinned?; back: string[]; forward: string[]; nav? }
+interface Pane { id; tabs: Tab[]; active /* tab id */ }
+type Layout = { type: 'pane'; id } | { type: 'split'; id; dir: 'row' | 'column'; children: Layout[]; sizes: number[] /* fractions */ }
+interface Workspace { panes: Record<id, Pane>; layout: Layout; activePane; closed: { tab; pane; index }[] /* last 20 */ }
+```
+
+- **Tabs.** New tabs open after the active one. Closing selects the right neighbour, else the left; a pane's last tab closes the pane, and the last pane gets a new tab (`/x/new-tab`, a hidden page: Open a file, New note, Today, recent files). Closed tabs (with their history) are remembered for **Reopen closed tab**, which puts a tab back where it was. A **pinned** tab is skipped by Close tab, Close others and Close tabs to the right, shows a pin instead of ×, and a push navigation from it to another file or page opens a new tab next to it, so it keeps its file; a heading of the same note stays in it.
+- **History per tab.** Every tab has its own back and forward stacks (50 each). `nav` counts its navigations and is the key of its location, so following a link to where the tab already is still scrolls again (§6.4).
+- **Splits.** Split right or down creates a pane showing what the split pane shows (a new tab with the same route); a split in the direction of the split that holds the pane adds a sibling and halves the pane's share. Dragging a tab onto a pane's edge quarter (left, right, top, bottom) splits that pane with the tab; onto its middle, or onto a strip, moves the tab there (before or after the tab under the pointer). Closing a pane collapses one-child splits and merges a child split of the same direction into its parent. Dividers resize their two neighbours (each keeps at least 10 % of the split; arrow keys move a focused divider by 2 %).
+- **Moves.** A moved file or folder rebases every route that shows it, in all tabs, their histories and the closed tabs (`rebase`, called from `syncTarget.onEntryMoved` for own moves and `entry.moved` alike). Deleted files stay in their tabs, which show "File not found" and strike their title.
+
+**URL and history** (`store.ts`, `RouteSync`). The URL is the source of truth for the **active pane**: it is always the route of the active pane's shown tab, so deep links, bookmarks, reloads and `activePath()` work exactly as before.
+
+- A router navigation (a link, the explorer, `navigateTo`) lands in the active tab: a push adds to its history, a replace changes its route. `RouteSync` applies it in a layout effect, before the browser paints.
+- Changing what the active pane shows from the workspace's side (selecting a tab or a pane, closing, moving or splitting) **replaces** the URL; a new tab or a reopened one **pushes** it, so Back returns to the tab it came from.
+- **Back and forward** (the browser's, the mouse buttons, `nav.back`/`nav.forward`) walk the **active tab's own history**. A `POP` is read as back or forward from React Router's history index (`history.state.idx`): the tab takes its own previous or next route, and when the browser's entry belongs to another tab the URL is replaced with the tab's. A tab with no history that way selects a tab of the active pane showing the entry's route (the tab a Mod-click came from), else stays and puts its URL back. Overlay entries (§6.4) repeat the page's URL and index, so they change nothing.
+- At startup the persisted workspace **adopts the URL**: the active tab already showing it, else a tab of the active pane, else of any pane showing it, is selected; otherwise the active tab navigates there (its previous route goes into its history). `/` keeps its home-page behaviour (§6.4) in the active tab; `/capture` and the web clipper's `/clip` (§6.27.1) are outside the workspace.
+- **Persisted per device** in `localStorage` (`notesapp:workspace`, written 250 ms after a change and on `pagehide`), validated on load (`sanitize`); a damaged record starts over with one tab. Browser windows of one device share it; the last one written wins.
+
+**Rendering** (`WorkspaceLayout`, `PaneView`, `TabStrip`; §6.5).
+
+- Panes are a **flat list keyed by pane id**, absolutely positioned from the layout's geometry (`geometry.ts`), in creation order: splitting, resizing or closing a neighbour never remounts or moves a pane's DOM, so its editor, focus, scroll position and frames (a PDF) stay.
+- Each pane renders `AppRoutes` (§6.4's routes) inside its own `WorkspaceScroll`, with its shown tab's location (`<Routes location>`, whose `LocationContext` is what `useLocation()` reads inside the pane). Shell components (panels, status bar, top bar) read the real location, which is the active pane's: **backlinks, outline, local graph, history and the other panels follow the active pane** unchanged.
+- **Only each pane's shown tab is mounted** (lazy: restored and background tabs cost nothing until shown). Scroll positions are remembered per tab and route and restored when a tab is shown again; editing state, undo included, survives in the session (§6.3).
+- An inactive pane gets a `NavigationContext` whose navigator moves **its own tab**: a `<Navigate>` or `useNavigate()` inside it never touches the URL. A pointer or focus entering a pane makes it active first (`onPointerDownCapture`, `onFocusCapture`), so the click that follows acts in the active pane as before.
+- `PaneContext` (`{ paneId, active }`) gates what belongs to the page rather than to a pane: only the active pane's editor becomes the active editor (palette commands, the mobile toolbar) and takes focus when it mounts, answers Outline clicks and mode-switch scroll requests, records the file in Recent files and sets `document.title`; only its scroll container answers focus requests and carries `id="workspace-scroll"`. Outside a pane (tests, embeds) a component acts as the active pane's.
+- The strip: icon and title per tab (`labels.ts`: the file's name and its view's icon, or the page's title), × (or a pin), middle click closes, double click on the empty strip or **+** opens a new tab, a context menu (Close, Close others, Close tabs to the right, Pin/Unpin, Split right, Split down, Reopen closed tab, Close pane), and Split right, Split down and Close pane buttons. The active pane's shown tab carries an accent line when there are several panes. Keyboard: `←/→` move between tabs, `Enter` shows one, `Delete` closes it, `Shift-F10` or the menu key opens its menu.
+
+**One file in two panes** (`DocumentSession.routeTransactions`). A file shown in two panes has one `DocumentSession` (the registry is per path, §6.3); its holders keep it open until no pane shows it, and the last release flushes it.
+
+- Editors built on `NoteEditor` (`markdown` and `text`, which declare `sharedSession: true`, §6.8) all attach to it. Every editor dispatches through the session (`EditorView.dispatchTransactions`), which first copies each document change into the file's other editors, annotated `paneSync` (not a local edit, so it is not counted twice), kept out of their undo history, and with `filter: false`, so Live Preview's editing rules never alter a copied change and the documents stay identical. The editor where an edit was typed marks the session dirty and one save covers it; remote text goes into one editor and is copied to the others like any change. **Both stay in sync, and no conflict banner can arise between them.**
+- Each pane **undoes its own edits**. The first editor holds the session's main undo history; another gets the text with a history of its own. When the main editor unmounts while another stays, its state is parked and handed back (caught up with the current text, the difference not undoable) to the next editor that mounts or, when the last one closes, to the session, so switching modes with the file in two panes keeps the main history. Remote updates wait for an IME composition in any of the editors.
+- A **textual view that keeps its own model** (spreadsheets, drawings, canvases, encrypted notes) cannot share its file live, so it shows in **one pane at a time**: the active pane when it shows the file, else the first in layout order (`exclusiveOwner`). The other panes show "This file is open in another pane" with **Show it here**, which makes that pane active and so moves the view. Non-textual views (images, PDFs, media) show in every pane.
+
+**Opening in a new tab** (`gesture.ts`). The gesture is recorded in the capture phase and read by `navigateTo` while the event is dispatched, so every way of opening a file honours it without knowing about tabs:
+
+- **Mod-click** on anything that opens a file (explorer, bookmarks, recent files, search results, backlinks, outline, links in a locked note or an embed); in an **editable** note, where Mod-click follows a link (§6.6), **Mod-Shift-click** opens it in a new tab.
+- **Middle click** on those elements, replayed as a Mod-click flagged for a new tab (middle-button autoscroll is suppressed there; external links keep the browser's behaviour).
+- **Mod-Enter** in the quick switcher (its footer says so); the explorer menu has **Open in new tab** and **Open to the right**; the palette has **Open current file in new tab**.
+
+**Commands** (§6.13; keys customizable, §6.25). Browsers keep `Ctrl-T`, `Ctrl-W` and `Ctrl-Tab` for themselves, so the defaults add Alt: New tab `Mod-Alt-T`, Close tab `Mod-Alt-W`, **Reopen closed tab `Mod-Shift-T`** (it reaches the page in the desktop app, item 41; in a browser tab the browser reopens its own closed tab, so rebind it there), Go to next and previous tab `Mod-Alt-PageDown`/`PageUp`, Focus next and previous pane `Mod-Alt-]`/`[` (the newly active pane's scroll container takes the focus), plus Pin or unpin tab, Open current file in new tab, Split right, Split down, Close pane and Show open tabs (phones). All tab keys are `globalHotkey`, so they work while the editor has focus.
+
+**Phones** (§6.16). One pane, the active one, without a strip: exactly the v1 layout. The top bar's **tabs button** shows the number of open tabs and opens the **tab switcher**, a bottom sheet listing every tab of every pane (title, folder, pin), each with ×, plus **New tab**. Picking a tab of another pane makes that pane active. A layout made in a wider window survives and returns when the window widens.
+
+**Tests.** `workspace/model.test.ts` (every rule above), `geometry.test.ts`, `store.test.ts` (URL and history in step, persistence, gestures), `WorkspaceLayout.test.tsx` (shown tabs only, an inactive pane's navigation stays in its tab, focus by pointer, closing from ×) and `sync/DocumentSession.panes.test.ts` (two editors stay equal, one save, remote text, per-pane undo, the main history across remounts).
+### 6.41 Formulas in notes (ROADMAP item 39)
 
 Spreadsheet math in ordinary notes, with item 6's engine (HyperFormula under GPL-3.0, §6.21), so a function behaves the same in a note table and in a `.sheet` file. The file always holds exactly what was typed: results are computed from the text each time it changes, and are never written back (search finds the formula text).
 
@@ -3999,6 +4244,8 @@ volumes:
 
 containerboot substitutes `${TS_CERT_DOMAIN}` with the node's FQDN. The file must not be inlined into compose, which would interpolate the variable itself.
 
+Public publishing (§5.28) is off in the shipped file: no Funnel and no second port. `deploy/tailscale/serve.funnel.json.example` is the opt-in variant: it adds `"8443": { "HTTPS": true }`, `${TS_CERT_DOMAIN}:8443` → `http://127.0.0.1:8081` (the publish server only) and `AllowFunnel` true for `:8443` alone; `:443` stays tailnet-only. It is copied over `serve.json` by hand (DEPLOY.md "Public publishing"). The tailnet policy must also grant `tag:notes` the `funnel` node attribute.
+
 ### 7.4 `deploy/.env.example`
 
 ```dotenv
@@ -4191,6 +4438,8 @@ updates:
 ```
 
 If the `docker-compose` ecosystem is not available to the repository, the monthly manual update in §7.9 covers the compose images.
+
+`.github/workflows/desktop.yml` (ROADMAP item 41, §6.39) is separate from CI and the image: it runs only on `desktop-v*` tags (and by hand, publishing nothing), tests and packages the desktop shell on a Windows and a macOS runner, and attaches the installer and the dmg to the tag's release. Dependabot does not watch `desktop/` (Electron upgrades are deliberate, with a new tag).
 
 ### 7.6 Healthchecks
 

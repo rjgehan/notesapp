@@ -1,4 +1,4 @@
-// Formulas in notes (ROADMAP item 39, DESIGN §6.38): the note's tables as the sheets of one
+// Formulas in notes (ROADMAP item 39, DESIGN §6.41): the note's tables as the sheets of one
 // HyperFormula instance, with item 6's configuration, so every function behaves as it does in a
 // `.sheet` file. A lazy chunk (load.ts), loaded only for notes that hold formulas. Results are never
 // written into the note: they are computed from its text each time it changes.

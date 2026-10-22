@@ -5,6 +5,7 @@
 import { ArrowLeft, ArrowRight, BookOpen, CodeXml, Lock, LockOpen, Pencil } from 'lucide-react';
 import { runCommand } from '../../features/commands';
 import { BookmarkToggle } from '../../components/BookmarkToggle';
+import { PublishButton } from '../../components/publish/PublishButton';
 import { SaveStatus } from '../../components/SaveStatus';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
 import { toggleNoteMode, toggleSourceMode } from '../../features/noteMode';
@@ -101,6 +102,7 @@ export function NoteHeader({ path, snapshot, mode, editable, controls = true }: 
           </span>
           <span className="note-header-actions">
             {snapshot && <SaveStatus snapshot={snapshot} />}
+            <PublishButton path={path} />
             <BookmarkToggle path={path} />
             {breakpoint === 'desktop' && (
               <>

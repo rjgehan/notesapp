@@ -29,6 +29,8 @@ import type { DiscardedRecord } from '../../sync/drafts';
 import { documents, draftStore } from '../../sync/instance';
 import { useBreakpoint } from '../layout/useBreakpoint';
 import { CaptureSettings } from '../capture/CaptureSettings';
+import { PublishSettings } from '../publish/PublishSettings';
+import { ClipperSettings } from '../clip/ClipperSettings';
 import { OrphanDraftList } from '../OrphanDrafts';
 import { HotkeysSection } from './HotkeysSection';
 import { usePageTitle } from './usePageTitle';
@@ -37,6 +39,10 @@ import { SettingsWriter } from '../../features/settingsWriter';
 import { setTranscribeNewRecordings, useVoice } from '../../features/voice/voiceNotes';
 import { fetchAiStatus } from '../../features/ai/aiClient';
 import { AI_STATUS_KEY } from '../../features/ai/run';
+import { REMINDERS_STATUS_KEY, remindersApi } from '../../features/reminders/client';
+import { pushSupport, removeDevice, subscribeThisDevice, thisDeviceId, unsubscribeThisDevice, type PushSupport } from '../../features/reminders/device';
+import { deviceZone, reportZone } from '../../features/reminders/register';
+import type { ReminderRouteId } from '../../api/types';
 
 const SECTIONS = [
   { id: 'files', title: 'Files and links' },
@@ -45,7 +51,10 @@ const SECTIONS = [
   { id: 'editor', title: 'Editor' },
   { id: 'hotkeys', title: 'Hotkeys' },
   { id: 'capture', title: 'Quick capture' },
+  { id: 'clipper', title: 'Web clipper' },
   { id: 'ai', title: 'Ask and summaries' },
+  { id: 'reminders', title: 'Reminders' },
+  { id: 'publish', title: 'Publishing' },
   { id: 'device', title: 'This device' },
   { id: 'about', title: 'About' },
 ] as const;
@@ -104,6 +113,7 @@ function validate(s: Settings): Record<string, string> {
     if (!Number.isInteger(s.ai.maxContextChars) || s.ai.maxContextChars < 4000 || s.ai.maxContextChars > 400000) add('aiMaxContext', 'Use 4,000 to 400,000 characters');
     if (!Number.isFinite(s.ai.monthlyBudgetUsd) || s.ai.monthlyBudgetUsd <= 0 || s.ai.monthlyBudgetUsd > 10000) add('aiBudget', 'Use an amount above $0 and at most $10,000');
   }
+  if (s.reminders) add('reminderTime', /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(s.reminders.dailyNoteTime) ? null : 'Use a time such as 09:00');
   return errors;
 }
 
@@ -219,7 +229,7 @@ function Select<T extends string>({ value, options, onChange, disabled, label }:
 
 // ---------- sections ----------
 
-interface VaultSectionProps {
+export interface VaultSectionProps {
   settings: Settings;
   set(next: Settings, immediate?: boolean): void;
   disabled: boolean;
@@ -533,6 +543,204 @@ function AiSection({ settings: s, set, disabled, errors }: VaultSectionProps) {
   );
 }
 
+// ---------- reminders (ROADMAP item 9, DESIGN §6.38) ----------
+
+function TestButton({ route, deviceId, label = 'Send a test' }: { route: ReminderRouteId; deviceId?: string; label?: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="button button-small"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        remindersApi
+          .test({ route, deviceId })
+          .then((r) => toast(r.sent ? 'Test reminder sent' : `Not sent: ${r.error ?? 'unknown error'}`, { kind: r.sent ? 'success' : 'error' }))
+          .catch((e: unknown) => toastError(e))
+          .finally(() => {
+            setBusy(false);
+            void queryClient.invalidateQueries({ queryKey: REMINDERS_STATUS_KEY });
+          });
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function notificationPermission(): NotificationPermission | 'unsupported' {
+  return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+}
+
+function thisDeviceText(support: PushSupport, subscribed: boolean, permission: NotificationPermission | 'unsupported'): string {
+  if (support === 'ios-needs-install') return 'Add NotesApp to the Home Screen (Share › Add to Home Screen), open it from there, then come back here.';
+  if (support !== 'supported') return 'This browser cannot receive Web Push.';
+  if (subscribed) return 'Subscribed: reminders arrive here.';
+  if (permission === 'denied') return 'Notifications are blocked for NotesApp in this browser’s settings.';
+  return 'Not subscribed.';
+}
+
+function permissionText(permission: NotificationPermission | 'unsupported'): string {
+  if (permission === 'granted') return 'Allowed in this browser.';
+  if (permission === 'denied') return 'Blocked in this browser’s settings.';
+  if (permission === 'unsupported') return 'This browser shows the message only.';
+  return 'Not asked yet.';
+}
+
+export function RemindersSection({ settings: s, set, disabled, errors }: VaultSectionProps) {
+  const r = s.reminders ?? DEFAULT_SETTINGS.reminders;
+  const rem = (patch: Partial<Settings['reminders']>, immediate = true) => set({ ...s, reminders: { ...r, ...patch } }, immediate);
+  const status = useQuery({ queryKey: REMINDERS_STATUS_KEY, queryFn: remindersApi.status, staleTime: 5_000 });
+  const st = status.data;
+  const [busy, setBusy] = useState(false);
+  const [permission, setPermission] = useState(notificationPermission);
+  const [myDevice, setMyDevice] = useState(thisDeviceId);
+  const support = pushSupport();
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: REMINDERS_STATUS_KEY });
+  const subscribed = !!myDevice && !!st?.webPush.devices.some((d) => d.id === myDevice);
+  const zone = deviceZone();
+
+  const toggleThisDevice = () => {
+    setBusy(true);
+    (subscribed ? unsubscribeThisDevice() : subscribeThisDevice().then(() => undefined))
+      .then(() => toast(subscribed ? 'This device no longer receives reminders' : 'This device now receives reminders', { kind: 'success' }))
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : errorMessage(e), { kind: 'error' }))
+      .finally(() => {
+        setBusy(false);
+        setMyDevice(thisDeviceId());
+        setPermission(notificationPermission());
+        refresh();
+      });
+  };
+
+  return (
+    <>
+      <p className="setting-note">
+        <Info size={14} aria-hidden /> Task reminders (set in a task’s details) and the daily-note nudge reach you through the routes switched on here. A reminder counts as delivered once one of them takes it; reminders missed while the server was down follow when it starts.
+      </p>
+
+      <h3 className="settings-subtitle">Web Push</h3>
+      <Row label="Send by Web Push" description="To the devices below, even with NotesApp closed. On iPhone and iPad this needs iOS 16.4 or later and NotesApp added to the Home Screen. Each message is encrypted for its device; Apple, Google or Mozilla only relay it.">
+        <Toggle label="Send reminders by Web Push" checked={r.webPush} disabled={disabled} onChange={(v) => rem({ webPush: v })} />
+      </Row>
+      {st && !st.webPush.available && <p className="field-error">{st.webPush.reason}</p>}
+      <Row label="This device" description={thisDeviceText(support, subscribed, permission)}>
+        <button type="button" className="button button-small" disabled={busy || support !== 'supported' || (st !== undefined && !st.webPush.available)} onClick={toggleThisDevice}>
+          {subscribed ? 'Unsubscribe' : 'Subscribe this device'}
+        </button>
+      </Row>
+      {st && st.webPush.devices.length > 0 && (
+        <ul className="discarded-list" aria-label="Subscribed devices">
+          {st.webPush.devices.map((d) => (
+            <li key={d.id} className="discarded-item">
+              <div className="discarded-head">
+                <span className="discarded-name">
+                  {d.name}
+                  {d.id === myDevice && <span className="muted"> (this device)</span>}
+                </span>
+                <span className="muted">{d.lastSuccessAt ? `last reminder ${formatRelative(d.lastSuccessAt)}` : `added ${formatRelative(d.createdAt)}`}</span>
+              </div>
+              {d.lastError && <p className="field-error">{d.lastError}</p>}
+              <div className="discarded-actions">
+                <TestButton route="webPush" deviceId={d.id} />
+                <button
+                  type="button"
+                  className="button button-small"
+                  aria-label={`Remove ${d.name}`}
+                  onClick={() =>
+                    void removeDevice(d.id)
+                      .catch((e: unknown) => toastError(e))
+                      .finally(() => {
+                        setMyDevice(thisDeviceId());
+                        refresh();
+                      })
+                  }
+                >
+                  <Trash2 size={14} aria-hidden /> Remove
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3 className="settings-subtitle">ntfy</h3>
+      <Row label="Send through ntfy" description="To the ntfy app, with the server and topic of the server’s ntfy.json (CASAOS.md or DEPLOY.md, “Reminders”).">
+        <Toggle label="Send reminders through ntfy" checked={r.ntfy} disabled={disabled} onChange={(v) => rem({ ntfy: v })} />
+      </Row>
+      <Row label="Title only" description="Send the task’s title and nothing else. With ntfy.sh the message leaves your tailnet; turn this off only with your own ntfy server.">
+        <Toggle label="Send only the task title through ntfy" checked={r.ntfyTitleOnly} disabled={disabled} onChange={(v) => rem({ ntfyTitleOnly: v })} />
+      </Row>
+      <Row label="ntfy server" description={st ? (st.ntfy.configured ? `Configured: ${st.ntfy.server ?? ''}${st.ntfy.ownTopic ? ', with its own reminders topic' : ''}` : (st.ntfy.reason ?? 'Not configured')) : 'Loading…'}>
+        <TestButton route="ntfy" />
+      </Row>
+
+      <h3 className="settings-subtitle">In the app</h3>
+      <Row label="Show in open tabs" description="A message in every open NotesApp tab, and a system notification where this browser allows it. Nothing arrives while every tab is closed.">
+        <Toggle label="Show reminders in open tabs" checked={r.inApp} disabled={disabled} onChange={(v) => rem({ inApp: v })} />
+      </Row>
+      <Row label="Browser notifications" description={permissionText(permission)}>
+        <div className="setting-buttons">
+          {permission === 'default' && (
+            <button type="button" className="button button-small" onClick={() => void Notification.requestPermission().then(() => setPermission(notificationPermission()))}>
+              Allow
+            </button>
+          )}
+          <TestButton route="inApp" />
+        </div>
+      </Row>
+
+      <h3 className="settings-subtitle">Daily note</h3>
+      <Row label="Daily-note nudge" description="A reminder at this time when today’s daily note does not exist yet." error={errors.reminderTime}>
+        <div className="setting-buttons">
+          <input type="time" className="text-input" aria-label="Daily-note nudge time" value={r.dailyNoteTime} disabled={disabled} onChange={(e) => e.target.value && rem({ dailyNoteTime: e.target.value.slice(0, 5) }, false)} />
+          <Toggle label="Daily-note nudge" checked={r.dailyNote} disabled={disabled} onChange={(v) => rem({ dailyNote: v })} />
+        </div>
+      </Row>
+
+      <h3 className="settings-subtitle">Status</h3>
+      <dl className="about-list">
+        <div className="about-row">
+          <dt>Time zone</dt>
+          <dd>
+            {st ? `${st.zone}${st.zoneReported ? '' : ' (the server’s: no device reported one yet)'}` : 'Loading…'}
+            {st && zone && zone !== st.zone && (
+              <>
+                {' · '}
+                <button
+                  type="button"
+                  className="button button-small"
+                  onClick={() => {
+                    reportZone();
+                    setTimeout(refresh, 500);
+                  }}
+                >
+                  Use this device’s ({zone})
+                </button>
+              </>
+            )}
+          </dd>
+        </div>
+        <div className="about-row">
+          <dt>Last delivered</dt>
+          <dd>{st?.lastDeliveredAt ? formatDateTime(st.lastDeliveredAt) : 'Nothing yet'}</dd>
+        </div>
+        {st?.lastError && (
+          <div className="about-row">
+            <dt>Last problem</dt>
+            <dd>{`${st.lastError}${st.lastErrorAt ? ` (${formatRelative(st.lastErrorAt)})` : ''}`}</dd>
+          </div>
+        )}
+        <div className="about-row">
+          <dt>Next</dt>
+          <dd>{st ? (st.upcoming.length === 0 ? 'No upcoming reminders' : st.upcoming.map((u) => `${u.title} (${u.at.replace('T', ' ')})`).join(' · ')) : status.isError ? errorMessage(status.error) : 'Loading…'}</dd>
+        </div>
+      </dl>
+    </>
+  );
+}
+
 const REASONS: Record<DiscardedRecord['reason'], string> = {
   'take-theirs': 'replaced by Take theirs',
   discard: 'discarded',
@@ -838,7 +1046,7 @@ export default function SettingsPage() {
             </h1>
             {saving && <span className="muted">Saving…</span>}
           </header>
-          {section !== 'device' && section !== 'hotkeys' && section !== 'about' && section !== 'capture' && (
+          {section !== 'device' && section !== 'hotkeys' && section !== 'about' && section !== 'capture' && section !== 'publish' && section !== 'clipper' && (
             <>
               {readOnly && (
                 <div className="banner banner-warning" role="status">
@@ -859,7 +1067,10 @@ export default function SettingsPage() {
           {section === 'editor' && <EditorSection {...props} />}
           {section === 'hotkeys' && <HotkeysSection />}
           {section === 'capture' && <CaptureSettings />}
+          {section === 'clipper' && <ClipperSettings />}
           {section === 'ai' && <AiSection {...props} />}
+          {section === 'reminders' && <RemindersSection {...props} />}
+          {section === 'publish' && <PublishSettings />}
           {section === 'device' && <DeviceSection />}
           {section === 'about' && <AboutSection />}
         </section>

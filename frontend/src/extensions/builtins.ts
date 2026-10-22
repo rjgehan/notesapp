@@ -1,4 +1,5 @@
 // Every v1 view, panel and command, registered through the public extension points (DESIGN §6.8).
+import { copyLineDown, moveLineDown, moveLineUp } from '@codemirror/commands';
 import { openSearchPanel } from '@codemirror/search';
 import {
   Activity,
@@ -43,12 +44,17 @@ import { insertWikilink } from '../editor/completion';
 import { headingsFromState } from '../editor/outline';
 import { followLinkAtCursor, toggleCheckbox } from '../editor/editorCommands';
 import { setHeading, toggleBold, toggleBulletList, toggleHeading, toggleHighlight, toggleInlineCode, toggleItalic, toggleLink, toggleNumberedList, toggleQuote, toggleStrikethrough } from '../editor/formatting';
+import { foldAllHeadings, foldHeading, unfoldAllHeadings, unfoldHeading } from '../editor/headingFold';
+import { renumberList } from '../editor/listRenumber';
 import { historyEditor, insertTable } from '../editor/livePreview/table';
+import { openSlashMenu } from '../editor/slash';
+import { registerAppSlashItems, registerEmbedSlashItems } from './slashItems';
 import { pickAndInsertAttachments } from '../features/attachments';
 import { currentBookmarks, isFileBookmarked, promptNewGroup, toggleFileBookmark, toggleSearchBookmark } from '../features/bookmarkStore';
 import { findSearchBookmarks } from '../features/bookmarks';
 import { promptRenameHeading } from '../features/headingRename';
 import { getCommand, setViewCommandSource } from '../features/commands';
+import { registerReminders } from '../features/reminders/register';
 import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../features/daily';
 import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
@@ -66,6 +72,7 @@ import { registerTasks } from '../tasks/register';
 import { registerFlashcards } from '../flashcards/register';
 import { registerHabits } from '../habits/register';
 import { registerCalendar } from '../calendar/register';
+import { registerWorkspace } from '../workspace/register';
 import { registerCanvasView } from '../views/canvas/register';
 import { registerKanban } from '../views/kanban/register';
 import { registerEncryption } from '../views/encrypted/register';
@@ -73,6 +80,7 @@ import { registerDrawingViews } from '../views/excalidraw/register';
 import { registerPdfView } from '../views/pdf/register';
 import { startVoiceNote, transcribeAtCursor } from '../features/voice/voiceNotes';
 import { registerAi } from '../features/ai/register';
+import { registerPublish } from '../components/publish/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerSheetView } from '../views/sheet/register';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
@@ -155,6 +163,7 @@ export function registerBuiltins(): void {
     modes: ['live', 'source', 'locked'],
     load: () => import('../views/markdown/MarkdownView'),
     loadEmbed: () => import('../render/NoteEmbed'),
+    sharedSession: true,
     create: { label: 'note', extension: 'md', initialContent: () => '' },
   });
   registerView({
@@ -163,6 +172,7 @@ export function registerBuiltins(): void {
     icon: FileBraces,
     textual: true,
     modes: ['edit'],
+    sharedSession: true,
     load: () => import('../views/TextView'),
   });
   registerSheetView();
@@ -286,6 +296,16 @@ export function registerBuiltins(): void {
   editorCommand('editor.quote', 'Toggle quote', toggleQuote);
   editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
   editorCommand('editor.insertTable', 'Insert table', insertTable);
+  // Editor niceties (ROADMAP item 31, DESIGN §6.6.2).
+  editorCommand('editor.insertMenu', 'Insert… (the / menu)', openSlashMenu);
+  editorCommand('editor.renumberList', 'Renumber numbered list', renumberList);
+  editorCommand('editor.moveLineUp', 'Move line up', moveLineUp, 'Alt-ArrowUp');
+  editorCommand('editor.moveLineDown', 'Move line down', moveLineDown, 'Alt-ArrowDown');
+  editorCommand('editor.duplicateLine', 'Duplicate line', copyLineDown, 'Shift-Alt-ArrowDown');
+  editorCommand('editor.foldHeading', 'Fold heading', foldHeading, 'Mod-Shift-[');
+  editorCommand('editor.unfoldHeading', 'Unfold heading', unfoldHeading, 'Mod-Shift-]');
+  editorCommand('editor.foldAllHeadings', 'Fold all headings', foldAllHeadings);
+  editorCommand('editor.unfoldAll', 'Unfold all headings', unfoldAllHeadings);
   // In a table cell, find searches the note.
   editorCommand('editor.find', 'Find/replace in current note', (v) => openSearchPanel(historyEditor(v)), 'Mod-f');
   // Voice notes (ROADMAP item 33, DESIGN §6.30): recorded into the open note at its cursor.
@@ -432,9 +452,17 @@ export function registerBuiltins(): void {
   registerAi();
   // The calendar: daily notes and tasks by day (ROADMAP item 14, DESIGN §6.32).
   registerCalendar();
+  // Reminders and push notifications (ROADMAP items 9 and 4c, DESIGN §6.38).
+  registerReminders();
+  registerPublish();
+  // ROADMAP item 11 (DESIGN §6.40): tabs, split panes and their commands.
+  registerWorkspace();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 
   // ---------- roadmap features, through the same extension points ----------
   registerTasks();
+  // The `/` menu's app items (DESIGN §6.6.2), after the commands they run.
+  registerAppSlashItems();
+  onViewsChanged(registerEmbedSlashItems);
 }

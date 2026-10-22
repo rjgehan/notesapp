@@ -4,14 +4,14 @@
 #
 # Data lives under /DATA/AppData/notesapp:
 #   data/vault       your notes (plain Markdown + git history), editable over SSH as uid 1000
-#   data/secrets/    optional, outside the vault: ntfy.json (app alerts), mirror-token (GitHub mirror),
-#                    claude-token or anthropic-key (Ask your vault, Claude)
+#   data/secrets/    optional, outside the vault: ntfy.json (app alerts, reminders), mirror-token (GitHub mirror),
+#                    claude-token or anthropic-key (Ask your vault, Claude), push.json (Web Push, made by the app)
 #   tailscale/       Tailscale node identity + HTTPS certs (never delete)
 #   backup/          only with the optional NotesApp Backup app (casaos-backup-compose.yml)
 #
 # The app is reachable ONLY over your tailnet at https://notes.<tailnet>.ts.net — no ports are
 # published on the LAN. Full runbook and troubleshooting: docs/DEPLOY.md and docs/CASAOS.md.
-# The optional extras (app alerts, GitHub mirror, nightly backups) are off until you set them
+# The optional extras (app alerts, GitHub mirror, nightly backups, public publishing) are off until you set them
 # up as docs/CASAOS.md describes; a fresh install needs none of them.
 name: notesapp
 
@@ -25,14 +25,28 @@ services:
   tailscale:
     image: tailscale/tailscale:stable
     container_name: notesapp-tailscale
-    # Writes serve.json (HTTPS :443 → the app on 127.0.0.1:8080) and makes the data folder
-    # writable by the app's uid 1000, then hands over to Tailscale's normal entrypoint.
+    # Writes serve.json (HTTPS :443 → the app on 127.0.0.1:8080, tailnet only) and makes the data
+    # folder writable by the app's uid 1000, then hands over to Tailscale's normal entrypoint. Only with
+    # NOTES_PUBLISH_FUNNEL=true below does serve.json also get :8443 → the read-only publish server on
+    # 127.0.0.1:8081 with Funnel allowed for that port alone (public publishing, docs/CASAOS.md).
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
         mkdir -p /config /notes-data/vault /notes-data/.config
         chown -R 1000:1000 /notes-data
+        if [ "$$NOTES_PUBLISH_FUNNEL" = "true" ]; then
+        cat > /config/serve.json <<'JSON'
+        {
+          "TCP": { "443": { "HTTPS": true }, "8443": { "HTTPS": true } },
+          "Web": {
+            "notes.CHANGE-ME.ts.net:443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:8080" } } },
+            "notes.CHANGE-ME.ts.net:8443": { "Handlers": { "/": { "Proxy": "http://127.0.0.1:8081" } } }
+          },
+          "AllowFunnel": { "notes.CHANGE-ME.ts.net:443": false, "notes.CHANGE-ME.ts.net:8443": true }
+        }
+        JSON
+        else
         cat > /config/serve.json <<'JSON'
         {
           "TCP": { "443": { "HTTPS": true } },
@@ -40,6 +54,7 @@ services:
           "AllowFunnel": { "notes.CHANGE-ME.ts.net:443": false }
         }
         JSON
+        fi
         exec /usr/local/bin/containerboot
     environment:
       TS_AUTHKEY: tskey-auth-CHANGE-ME          # one-off auth key with tag:notes (see docs/CASAOS.md)
@@ -51,6 +66,9 @@ services:
       TS_USERSPACE: "false"                     # kernel mode is required by the app's startup check
       TS_ENABLE_HEALTH_CHECK: "true"
       TS_LOCAL_ADDR_PORT: 127.0.0.1:9002
+      # Public publishing (docs/CASAOS.md "Public publishing"): "true" adds the Funnel entry for the publish
+      # server to serve.json. Off. Needs NOTES_PUBLISH_ENABLED="true" on notes as well; either alone exposes nothing.
+      NOTES_PUBLISH_FUNNEL: "false"
     volumes:
       - /DATA/AppData/notesapp/tailscale:/var/lib/tailscale
       - /DATA/AppData/notesapp/data:/notes-data
@@ -94,6 +112,11 @@ services:
       # Ask your vault (Claude) runs Claude Code with your subscription, using the token (claude setup-token) in
       # /DATA/AppData/notesapp/data/secrets/claude-token (or an API key in .../anthropic-key), and stays
       # off until switched on in Settings › Ask and summaries (docs/CASAOS.md "Ask your vault").
+      # Public publishing (docs/CASAOS.md "Public publishing"): OFF, nothing is public. "true" starts the read-only
+      # publish server on 127.0.0.1:8081 (published snapshots only); it is reachable from the internet only when
+      # NOTES_PUBLISH_FUNNEL is "true" on the tailscale service above as well. Snapshots: data/publish.
+      NOTES_PUBLISH_ENABLED: "false"
+      NOTES_PUBLISH_BASE_URL: https://notes.CHANGE-ME.ts.net:8443
     volumes:
       - /DATA/AppData/notesapp/data:/data
       # The last nightly backup's status for the status page, read-only. Written by the optional

@@ -1,13 +1,14 @@
 // Explorer row menu items (DESIGN §6.15): new note/folder here and the views' create items,
 // rename, move, delete, copy link, file history and download.
-import { Copy, Download, FilePlus, FolderInput, FolderPlus, History, LayoutTemplate, Pencil, Star, StarOff, Trash } from 'lucide-react';
+import { Columns2, Copy, Download, FilePlus, PanelTop, FolderInput, FolderPlus, History, LayoutTemplate, Pencil, Star, StarOff, Trash } from 'lucide-react';
 import type { FileEntry } from '../../api/types';
 import { findFolderBookmarks } from '../../features/bookmarks';
 import { currentBookmarks, isFileBookmarked, toggleFileBookmark, toggleFolderBookmark } from '../../features/bookmarkStore';
 import { copyLink, createFolder, createNote, deleteEntry, downloadFile, validateNewName } from '../../features/fileOps';
 import { newNoteFromTemplateIn } from '../../features/folderTemplates';
 import { activePath, openPath } from '../../features/navigation';
-import { displayName, folderOf } from '../../features/paths';
+import { displayName, folderOf, noteRoute } from '../../features/paths';
+import { openInNewTab, splitPane, workspace } from '../../workspace/store';
 import { confirmAction, promptText } from '../../state/dialogs';
 import { useUi } from '../../state/ui';
 import { registeredViews } from '../../views/registry';
@@ -76,6 +77,20 @@ export function rowMenuItems(row: RowTarget, startRename: () => void): MenuEntry
     run: () => void (row.kind === 'file' ? toggleFileBookmark(row.path) : toggleFolderBookmark(row.path)),
   });
   if (row.kind === 'file') {
+    // Tabs and split panes (ROADMAP item 11, DESIGN §6.40); phones have one pane.
+    const desktop = typeof window.matchMedia !== 'function' || !window.matchMedia('(max-width: 767px)').matches;
+    items.push({ id: 'open-tab', label: 'Open in new tab', icon: <PanelTop size={16} />, run: () => openInNewTab(noteRoute(row.path)) });
+    if (desktop) {
+      items.push({
+        id: 'open-right',
+        label: 'Open to the right',
+        icon: <Columns2 size={16} />,
+        run: () => {
+          splitPane(workspace().activePane, 'right');
+          openPath(row.path, null, { replace: true });
+        },
+      });
+    }
     items.push(
       { id: 'copy-link', label: 'Copy link', icon: <Copy size={16} />, run: () => void copyLink(row.path, activePath()) },
       {

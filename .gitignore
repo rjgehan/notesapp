@@ -1,5 +1,6 @@
 # Local vault used by the backend's dev profile
 dev-vault/
+dev-publish/
 
 # Secrets and per-host overrides on homeserver (docs/DEPLOY.md)
 deploy/.env
@@ -21,3 +22,8 @@ backend/target/
 
 # Build worktrees used while building the roadmap
 .wt/
+
+# The web clipper build (clipper/build.mjs)
+clipper/dist/
+# Desktop app build output
+desktop/dist/

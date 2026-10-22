@@ -42,3 +42,11 @@ updates:
       - dependency-name: typescript        # pinned ~6.0.x until typescript-eslint supports newer (DESIGN §6.1)
         update-types: ['version-update:semver-major', 'version-update:semver-minor']
       - dependency-name: xlsx              # SheetJS from cdn.sheetjs.com (DESIGN §6.21.10); the registry's xlsx is frozen at 0.18.x with advisories
+
+  - package-ecosystem: npm                 # the web clipper (ROADMAP item 19); exact pins, so every update is a PR
+    directory: /clipper
+    schedule: { interval: weekly }
+    groups:
+      clipper:
+        patterns: ['*']
+        update-types: [minor, patch]

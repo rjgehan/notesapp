@@ -1,4 +1,4 @@
-// Formulas in notes (ROADMAP item 39, DESIGN §6.38) in Live Preview and locked notes: a table cell
+// Formulas in notes (ROADMAP item 39, DESIGN §6.41) in Live Preview and locked notes: a table cell
 // whose text starts with `=` shows its result (editing the cell shows the formula, and the grid's
 // formula bar its result), and inline code that starts with `=` shows its result while the
 // selection is elsewhere. The note's text is never changed: results are computed from it.

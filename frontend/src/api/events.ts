@@ -129,6 +129,16 @@ export class EventStream {
     for (const c of this.cleanups.splice(0)) c();
   }
 
+  /**
+   * The desktop app after sleep, resume or a network change (ROADMAP item 41): a fresh connection now,
+   * replaying from the last event id, with open documents revalidated once it has caught up (as `pageshow`).
+   */
+  reconnect(): void {
+    if (this.stopped) return;
+    this.revalidateOnCatchUp = true;
+    this.reconnectNow();
+  }
+
   /** "Reload vault from server" (app.resync): the resync procedure on demand. */
   resyncNow(): Promise<void> {
     return this.resync();

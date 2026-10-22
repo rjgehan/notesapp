@@ -65,6 +65,24 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  clipper:                                   # the web clipper (ROADMAP item 19): extension, bookmarklet, Shortcut script
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults: { run: { working-directory: clipper } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: clipper/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
   deploy-scripts:                            # deploy/backup runs only on homeserver: test it here, in its own images
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -110,7 +128,7 @@ jobs:
           cache-from: type=gha
 
   publish:
-    needs: [backend, backend-jdk25, frontend]
+    needs: [backend, backend-jdk25, frontend, clipper]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'   # push, weekly schedule, manual
     uses: ./.github/workflows/publish.yml
     permissions:

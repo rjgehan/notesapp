@@ -18,6 +18,7 @@ import { reportStreamHealth } from '../state/connection';
 import { cachedTree, noteWritten } from '../offline/offlineStore';
 import { startOfflineSync, treeLoadedFromServer, treeLoadedFromSnapshot } from '../offline/offlineSync';
 import { useUi } from '../state/ui';
+import { rebaseWorkspace } from '../workspace/store';
 import { applyEvent, type SyncTarget } from './applyEvents';
 import { documents, draftStore, moveMap, tabs } from './instance';
 import { applyWriteResult } from './treePatch';
@@ -30,6 +31,8 @@ export const syncTarget: SyncTarget = {
   settings: currentSettings,
   onEntryMoved(from, to, type) {
     renameRecent(from, to);
+    // Every tab showing the file (or a file in the folder) follows it (DESIGN §6.40).
+    rebaseWorkspace(from, to, type);
     if (type === 'folder') useUi.getState().rekeyExpanded(from, to);
     useUi.getState().rekeyNoteModes(from, to);
     const editing = useUi.getState().editingNew;

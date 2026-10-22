@@ -60,8 +60,8 @@ DESIGN.md has the details.
 | 6 | **Spreadsheets with Google-Sheets-style formulas** *(big three a)* | H | L | |
 | 7 | Quick capture inbox and the iPhone Share Sheet *(built 2026-10-21, `feat/pwa-capture`)* | H | M | |
 | 8 | Installable PWA and offline mode *(declined for v1; built 2026-10-21, `feat/pwa-capture`)* | H | L | |
-| 9 | Reminders and push notifications | H | M | 4; 8 for Web Push |
-| 11 | Tabs and split panes *(declined for v1)* | M | M | |
+| 9 | Reminders and push notifications *(built 2026-10-21, `feat/reminders`)* | H | M | 4; 8 for Web Push |
+| 11 | Tabs and split panes *(declined for v1; built 2026-10-21, `feat/tabs`)* | M | M | |
 | 12 | Bookmarks (starred) and a recent-files pane | M | S | |
 | 13 | Properties editor (typed frontmatter UI) | M | M | |
 | 14 | Calendar view *(built 2026-10-21, `feat/calendar`)* | M | M | 4 optional |
@@ -69,14 +69,14 @@ DESIGN.md has the details.
 | 16 | Graph view *(declined for v1)* | M | M | |
 | 17 | Dataview-style query blocks *(shrinks to a `query()` helper inside 40)* | M | S | 40; 13 helps |
 | 18 | Ask your vault and summaries, powered by Claude | H | M | |
-| 19 | Web clipper | M | M | 7 |
+| 19 | Web clipper *(built 2026-10-21, `feat/clipper`)* | M | M | 7 |
 | 20 | Block references and block embeds *(built 2026-10-21, `feat/block-refs`)* | M | M | |
 | 21 | Update `[[Note#Heading]]` links when a heading is renamed | M | S | |
 | 22 | Search upgrades: OR, regex, saved searches, PDF text | M | M | |
 | 23 | Large-attachment policy for git history | M | S | 1 |
 | 24 | Obsidian vault import and compatibility kit | M | S | |
 | 25 | Canvas (JSON Canvas, Obsidian-compatible) | M | L | |
-| 26 | Publish a note publicly through Tailscale Funnel | M | M | 3 helps |
+| 26 | Publish a note publicly through Tailscale Funnel *(built 2026-10-21, `feat/publish`, switched off)* | M | M | 3 helps |
 | 27 | Per-note encryption *(built 2026-10-21, `feat/encryption`)* | M | M | |
 | 28 | Vault-wide timeline and restoring deleted files from git | M | M | |
 | 29 | Customizable hotkeys and per-device preferences | L | S | |
@@ -183,7 +183,7 @@ Known leftovers, low severity, left for later:
 
 ### 39. Formulas in notes: spreadsheet math in tables and text *(new, 2026-10-17; built 2026-10-21, `feat/formulas`)*
 
-**Built** (39a and 39b, DESIGN §6.38): formulas in table cells with a formula bar, inline formulas, named tables (`^budget`), per-column formats in a `%% formats: B=currency C=percent %%` line, and `formulas: false`. Tables without an id are `Table1`, `Table2`, … Numbers show in the sheets' Automatic format, with thousands separators from five digits on. Formulas compute in the note's own Live Preview and locked view; embedded notes show them as typed.
+**Built** (39a and 39b, DESIGN §6.41): formulas in table cells with a formula bar, inline formulas, named tables (`^budget`), per-column formats in a `%% formats: B=currency C=percent %%` line, and `formulas: false`. Tables without an id are `Table1`, `Table2`, … Numbers show in the sheets' Automatic format, with thousands separators from five digits on. Formulas compute in the note's own Live Preview and locked view; embedded notes show them as typed.
 
 **One line:** Excel- and Google-Sheets-style formulas inside ordinary notes. A table cell containing `=SUM(B2:B5)` shows its result, and inline `` `=1450*12` `` shows `17,400`. The file keeps the formula you typed.
 
@@ -298,7 +298,7 @@ Errors show in the block as the message and line number, with the code visible.
 
 ### 4. Structured to-do tracking, not Markdown *(big three c)*
 
-**Status:** built (wave 1): phases 4a and 4b, as below; phase 4c (reminder delivery) comes with item 9, as planned. Reminders are already stored, edited and moved with repeating tasks, so item 9 only adds delivery. Deviations from this spec, and why:
+**Status:** built (wave 1): phases 4a and 4b, as below; phase 4c (reminder delivery) built with item 9 (2026-10-21): reminders fire through the routes of item 9, and the detail sheet offers presets (at the due time, 15 minutes or 1 hour before, the morning of an all-day due date, the evening before, in an hour, tomorrow at 9:00) besides a custom time. Deviations from this spec, and why:
 
 - **Embeds in Live Preview.** `![[Home.tasks]]` is interactive in the reading view, through the view registry's `loadEmbed`. Live Preview (item 10) renders no embeds until its phase 10b, which mounts them through that same hook, so task embeds need no change then. Embeds also take `#Section` or `#^<task id>` to show part of a list.
 - **Convert checkbox to task** leaves `- [[Inbox.tasks#^<task id>|Title]]`: a link to the list's file with the task's id as an Obsidian block reference, because a task has no note of its own. NotesApp opens the task from it, even after the task moved to another list, and Obsidian keeps it as a link to the file. The line keeps its list marker. The Obsidian Tasks plugin's emoji dates, priorities and 🔁 rules become task fields, which this spec did not ask for, so a vault that used that plugin keeps its dates.
@@ -399,7 +399,7 @@ interface Task {
   - `#tag`, `@List` and `[[link]]` are recognized.
 - Parsed parts appear as chips before you save.
 
-**Reminders.** These come from item 9: Web Push in the installed PWA (item 8), or ntfy. Phase 4c therefore needs your choice of route first (see item 9).
+**Reminders.** These come from item 9: Web Push in the installed PWA (item 8), ntfy, or in the app; every route is built and switched on in Settings (item 9).
 
 **Integration with notes.**
 
@@ -693,6 +693,16 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 
   A reminder is marked delivered once at least one channel accepts it, and missed reminders are delivered when the server starts.
 
+**Status:** built (2026-10-21) with phase 4c of item 4. Design in DESIGN §5.26 (server) and §6.38 (client), contract in API.md §28, setup in DEPLOY.md *Reminders* and CASAOS.md *Reminders*. The in-app, Web Push and ntfy routes are built, each a switch in **Settings › Reminders**, all off by default; the desktop route waits for item 41. Deviations and additions:
+
+- **Web Push with JDK cryptography**, no library: RFC 8291 `aes128gcm` encryption and an ES256 VAPID token, tested against RFC 8291 Appendix A. The key pair and the subscribed devices are in `/data/secrets/push.json`, created by the app on first use; a device whose subscription expired is dropped.
+- **The window for missed reminders is 24 hours.** Older ones are not sent after a long outage. While every route is off, nothing accumulates: switching a route on later does not send a day of old reminders. Delivery is at least once: a crash between sending and saving may repeat one.
+- **Time zone.** Reminder times are local, so each device reports its zone at startup and the latest report wins (the server's UTC until one does). Daylight-saving gaps move a reminder forward by the gap; overlaps fire it once.
+- **ntfy sends the task's title only** by default (*Title only*), because with ntfy.sh the text leaves the tailnet; switching it off adds the due date and the start of the notes. Reminders may have their own topic (`"reminders": {"topic": …}` in `ntfy.json`).
+- **Snooze (10 minutes) and Done** are notification buttons on desktop Chrome, Edge and Android. iOS web push has no buttons, so on the iPhone a tap opens the task. Done completes the task only while it still has that reminder, so a late tap never completes the next occurrence of a repeating task.
+- **Daily-note nudges** are built: at a time you choose, only when today's daily note does not exist yet; tapping opens (or creates) it.
+- **Not verified on a real iPhone** in development: subscribing from the Home Screen app (iOS 16.4+), delivery with the app closed, and a tap opening the task.
+
 ### 11. Tabs and split panes *(declined for v1)*
 
 **One line:** open several notes as tabs and view two side by side on desktop.
@@ -704,6 +714,8 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 - A workspace model, `panes: [{ tabs: [{path, mode}], active }]`, persisted per device.
 - `Mod`+click opens a new tab; drag a tab to split.
 - Phones keep a single pane with a tab switcher.
+
+**Built 2026-10-21** (`feat/tabs`, DESIGN §6.40): tabs per pane with their own back/forward history (browser back and forward walk the active tab's), open in a new tab by Mod-click, middle click, Mod-Enter in the quick switcher or the explorer menu, close, drag to reorder or to another pane, pin, Reopen closed tab (`Mod-Shift-T`); vertical and horizontal splits with resizable dividers, Split right/down, drag a tab onto a pane's edge to split; the URL stays the active pane's route, so deep links work; the layout is saved per device; panels follow the active pane; one note in two panes shares its session and both editors stay in sync; inactive tabs mount only when shown; phones keep one pane plus a tab switcher sheet.
 
 ### 12. Bookmarks (starred) and a recent-files pane
 
@@ -838,6 +850,8 @@ Results update through SSE.
 - HTML to Markdown with turndown 7.2.4 (MIT).
 - The note is saved to `Clippings/` and rendered with the v1 reading-view sanitizer (no forms, no fixed positioning, optional click-to-load remote images).
 
+**Status: built 2026-10-21** on `feat/clipper` (DESIGN §6.27.1, API.md §2 and §18, install in [CLIPPER.md](CLIPPER.md)). A new top-level `clipper/` package (its own esbuild build and Vitest tests) with three clients over one core (Readability 0.6.0, turndown 7.2.4 with its GFM plugin, Obsidian Web Clipper's properties: `title`, `source`, `author`, `site`, `published`, `created`, `description`, `tags: [clippings]`): a **Manifest V3 extension** for Chrome, Edge and Firefox (toolbar popup, context menu, selection-only clips, optional image download as attachments, optional save without preview), a **bookmarklet** (Settings › Web clipper) and an **iOS Shortcut** for Safari's share sheet, whose script extracts on the phone and posts to `POST /api/files`. The bookmarklet and the extension never call the API: they hand the clip to the app's `/clip` page with `postMessage`, which saves it through the same-origin API, so the CSRF rules are unchanged and nothing needs configuring on the server. **No server-side fetch was needed**, so the guarded client above is not built. Images stay remote links except in the extension, which can download them (with the user's grant of all sites).
+
 ### 20. Block references and block embeds
 
 **Status: built (2026-10-21, branch `feat/block-refs`).** DESIGN §5.37 and §6.37, API.md §37.
@@ -941,7 +955,7 @@ Plugs into the view registry. `.canvas` is already a text kind.
 - **Elsewhere.** `![[Board.canvas]]` shows a scaled preview; search finds cards; notes on a canvas list it among their backlinks (the `DocumentIndexer` extension point, shared with item 5).
 - **Moves.** The server rewrites a canvas's links after a move (card links and file nodes, replacing only those JSON strings); an open canvas also follows moves its tab saw and offers to relink a missing file.
 
-### 26. Publish a note publicly through Tailscale Funnel
+### 26. Publish a note publicly through Tailscale Funnel *(built 2026-10-21, switched off)*
 
 **One line:** share a read-only page for chosen notes with people outside the tailnet, without exposing the app.
 
@@ -958,6 +972,8 @@ Plugs into the view registry. `.canvas` is already a text kind.
 - `serve.json` adds `:8443` → `127.0.0.1:8081` with `AllowFunnel` true for that port only. `:443` stays tailnet-only.
 - Integration tests request `/api/tree`, `/api/files?path=…`, `/n/x` and `/` on 8081 and expect 404.
 - Prerequisite: the v1 identity and Host allowlists (DESIGN §5.13) are in place.
+
+**Status: built 2026-10-21** on `feat/publish` (DESIGN §5.28, API.md §26), switched off: `NOTES_PUBLISH_ENABLED` defaults to `false` in the app, `docker-compose.yml`, `.env.example` and `casaos-compose.yml`, and the shipped `serve.json` has no Funnel entry; `deploy/tailscale/serve.funnel.json.example` (CasaOS: `NOTES_PUBLISH_FUNNEL`) is the opt-in, documented in DEPLOY.md and CASAOS.md "Public publishing". The publish server is a JDK `HttpServer` on `127.0.0.1:8081` that serves only snapshots listed in `.notesapp/publish.json` (stored outside the vault in `/data/publish`), `404` for everything else; the app answers `403 funnel-request` to anything carrying `Tailscale-Funnel-Request`. Snapshots are rendered on the server (commonmark-java) with no app JavaScript and a CSP without scripts: frontmatter, comments, raw HTML and vault queries are left out, links to unpublished notes become plain text without their folder, and only the attachments the note embeds are copied. Publish, republish (title, address) and unpublish from the note header, the ⋯ menu or the palette, and a list in Settings › Publishing. The integration tests request `/api/tree`, `/api/files?path=…`, `/n/x`, `/`, unreferenced attachments, `.notesapp` and `.git` paths (escaped and dot-segment variants too) on the publish server and get `404`. Not yet: math and Mermaid show as source on public pages; a snapshot links to another published note only if that note was published first (republish to update).
 
 ### 27. Per-note encryption
 
@@ -1021,6 +1037,15 @@ Plugs into the view registry. `.canvas` is already a text kind.
 | M | S | |
 
 ### 31. Slash commands and editor niceties
+
+**Status:** built (wave 3). A `/` menu at a line start or after a space, in Live Preview and source mode, with fuzzy filtering over headings, lists, checklist, quote, callouts of every type, tables, dividers, code blocks (16 languages by name), math, Mermaid, links, embeds, block references, dates and times, and the app's commands: insert template, image, attachment, a new embedded drawing, spreadsheet, canvas or board, encrypted text, voice note and new task. The items run the existing commands. Not in code, math, links or the frontmatter, nor in vim's normal mode; in a table cell only the inline items. On the phone it is docked above the keyboard toolbar, which gains a `/` button. Design in DESIGN §6.6.2. Deviations and additions:
+
+- **Renumbering** follows deleted, moved, pasted and indented lines, as one undo step with the edit (Enter already renumbered); typing a number is left alone. Also "Renumber numbered list".
+- **Heading folding**: a chevron left of each heading, `Mod-Shift-[` and `Mod-Shift-]`, and Fold and Unfold all headings; not saved with the note.
+- **Typing `*`, `_`, `~`, `=`, a backtick or `$` over selected text wraps it**, as in Obsidian.
+- **Move line up and down and Duplicate line** were already CodeMirror keys (`Alt-ArrowUp/Down`, `Shift-Alt-ArrowDown`); they are now also in the palette.
+- **Pasting a URL over selected text makes a link** (it already did, through lang-markdown). **Not built: the fetched page title** for a pasted bare URL. It needs the server to fetch arbitrary web pages (a new outbound connection, with SSRF guards), which would have to be optional and off by default; left for a decision.
+- **Table editing helpers** are the Live Preview grid's (item 10); nothing new beyond the menu.
 
 **One line:** small editing aids.
 
@@ -1163,6 +1188,14 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
   - Connection state is shown in the window title.
   - Offline, it shows the service worker's cached app (item 8), or a "Can't reach the server. Is Tailscale connected?" page with Retry.
 - **Packaging.** electron-builder produces a Windows NSIS installer and an unsigned macOS dmg. A GitHub Actions workflow builds them on `desktop-v*` tags and attaches them to a release in the private repository. There is no auto-updater: the shell rarely changes, because the UI comes from the server.
+
+**Status:** built (2026-10-21, branch `feat/desktop`): DESIGN §6.39, install and usage in `docs/DESKTOP.md`. Electron 44.9.3 and electron-builder 26.17.0 (both MIT) in `desktop/`, with its own lockfile, `node --test` unit tests and build scripts; `.github/workflows/desktop.yml` builds on `desktop-v*` tags only. The Windows installer was built and the packaged app run against a local backend (first-run check, app, capture hotkey and window, tray behaviour, offline page and the service worker's offline app); the macOS dmg is built only by the workflow and has not been run on a Mac. Deviations and additions:
+- **Permissions:** besides notifications, the server's pages may write to the clipboard (the Copy buttons), go fullscreen, and use the **microphone only** (voice notes and dictation, item 33); camera, location and everything else are denied.
+- **The capture window** loads the app's own `/capture` page rather than posting to `/api/capture` itself, so photos, Today/Inbox and the offline queue work as in the browser. `Esc` or Cancel hides it and discards an unsent draft; "Open the note" opens it in the main window.
+- **Notifications (item 9):** reminders' in-app route uses the web Notification API, which the shell turns into native notifications; a click brings the window back from the tray (the page's `window.focus()` asks the shell). Web Push itself does not work in Electron (no push service), but the window keeps running in the tray, unthrottled, so `reminder.due` events still arrive. `notesDesktop.notify()` is there for a shell-side route.
+- **Closing the window keeps the app in the tray** (and the hotkey working); Quit is in the tray menu. A tray item **Settings…** changes the server, the shortcut (configurable, or none) and launch at login.
+- **Resume:** after sleep or unlock the shell asks the page to reconnect its event stream at once (`EventStream.reconnect()`), rather than waiting for the 45 s watchdog.
+- **macOS:** the dmg is universal and ad-hoc signed (so Apple Silicon runs it) but not notarised: DESKTOP.md has the Gatekeeper steps. Windows is not code-signed: SmartScreen asks once.
 
 ---
 

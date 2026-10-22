@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. 2026-10-21: the PDF viewer (item 32) in §9.1; voice notes and transcription (item 33) in §3, §17, §18, §19 and §23. 2026-10-21: Ask your vault and summaries (item 18) in §3, §5, §17, §18, §19 and §24. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. 2026-10-21: the PDF viewer (item 32) in §9.1; voice notes and transcription (item 33) in §3, §17, §18, §19 and §23. 2026-10-21: Ask your vault and summaries (item 18) in §3, §5, §17, §18, §19 and §24. 2026-10-21: public publishing (item 26) in §3, §17, §18, §19 and §26. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -136,6 +136,7 @@ Besides notes, the server indexes the content of some structured text files (DES
 - `POST /api/links/resolve` is a read-only `POST`, but it still needs `X-Client-Id`.
 - `GET` requests, including `<img src>` and `EventSource`, need no custom headers.
 - The health endpoints (§6.3) are exempt from the Host and identity checks.
+- **The web clipper** (ROADMAP item 19, DESIGN §6.27.1) changes none of these rules. Its bookmarklet and browser extension never call the API: they pass the clip to the app's `/clip` page with `postMessage`, and that page saves it with ordinary same-origin requests (`POST /api/attachments`, then `POST /api/files` with `onConflict: "rename"`). Its iOS Shortcut posts the `CreateFileRequest` its script returns to `POST /api/files` with `X-Client-Id: ios-shortcut-clipper` and no `Origin`, like the capture Shortcut (§8.5).
 
 ---
 
@@ -195,6 +196,8 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `ai-excluded` | 403 | Excluded from Ask and summaries | §24: the note, folder or selection named is under `settings.ai.excludedPaths` or `settings.files.excludedPaths` | `path` |
 | `ai-budget-exceeded` | 429 | Monthly AI budget reached | §24: this month's estimated spend reached `settings.ai.monthlyBudgetUsd` | `limit` (the budget, USD), `spent` (USD) |
 | `block-not-found` | 409 | Block not found | §37: the line a block id was to go on is no longer in the note, or is no longer unique | `line` |
+| `funnel-request` | 403 | Not available through Funnel | The request carries `Tailscale-Funnel-Request`: it came from the internet through Tailscale Funnel. Every path, health included (§26) | |
+| `publishing-off` | 409 | Public publishing is off | §26.2: `NOTES_PUBLISH_ENABLED` is not `true` on the server | |
 
 ```ts
 export interface FieldError { field: string; message: string }   // e.g. {"field":"settings.files.newNoteFolder","message":"invalid path"}
@@ -283,7 +286,9 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
     "templates": { "folder": "Templates", "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm", "folderTemplates": [] },
     "editor": { "defaultMode": "edit", "readableLineLength": true, "strictLineBreaks": false },
     "ai": { "enabled": false, "provider": "claude-code", "model": "claude-sonnet-5-5", "excludedPaths": ["Private"],
-            "maxContextChars": 60000, "monthlyBudgetUsd": 5.0 }
+            "maxContextChars": 60000, "monthlyBudgetUsd": 5.0 },
+    "reminders": { "webPush": false, "ntfy": false, "ntfyTitleOnly": true, "inApp": false, "dailyNote": false,
+                   "dailyNoteTime": "09:00" }
   },
   "readOnly": false
 }
@@ -318,6 +323,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `templates.folderTemplates` | At most 100 `{folder, template}` objects: `folder` is `""` (every folder) or a valid folder path, at most one rule per folder; `template` is `""` (an unused row) or a valid file path (it need not exist). Errors name the entry, e.g. `settings.templates.folderTemplates[2].folder`. |
 | Enums | Exactly the strings in §17 |
 | `ai` (ROADMAP item 18) | **Optional**, unlike the other groups: it came after schema version 1, so a file or a request without it, or without one of its fields, is valid. A request without `ai` keeps the current values (an old page cannot switch it off by accident); a file without it gets the defaults. A field that is present must be valid: `enabled` a boolean; `provider` `claude-code` or `api`; `model` one of `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5`; `excludedPaths` as `files.excludedPaths`; `maxContextChars` an integer from 4,000 to 400,000; `monthlyBudgetUsd` a number above 0 and at most 10,000. |
+| `reminders` (ROADMAP item 9, §28) | **Optional** like `ai`, with the same rules for a missing group or field. `webPush`, `ntfy`, `ntfyTitleOnly`, `inApp` and `dailyNote` are booleans (all `false` except `ntfyTitleOnly`); `dailyNoteTime` is `HH:mm` from `00:00` to `23:59`. |
 
 **Semantics.**
 
@@ -1826,6 +1832,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `searches.changed` | `SavedSearchesChangedEvent` | no | The saved searches were saved (§12.4); refetch them |
 | `bookmarks.changed` | `BookmarksChangedEvent` | no | The bookmarks were saved (§21). After a move or a trash restore the server re-keys them itself and sends this with `origin: null`, so it reaches every client, the mover's included. Refetch `GET /api/bookmarks`. |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
+| `reminder.due` | `ReminderDueEvent` | no | A reminder for every open tab: the in-app route (§28.5). Not in `VAULT_EVENT_NAMES`: the reminders feature registers it with `registerEventHandler`. |
 | `flashcards.changed` | `FlashcardsChangedEvent` | no | Flashcard review records or settings changed (§34.7). Not in `VAULT_EVENT_NAMES`: the flashcards feature registers it with `registerEventHandler`. |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 | `task.created`, `task.changed` | `TaskEvent` | no | A task was created or changed through the task API (§20.8) |
@@ -1897,7 +1904,7 @@ export type ErrorCode =
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
   | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
-  | 'block-not-found';
+  | 'block-not-found' | 'funnel-request' | 'publishing-off';
 
 export interface FieldError { field: string; message: string }
 
@@ -2043,6 +2050,15 @@ export interface AiSettings {
   maxContextChars: number;        // note text one request may carry, 4,000 to 400,000; default 60,000
   monthlyBudgetUsd: number;       // requests are refused once this month's estimated spend reaches it; default 5
 }
+/** Reminders and push notifications (§28). Every route is off by default. Optional in a request, like ai. */
+export interface RemindersSettings {
+  webPush: boolean;               // Web Push to the devices subscribed in Settings › Reminders
+  ntfy: boolean;                  // ntfy, configured in /data/secrets/ntfy.json
+  ntfyTitleOnly: boolean;         // with ntfy, the task's title only, never its notes; default true
+  inApp: boolean;                 // a toast and a browser notification in every open tab
+  dailyNote: boolean;             // nudge when today's daily note does not exist yet
+  dailyNoteTime: string;          // 'HH:mm', default '09:00'
+}
 export interface Settings {
   schemaVersion: 1;
   files: FilesSettings;
@@ -2050,6 +2066,7 @@ export interface Settings {
   templates: TemplatesSettings;
   editor: EditorSettings;
   ai: AiSettings;
+  reminders: RemindersSettings;
 }
 export interface SettingsResponse { settings: Settings; version: Version; readOnly: boolean }
 export interface SettingsUpdateRequest { settings: Settings; baseVersion: Version }
@@ -2746,6 +2763,64 @@ export interface DatedNotesResponse {
   notes: DatedNote[];           // by day, then path; a note once per day
 }
 
+// ---------- Reminders (API.md §28, ROADMAP items 9 and 4c) ----------
+export type ReminderRouteId = 'webPush' | 'ntfy' | 'inApp';
+export interface PushDevice {
+  id: string;
+  name: string;
+  createdAt: IsoInstant;
+  lastSuccessAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+}
+export interface UpcomingReminder { taskId: string; title: string; at: LocalDateTime }
+export interface RemindersStatus {
+  zone: string;                   // the IANA zone reminders are read in
+  zoneReported: boolean;          // false: no device reported one yet, the server's zone is used
+  serverZone: string;
+  webPush: { available: boolean; reason: string | null; publicKey: string | null; devices: PushDevice[] };
+  ntfy: { configured: boolean; reason: string | null; server: string | null; ownTopic: boolean };
+  inApp: { connections: number };
+  lastDeliveredAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+  upcoming: UpcomingReminder[];   // the next five, soonest first
+}
+export interface ReminderZoneRequest { zone: string }
+export interface PushKey { publicKey: string }   // base64url, the applicationServerKey
+export interface PushSubscriptionRequest { endpoint: string; keys: { p256dh: string; auth: string }; name: string }
+export interface ReminderTestRequest { route: ReminderRouteId; deviceId?: string }
+export interface ReminderTestResult { sent: boolean; error: string | null }
+export interface ReminderActionRequest { taskId: string; at: LocalDateTime; minutes?: number }   // minutes: snooze only, default 10
+export interface ReminderActionResult { changed: boolean; until: IsoInstant | null }
+/** `reminder.due` (§28.5), registered at runtime by the reminders feature. */
+export interface ReminderDueEvent {
+  key: string;
+  kind: 'task' | 'daily' | 'test';
+  taskId: string | null;
+  at: LocalDateTime | null;
+  title: string;
+  body: string;
+  url: string;                    // an app path, such as '/x/tasks/today?task=<id>'
+  sentAt: IsoInstant;
+}
+
+// ---------- Public publishing (API.md §26, ROADMAP item 26) ----------
+export type PublishedNoteState = 'current' | 'changed' | 'source-missing' | 'snapshot-missing';
+export interface PublishedNote {
+  path: VaultPath;              // follows moves and renames made in the app
+  slug: string;                 // the public page is /p/<slug>
+  title: string;
+  url: string;                  // baseUrl + '/p/' + slug, or only the path when there is no base URL
+  publishedAt: IsoInstant;
+  state: PublishedNoteState;    // changed: edited since publishing; the public page shows the snapshot
+}
+export interface PublishResponse {
+  enabled: boolean;             // NOTES_PUBLISH_ENABLED; false: nothing is served or publishable
+  baseUrl: string | null;       // NOTES_PUBLISH_BASE_URL without a trailing slash
+  notes: PublishedNote[];
+}
+export interface PublishRequest { path: VaultPath; slug?: string; title?: string }   // omitted: keep, or derive
 // ---------- Scripts in notes (API.md §40, ROADMAP items 40 and 17) ----------
 export interface NoteTask {
   line: number;                 // 0-based line in the note
@@ -2839,6 +2914,9 @@ export interface NotesQueryResponse {
 | POST | `/api/tasks/lists/{id}/sections/reorder` | `ReorderRequest` | 200 `TaskListWriteResult` | 20.5 |
 | GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
 | PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
+| GET | `/api/publish` | | 200 `PublishResponse` | 26.1 |
+| POST | `/api/publish` | `PublishRequest` | 200 `PublishedNote` | 26.2 |
+| DELETE | `/api/publish?path=` | | 204 | 26.3 |
 | POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
 | POST | `/api/notes/block-id` | `BlockIdRequest` | 200 `BlockIdResult` | 37 |
 | GET | `/api/transcription` | | 200 `TranscriptionStatus` | 23.1 |
@@ -2855,9 +2933,19 @@ export interface NotesQueryResponse {
 | POST | `/api/ai/ask` | `AiAskRequest` | 200 `text/event-stream` | 24.2 |
 | POST | `/api/ai/summarize` | `AiSummarizeRequest` | 200 `text/event-stream` | 24.3 |
 | GET | `/api/notes/by-date?from=&to=&property=` | | 200 `DatedNotesResponse` | 25.1 |
+| GET | `/api/reminders/status` | | 200 `RemindersStatus` | 28.1 |
+| PUT | `/api/reminders/zone` | `ReminderZoneRequest` | 204 | 28.1 |
+| POST | `/api/push/key` | | 200 `PushKey` | 28.2 |
+| POST | `/api/push/subscriptions` | `PushSubscriptionRequest` | 201 `PushDevice` | 28.2 |
+| DELETE | `/api/push/subscriptions/{id}` | | 204 | 28.2 |
+| POST | `/api/reminders/test` | `ReminderTestRequest` | 200 `ReminderTestResult` | 28.3 |
+| POST | `/api/reminders/snooze` | `ReminderActionRequest` | 200 `ReminderActionResult` | 28.4 |
+| POST | `/api/reminders/done` | `ReminderActionRequest` | 200 `ReminderActionResult` | 28.4 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
-**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions) and `/capture` (quick capture, DESIGN §6.27). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
+**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions), `/capture` (quick capture, DESIGN §6.27) and `/clip` (the web clipper's hand-over page, DESIGN §6.27.1). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
+
+**Web clipper** (DESIGN §6.27.1): `/clip` is the only response sent with `Cross-Origin-Opener-Policy: unsafe-none` (every other one has `same-origin`), so the bookmarklet's window can post to it. `/clipper/clipper.js`, `/clipper/shortcut.js` and `/clipper/bookmarklet.js` are the clipper build's scripts (`no-cache`); a server built without the clipper answers them `404`.
 
 **Installable app** (DESIGN §6.26): `/sw.js` (the service worker) is served with `Cache-Control: no-cache` and `Service-Worker-Allowed: /`; `/manifest.webmanifest` as `application/manifest+json` with `no-cache`. `POST /capture/share` is the manifest's share target, answered by the service worker; one that reaches the server (no worker) gets `303 See Other` to `/capture?share=lost` and nothing is stored.
 
@@ -2894,6 +2982,7 @@ export interface NotesQueryResponse {
 | `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
 | `BlockIdRequest`, `BlockIdResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]` |
 | `TranscriptionStatus`, `TranscriptionResult` | Same; the request is `TranscribeRequest(String path)` | |
+| `PublishResponse`, `PublishedNote`, `PublishRequest` | Same | `PublishedNote.state` is the enum `PublishedNoteState` (`current`, `changed`, `source-missing`, `snapshot-missing`); every `PublishRequest` component is `@Nullable` |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 | `Task`, `TaskList`, `TaskSection`, `TaskRecurrence`, `TaskReminder`, `TaskFileProblem`, `TasksResponse`, `TaskListsResponse`, `TaskWriteResult`, `TaskListWriteResult`, `CompleteTaskRequest`, `ReorderTasksRequest`, `ReorderRequest`, `CreateTaskListRequest`, `SectionRequest` | Same | Enums `TaskStatus`, `TaskView` and `RecurrenceFrom` (for `TaskRecurrence.from`); `Task.priority` is an `int`. `CompleteTaskRequest.base` is a `JsonNode`. |
@@ -2905,6 +2994,9 @@ export interface NotesQueryResponse {
 | `FlashcardsChangedEvent` | Same name in `com.rjgehan.notes.events` | An extension event (§34.7): it echoes `origin` like a content event, and `cards` maps removed records to `null` |
 | `AiSettings` | Same name in `com.rjgehan.notes.settings` | `model` is a `String` checked against `AiSettings.MODELS` |
 | `AiAskRequest`, `AiSummarizeRequest`, `AiTurn`, `AiPrompt`, `AiStatus`, `AiModelInfo`, `AiSource`, `AiStartEvent`, `AiDeltaEvent`, `AiRestartEvent`, `AiUsage`, `AiDoneEvent`, `AiErrorEvent` | Same | Every request component is `@Nullable` (the service validates and applies defaults). `AiStatus.state` is the enum `AiState` (`off`, `not-configured`, `over-budget`, `ready`). The stream events are written by `AiController` through an `SseEmitter`, not through `EventHub`. |
+| `RemindersSettings` | Same name in `com.rjgehan.notes.settings` | `dailyNoteTime` is a `String` checked against `HH:mm` |
+| `RemindersStatus` (with the nested `WebPush`, `Ntfy`, `InApp`), `PushDevice`, `UpcomingReminder`, `PushKey`, `PushSubscriptionRequest` (with `Keys`), `ReminderZoneRequest`, `ReminderTestRequest`, `ReminderTestResult`, `ReminderActionRequest`, `ReminderActionResult` | Same (§28) | Every request component is `@Nullable` and checked by `ReminderController`; `ReminderActionRequest.minutes` is an `Integer` |
+| `ReminderDueEvent` | Same name in `com.rjgehan.notes.events` | Not a content event: no `origin`, delivered to every connection |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
@@ -3377,6 +3469,43 @@ A value dates a note when it is a string holding a date (`2026-10-21`), a date-t
 
 `400 bad-request` names the first bad parameter. The answer is not pushed: clients refetch it after `file.*`, `entry.moved` and `folder.deleted` events for notes (§16.4), debounced.
 
+## 26. Public publishing (ROADMAP item 26)
+
+Chosen notes can be published as read-only public pages through Tailscale Funnel, **switched off as shipped**: the server starts its publish server only with `NOTES_PUBLISH_ENABLED=true`, and the internet reaches it only once `serve.json` has the Funnel entry (DEPLOY.md "Public publishing"). The endpoints below are on the app, which stays tailnet-only: any request that came through Funnel (it carries `Tailscale-Funnel-Request`) is refused with `403 funnel-request`, on every path. DESIGN §5.28 has the design and the rules for what a page contains.
+
+The public pages are served by a separate server (`127.0.0.1:8081`, behind Funnel on `https://<host>:8443`) that answers only `GET`/`HEAD` on `/p/<slug>`, `/p/<slug>/<asset>` and `/p/-/style.css`, with `404` for everything else. A page is a static snapshot rendered when the note is published: later edits stay private until the note is republished.
+
+### 26.1 `GET /api/publish`
+
+`200 PublishResponse`: `enabled` (the server switch), `baseUrl` (`NOTES_PUBLISH_BASE_URL` without a trailing slash, or `null`) and every published note, in the order published:
+
+| `PublishedNote` field | Meaning |
+|---|---|
+| `path` | The note. Follows moves and renames made through the app |
+| `slug` | The page is `/p/<slug>`: 1 to 80 of `a-z`, `0-9` and inner `-` |
+| `title` | The page's title |
+| `url` | `baseUrl + "/p/" + slug`, or only the path when `baseUrl` is null |
+| `publishedAt` | When the snapshot was made |
+| `state` | `current`; `changed` (the note was edited since); `source-missing` (the note is gone; the page stays public until unpublished); `snapshot-missing` (the page's files are not on the server, for example after a restore: republish) |
+
+The list is read from `.notesapp/publish.json`, which is committed with the vault's history.
+
+### 26.2 `POST /api/publish`
+
+Body `PublishRequest`: `path` (required, a note), `slug` and `title` (optional). Publishes the note, or republishes it: the snapshot is rendered again from the note as it is now and replaces the previous one. An omitted `title` keeps the current one, or for a first publish is the note's name; an omitted `slug` keeps the current one, or is made from the title (`-2`, `-3`… when taken; random when the title has no letters or digits). A new `slug` moves the page: the old address answers `404` at once.
+
+| Status | When |
+|---|---|
+| `200` | `PublishedNote` |
+| `400 bad-request` | No `path`; not a note (`.md`, not a drawing; an encrypted `.mdenc` note never); a `slug` outside the rule of §26.1; a `title` over 200 characters or with a line break |
+| `403 reserved-path`, `404 not-found` | The path is reserved, or no such note |
+| `409 already-exists` | Another note is published at that `slug` (`existingPath`) |
+| `409 publishing-off` | Publishing is switched off on the server |
+
+### 26.3 `DELETE /api/publish?path={path}`
+
+`204`: the page and its files are deleted and the address answers `404` from then on; the note itself is not changed. Allowed while publishing is off, so notes published earlier can be taken down. `404 not-found` when the path is not published.
+
 ## 27. Encrypted notes (ROADMAP item 27)
 
 Numbered after its ROADMAP item, like §34 and §35. Encryption is done in the browser (DESIGN §6.33) in the Obsidian Meld Encrypt formats; this API adds no endpoint and no field, and never receives a passphrase, a key or a plaintext.
@@ -3384,6 +3513,56 @@ Numbered after its ROADMAP item, like §34 and §35. Encryption is done in the b
 - **`.mdenc` files** are `kind: "text"` (`mdenc` is in the default `notes.text-extensions`, DESIGN §4.2) and use the text-file endpoints (§8) unchanged: `GET`/`PUT /api/files` with versions and conflicts, history (§14), trash (§13), moves (§10; a move from `X.md` to `X.mdenc` updates links like any rename). Their content is the plugin's JSON, `{"version":"2.0","hint":"…","encodedData":"<base64>"}`. They are not indexed documents (§1.8): search (§12) never returns them by content (a `file:` or `path:` query still finds them by name), and they have no links, tags or mentions (§11).
 - **Inline sections** in notes (`%%🔐β 💡hint💡<base64> 🔐%%`, `🔐β …🔐`, and the plugin's older `α` and unmarked commented forms; one line, at least 16 base64 characters) are stored as written. Search treats each section, hint included, as blank space: no word, phrase, regular expression or scoped query matches it and snippets show spaces there; line numbers and offsets in results are those of the note.
 - **Ask your vault** (§24): note text sent to the model, and the `text` of a `selection` request, have every section replaced by `[encrypted]`; `.mdenc` files are never sources (they are not notes), and `scope: "note"` on one is answered like any other path that is not a note.
+
+## 28. Reminders and push notifications (ROADMAP items 9 and 4c)
+
+Task reminders (`Task.reminders`, §20.1) and the daily-note nudge, delivered by the server's scheduler through the routes switched on in `settings.reminders` (§5): **Web Push** to subscribed devices, **ntfy**, and **in-app** (`reminder.due` on the event stream). Every route is off by default. The design (due rules, ledger, retries) is DESIGN §5.26; the client's part is DESIGN §6.38.
+
+A reminder's `at` is a local date-time with no zone. The server reads it in the IANA zone the devices report (`PUT /api/reminders/zone`; the latest report wins), and in its own zone (UTC in the image) until one does.
+
+### 28.1 Status and zone
+
+**`GET /api/reminders/status`** → `200 RemindersStatus`: the zone in use, each route's readiness (whether a route is *on* is in `settings.reminders`), the subscribed devices (never their endpoints or keys), the last delivery and the last problem (since the server started), and the next five reminders.
+
+- `webPush.available` is false, with `reason`, when `<secrets-dir>/push.json` cannot be read or is malformed. `webPush.publicKey` is null until the key pair exists (`POST /api/push/key`).
+- `ntfy.configured` is false, with `reason`, when `<secrets-dir>/ntfy.json` is missing or invalid (the same file as the app alerts, §6.6). `ownTopic` is true when it has `"reminders": {"topic": …}`; otherwise reminders go to its default topic. The topic and token are never shown.
+- `inApp.connections` counts the open event streams.
+
+**`PUT /api/reminders/zone`** `ReminderZoneRequest` → `204`. `400 bad-request` for anything but an IANA zone id (`Europe/Berlin`, `America/New_York`, `UTC`). Clients send it at startup.
+
+### 28.2 Web Push devices
+
+**`POST /api/push/key`** → `200 PushKey`: the server's VAPID public key (base64url, 65 bytes uncompressed P-256), created with its private key in `<secrets-dir>/push.json` on the first call. `400 bad-request` when the file cannot be written.
+
+**`POST /api/push/subscriptions`** `PushSubscriptionRequest` (the browser's `PushSubscription.toJSON()` plus a `name`) → `201 PushDevice`. Subscribing the same endpoint again updates it and keeps its id (the first 16 characters of the base64url SHA-256 of the endpoint). `400 bad-request` when `endpoint` is not an `https` URL, `keys.p256dh` is not a P-256 point, `keys.auth` is not 16 bytes, or 50 devices are already subscribed.
+
+**`DELETE /api/push/subscriptions/{id}`** → `204`; `404 not-found` for an unknown id. A device whose push service answers `404` or `410` is removed by the server itself.
+
+Each message is encrypted for its device (RFC 8291, `aes128gcm`) and sent with a VAPID `Authorization` header (RFC 8292), `TTL: 86400`, `Urgency: high` and a `Topic` derived from the reminder's key. The decrypted JSON, which the service worker turns into a notification:
+
+```json
+{"title":"Pay rent","body":"Due 2026-10-16\nTransfer from the joint account","tag":"task:01JA…:2026-10-16T09:00",
+ "kind":"task","url":"/x/tasks/today?task=01JA…","taskId":"01JA…","at":"2026-10-16T09:00"}
+```
+
+`taskId` and `at` are present for task reminders only. `url` is an app path: `/x/tasks/today?task=<id>` opens the task's detail sheet; `/?open=daily` opens today's daily note.
+
+### 28.3 `POST /api/reminders/test`
+
+`ReminderTestRequest` → `200 ReminderTestResult`. Sends a test reminder through one route now, **whether or not it is switched on**, so a route can be tried before it is enabled. With `route: "webPush"`, `deviceId` limits it to one device. `sent: false` with `error` when the route did not take it (no device subscribed, `ntfy.json` missing, no tab open, or the push service's or ntfy's HTTP status). `400 bad-request` for another `route`.
+
+### 28.4 `POST /api/reminders/snooze` and `POST /api/reminders/done`
+
+Both take `ReminderActionRequest` with the `taskId` and `at` of the notification, and answer `200 ReminderActionResult`. The service worker calls them from a notification's buttons (desktop Chrome, Edge and Android only; iOS shows no notification buttons).
+
+- **snooze**: the reminder fires again in `minutes` (1 to 1440, default 10); `until` says when. `changed: false` when the task is gone or closed.
+- **done**: completes the task as `POST /api/tasks/{id}/complete` would, with the zone of §28.1 and, as `base`, the task's current `due` and `start`, so a repeating task rolls forward once. `changed: false`, and nothing happens, when the task is closed, gone, or no longer has a reminder at `at` (another device completed it or it rolled forward).
+
+`400 bad-request` without `taskId`, or with an `at` that is not `YYYY-MM-DDTHH:mm`.
+
+### 28.5 `reminder.due`
+
+The in-app route publishes `ReminderDueEvent` on the event stream (§16.4) for each reminder it delivers. It counts as delivered only when at least one stream is connected. Clients show each `key` once (a replay after a reconnect repeats it) and ignore events sent more than 15 minutes ago. `kind` is `task`, `daily` or `test`.
 
 ---
 

@@ -1578,6 +1578,13 @@ mark.match {
   color: var(--text-muted);
 }
 
+/* Running text with inline code and emphasis: .setting-note alone is a flex row, which would
+   split such a sentence into columns. */
+.setting-note.setting-prose {
+  display: block;
+  line-height: 1.55;
+}
+
 .settings-subtitle {
   margin: 28px 0 8px;
   font-size: 1.05em;
@@ -2133,6 +2140,15 @@ mark.match {
   .is-recording .voice-mic {
     animation: none;
   }
+}
+
+/* Settings › Reminders (DESIGN §6.38): a time field or buttons beside a switch. */
+.setting-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* ---------- folder templates (Settings › Templates, ROADMAP item 30) ---------- */

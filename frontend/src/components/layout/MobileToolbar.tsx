@@ -28,6 +28,7 @@ import {
   Minus,
   Redo2,
   SquareArrowOutUpRight,
+  Slash,
   SquareCheck,
   Table,
   Undo2,
@@ -41,7 +42,8 @@ import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox
 import { cycleHeading, toggleBold, toggleBulletList, toggleInlineCode, toggleItalic, toggleLink } from '../../editor/formatting';
 import { historyEditor, insertTable, isTableCell, moveToCell } from '../../editor/livePreview/table';
 import { revealCaret } from '../../editor/mobileViewport';
-import { pickAndInsertAttachments, pickFiles } from '../../features/attachments';
+import { openSlashMenu } from '../../editor/slash';
+import { pickAndInsertImages } from '../../features/editorInsertions';
 import { startVoiceNote } from '../../features/voice/voiceNotes';
 import { runCommand } from '../../features/commands';
 import { activePath } from '../../features/navigation';
@@ -65,6 +67,8 @@ interface Tool {
 }
 
 const TOOLS: Tool[] = [
+  // The `/` menu (DESIGN §6.6.2), docked above the keyboard.
+  { id: 'insert', label: 'Insert…', icon: Slash, markdown: true, run: (v) => openSlashMenu(v) },
   { id: 'wikilink', label: 'Insert internal link', icon: Brackets, markdown: true, run: (v) => insertWikilink(v) },
   { id: 'tag', label: 'Insert tag', icon: Hash, markdown: true, run: (v) => insertTagSign(v) },
   { id: 'cell-previous', label: 'Previous cell', icon: ArrowLeftToLine, cell: true, run: (v) => moveToCell(v, -1) },
@@ -100,19 +104,8 @@ const TOOLS: Tool[] = [
     icon: ImagePlus,
     markdown: true,
     lines: true,
-    run: (v) => {
-      // The picker blurs the editor; the session remembers where to insert before it opens.
-      const ctx = v.state.facet(noteContext);
-      if (!ctx) return;
-      const session = isNotePath(ctx.path()) ? documents.get(ctx.path()) : undefined;
-      if (session) {
-        pickAndInsertAttachments(session, 'image/*');
-        return;
-      }
-      // A Markdown editor that is not a note's (a canvas card) inserts through its own context.
-      const { from, to } = v.state.selection.main;
-      void pickFiles({ accept: 'image/*', multiple: true }).then((files) => ctx.insertFiles(files, { from, to }, false));
-    },
+    // The picker blurs the editor; the session remembers where to insert before it opens.
+    run: (v) => pickAndInsertImages(v),
   },
   {
     id: 'voice',

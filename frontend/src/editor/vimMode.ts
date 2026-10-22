@@ -118,6 +118,11 @@ export function currentVimMode(): VimModeLabel | null {
   return current?.mode ?? null;
 }
 
+/** The vim mode of `view`, or null when vim is not on in it (or it never had the focus). */
+export function vimModeOf(view: EditorView): VimModeLabel | null {
+  return current?.view === view ? current.mode : null;
+}
+
 function subscribe(l: () => void): () => void {
   listeners.add(l);
   return () => listeners.delete(l);

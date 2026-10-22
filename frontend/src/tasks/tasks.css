@@ -795,6 +795,18 @@ button.link-button {
   width: auto;
 }
 
+.task-reminder-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.task-reminder-add .select {
+  width: auto;
+  max-width: 100%;
+}
+
 .task-reminders .task-field-note {
   flex-basis: 100%;
 }

@@ -32,6 +32,8 @@ import com.rjgehan.notes.identity.Identity;
 import com.rjgehan.notes.index.FileIndexer;
 import com.rjgehan.notes.index.IndexBuilder;
 import com.rjgehan.notes.index.VaultIndex;
+import com.rjgehan.notes.publish.PublishService;
+import com.rjgehan.notes.publish.SnapshotStore;
 import com.rjgehan.notes.settings.SettingsService;
 import com.rjgehan.notes.sheets.SheetDocumentIndexer;
 import com.rjgehan.notes.tasks.TaskDocumentIndexer;
@@ -109,6 +111,10 @@ public final class TestVault implements AutoCloseable {
 
 	public final BookmarkService bookmarks;
 
+	public final SnapshotStore snapshots;
+
+	public final PublishService publish;
+
 	public final TrashStore trashStore;
 
 	public final LargeFiles largeFiles;
@@ -153,8 +159,11 @@ public final class TestVault implements AutoCloseable {
 		this.bookmarks = new BookmarkService(this.fs, this.index, this.batcher, this.hub, this.clock, JSON);
 		this.trash = new TrashService(this.paths, this.fs, this.locks, this.index, this.files, this.trashStore,
 				this.reconciler, this.batcher, this.hub, this.bookmarks);
+		this.snapshots = new SnapshotStore(this.properties);
+		this.publish = new PublishService(this.properties, this.fs, this.index, this.files, this.batcher,
+				this.snapshots, this.clock, JSON);
 		this.moves = new MoveService(this.paths, this.fs, this.locks, this.index, this.files, this.indexer,
-				this.reconciler, this.batcher, this.hub, this.moveLog, this.settings, this.bookmarks);
+				this.reconciler, this.batcher, this.hub, this.moveLog, this.settings, this.bookmarks, this.publish);
 		this.attachments = new AttachmentService(this.paths, this.nameRules, this.files, this.index, this.settings);
 		this.headings = new HeadingRenameService(this.paths, this.fs, this.locks, this.index, this.files,
 				this.indexer, this.reconciler, this.batcher, this.hub, this.bookmarks);

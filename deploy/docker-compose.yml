@@ -54,6 +54,9 @@ services:
       NOTES_MIRROR_URL: ${NOTES_MIRROR_URL:-}   # https://github.com/<you>/<repo>.git; empty = no mirror
       NOTES_MIRROR_TOKEN_FILE: /run/secrets/mirror_token
       # App-error alerts (ROADMAP item 38) are on when /data/secrets/ntfy.json exists (DEPLOY.md "App alerts").
+      # Reminders (ROADMAP item 9) are switched on in Settings › Reminders (DEPLOY.md "Reminders"). Empty = the
+      # VAPID contact is https://<first allowed host>; set mailto:you@example.com if a push service refuses it.
+      NOTES_REMINDERS_VAPID_SUBJECT: ${NOTES_REMINDERS_VAPID_SUBJECT:-}
       # ---- Voice-note transcription (ROADMAP item 33, DEPLOY.md "Voice notes"): off while empty. With the
       # whisper service below (COMPOSE_PROFILES=transcription): http://whisper:9000
       NOTES_TRANSCRIPTION_URL: ${NOTES_TRANSCRIPTION_URL:-}
@@ -65,6 +68,11 @@ services:
       NOTES_TRANSCRIPTION_MAX_SIZE: ${NOTES_TRANSCRIPTION_MAX_SIZE:-25MB}    # larger recordings are not sent
       # ---- Ask your vault (ROADMAP item 18, DEPLOY.md "Ask your vault"): off until switched on in Settings.
       NOTES_AI_API_KEY_FILE: /run/secrets/anthropic_key
+      # ---- Public publishing (ROADMAP item 26, DEPLOY.md "Public publishing"): OFF. The read-only publish server
+      # (127.0.0.1:8081, published snapshots only) starts only with NOTES_PUBLISH_ENABLED=true, and is public only
+      # once tailscale/serve.json also has the Funnel entry (serve.funnel.json.example). Snapshots: /data/publish.
+      NOTES_PUBLISH_ENABLED: ${NOTES_PUBLISH_ENABLED:-false}
+      NOTES_PUBLISH_BASE_URL: ${NOTES_PUBLISH_BASE_URL:-}     # https://notes.<tailnet>.ts.net:8443, for copied links
     secrets: [mirror_token, anthropic_key]
     volumes:
       - notes-data:/data

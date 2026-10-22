@@ -1,4 +1,4 @@
-// The formula engine for notes is a lazy chunk (ROADMAP item 39, DESIGN §6.38): HyperFormula loads
+// The formula engine for notes is a lazy chunk (ROADMAP item 39, DESIGN §6.41): HyperFormula loads
 // the first time a note with formulas shows, never for notes without them. Editors waiting for it
 // subscribe, and redraw once it is in.
 export type FormulaEngine = typeof import('./engine');

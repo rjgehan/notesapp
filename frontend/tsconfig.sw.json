@@ -22,5 +22,5 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true
   },
-  "include": ["src/sw/sw.ts", "src/sw/core.ts"]
+  "include": ["src/sw/sw.ts", "src/sw/core.ts", "src/sw/push.ts"]
 }

@@ -1,4 +1,4 @@
-// Formulas in notes (ROADMAP item 39, DESIGN §6.38): what a note's formulas are made of, without the
+// Formulas in notes (ROADMAP item 39, DESIGN §6.41): what a note's formulas are made of, without the
 // engine. Every Markdown table is a small sheet (columns A, B, …; the header is row 1), a cell whose
 // text starts with `=` is a formula, and inline code that starts with `=` is an inline formula. A
 // table named with an Obsidian block id (a `^budget` line under it, after a blank line) is the sheet
