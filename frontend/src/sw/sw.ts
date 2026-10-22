@@ -12,6 +12,8 @@
 //   copy (src/offline), which knows how old it is.
 // - A share from another app (Web Share Target, POST /capture/share) is kept in Cache Storage and
 //   the browser is sent to the capture page (DESIGN §6.27); nothing is posted to the server.
+// - Reminders (DESIGN §6.32): a push message becomes a notification; tapping it focuses an open tab
+//   (which opens the task) or opens the app; Snooze and Done (desktop only) call the API directly.
 import {
   classify,
   CONFIG_CACHE,
@@ -30,6 +32,7 @@ import {
   shouldServeShellFor,
   staleShellCaches,
 } from './core';
+import { actionRequest, OPEN_MESSAGE, reminderNotification, safeAppPath, type ReminderNotificationData } from './push';
 
 declare const self: ServiceWorkerGlobalScope;
 declare const __SW_BUILD__: string;
@@ -211,4 +214,55 @@ self.addEventListener('message', (event) => {
   } else if (message.type === 'SET_OFFLINE_MEDIA') {
     event.waitUntil(setMediaEnabled(message.enabled === true));
   }
+});
+
+// ---------- reminders (Web Push) ----------
+
+// Mutating API requests need a client id (API.md §3); the worker has its own.
+const SW_CLIENT_ID = 'sw-' + Math.random().toString(36).slice(2, 12).padEnd(10, '0');
+
+self.addEventListener('push', (event) => {
+  let json: unknown;
+  try {
+    json = event.data?.json() ?? null;
+  } catch {
+    json = { title: event.data?.text() ?? 'NotesApp reminder' };
+  }
+  const spec = reminderNotification(json);
+  event.waitUntil(self.registration.showNotification(spec.title, spec.options as NotificationOptions));
+});
+
+async function openReminder(url: string): Promise<void> {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const tab = windows.find((c) => new URL(c.url).origin === self.location.origin);
+  if (tab) {
+    await tab.focus().catch(() => undefined);
+    tab.postMessage({ type: OPEN_MESSAGE, url });
+    return;
+  }
+  await self.clients.openWindow(url);
+}
+
+self.addEventListener('notificationclick', (event) => {
+  const notification = event.notification;
+  const data = (notification.data ?? null) as ReminderNotificationData | null;
+  notification.close();
+  const request = actionRequest(event.action, data);
+  if (request) {
+    event.waitUntil(
+      fetch(request.url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Client-Id': SW_CLIENT_ID },
+        body: JSON.stringify(request.body),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+        })
+        // The action could not reach the server: open the task instead, so nothing is lost.
+        .catch(() => openReminder(safeAppPath(data?.url))),
+    );
+    return;
+  }
+  event.waitUntil(openReminder(safeAppPath(data?.url)));
 });

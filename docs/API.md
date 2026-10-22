@@ -282,7 +282,9 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
     "templates": { "folder": "Templates", "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm" },
     "editor": { "defaultMode": "edit", "readableLineLength": true, "strictLineBreaks": false },
     "ai": { "enabled": false, "provider": "claude-code", "model": "claude-sonnet-5-5", "excludedPaths": ["Private"],
-            "maxContextChars": 60000, "monthlyBudgetUsd": 5.0 }
+            "maxContextChars": 60000, "monthlyBudgetUsd": 5.0 },
+    "reminders": { "webPush": false, "ntfy": false, "ntfyTitleOnly": true, "inApp": false, "dailyNote": false,
+                   "dailyNoteTime": "09:00" }
   },
   "readOnly": false
 }
@@ -316,6 +318,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `excludedPaths` | At most 100 valid paths (folder or file prefixes, matched case-insensitively) |
 | Enums | Exactly the strings in §17 |
 | `ai` (ROADMAP item 18) | **Optional**, unlike the other groups: it came after schema version 1, so a file or a request without it, or without one of its fields, is valid. A request without `ai` keeps the current values (an old page cannot switch it off by accident); a file without it gets the defaults. A field that is present must be valid: `enabled` a boolean; `provider` `claude-code` or `api`; `model` one of `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5`; `excludedPaths` as `files.excludedPaths`; `maxContextChars` an integer from 4,000 to 400,000; `monthlyBudgetUsd` a number above 0 and at most 10,000. |
+| `reminders` (ROADMAP item 9, §25) | **Optional** like `ai`, with the same rules for a missing group or field. `webPush`, `ntfy`, `ntfyTitleOnly`, `inApp` and `dailyNote` are booleans (all `false` except `ntfyTitleOnly`); `dailyNoteTime` is `HH:mm` from `00:00` to `23:59`. |
 
 **Semantics.**
 
@@ -1809,6 +1812,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `searches.changed` | `SavedSearchesChangedEvent` | no | The saved searches were saved (§12.4); refetch them |
 | `bookmarks.changed` | `BookmarksChangedEvent` | no | The bookmarks were saved (§21). After a move or a trash restore the server re-keys them itself and sends this with `origin: null`, so it reaches every client, the mover's included. Refetch `GET /api/bookmarks`. |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
+| `reminder.due` | `ReminderDueEvent` | no | A reminder for every open tab: the in-app route (§25.5). Not in `VAULT_EVENT_NAMES`: the reminders feature registers it with `registerEventHandler`. |
 | `flashcards.changed` | `FlashcardsChangedEvent` | no | Flashcard review records or settings changed (§34.7). Not in `VAULT_EVENT_NAMES`: the flashcards feature registers it with `registerEventHandler`. |
 | `resync` | `ResyncEvent` | yes | The server could not describe the change precisely (watcher overflow, a bulk change of more than 50 entries, or a rescan error). Refetch everything (§16.5). |
 | `task.created`, `task.changed` | `TaskEvent` | no | A task was created or changed through the task API (§20.8) |
@@ -2022,6 +2026,15 @@ export interface AiSettings {
   maxContextChars: number;        // note text one request may carry, 4,000 to 400,000; default 60,000
   monthlyBudgetUsd: number;       // requests are refused once this month's estimated spend reaches it; default 5
 }
+/** Reminders and push notifications (§25). Every route is off by default. Optional in a request, like ai. */
+export interface RemindersSettings {
+  webPush: boolean;               // Web Push to the devices subscribed in Settings › Reminders
+  ntfy: boolean;                  // ntfy, configured in /data/secrets/ntfy.json
+  ntfyTitleOnly: boolean;         // with ntfy, the task's title only, never its notes; default true
+  inApp: boolean;                 // a toast and a browser notification in every open tab
+  dailyNote: boolean;             // nudge when today's daily note does not exist yet
+  dailyNoteTime: string;          // 'HH:mm', default '09:00'
+}
 export interface Settings {
   schemaVersion: 1;
   files: FilesSettings;
@@ -2029,6 +2042,7 @@ export interface Settings {
   templates: TemplatesSettings;
   editor: EditorSettings;
   ai: AiSettings;
+  reminders: RemindersSettings;
 }
 export interface SettingsResponse { settings: Settings; version: Version; readOnly: boolean }
 export interface SettingsUpdateRequest { settings: Settings; baseVersion: Version }
@@ -2697,6 +2711,48 @@ export interface HabitsResponse {
   dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
   daily: DailyNoteValues[];     // daily notes with simple frontmatter values
 }
+
+// ---------- Reminders (API.md §25, ROADMAP items 9 and 4c) ----------
+export type ReminderRouteId = 'webPush' | 'ntfy' | 'inApp';
+export interface PushDevice {
+  id: string;
+  name: string;
+  createdAt: IsoInstant;
+  lastSuccessAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+}
+export interface UpcomingReminder { taskId: string; title: string; at: LocalDateTime }
+export interface RemindersStatus {
+  zone: string;                   // the IANA zone reminders are read in
+  zoneReported: boolean;          // false: no device reported one yet, the server's zone is used
+  serverZone: string;
+  webPush: { available: boolean; reason: string | null; publicKey: string | null; devices: PushDevice[] };
+  ntfy: { configured: boolean; reason: string | null; server: string | null; ownTopic: boolean };
+  inApp: { connections: number };
+  lastDeliveredAt: IsoInstant | null;
+  lastError: string | null;
+  lastErrorAt: IsoInstant | null;
+  upcoming: UpcomingReminder[];   // the next five, soonest first
+}
+export interface ReminderZoneRequest { zone: string }
+export interface PushKey { publicKey: string }   // base64url, the applicationServerKey
+export interface PushSubscriptionRequest { endpoint: string; keys: { p256dh: string; auth: string }; name: string }
+export interface ReminderTestRequest { route: ReminderRouteId; deviceId?: string }
+export interface ReminderTestResult { sent: boolean; error: string | null }
+export interface ReminderActionRequest { taskId: string; at: LocalDateTime; minutes?: number }   // minutes: snooze only, default 10
+export interface ReminderActionResult { changed: boolean; until: IsoInstant | null }
+/** `reminder.due` (§25.5), registered at runtime by the reminders feature. */
+export interface ReminderDueEvent {
+  key: string;
+  kind: 'task' | 'daily' | 'test';
+  taskId: string | null;
+  at: LocalDateTime | null;
+  title: string;
+  body: string;
+  url: string;                    // an app path, such as '/x/tasks/today?task=<id>'
+  sentAt: IsoInstant;
+}
 ```
 
 ---
@@ -2781,6 +2837,14 @@ export interface HabitsResponse {
 | GET | `/api/ai/status` | | 200 `AiStatus` | 24.4 |
 | POST | `/api/ai/ask` | `AiAskRequest` | 200 `text/event-stream` | 24.2 |
 | POST | `/api/ai/summarize` | `AiSummarizeRequest` | 200 `text/event-stream` | 24.3 |
+| GET | `/api/reminders/status` | | 200 `RemindersStatus` | 25.1 |
+| PUT | `/api/reminders/zone` | `ReminderZoneRequest` | 204 | 25.1 |
+| POST | `/api/push/key` | | 200 `PushKey` | 25.2 |
+| POST | `/api/push/subscriptions` | `PushSubscriptionRequest` | 201 `PushDevice` | 25.2 |
+| DELETE | `/api/push/subscriptions/{id}` | | 204 | 25.2 |
+| POST | `/api/reminders/test` | `ReminderTestRequest` | 200 `ReminderTestResult` | 25.3 |
+| POST | `/api/reminders/snooze` | `ReminderActionRequest` | 200 `ReminderActionResult` | 25.4 |
+| POST | `/api/reminders/done` | `ReminderActionRequest` | 200 `ReminderActionResult` | 25.4 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
 **SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions) and `/capture` (quick capture, DESIGN §6.27). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
@@ -2829,6 +2893,9 @@ export interface HabitsResponse {
 | `FlashcardsChangedEvent` | Same name in `com.rjgehan.notes.events` | An extension event (§34.7): it echoes `origin` like a content event, and `cards` maps removed records to `null` |
 | `AiSettings` | Same name in `com.rjgehan.notes.settings` | `model` is a `String` checked against `AiSettings.MODELS` |
 | `AiAskRequest`, `AiSummarizeRequest`, `AiTurn`, `AiPrompt`, `AiStatus`, `AiModelInfo`, `AiSource`, `AiStartEvent`, `AiDeltaEvent`, `AiRestartEvent`, `AiUsage`, `AiDoneEvent`, `AiErrorEvent` | Same | Every request component is `@Nullable` (the service validates and applies defaults). `AiStatus.state` is the enum `AiState` (`off`, `not-configured`, `over-budget`, `ready`). The stream events are written by `AiController` through an `SseEmitter`, not through `EventHub`. |
+| `RemindersSettings` | Same name in `com.rjgehan.notes.settings` | `dailyNoteTime` is a `String` checked against `HH:mm` |
+| `RemindersStatus` (with the nested `WebPush`, `Ntfy`, `InApp`), `PushDevice`, `UpcomingReminder`, `PushKey`, `PushSubscriptionRequest` (with `Keys`), `ReminderZoneRequest`, `ReminderTestRequest`, `ReminderTestResult`, `ReminderActionRequest`, `ReminderActionResult` | Same (§25) | Every request component is `@Nullable` and checked by `ReminderController`; `ReminderActionRequest.minutes` is an `Integer` |
+| `ReminderDueEvent` | Same name in `com.rjgehan.notes.events` | Not a content event: no `origin`, delivered to every connection |
 
 **Enums.** `FileKind`, `EntryType`, `OnConflict`, `LinkStyle` and `ChangeType` (in `api.dto`) serialize as the exact lower-case strings in §17, through `@JsonProperty` on each constant. Settings enums do the same with their string values.
 
@@ -3276,6 +3343,58 @@ The response to §24.2 and §24.3 is `text/event-stream` with `Cache-Control: no
 | `error` | `AiErrorEvent` `{code, message}` | The end, after a failure: `auth` (the token or key was refused), `rate-limited` (also a subscription's usage limit), `overloaded`, `bad-request`, `unavailable` (network, timeout), `busy` (two answers are already being written), `internal-error`. `message` never contains the key or note text. |
 
 A stream that ends without `done` or `error` was cut off. Closing the connection (Stop) stops the answer on the server too; what was generated until then is still counted in the month's spend, estimated at four characters per token.
+
+---
+
+## 25. Reminders and push notifications (ROADMAP items 9 and 4c)
+
+Task reminders (`Task.reminders`, §20.1) and the daily-note nudge, delivered by the server's scheduler through the routes switched on in `settings.reminders` (§5): **Web Push** to subscribed devices, **ntfy**, and **in-app** (`reminder.due` on the event stream). Every route is off by default. The design (due rules, ledger, retries) is DESIGN §5.26; the client's part is DESIGN §6.32.
+
+A reminder's `at` is a local date-time with no zone. The server reads it in the IANA zone the devices report (`PUT /api/reminders/zone`; the latest report wins), and in its own zone (UTC in the image) until one does.
+
+### 25.1 Status and zone
+
+**`GET /api/reminders/status`** → `200 RemindersStatus`: the zone in use, each route's readiness (whether a route is *on* is in `settings.reminders`), the subscribed devices (never their endpoints or keys), the last delivery and the last problem (since the server started), and the next five reminders.
+
+- `webPush.available` is false, with `reason`, when `<secrets-dir>/push.json` cannot be read or is malformed. `webPush.publicKey` is null until the key pair exists (`POST /api/push/key`).
+- `ntfy.configured` is false, with `reason`, when `<secrets-dir>/ntfy.json` is missing or invalid (the same file as the app alerts, §6.6). `ownTopic` is true when it has `"reminders": {"topic": …}`; otherwise reminders go to its default topic. The topic and token are never shown.
+- `inApp.connections` counts the open event streams.
+
+**`PUT /api/reminders/zone`** `ReminderZoneRequest` → `204`. `400 bad-request` for anything but an IANA zone id (`Europe/Berlin`, `America/New_York`, `UTC`). Clients send it at startup.
+
+### 25.2 Web Push devices
+
+**`POST /api/push/key`** → `200 PushKey`: the server's VAPID public key (base64url, 65 bytes uncompressed P-256), created with its private key in `<secrets-dir>/push.json` on the first call. `400 bad-request` when the file cannot be written.
+
+**`POST /api/push/subscriptions`** `PushSubscriptionRequest` (the browser's `PushSubscription.toJSON()` plus a `name`) → `201 PushDevice`. Subscribing the same endpoint again updates it and keeps its id (the first 16 characters of the base64url SHA-256 of the endpoint). `400 bad-request` when `endpoint` is not an `https` URL, `keys.p256dh` is not a P-256 point, `keys.auth` is not 16 bytes, or 50 devices are already subscribed.
+
+**`DELETE /api/push/subscriptions/{id}`** → `204`; `404 not-found` for an unknown id. A device whose push service answers `404` or `410` is removed by the server itself.
+
+Each message is encrypted for its device (RFC 8291, `aes128gcm`) and sent with a VAPID `Authorization` header (RFC 8292), `TTL: 86400`, `Urgency: high` and a `Topic` derived from the reminder's key. The decrypted JSON, which the service worker turns into a notification:
+
+```json
+{"title":"Pay rent","body":"Due 2026-10-16\nTransfer from the joint account","tag":"task:01JA…:2026-10-16T09:00",
+ "kind":"task","url":"/x/tasks/today?task=01JA…","taskId":"01JA…","at":"2026-10-16T09:00"}
+```
+
+`taskId` and `at` are present for task reminders only. `url` is an app path: `/x/tasks/today?task=<id>` opens the task's detail sheet; `/?open=daily` opens today's daily note.
+
+### 25.3 `POST /api/reminders/test`
+
+`ReminderTestRequest` → `200 ReminderTestResult`. Sends a test reminder through one route now, **whether or not it is switched on**, so a route can be tried before it is enabled. With `route: "webPush"`, `deviceId` limits it to one device. `sent: false` with `error` when the route did not take it (no device subscribed, `ntfy.json` missing, no tab open, or the push service's or ntfy's HTTP status). `400 bad-request` for another `route`.
+
+### 25.4 `POST /api/reminders/snooze` and `POST /api/reminders/done`
+
+Both take `ReminderActionRequest` with the `taskId` and `at` of the notification, and answer `200 ReminderActionResult`. The service worker calls them from a notification's buttons (desktop Chrome, Edge and Android only; iOS shows no notification buttons).
+
+- **snooze**: the reminder fires again in `minutes` (1 to 1440, default 10); `until` says when. `changed: false` when the task is gone or closed.
+- **done**: completes the task as `POST /api/tasks/{id}/complete` would, with the zone of §25.1 and, as `base`, the task's current `due` and `start`, so a repeating task rolls forward once. `changed: false`, and nothing happens, when the task is closed, gone, or no longer has a reminder at `at` (another device completed it or it rolled forward).
+
+`400 bad-request` without `taskId`, or with an `at` that is not `YYYY-MM-DDTHH:mm`.
+
+### 25.5 `reminder.due`
+
+The in-app route publishes `ReminderDueEvent` on the event stream (§16.4) for each reminder it delivers. It counts as delivered only when at least one stream is connected. Clients show each `key` once (a replay after a reconnect repeats it) and ignore events sent more than 15 minutes ago. `kind` is `task`, `daily` or `test`.
 
 ---
 

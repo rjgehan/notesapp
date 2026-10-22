@@ -47,6 +47,7 @@ import { currentBookmarks, isFileBookmarked, promptNewGroup, toggleFileBookmark,
 import { findSearchBookmarks } from '../features/bookmarks';
 import { promptRenameHeading } from '../features/headingRename';
 import { getCommand, setViewCommandSource } from '../features/commands';
+import { registerReminders } from '../features/reminders/register';
 import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../features/daily';
 import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
@@ -410,6 +411,8 @@ export function registerBuiltins(): void {
   registerHabits();
   // Ask your vault and summaries, powered by Claude (ROADMAP item 18, DESIGN §6.31).
   registerAi();
+  // Reminders and push notifications (ROADMAP items 9 and 4c, DESIGN §6.32).
+  registerReminders();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

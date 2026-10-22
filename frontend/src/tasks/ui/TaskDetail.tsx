@@ -19,6 +19,7 @@ import { datePart, useToday } from '../dates';
 import { childrenByParent, depthOf, isClosed, MAX_DEPTH } from '../model';
 import { createTask, deleteTask, isPending, updateTask } from '../mutations';
 import { useTaskById } from '../queries';
+import { reminderPresets } from '../reminderPresets';
 import { taskStore, useTaskStore } from '../store';
 import { DateTimeField, PriorityField, StatusField, TagsField } from './fields';
 import { RepeatField } from './RepeatField';
@@ -44,11 +45,14 @@ function Field({ label, children, id }: { label: string; children: React.ReactNo
 function RemindersField({ task, disabled }: { task: Task; disabled?: boolean }) {
   const today = useToday();
   const save = (reminders: TaskReminder[]) => void updateTask(task, { reminders }, { reminders: task.reminders });
-  const add = () => {
-    const day = task.due ? datePart(task.due) : today;
-    const at: LocalDateTime = task.due && task.due.length > 10 ? task.due : `${day}T09:00`;
+  const add = (at: LocalDateTime) => {
     if (!task.reminders.some((r) => r.at === at)) save([...task.reminders, { at }]);
   };
+  const custom = () => {
+    const day = task.due ? datePart(task.due) : today;
+    add(task.due && task.due.length > 10 ? task.due : `${day}T09:00`);
+  };
+  const presets = reminderPresets(task);
   return (
     <div className="task-reminders">
       {task.reminders.map((r, i) => (
@@ -73,11 +77,31 @@ function RemindersField({ task, disabled }: { task: Task; disabled?: boolean }) 
         </div>
       ))}
       {!disabled && task.reminders.length < 20 && (
-        <button type="button" className="button button-small" onClick={add}>
-          <Bell size={14} aria-hidden /> Add reminder
-        </button>
+        <div className="task-reminder-add">
+          <Bell size={14} aria-hidden />
+          <select
+            className="select"
+            aria-label="Add reminder"
+            value=""
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === 'custom') custom();
+              else if (value) add(value);
+            }}
+          >
+            <option value="">Add reminder…</option>
+            {presets.map((p) => (
+              <option key={p.id} value={p.at}>
+                {p.label} ({formatDateTime(p.at)})
+              </option>
+            ))}
+            <option value="custom">Custom time…</option>
+          </select>
+        </div>
       )}
-      <p className="task-field-note">Stored with the task; notifications come with reminders (roadmap item 9).</p>
+      <p className="task-field-note">
+        Sent by the routes switched on in <a href="/settings/reminders" onClick={(e) => { e.preventDefault(); close(); navigateTo('/settings/reminders'); }}>Settings › Reminders</a>.
+      </p>
     </div>
   );
 }

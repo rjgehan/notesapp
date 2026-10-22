@@ -44,10 +44,20 @@ describe('task detail sheet', () => {
     await waitFor(() => expect(patch).toHaveBeenLastCalledWith('A', { changes: { priority: 3 }, base: { priority: 0 } }, expect.any(String)));
     fireEvent.change(screen.getByRole('combobox', { name: 'Repeat' }), { target: { value: 'daily' } });
     await waitFor(() => expect(patch).toHaveBeenLastCalledWith('A', { changes: { recurrence: { rrule: 'FREQ=DAILY', from: 'due' } }, base: { recurrence: null } }, expect.any(String)));
-    fireEvent.click(screen.getByRole('button', { name: /Add reminder/ }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Add reminder' }), { target: { value: 'custom' } });
     await waitFor(() => expect(patch).toHaveBeenLastCalledWith('A', { changes: { reminders: [{ at: '2026-11-01T09:30' }] }, base: { reminders: [] } }, expect.any(String)));
     fireEvent.change(screen.getByRole('combobox', { name: 'List' }), { target: { value: 'L2' } });
     await waitFor(() => expect(patch).toHaveBeenLastCalledWith('A', { changes: { listId: 'L2' }, base: { listId: 'L1' } }, expect.any(String)));
+  });
+
+  it('adds a reminder from a preset relative to the due time', async () => {
+    taskStore.upsert([makeTask({ id: 'A', title: 'Flight', due: '2099-05-02T10:30' })]);
+    const patch = update();
+    renderWithApp(<TaskDetail id="A" />);
+    const add = screen.getByRole('combobox', { name: 'Add reminder' });
+    expect(within(add).getByRole('option', { name: /^1 hour before/ })).toHaveValue('2099-05-02T09:30');
+    fireEvent.change(add, { target: { value: '2099-05-02T09:30' } });
+    await waitFor(() => expect(patch).toHaveBeenLastCalledWith('A', { changes: { reminders: [{ at: '2099-05-02T09:30' }] }, base: { reminders: [] } }, expect.any(String)));
   });
 
   it('builds a custom rule from choices, read back as text', async () => {

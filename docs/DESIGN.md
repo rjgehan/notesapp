@@ -205,6 +205,7 @@ NotesApp/                              (monorepo; branch main)
 | `.notesapp/bookmarks.json` | Bookmarks (§5.21), in Obsidian's `bookmarks.json` format | hidden | committed, like the settings |
 | `.notesapp/searches.json` | Saved searches (§5.5.10, API.md §12.4) | hidden | committed, so they sync and have history |
 | `.notesapp/trash.json` | Trash metadata (§5.7) | hidden | **excluded** |
+| `.notesapp/reminders.json` | The reminder scheduler's state: baseline, zone, delivered reminders, snoozes (§5.26) | hidden | **excluded** |
 | `.notesapp/srs.json` | Flashcard answers, their cached FSRS state and the flashcard settings (§5.34) | hidden | committed |
 | `.notesapp/tmp/` | Staging area for every write (§5.4) and for purged trash items awaiting deletion (§5.7); emptied at startup | hidden | excluded |
 | `.notesapp/cache/` | Derived caches: `search-text/` holds the extracted text of PDFs (§5.5.10) | hidden | excluded |
@@ -213,7 +214,7 @@ NotesApp/                              (monorepo; branch main)
 | `.obsidian/` | Obsidian's settings, from an imported vault or if the vault is ever opened in Obsidian. Read for the import and the compatibility report (§5.23), never written. | hidden | committed except `workspace*.json` |
 | Any other entry whose name starts with `.` | Hidden, untouched | hidden | according to the vault's `.gitignore` |
 
-**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), an optional transcription API key (item 33, §5.24), `claude-token` and `anthropic-key`, the Claude Code token and the Anthropic API key of Ask your vault (item 18, §5.25), and later push keys. Operator secrets come from compose `secrets:` files read through `*_FILE` properties (`NOTES_AI_API_KEY_FILE` points the API key there in the plain-compose deploy).
+**Invariant: nothing secret lives in the vault.** The vault is committed to git, moved to the trash, and pushed to the mirror when one is configured (ROADMAP item 2, §5.8). Secrets the app holds live in `/data/secrets/` (`notes.secrets-dir`), outside `/data/vault`: `ntfy.json`, the ntfy server, topic and token shared by the app-error alerts (ROADMAP item 38, §5.18.1) and the reminders (item 9), an optional transcription API key (item 33, §5.24), `claude-token` and `anthropic-key`, the Claude Code token and the Anthropic API key of Ask your vault (item 18, §5.25), and `push.json`, the Web Push key pair and subscribed devices of the reminders (item 9, §5.26). Operator secrets come from compose `secrets:` files read through `*_FILE` properties (`NOTES_AI_API_KEY_FILE` points the API key there in the plain-compose deploy).
 
 ### 4.2 File kinds
 
@@ -319,6 +320,7 @@ The app owns this file: it rewrites it at every startup, and it keeps its last s
 .notesapp/cache/
 .notesapp/tmp/
 .notesapp/trash.json
+.notesapp/reminders.json
 .trash/
 .obsidian/workspace*.json
 .notesapp-*.tmp
@@ -474,6 +476,9 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `WelcomeContent` | Loads `welcome/Welcome.md` from the classpath. |
 | `notify` | `NtfyConfig`, `NtfyConfigFile` | `ntfy.json` in `notes.secrets-dir`: the server, the default topic, an optional token and the `alerts` section; read again when it changes (§5.18.1). Shared with the reminders of ROADMAP item 9. |
 | | `NtfyClient` | Publishes one message as JSON to the server's root URL, with the token as `Authorization: Bearer`; never follows a redirect. |
+| `reminders` | `ReminderScheduler` | Reminders and the daily-note nudge (ROADMAP items 9 and 4c, §5.26): what is due, the ledger in `.notesapp/reminders.json`, retries, snooze and done. |
+| | `ReminderRoute`, `WebPushRoute`, `NtfyRoute`, `InAppRoute` | The delivery routes, each switched on in `settings.reminders`. |
+| | `WebPushCrypto`, `WebPushSender`, `PushStore` | RFC 8291 encryption and VAPID with JDK crypto, one push request, and `push.json` (the key pair and devices) in `notes.secrets-dir`. |
 | `ai` | `AiService`, `PromptBuilder`, `QueryTerms`, `Excerpts` | Ask your vault and summaries (ROADMAP item 18, §5.25): availability and budget checks, retrieval over the search index, the prompt with its caps and the rebuild of earlier turns, the stream of events. |
 | | `AiProviders`, `ClaudeGateway`, `ClaudeCodeGateway`, `AnthropicGateway`, `FakeGateway` | The two providers and one streamed answer: Claude Code run headless with the subscription (the default), the Messages API through the official SDK, or canned for development (`notes.ai.fake`). |
 | | `ApiKeyFile`, `UsageLedger`, `AiModels`, `AiProperties` | The credential files, the Claude Code token or the API key (read again when they change), the monthly spend in `.notesapp/cache/ai-usage.json`, the models and their prices, `notes.ai.*`. |
@@ -1384,7 +1389,7 @@ notes.security.require-tailscale-interface=false
 logging.level.com.rjgehan.notes=DEBUG
 ```
 
-`notes.ai.*` (Ask your vault, ROADMAP item 18) is its own record, `AiProperties`, so it does not widen this one; its keys are in §5.25.
+`notes.ai.*` (Ask your vault, ROADMAP item 18) is its own record, `AiProperties`, so it does not widen this one; its keys are in §5.25. The reminders (item 9, §5.26) read two optional keys directly: `notes.reminders.vapid-subject` (`NOTES_REMINDERS_VAPID_SUBJECT`, the VAPID contact; default `https://<first allowed host>`) and `notes.reminders.tick` (15s).
 
 For phone testing against dev (§9.1 step 4), `NOTES_ALLOWED_HOSTS` overrides the list and adds `rgpc.<tailnet>.ts.net:5173`. Integration tests set `notes.allowed-hosts`, `notes.identity.allow-default` and `notes.security.require-tailscale-interface` explicitly.
 
@@ -1450,14 +1455,15 @@ The stable markers above are pushed to ntfy by the app itself, so a problem reac
 
 ```json
 { "server": "https://ntfy.sh", "topic": "notes-<random>", "token": "tk_…",
-  "alerts": { "enabled": true, "topic": "notes-ops-<random>" } }
+  "alerts": { "enabled": true, "topic": "notes-ops-<random>" },
+  "reminders": { "topic": "notes-remind-<random>" } }
 ```
 
-- `server` defaults to `https://ntfy.sh`; `topic` is required (ntfy's rule: 1 to 64 letters, digits, `-` or `_`); `token` is optional. `alerts` is optional: `false` or `{"enabled": false}` switches the alerts off, and its `topic` overrides the default one. Item 9 adds its own section; unknown members are ignored.
+- `server` defaults to `https://ntfy.sh`; `topic` is required (ntfy's rule: 1 to 64 letters, digits, `-` or `_`); `token` is optional. `alerts` is optional: `false` or `{"enabled": false}` switches the alerts off, and its `topic` overrides the default one. `reminders.topic` is the reminders' own topic (item 9, §5.26); without it they use the default topic. Unknown members are ignored.
 - Alerts are on whenever the file exists and is valid. `NtfyConfigFile` reads it when an alert is due and when the status page asks, and parses it again only when its size or modification time changed, so editing it needs no restart.
 - Problems ("ntfy.json needs a "topic" …") are shown on the status page. They never quote the topic or the token, and `NtfyConfig.toString()` leaves both out. A URL with credentials is refused. A token is accepted only with `https://`, or with `http://` to a loopback or tailnet host (`*.ts.net`, a bare MagicDNS name, 100.64.0.0/10, `fd7a:115c:a1e0::/48`), where WireGuard encrypts it.
 - The file is outside the vault (§4.1), so it never reaches git, the trash or the mirror. It is in the `notes-data` volume, so the encrypted backups hold it (§7.10).
-- **Why not a compose secret,** like the mirror token? `ntfy.json` belongs to the app: item 9 switches its channels in Settings and may write the file, which a read-only compose secret cannot allow, and editing it should not need a redeploy.
+- **Why not a compose secret,** like the mirror token? `ntfy.json` belongs to the app: item 9 switches its channels in Settings and a later version may write the file, which a read-only compose secret cannot allow, and editing it should not need a redeploy.
 
 **The watchdog exit.** `TAILSCALE_WATCHDOG_EXIT` is logged just before the JVM exits in an orphaned network namespace (§7.6), from which nothing can be sent. At `ApplicationReadyEvent`, `AppAlerts` reads `.watchdog-exits`: an exit up to 10 minutes before this JVM started is why it started, and that alert is sent now.
 
@@ -1660,6 +1666,38 @@ Questions about the notes answered by Claude with citations, summaries of a note
 **Alternatives considered.** Embeddings (a vector index needs an embedding provider, since Anthropic has no embeddings API, and its storage and refresh; BM25 over the existing index answers personal-scale questions well, and the roadmap defers embeddings). Server-side conversations (they would keep questions and answers on the server and need their own retention; the device keeping them matches "conversation history per device"). Tool use to let Claude search the vault itself (more calls and cost per question, and harder to keep excluded folders out). Opus as the default (the roadmap's first choice; Sonnet 5.5 answers note questions well at half the price, and Opus is one setting away).
 
 **Tests.** `ClaudeCodeGatewayTest` with the CLI replaced by a fake process (the locked-down command line and environment, the stream-json lines, an older CLI without partial messages, a refused token, a usage limit, a crash with its stderr scrubbed, cancellation and the timeout); `AiServiceTest` (the providers, availability, retrieval, exclusions, caps, the byte-for-byte rebuild of earlier turns, summaries, suggestions, the stream of events, the spend guard, a browser leaving part way) with a recording gateway; `AnthropicGatewayTest` against a local HTTP server that replays recorded Messages API streams (the request's shape, the key as a bearer token, the fallback, refusals, error mapping without the key, stopping on a listener's exception); `ExcerptsTest`, `QueryTermsTest`, the settings tests, and `AiIntegrationTest` (the HTTP contract with `notes.ai.fake`). No test calls Anthropic.
+
+### 5.26 Reminders and push notifications (ROADMAP items 9 and 4c)
+
+Task reminders (`Task.reminders`, local `YYYY-MM-DDTHH:mm`, §5.20) and a daily-note nudge, delivered by one scheduler through three routes, each switched on in Settings (`settings.reminders`, all off by default, the ROADMAP decision of 2026-10-17: build every route, pick later). The contract is API.md §25; the code is the `reminders` package and `ReminderController`; the client side is §6.32. The desktop app's native notifications (item 41) are a fourth route for later, behind the same `ReminderRoute` interface.
+
+**The scheduler** (`ReminderScheduler`) starts on `ApplicationReadyEvent`, after the settings and the index are loaded, and ticks every 15 seconds (`notes.reminders.tick`) on its own daemon thread.
+
+- **Due.** A task reminder is due when its local time, read in the reminders zone, is in `(now − 24 h, now]`, after the **baseline**, and its key `task:<id>:<at>` is not in the ledger. Only open, unarchived tasks in unarchived lists count (`TaskService.withReminders`). Local times resolve with `ZonedDateTime.ofLocal(…, null)`: in a spring-forward gap a 02:30 reminder fires at 03:30; in the autumn overlap it takes the earlier offset, so it fires once.
+- **The zone** is the IANA zone the devices report at startup (`PUT /api/reminders/zone`); the latest report wins, which suits one person whose devices share a zone. Until one reports, the server's clock zone (UTC) is used.
+- **Delivered** once at least one route that is on accepts the message; its key then goes into the ledger. Routes are tried in turn; one that fails does not stop the others. A reminder no route accepted is retried after 30 seconds, doubling up to 15 minutes, until it leaves the 24-hour window. At most 20 reminders go out per tick, oldest first.
+- **At least once.** The ledger is saved after the sends, so a crash between them repeats that reminder rather than losing it. Push messages carry a `Topic` (a hash of the key), so a repeat still waiting at the push service replaces the first.
+- **Baseline.** With every route off, the baseline follows the clock (saved at most every 10 minutes), so switching a route on later does not deliver a day of old reminders at once. With a route on, it stays put, so reminders that fell due while the server was down (within 24 hours) are delivered when it starts, as the ROADMAP asks.
+- **Snooze** adds `{taskId, at, until}` to the state; it fires like a reminder with the key `snooze:<id>:<at>:<until>` (the body says "(snoozed)") and is then dropped. **Done** completes the task through `TaskService.complete` with `base: {due, start}` taken from the task as it is now, and only while the task is open and still has a reminder (or a snooze) at `at`, so a late tap after another device completed or rolled the task forward changes nothing, and a repeating task rolls forward once.
+- **Daily-note nudge** (`settings.reminders.dailyNote`, at `dailyNoteTime`, default 09:00, key `daily:<date>`): due like a reminder; when today's daily note (the settings' folder and format, `MomentFormat`) already exists it is marked delivered without sending. It opens `/?open=daily`.
+
+**State: `.notesapp/reminders.json`**, written atomically (temporary file, then a move) and kept out of git through the managed `info/exclude` (§4.6), like `trash.json`, because it changes with every delivery:
+
+```json
+{ "version": 1, "baseline": "2026-10-16T12:00:00Z", "zone": "Europe/Berlin",
+  "delivered": { "task:01JA…:2026-10-16T09:00": "2026-10-16T07:00:04Z", "daily:2026-10-16": "…" },
+  "snoozes": [ { "taskId": "01JA…", "at": "2026-10-16T09:00", "until": "2026-10-16T07:10:04Z" } ] }
+```
+
+Ledger entries are pruned after 48 hours (twice the window), snoozes a day after they were due. A missing or unreadable file starts from now (with a WARN), so a corrupted file never floods.
+
+**Routes** (`ReminderRoute`: `id`, `enabled(settings)`, `deliver(message, settings)`, never throwing):
+
+- **Web Push** (`WebPushRoute`, `WebPushSender`, `PushStore`, `WebPushCrypto`). JDK cryptography only, no new dependency: the message is encrypted per device with RFC 8291 in RFC 8188's `aes128gcm` coding (ECDH P-256 with a fresh sender key, HKDF-SHA256, AES-128-GCM, one record with the `0x02` delimiter; tested against RFC 8291 Appendix A), and authorized with a VAPID token (RFC 8292: an ES256 JWT signed with `SHA256withECDSAinP1363Format`, `aud` the push service's origin, `exp` 12 hours, `sub` `notes.reminders.vapid-subject` or else `https://<first allowed host>`). Headers: `TTL: 86400`, `Urgency: high`, `Topic`. Redirects are not followed. `201`/`2xx` is accepted; `404` or `410` removes the device; anything else is recorded on the device and the route fails over to the next. The payload is JSON (title, body, tag, kind, url, taskId, at; API.md §25.2), at most 3,993 bytes, so push services see neither the title nor the notes. **`/data/secrets/push.json`** (`PushStore`, outside the vault, §4.1, written owner-only where the file system allows) holds the VAPID key pair, created on the first `POST /api/push/key`, and the devices (endpoint, keys, name, last success and error). An endpoint must be `https`; at most 50 devices. A subscription is a capability to notify that device, so the endpoints never leave the server (the API shows names and ids).
+- **ntfy** (`NtfyRoute`) reuses `NtfyClient` and `ntfy.json` (§5.18.1), with the topic of its `reminders.topic` or the default one, priority 4, tag `bell`, and a click URL on the first allowed host. **Title only** (`ntfyTitleOnly`, on by default) sends the task's title with the body "Task reminder", never the notes or the due line, because with ntfy.sh the text leaves the tailnet; the title itself still does, which Settings says.
+- **In-app** (`InAppRoute`) publishes `reminder.due` (`ReminderDueEvent`) to `EventHub`; it is accepted only while at least one event stream is connected, so with every tab closed another route, or a later tick, delivers it.
+
+**Tests.** `WebPushCryptoTest` (the RFC 8291 Appendix A vector both ways, a fresh round trip, key encodings, invalid points, a VAPID JWT the public key verifies), `WebPushTest` (the store's validation and file, a send to a local HTTP server whose body the device key decrypts and whose VAPID token verifies, 500 recorded, 410 removing the device; the ntfy route's title-only and full bodies and click URL), `ReminderSchedulerTest` (delivered once across a restart, missed reminders after downtime, the 24-hour window, the moving baseline, retry backoff, zones and DST, snooze and done, the daily nudge, upcoming, an unreadable state file), `NtfyConfigFileTest` (`reminders.topic`), `SettingsServiceTest` (the optional group and its validation) and `RemindersIntegrationTest` (status, zone, key, subscribe and unsubscribe, test, snooze, done completing a task once).
 
 ### 5.34 Flashcard review records (ROADMAP item 34)
 
@@ -3273,6 +3311,20 @@ The conversation view of §5.25, in `features/ai/`, registered through the exten
 - **Layout.** The panel is a flex column whose messages scroll above the input; on the page the workspace scrolls (§6.16) and the input is sticky at the bottom with the safe-area inset. Both follow a streaming answer unless the reader scrolled up. Inputs are 16 px and chips and buttons 44 px on touch screens; the input is a textarea that grows, Enter sends and Shift+Enter breaks the line (`enterkeyhint="send"`).
 
 **Tests** (Vitest): `sse.test.ts` (any split, CRLF, comments), `aiClient.test.ts` (the request, the events, problems, a cut-off stream, aborts), `conversations.test.ts` (storage, history, limits, damaged data), `actions.test.ts` (the week, citations) and `AiChat.test.tsx` (registration, the off and unconfigured states, the notice, a streamed answer whose citation opens the note, history and the include toggle, an unresolved citation creating nothing).
+
+### 6.32 Reminders (ROADMAP items 9 and 4c)
+
+The client side of §5.26, in `features/reminders/`, the service worker's `sw/push.ts`, Settings and the task detail sheet.
+
+- **Startup** (`startReminders()` in `main.tsx`): reports the device's zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`, `PUT /api/reminders/zone`, quiet on failure); opens the task of a `?task=<id>` address (a notification opened the app) and removes the parameter, so a reload does not open it again; and listens for the service worker's `notesapp:open-reminder` messages. `registerReminders()` (from `builtins.ts`) registers the `reminder.due` handler.
+- **In-app route** (`inApp.ts`): each `reminder.due` key is shown once per tab, and an event sent more than 15 minutes ago (a replay) not at all. It shows a toast that stays until dismissed, with **Open**, and, when the browser allows notifications, a system `Notification` tagged with the key, so several tabs make one. Browsers that allow notifications only from a service worker (iOS) keep the toast.
+- **Opening** (`open.ts`): `/x/tasks/today?task=<id>` navigates there and opens the task's detail sheet; `/?open=daily` opens today's daily note (`HomePage` treats it like `openOnStartup`, and an open tab calls `openTodaysDailyNote`). Only app paths are followed (`safeAppPath`).
+- **Service worker** (`sw.ts` with the pure `sw/push.ts`): `push` shows the decrypted JSON as a notification (a malformed message still shows one, since browsers penalise silent pushes); task reminders get **Snooze 10 min** and **Done** buttons and `requireInteraction`. `notificationclick` calls `POST /api/reminders/snooze` or `/done` for a button (with the worker's own `X-Client-Id`; if that fails it opens the task instead), otherwise focuses an open NotesApp tab and posts it the URL, or opens a window at it. iOS shows no notification buttons, so on the iPhone a tap always opens the task.
+- **This device** (`device.ts`): *Subscribe this device* asks for notification permission, `POST /api/push/key`, subscribes the worker's `PushManager` (`userVisibleOnly`, the VAPID key; an old subscription with another key is replaced) and posts it with a name from the user agent ("iPhone · Safari"); the returned id is kept in `localStorage` (`notesapp.push.device`) to mark and unsubscribe this device. `pushSupport()` tells apart a browser without Web Push from an iPhone or iPad Safari tab, which needs NotesApp added to the Home Screen first (iOS 16.4+). The service worker runs in built apps only, so the development server says so.
+- **Settings › Reminders** (`RemindersSection`): the switches of `settings.reminders` per route, with *Title only* for ntfy and the daily-note nudge with its time; the device list from `GET /api/reminders/status` (this device marked, last success or error, a per-device test, Remove); the ntfy configuration state and a test; browser-notification permission (*Allow*) and an in-app test; and the status: the zone in use (with "Use this device's" when it differs), the last delivery, the last problem and the next reminders. Tests work whether or not the route is on.
+- **Task detail** (`RemindersField`, `tasks/reminderPresets.ts`): *Add reminder…* offers presets relative to the due date (at the due time, 15 minutes or 1 hour before, 9:00 on an all-day due date, 18:00 the day before) and to now (in 1 hour, rounded to 5 minutes; tomorrow at 9:00), leaving out past times and ones the task has, plus *Custom time…* (a `datetime-local` field, as before). A note links to Settings › Reminders.
+
+**Tests** (Vitest): `sw/push.test.ts` (payload to notification, buttons to requests, unsafe URLs), `reminders.test.ts` (one toast per key, old replays ignored, Open opening the task, `?task=` at startup, device names, the VAPID key decoding), `reminderPresets.test.ts`, the Reminders section in `SettingsPage.test.tsx`, and a preset in `TaskDetail.test.tsx`.
 
 ### 6.34 Flashcards (ROADMAP item 34)
 

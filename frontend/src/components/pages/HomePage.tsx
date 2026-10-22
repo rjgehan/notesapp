@@ -1,8 +1,9 @@
-// `/` (DESIGN §6.4): today's daily note when `dailyNotes.openOnStartup` (once per page load);
+// `/` (DESIGN §6.4): today's daily note when `dailyNotes.openOnStartup` or `?open=daily` (a
+// daily-note reminder, DESIGN §6.32), once per page load;
 // otherwise the last-opened note if it still exists, then Welcome.md, then an empty state.
 import { NotebookPen } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router';
+import { Navigate, useLocation } from 'react-router';
 import { useSettings, useTree } from '../../api/hooks';
 import { getCommand, runCommand, useCommandsVersion } from '../../features/commands';
 import { openTodaysDailyNote } from '../../features/daily';
@@ -16,6 +17,8 @@ export function HomePage() {
   useCommandsVersion();
   const tree = useTree();
   const settings = useSettings();
+  const askedForDaily = new URLSearchParams(useLocation().search).get('open') === 'daily';
+  const wantsDaily = askedForDaily || !!settings.data?.settings.dailyNotes.openOnStartup;
   // React state, so that a startup daily note that could not be opened re-renders this page.
   const [handled, setHandled] = useState(startupHandled);
   const settingsPending = settings.isPending && !handled;
@@ -23,12 +26,12 @@ export function HomePage() {
   useEffect(() => {
     if (settings.isPending || startupHandled) return;
     startupHandled = true;
-    if (!settings.data?.settings.dailyNotes.openOnStartup) return;
+    if (!wantsDaily) return;
     // On success the route changes; on failure (a toast says why) the usual home page shows.
     void openTodaysDailyNote().then((opened) => {
       if (!opened) setHandled(true);
     });
-  }, [settings.isPending, settings.data]);
+  }, [settings.isPending, wantsDaily]);
 
   if (tree.isPending || settingsPending) return <div className="view-loading" aria-busy="true" />;
   if (tree.isError) {
@@ -40,7 +43,7 @@ export function HomePage() {
     );
   }
   // The effect opens today's note once the settings ask for it.
-  if (!handled && settings.data?.settings.dailyNotes.openOnStartup) return <div className="view-loading" aria-busy="true" />;
+  if (!handled && wantsDaily) return <div className="view-loading" aria-busy="true" />;
   const last = lastOpenedPath();
   const target = (last && tree.data.byPath.has(last) ? last : null) ?? (tree.data.byPath.has('Welcome.md') ? 'Welcome.md' : null);
   if (target) return <Navigate to={noteRoute(target)} replace />;
