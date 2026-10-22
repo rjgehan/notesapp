@@ -5,7 +5,8 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { findTermRanges, type HighlightTerm } from '../features/searchTerms';
 import { isLocalEdit } from './remote';
 
-export const setSearchHighlight = StateEffect.define<{ terms: HighlightTerm[]; line: number | null } | null>();
+/** `line` flashes (through `lineEnd`, inclusive, for a block: ROADMAP item 20). */
+export const setSearchHighlight = StateEffect.define<{ terms: HighlightTerm[]; line: number | null; lineEnd?: number } | null>();
 
 const termMark = Decoration.mark({ class: 'cm-search-term' });
 const flashLine = Decoration.line({ class: 'cm-flash-line' });
@@ -16,10 +17,12 @@ const field = StateField.define<DecorationSet>({
     for (const e of tr.effects) {
       if (!e.is(setSearchHighlight)) continue;
       if (!e.value) return Decoration.none;
-      const { terms, line } = e.value;
+      const { terms, line, lineEnd } = e.value;
       const doc = tr.state.doc;
       const ranges: Range<Decoration>[] = findTermRanges(doc.toString(), terms).map((r) => termMark.range(r.from, r.to));
-      if (line !== null && line >= 0 && line < doc.lines) ranges.push(flashLine.range(doc.line(line + 1).from));
+      if (line !== null && line >= 0) {
+        for (let l = line; l <= Math.max(line, lineEnd ?? line) && l < doc.lines; l++) ranges.push(flashLine.range(doc.line(l + 1).from));
+      }
       return Decoration.set(ranges, true);
     }
     if (isLocalEdit(tr)) return Decoration.none;

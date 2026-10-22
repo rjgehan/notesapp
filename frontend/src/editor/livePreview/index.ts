@@ -20,6 +20,7 @@ import { inputRules } from './inputRules';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
 import { isPointerSelection, touchTracking } from './pointer';
 import { richMarkdown } from './rich';
+import { hiddenBlockIds } from './blockIds';
 import { deleteNextToTable, tableBlocks, tables } from './table';
 import { tableCellHost } from './table/facets';
 
@@ -444,6 +445,8 @@ export function livePreview(config: LivePreviewConfig): Extension {
     footnoteTooltips(),
     // Callouts, math and Mermaid, rendered by the app (ROADMAP item 3).
     richMarkdown({ locked: config.locked, remoteImages: config.remoteImages ?? true, checkboxes: config.checkboxes }),
+    // Block ids (` ^id`, ROADMAP item 20) hide, as in the reading of the note.
+    hiddenBlockIds(config.locked),
     config.locked ? [] : inputRules(),
   ];
 }

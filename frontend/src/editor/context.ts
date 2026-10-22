@@ -2,6 +2,7 @@
 // testable and never import React or global singletons directly.
 import { Facet, StateEffect } from '@codemirror/state';
 import type { FileEntry, NoteMeta, Settings } from '../api/types';
+import type { NoteBlock } from '../features/blocks';
 import type { VaultTree } from '../api/vaultTree';
 
 export interface NoteContext {
@@ -46,6 +47,16 @@ export interface NoteContext {
   renderMarkdown?(el: HTMLElement, block: MarkdownBlockRequest): () => void;
   /** Live Preview's inline math (`$x$`): KaTeX into `el`. Absent: math stays text. */
   renderMath?(el: HTMLElement, tex: string, display: boolean): void;
+  /**
+   * `[[Note#^` completion (ROADMAP item 20): the current text of another note, and the id of one
+   * of its blocks (read from `text`), added under `wanted` (or another free id) when it has none.
+   * A failure is reported to the user by the implementation. Absent where blocks of other notes
+   * are not offered.
+   */
+  blocks?: {
+    noteText(path: string): Promise<string>;
+    ensureBlockId(path: string, text: string, block: NoteBlock, wanted: string): Promise<string>;
+  };
 }
 
 /** A block of the note to render: its Markdown, and what a tap on one of its task checkboxes does. */

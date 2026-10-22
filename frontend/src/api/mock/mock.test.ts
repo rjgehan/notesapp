@@ -120,3 +120,17 @@ describe('MockVault heading renames (API.md §22)', () => {
     expect(problemCode(() => v.renameHeading({ path: 'Plan.md', from: 'Aims', to: 'Goals' }, 'c1'))).toBe('bad-request');
   });
 });
+
+describe('MockVault block ids (API.md §37)', () => {
+  it('adds an id where the line is now, keeps an existing one, and refuses a block that is gone', () => {
+    const v = new MockVault(false);
+    v.createFile({ path: 'Plan.md', content: 'Intro\nIdea\n\n| a |\n|---|\n' }, 'c1');
+    const added = v.addBlockId({ path: 'Plan.md', line: 0, lineText: 'Idea', placement: 'end', id: 'idea1' }, 'c1');
+    expect(added).toMatchObject({ id: 'idea1', created: true, line: 1 });
+    const table = v.addBlockId({ path: 'Plan.md', line: 4, lineText: '|---|', placement: 'after' }, 'c1');
+    expect(v.readFile('Plan.md').content).toBe(`Intro\nIdea ^idea1\n\n| a |\n|---|\n\n^${table.id}\n`);
+    expect(table.line).toBe(6);
+    expect(v.addBlockId({ path: 'Plan.md', line: 1, lineText: 'Idea ^idea1', placement: 'end', id: 'x' }, 'c1')).toMatchObject({ id: 'idea1', created: false });
+    expect(problemCode(() => v.addBlockId({ path: 'Plan.md', line: 0, lineText: 'Nope', placement: 'end' }, 'c1'))).toBe('block-not-found');
+  });
+});

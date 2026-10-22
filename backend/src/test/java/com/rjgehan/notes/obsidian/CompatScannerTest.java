@@ -41,8 +41,8 @@ class CompatScannerTest {
 		assertThat(where(issues.get("templater"))).containsExactly("Templates/Daily.md:0");
 		assertThat(where(issues.get("obsidian-uris"))).containsExactly("Home.md:9");
 		assertThat(where(issues.get("html-removed"))).containsExactly("Home.md:20");
-		assertThat(where(issues.get("block-references"))).containsExactly("Home.md:7", "Home.md:7");
-		assertThat(issues.get("block-references").noteCount()).isEqualTo(1);
+		// Block references and embeds work since ROADMAP item 20: no longer a finding (missing blocks still are).
+		assertThat(issues).doesNotContainKey("block-references");
 		assertThat(issues.get("dataview").roadmapItem()).isEqualTo(40);
 		assertThat(issues.get("dataview").category()).isEqualTo(CompatIssue.Category.SYNTAX);
 	}

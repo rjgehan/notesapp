@@ -1,10 +1,12 @@
-// Completion sources (DESIGN §6.6 #8): `[[` notes and aliases, `[[Note#` / `[[#` headings, `#` tags.
+// Completion sources (DESIGN §6.6 #8): `[[` notes and aliases, `[[Note#` / `[[#` headings,
+// `[[Note#^` / `[[#^` blocks (ROADMAP item 20, DESIGN §6.37), `#` tags.
 // Sources rank with fuzzysort and return `filter: false` without `validFor`, so CodeMirror re-runs
 // them on every keystroke and the list re-ranks as the query grows.
 import { pickedCompletion, startCompletion, type Completion, type CompletionContext, type CompletionResult, type CompletionSource } from '@codemirror/autocomplete';
 import { syntaxTree } from '@codemirror/language';
 import type { EditorView } from '@codemirror/view';
 import type { FileEntry } from '../api/types';
+import { blockIdsIn, newBlockId, noteLines, pickableBlocks, planBlockId, scanBlocks, type NoteBlock } from '../features/blocks';
 import { fuzzyRank } from '../features/fuzzy';
 import { encodeMdPath, linkText, resolve } from '../features/links';
 import { displayName, folderOf, stripMd } from '../features/paths';
@@ -111,6 +113,7 @@ export const headingSource: CompletionSource = async (context: CompletionContext
   const source = ctx.path();
   const resolved = target === '' ? source : resolve(target, source, ctx.tree().links);
   if (resolved === null) return null;
+  if (query.startsWith('^')) return blockCompletion(context, ctx, { linkFrom: match.from, embed, target, resolved, query: query.slice(1) });
 
   let headings: Array<{ text: string; level: number }>;
   if (resolved === source) {
@@ -143,6 +146,123 @@ export const headingSource: CompletionSource = async (context: CompletionContext
   }));
   return { from: queryFrom, options, filter: false };
 };
+
+const BLOCK_KIND: Record<NoteBlock['kind'], string> = {
+  paragraph: 'paragraph',
+  heading: 'heading',
+  'list-item': 'list item',
+  list: 'list',
+  quote: 'quote',
+  callout: 'callout',
+  table: 'table',
+  code: 'code',
+  math: 'math',
+};
+
+interface BlockQuery {
+  /** Where `[[` (or `![[`) starts. */
+  linkFrom: number;
+  embed: boolean;
+  /** The link's target as typed (`""` for this note). */
+  target: string;
+  resolved: string;
+  /** What follows `^`. */
+  query: string;
+}
+
+/**
+ * `[[Note#^query`: the target's paragraphs, headings, list items and structured blocks. Picking
+ * one without an id gives it one (` ^a1b2c3`): in this note as part of the same edit, in another
+ * note through `ctx.blocks` (the server adds it to the current file, so it is safe with edits
+ * elsewhere). The link names the new id at once; if the server keeps another (the block got one
+ * meanwhile), the link is corrected.
+ */
+async function blockCompletion(context: CompletionContext, ctx: NoteContext, q: BlockQuery): Promise<CompletionResult | null> {
+  const source = ctx.path();
+  const same = q.resolved === source;
+  let text: string;
+  if (same) {
+    if (!source.toLowerCase().endsWith('.md')) return null;
+    text = context.state.doc.toString();
+  } else {
+    if (!q.resolved.toLowerCase().endsWith('.md') || !ctx.blocks) return null;
+    try {
+      text = await ctx.blocks.noteText(q.resolved);
+    } catch {
+      return null;
+    }
+    if (context.aborted) return null;
+  }
+  const cursorLine = context.state.doc.lineAt(context.pos).number - 1;
+  const blocks = pickableBlocks(scanBlocks(text)).filter((b) => !same || cursorLine < b.start || cursorLine > b.end);
+  const ranked =
+    q.query.trim() === ''
+      ? blocks.slice(0, MAX_OPTIONS * 4)
+      : fuzzyRank(q.query, blocks, [(b) => b.text, (b) => b.id ?? ''], MAX_OPTIONS).map((r) => r.item);
+  const options: Completion[] = ranked.map((b) => ({
+    label: b.text,
+    detail: b.id ? `^${b.id}` : BLOCK_KIND[b.kind],
+    type: 'block',
+    apply: (view, completion, _from, to) => {
+      const insertFor = (id: string) => (same ? sameNoteLink(ctx, q.embed, '^' + id, null) : buildInsert(ctx, { path: q.resolved, alias: null }, q.embed, '^' + id, null));
+      if (b.id) return replaceLink(view, completion, q.linkFrom, to, insertFor(b.id));
+      if (same) return linkToNewBlockHere(view, completion, q.linkFrom, to, b, text, insertFor);
+      const provisional = newBlockId(blockIdsIn(text));
+      replaceLink(view, completion, q.linkFrom, to, insertFor(provisional));
+      void ctx.blocks!.ensureBlockId(q.resolved, text, b, provisional).then(
+        (id) => {
+          if (id !== provisional) renameInsertedId(view, q.linkFrom, provisional, id);
+        },
+        () => {},
+      );
+    },
+  }));
+  return { from: context.pos - q.query.length, options, filter: false };
+}
+
+/** A link to part of this note, in the note's link style. */
+function sameNoteLink(ctx: NoteContext, embed: boolean, subpath: string, display: string | null): string {
+  const s = ctx.settings().files;
+  if (s.useWikilinks) return `${embed ? '!' : ''}[[#${subpath}${display ? '|' + display : ''}]]`;
+  return `${embed ? '!' : ''}[${display ?? (embed ? '' : subpath)}](#${encodeMdPath(subpath)})`;
+}
+
+/** Adds the id to a block of this note and the link to it, as one edit (one undo step). */
+function linkToNewBlockHere(view: EditorView, completion: Completion, linkFrom: number, to: number, block: NoteBlock, text: string, insertFor: (id: string) => string): void {
+  const current = view.state.doc.toString();
+  const lineText = noteLines(text)[block.anchor] ?? '';
+  const id = newBlockId(blockIdsIn(current));
+  const plan = planBlockId(current, { line: block.anchor, lineText, placement: block.placement }, id);
+  if (plan.kind === 'missing') return;
+  const insert = insertFor(plan.id);
+  if (plan.kind === 'existing') return replaceLink(view, completion, linkFrom, to, insert);
+  const end = view.state.sliceDoc(to, to + 2) === ']]' ? to + 2 : to;
+  const shift = plan.from <= linkFrom ? plan.insert.length : 0;
+  view.dispatch({
+    changes: [
+      { from: plan.from, insert: plan.insert },
+      { from: linkFrom, to: end, insert },
+    ],
+    selection: { anchor: linkFrom + shift + insert.length },
+    userEvent: 'input.complete',
+    annotations: pickedCompletion.of(completion),
+  });
+}
+
+/** Replaces the provisional id written into a link near `near` with the id the block got. */
+function renameInsertedId(view: EditorView, near: number, provisional: string, id: string): void {
+  const doc = view.state.doc.toString();
+  let best = -1;
+  for (let at = doc.indexOf(provisional); at >= 0; at = doc.indexOf(provisional, at + 1)) {
+    if (best < 0 || Math.abs(at - near) < Math.abs(best - near)) best = at;
+  }
+  if (best < 0) return;
+  try {
+    view.dispatch({ changes: { from: best, to: best + provisional.length, insert: id }, userEvent: 'input.complete' });
+  } catch {
+    // The editor closed meanwhile; the note keeps the link as written.
+  }
+}
 
 export const tagSource: CompletionSource = async (context: CompletionContext): Promise<CompletionResult | null> => {
   const ctx = context.state.facet(noteContext);

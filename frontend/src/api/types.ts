@@ -24,7 +24,8 @@ export type ErrorCode =
   | 'io-error' | 'permission-denied' | 'internal-error'
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
-  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded';
+  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
+  | 'block-not-found';
 
 export interface FieldError { field: string; message: string }
 
@@ -41,6 +42,7 @@ export interface Problem {
   kind?: FileKind;
   limit?: number;
   spent?: number;                 // ai-budget-exceeded: this month's estimated spend in USD
+  line?: number;                  // block-not-found: the line the request named (§37)
   from?: VaultPath;
   to?: VaultPath;
   reason?: string;
@@ -306,6 +308,19 @@ export interface HeadingRenameResult {
   failed: FailedUpdate[];
   bookmarks: number;              // heading bookmarks of the note that were (or would be) updated
   commitId: string | null;
+}
+export interface BlockIdRequest {   // §37
+  path: VaultPath;
+  line: number;                   // 0-based line the client read lineText on (the block's anchor)
+  lineText: string;
+  placement: 'end' | 'after';     // append ' ^id' to the line, or put '^id' on a line of its own after it
+  id?: string;                    // the id the client would like; another one is chosen when a block has it
+}
+export interface BlockIdResult {
+  id: string;                     // the block's id: the new one, or the one it already had (created: false)
+  created: boolean;
+  line: number;                   // 0-based line that holds the id
+  file: FileEntry;                // the note after the call
 }
 
 // ---------- graph (§11.4) ----------

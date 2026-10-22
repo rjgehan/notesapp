@@ -9,6 +9,7 @@ import { insertAttachments } from '../features/attachments';
 import { linkTo } from '../features/fileOps';
 import { wantsNoteFocus } from '../features/focus';
 import { openLink, openTag } from '../features/navigation';
+import { editorBlocks } from '../features/blockRefs';
 import { recentPaths } from '../features/recent';
 import { renderLiveEmbed, renderLiveProperties } from '../render/liveEmbeds';
 import { renderLiveMarkdown, renderLiveMath } from '../render/liveRich';
@@ -69,6 +70,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       renderProperties: (el, yaml, onEdit) => renderLiveProperties(el, yaml, onEdit, session.path),
       renderMarkdown: (el, block) => renderLiveMarkdown(el, block, session.path),
       renderMath: renderLiveMath,
+      blocks: editorBlocks,
     };
     const hooks: EditorHooks = {
       onLocalChange: () => session.markDirty(),

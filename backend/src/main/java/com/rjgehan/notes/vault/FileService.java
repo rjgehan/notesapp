@@ -311,6 +311,68 @@ public class FileService {
 		}
 	}
 
+	/** A server-side edit of a text file's current content (see {@link #editText}). */
+	@FunctionalInterface
+	public interface TextEdit<T> {
+
+		/** The new text and a value for the caller; a null text leaves the file as it is. */
+		Edit<T> apply(String text);
+
+	}
+
+	public record Edit<T>(@Nullable String text, T value) {
+	}
+
+	public record Edited<T>(FileEntry file, T value, boolean changed) {
+	}
+
+	/**
+	 * Applies {@code edit} to the file's current content on disk, under its lock (adding a block id, API.md §37). Like a
+	 * capture, nothing the requester has not seen is replaced: the edit reads the latest text itself, other clients get
+	 * {@code file.changed}, and an open, dirty note there merges or enters the ordinary conflict flow. The BOM is kept;
+	 * a file with invalid UTF-8 is never rewritten.
+	 */
+	public <T> Edited<T> editText(String apiPath, TextEdit<T> edit, Identity identity, @Nullable String origin)
+			throws IOException {
+		ApiPath path = this.paths.resolve(apiPath, Mode.EXISTING);
+		requireTextKind(path);
+		long limit = this.kinds.textLimit(path.nfc());
+		Author author = Author.of(identity);
+		try (CommitBatcher.Operation operation = this.batcher.beginOperation();
+				VaultLocks.Held held = this.locks.read(lockPaths(path))) {
+			byte[] disk = (existingLocked(path) != null) ? readOrNull(path) : null;
+			if (disk == null) {
+				throw NotesException.notFound(path.nfc());
+			}
+			if (disk.length > limit) {
+				throw NotesException.tooLarge(limit, "The file is larger than the text limit");
+			}
+			FileRecord record = this.index.file(path.nfc());
+			if (record == null || !Hashing.blobId(disk).equals(record.version())) {
+				this.reconciler.reconcileLocked(path);
+			}
+			TextCodec.Decoded decoded = TextCodec.decode(disk);
+			if (decoded.lossy()) {
+				throw NotesException.badRequest("The file contains invalid UTF-8 and is never rewritten");
+			}
+			Edit<T> result = edit.apply(decoded.text());
+			if (result.text() == null || result.text().equals(decoded.text())) {
+				return new Edited<>(currentEntry(path), result.value(), false);
+			}
+			byte[] newBytes = TextCodec.encode(result.text(), decoded.hadBom());
+			if (newBytes.length > limit) {
+				throw NotesException.tooLarge(limit, "Text files are limited to " + limit + " bytes");
+			}
+			this.batcher.prepareWrite(author);
+			this.fs.atomicWrite(path.disk(), newBytes);
+			FileEntry entry = indexWritten(path, newBytes);
+			this.batcher.markDirty(path, author);
+			this.hub.publish(FileEvent.changed(entry, origin));
+			logger.info("EDIT {} client={} user={}", entry.path(), origin, identity.login());
+			return new Edited<>(entry, result.value(), true);
+		}
+	}
+
 	/**
 	 * The bytes that append {@code entry} (LF-only) to a file holding {@code disk}: on a new line, in the file's line
 	 * endings (CRLF when every line break in it is CRLF, DESIGN §6.9).

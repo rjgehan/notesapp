@@ -9,6 +9,7 @@ import { useLocation } from 'react-router';
 import { useVaultSettings } from '../../api/hooks';
 import { useWorkspaceScroller } from '../../components/layout/workspaceScroller';
 import { findHeading, headingsFromState } from '../../editor/outline';
+import { blockSubpathId, findBlock, scanBlocks } from '../../features/blocks';
 import { NoteEditor } from '../../editor/NoteEditor';
 import { setSearchHighlight } from '../../editor/searchHighlight';
 import { wantsNoteFocus } from '../../features/focus';
@@ -87,6 +88,16 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
     const line = modeLine ?? hitLine;
     const v = editorView.current;
     if (!v) return;
+    // A `#^id` subpath scrolls to that block and flashes it (ROADMAP item 20).
+    const blockId = modeLine === null ? blockSubpathId(heading) : null;
+    if (blockId) {
+      const block = findBlock(scanBlocks(v.state.doc.toString()), blockId);
+      if (block) {
+        scrollEditorToLine(v, block.start);
+        v.dispatch({ effects: setSearchHighlight.of({ terms: [], line: block.start, lineEnd: block.end }) });
+        return;
+      }
+    }
     if (heading && modeLine === null) {
       const h = findHeading(headingsFromState(v.state), heading);
       if (h) return scrollEditorToLine(v, h.line);

@@ -18,6 +18,8 @@ import type {
   FileEntry,
   FolderResult,
   GraphResponse,
+  BlockIdRequest,
+  BlockIdResult,
   HeadingRenameRequest,
   HeadingRenameResult,
   HistoryContent,
@@ -144,6 +146,8 @@ export interface Endpoints {
   getBookmarks(): Promise<BookmarksResponse>;
   putBookmarks(req: BookmarksUpdateRequest): Promise<BookmarksResponse>;
   renameHeading(req: HeadingRenameRequest): Promise<HeadingRenameResult>;
+  /** Gives a block of a note an Obsidian block id (API.md §37). */
+  addBlockId(req: BlockIdRequest): Promise<BlockIdResult>;
   getTranscriptionStatus(): Promise<TranscriptionStatus>;
   /** The transcript of a recording in the vault (API.md §23.2); it can take minutes. */
   transcribe(path: string): Promise<TranscriptionResult>;
@@ -221,6 +225,7 @@ export const httpEndpoints: Endpoints = {
   getBookmarks: () => apiFetch('/api/bookmarks'),
   putBookmarks: (req) => apiFetch('/api/bookmarks', { method: 'PUT', json: req }),
   renameHeading: (req) => apiFetch('/api/notes/rename-heading', { method: 'POST', json: req }),
+  addBlockId: (req) => apiFetch('/api/notes/block-id', { method: 'POST', json: req }),
   getTranscriptionStatus: () => apiFetch('/api/transcription'),
   transcribe: (path) => apiFetch('/api/transcriptions', { method: 'POST', json: { path } }),
   rawUrl: (entry, opts) =>
