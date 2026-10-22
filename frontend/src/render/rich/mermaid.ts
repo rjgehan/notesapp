@@ -2,8 +2,9 @@
 // 'strict' (labels HTML-encoded, no click handlers or links), directives may not touch the
 // security-relevant keys, and the SVG is sanitized again (sanitize.ts). Layout is dagre: Mermaid
 // 12's default ELK layout pulls in elkjs, which is EPL-2.0 (not GPL-compatible) and 1.4 MB, so it
-// is aliased to a stub in vite.config.ts and `layout` is a secure key.
-import mermaid from 'mermaid';
+// is aliased to a stub in vite.config.ts and `layout` is a secure key. Excalidraw's Mermaid import
+// shares this Mermaid, each with its own configuration (mermaidShared.ts).
+import { appMermaid as mermaid } from './mermaidShared';
 import { sanitizeSvg } from './sanitize';
 
 export type DiagramTheme = 'dark' | 'light';

@@ -133,6 +133,9 @@ export default defineConfig({
           new URL('./node_modules/@glideapps/glide-data-grid/dist/esm/internal/data-grid-overlay-editor/data-grid-overlay-editor.js', import.meta.url),
         ),
       },
+      // One Mermaid for the app and Excalidraw's Mermaid import, each with its own configuration
+      // (src/render/rich/mermaidShared.ts, which imports the package by its file).
+      { find: /^mermaid$/, replacement: fileURLToPath(new URL('./src/render/rich/mermaidShared.ts', import.meta.url)) },
       // Mermaid's optional ELK layout: elkjs is EPL-2.0 (not GPL-compatible) and 1.4 MB, so it is
       // left out of the bundle; diagrams use the dagre layout (src/render/rich/mermaid.ts).
       { find: /^elkjs\/lib\/elk\.bundled\.js$/, replacement: fileURLToPath(new URL('./src/render/rich/elkStub.ts', import.meta.url)) },
