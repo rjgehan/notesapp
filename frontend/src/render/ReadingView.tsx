@@ -4,7 +4,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTree, useVaultSettings } from '../api/hooks';
 import { splitFrontmatter } from '../features/frontmatter';
+import { openSection, sectionFromText } from '../features/encryption/inline';
 import { openLink, openTag } from '../features/navigation';
+import { toast } from '../state/toasts';
 import { usePrefs } from '../state/prefs';
 import type { DocumentSession } from '../sync/DocumentSession';
 import { useSessionChangeCount, useSessionSnapshot } from '../sync/useTextDocument';
@@ -113,11 +115,16 @@ export function ReadingView({ session, initialLine, onRendered }: Props) {
     if (!el) return;
     const click = (e: MouseEvent) => onClick(e, session);
     const change = (e: Event) => onChange(e, session, interactiveRef.current);
+    const key = (e: KeyboardEvent) => {
+      if ((e.key === 'Enter' || e.key === ' ') && openChip(e, session)) e.preventDefault();
+    };
     el.addEventListener('click', click);
     el.addEventListener('change', change);
+    el.addEventListener('keydown', key);
     return () => {
       el.removeEventListener('click', click);
       el.removeEventListener('change', change);
+      el.removeEventListener('keydown', key);
     };
   }, [session]);
 
@@ -129,8 +136,25 @@ export function ReadingView({ session, initialLine, onRendered }: Props) {
   );
 }
 
+/** An encrypted section's chip (DESIGN §6.33): opens its text in a dialog. */
+function openChip(e: Event, session: DocumentSession): boolean {
+  const chip = (e.target as HTMLElement).closest<HTMLElement>('.encrypted-chip');
+  if (!chip) return false;
+  if (chip.closest('[data-embed-root]')) {
+    toast('Open the note itself to unlock its encrypted text');
+    return true;
+  }
+  const section = sectionFromText(session.getText(), chip.dataset.section ?? '');
+  if (section) void openSection(session, section);
+  return true;
+}
+
 function onClick(e: MouseEvent, session: DocumentSession): void {
   const target = e.target as HTMLElement;
+  if (openChip(e, session)) {
+    e.preventDefault();
+    return;
+  }
   const placeholder = target.closest<HTMLElement>('.remote-image-placeholder');
   if (placeholder) {
     const img = document.createElement('img');

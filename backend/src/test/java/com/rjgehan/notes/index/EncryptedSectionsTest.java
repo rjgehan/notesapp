@@ -13,17 +13,18 @@ class EncryptedSectionsTest {
 
 	@Test
 	void everyPrefixAndBothSuffixesAreFound() {
-		String hidden = "%%" + LOCK + "β " + HINT + "my cat" + HINT + "QUJD+/== " + LOCK + "%%";
-		String visible = LOCK + "β QUJD " + LOCK;
-		String alpha = "%%" + LOCK + "α QUJD " + LOCK + "%%";
-		String obsolete = "%%" + LOCK + " QUJD " + LOCK + "%%";
+		String b64 = "QUJDREVGR0hJSktMTU5PUA==";
+		String hidden = "%%" + LOCK + "β " + HINT + "my cat" + HINT + "QUJD+/==QUJDREVGR0hJ " + LOCK + "%%";
+		String visible = LOCK + "β " + b64 + " " + LOCK;
+		String alpha = "%%" + LOCK + "α " + b64 + " " + LOCK + "%%";
+		String obsolete = "%%" + LOCK + " " + b64 + " " + LOCK + "%%";
 		String text = "a " + hidden + " b " + visible + " c " + alpha + " d " + obsolete + " e";
 		assertThat(EncryptedSections.strip(text)).isEqualTo("a [encrypted] b [encrypted] c [encrypted] d [encrypted] e");
 	}
 
 	@Test
 	void blankingKeepsEveryOffset() {
-		String section = "%%" + LOCK + "β " + HINT + "h" + HINT + "U2VjcmV0 " + LOCK + "%%";
+		String section = "%%" + LOCK + "β " + HINT + "h" + HINT + "U2VjcmV0U2VjcmV0 " + LOCK + "%%";
 		String text = "line one\nsecret: " + section + " end\nline three";
 		String blank = EncryptedSections.blank(text);
 		assertThat(blank).hasSameSizeAs(text);
@@ -35,13 +36,15 @@ class EncryptedSectionsTest {
 		String text = "Nothing " + LOCK + " here but a lock emoji " + LOCK + ".";
 		assertThat(EncryptedSections.blank(text)).isSameAs(text);
 		assertThat(EncryptedSections.strip("plain")).isSameAs("plain");
-		// A lock with words that are not base64 between is not a section.
+		// Words between two lock emoji are not a section, nor is a short or unmarked visible one.
 		assertThat(EncryptedSections.strip(text)).isEqualTo(text);
+		String unmarked = LOCK + " QUJDREVGR0hJSktMTU5PUA== " + LOCK + " and " + LOCK + "β QUJD " + LOCK;
+		assertThat(EncryptedSections.strip(unmarked)).isSameAs(unmarked);
 	}
 
 	@Test
 	void aSectionNeverSpansLines() {
-		String text = "%%" + LOCK + "β QUJD\nQUJD " + LOCK + "%%";
+		String text = "%%" + LOCK + "β QUJDREVGR0hJSktMTU5P\nQUJDREVGR0hJSktMTU5P " + LOCK + "%%";
 		assertThat(EncryptedSections.blank(text)).isSameAs(text);
 	}
 

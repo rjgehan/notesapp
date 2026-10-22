@@ -10,11 +10,17 @@ export interface Prefs {
   loadRemoteImages: boolean;
   /** Keep copies of recently opened notes, the tree and note images for offline reading (DESIGN §6.26). */
   offlineNotes: boolean;
+  /** Minutes without activity after which unlocked encrypted notes lock (DESIGN §6.33). */
+  encryptionLockMinutes: number;
+  /** Lock encrypted notes as soon as the app is hidden (another tab or app, the phone locked). */
+  encryptionLockOnHide: boolean;
 }
+
+export const ENCRYPTION_LOCK_CHOICES = [1, 5, 10, 30, 60] as const;
 
 export const PREFS_KEY = 'notesapp:prefs';
 
-export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true };
+export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true, encryptionLockMinutes: 10, encryptionLockOnHide: false };
 
 function load(): Prefs {
   try {
@@ -27,6 +33,8 @@ function load(): Prefs {
       autocorrect: typeof parsed.autocorrect === 'boolean' ? parsed.autocorrect : true,
       loadRemoteImages: typeof parsed.loadRemoteImages === 'boolean' ? parsed.loadRemoteImages : true,
       offlineNotes: typeof parsed.offlineNotes === 'boolean' ? parsed.offlineNotes : true,
+      encryptionLockMinutes: (ENCRYPTION_LOCK_CHOICES as readonly number[]).includes(parsed.encryptionLockMinutes as number) ? (parsed.encryptionLockMinutes as number) : 10,
+      encryptionLockOnHide: typeof parsed.encryptionLockOnHide === 'boolean' ? parsed.encryptionLockOnHide : false,
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -41,9 +49,9 @@ export const usePrefs = create<PrefsState>()((set, get) => ({
   ...load(),
   update(patch) {
     set(patch);
-    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes } = get();
+    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, encryptionLockMinutes, encryptionLockOnHide } = get();
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, encryptionLockMinutes, encryptionLockOnHide }));
     } catch {
       // Private mode or quota: the preference still applies to this page load.
     }

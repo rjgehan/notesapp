@@ -1,6 +1,7 @@
 // PromptDialog, ConfirmDialog and the choice dialog, rendered from the dialog stack (eager).
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { useDialogs, type ChoiceRequest, type ConfirmRequest, type PromptRequest } from '../../state/dialogs';
+import { PassphraseDialog, SecretDialog } from './EncryptionDialogs';
 import { Modal } from './Modal';
 
 function PromptDialog({ request }: { request: PromptRequest }) {
@@ -141,6 +142,10 @@ export function Dialogs() {
           <PromptDialog key={d.id} request={d} />
         ) : d.kind === 'confirm' ? (
           <ConfirmDialog key={d.id} request={d} />
+        ) : d.kind === 'passphrase' ? (
+          <PassphraseDialog key={d.id} request={d} />
+        ) : d.kind === 'secret' ? (
+          <SecretDialog key={d.id} request={d} />
         ) : (
           <ChoiceDialog key={d.id} request={d} />
         ),
