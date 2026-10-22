@@ -136,6 +136,7 @@ Besides notes, the server indexes the content of some structured text files (DES
 - `POST /api/links/resolve` is a read-only `POST`, but it still needs `X-Client-Id`.
 - `GET` requests, including `<img src>` and `EventSource`, need no custom headers.
 - The health endpoints (§6.3) are exempt from the Host and identity checks.
+- **The web clipper** (ROADMAP item 19, DESIGN §6.27.1) changes none of these rules. Its bookmarklet and browser extension never call the API: they pass the clip to the app's `/clip` page with `postMessage`, and that page saves it with ordinary same-origin requests (`POST /api/attachments`, then `POST /api/files` with `onConflict: "rename"`). Its iOS Shortcut posts the `CreateFileRequest` its script returns to `POST /api/files` with `X-Client-Id: ios-shortcut-clipper` and no `Origin`, like the capture Shortcut (§8.5).
 
 ---
 
@@ -2783,7 +2784,9 @@ export interface HabitsResponse {
 | POST | `/api/ai/summarize` | `AiSummarizeRequest` | 200 `text/event-stream` | 24.3 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
-**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions) and `/capture` (quick capture, DESIGN §6.27). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
+**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions), `/capture` (quick capture, DESIGN §6.27) and `/clip` (the web clipper's hand-over page, DESIGN §6.27.1). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
+
+**Web clipper** (DESIGN §6.27.1): `/clip` is the only response sent with `Cross-Origin-Opener-Policy: unsafe-none` (every other one has `same-origin`), so the bookmarklet's window can post to it. `/clipper/clipper.js`, `/clipper/shortcut.js` and `/clipper/bookmarklet.js` are the clipper build's scripts (`no-cache`); a server built without the clipper answers them `404`.
 
 **Installable app** (DESIGN §6.26): `/sw.js` (the service worker) is served with `Cache-Control: no-cache` and `Service-Worker-Allowed: /`; `/manifest.webmanifest` as `application/manifest+json` with `no-cache`. `POST /capture/share` is the manifest's share target, answered by the service worker; one that reaches the server (no worker) gets `303 See Other` to `/capture?share=lost` and nothing is stored.
 

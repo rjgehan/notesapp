@@ -3,12 +3,12 @@
 NotesApp is licensed under the GNU General Public License, version 3 only (`GPL-3.0-only`, see [LICENSE](LICENSE)).
 The NotesApp image ships the third-party software listed below, each under its own licence. Where an entry names several
 licences, they are the alternatives or the combination its project declares. Each package's full licence text is in its
-source distribution: `frontend/node_modules/<package>/` for the web app, and the `META-INF` folder of each jar inside
-the server's Spring Boot jar.
+source distribution: `frontend/node_modules/<package>/` for the web app, `clipper/node_modules/<package>/` for the web
+clipper, and the `META-INF` folder of each jar inside the server's Spring Boot jar.
 
 This file is generated; do not edit it by hand. After a dependency change, regenerate it from the repository root with
-`node scripts/third-party-notices.mjs` (it reads `frontend/package-lock.json` and resolves the backend's runtime
-dependencies with the Maven wrapper).
+`node scripts/third-party-notices.mjs` (it reads `frontend/package-lock.json` and `clipper/package-lock.json` and
+resolves the backend's runtime dependencies with the Maven wrapper).
 
 ## Web app (bundled by Vite)
 
@@ -152,6 +152,19 @@ Vitest, ESLint and so on) are not shipped.
 | yaml | ISC | <https://eemeli.org/yaml/> |
 | yocto-queue | MIT | <https://github.com/sindresorhus/yocto-queue> |
 | zustand | MIT | <https://github.com/pmndrs/zustand> |
+
+## Web clipper (bundled by esbuild)
+
+The production dependencies of `clipper/package.json`: the scripts the server serves under `/clipper/` and the browser
+extension built from the same sources (ROADMAP item 19). turndown's DOM for Node (`@mixmark-io/domino`) is left out of
+the browser bundles.
+
+| Package | Licence | Source |
+|---|---|---|
+| @mixmark-io/domino | BSD-2-Clause | <https://github.com/mixmark-io/domino> |
+| @mozilla/readability | Apache-2.0 | <https://github.com/mozilla/readability> |
+| turndown | MIT | <https://github.com/mixmark-io/turndown> |
+| turndown-plugin-gfm | MIT | <https://github.com/domchristie/turndown-plugin-gfm> |
 
 ## Server (in the Spring Boot jar)
 
