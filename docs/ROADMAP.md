@@ -1176,6 +1176,14 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
   - Offline, it shows the service worker's cached app (item 8), or a "Can't reach the server. Is Tailscale connected?" page with Retry.
 - **Packaging.** electron-builder produces a Windows NSIS installer and an unsigned macOS dmg. A GitHub Actions workflow builds them on `desktop-v*` tags and attaches them to a release in the private repository. There is no auto-updater: the shell rarely changes, because the UI comes from the server.
 
+**Status:** built (2026-10-21, branch `feat/desktop`): DESIGN §6.39, install and usage in `docs/DESKTOP.md`. Electron 44.9.3 and electron-builder 26.17.0 (both MIT) in `desktop/`, with its own lockfile, `node --test` unit tests and build scripts; `.github/workflows/desktop.yml` builds on `desktop-v*` tags only. The Windows installer was built and the packaged app run against a local backend (first-run check, app, capture hotkey and window, tray behaviour, offline page and the service worker's offline app); the macOS dmg is built only by the workflow and has not been run on a Mac. Deviations and additions:
+- **Permissions:** besides notifications, the server's pages may write to the clipboard (the Copy buttons), go fullscreen, and use the **microphone only** (voice notes and dictation, item 33); camera, location and everything else are denied.
+- **The capture window** loads the app's own `/capture` page rather than posting to `/api/capture` itself, so photos, Today/Inbox and the offline queue work as in the browser. `Esc` or Cancel hides it and discards an unsent draft; "Open the note" opens it in the main window.
+- **Notifications (item 9):** reminders' in-app route uses the web Notification API, which the shell turns into native notifications; a click brings the window back from the tray (the page's `window.focus()` asks the shell). Web Push itself does not work in Electron (no push service), but the window keeps running in the tray, unthrottled, so `reminder.due` events still arrive. `notesDesktop.notify()` is there for a shell-side route.
+- **Closing the window keeps the app in the tray** (and the hotkey working); Quit is in the tray menu. A tray item **Settings…** changes the server, the shortcut (configurable, or none) and launch at login.
+- **Resume:** after sleep or unlock the shell asks the page to reconnect its event stream at once (`EventStream.reconnect()`), rather than waiting for the 45 s watchdog.
+- **macOS:** the dmg is universal and ad-hoc signed (so Apple Silicon runs it) but not notarised: DESKTOP.md has the Gatekeeper steps. Windows is not code-signed: SmartScreen asks once.
+
 ---
 
 ## Explicitly not planned

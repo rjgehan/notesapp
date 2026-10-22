@@ -1,0 +1,22 @@
+{
+  "name": "notesapp-desktop",
+  "productName": "NotesApp",
+  "version": "1.0.0",
+  "description": "NotesApp for Windows and macOS: a thin, hardened shell around your NotesApp server.",
+  "author": "rjgehan",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/pages/setup.js && node --check src/pages/offline.js",
+    "dist:win": "electron-builder --win nsis --publish never",
+    "dist:mac": "electron-builder --mac dmg --publish never",
+    "dist:dir": "electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.17.0"
+  }
+}

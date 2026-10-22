@@ -25,3 +25,5 @@ backend/target/
 
 # The web clipper build (clipper/build.mjs)
 clipper/dist/
+# Desktop app build output
+desktop/dist/

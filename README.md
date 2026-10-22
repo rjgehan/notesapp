@@ -23,6 +23,7 @@ A self-hosted, single-user notes web app modelled closely on Obsidian. The vault
 - **History mirror on GitHub.** Optionally, the vault's git history is pushed to a private GitHub repository about 10 minutes after you stop editing, with a token from a compose secret; fast-forward only, so a mirror that has diverged is reported, never overwritten. Failures, and a mirror whose settings cannot be used, show in the status bar; failures are retried with backoff.
 - **Small history, large files kept.** Files over 25 MB (configurable), hidden ones included, stay in the vault and in backups but out of git history; the History panel says why, and replacing such a file keeps the old one in the trash.
 - **Status page and app alerts.** `/x/status` shows the server at a glance: problems first, then version and uptime, history (commits, failures, mirror, files kept out of it), the vault and index, disk space, the last backup, live-sync connections and the alerts. The app pushes its own problems (history not saved, mirror failing, disk full, …) to ntfy, deduplicated and rate-limited, without note content; the ntfy settings live outside the vault in `/data/secrets/ntfy.json`.
+- **Desktop app for Windows and macOS** *(roadmap item 41)*. A thin, sandboxed window around your server with a tray icon, a system-wide quick-capture shortcut (`Ctrl+Shift+Space` / `Cmd+Shift+Space`) that opens a small always-on-top capture window, native notifications, launch at login and offline use through the app's own offline mode. Installers are built from `desktop-v*` tags; see [docs/DESKTOP.md](docs/DESKTOP.md).
 - **Fast restarts.** The image runs on JDK 25 with an AOT cache made at build time, so a deploy or a nightly backup restart is back up sooner.
 
 ## Architecture
@@ -88,6 +89,7 @@ Rolling back, pausing updates, backups and everything else on the server side ar
 - [docs/DEPLOY.md](docs/DEPLOY.md): homeserver runbook (first deploy, operations, troubleshooting)
 - [docs/CASAOS.md](docs/CASAOS.md): installing on CasaOS by pasting one compose file, and its optional alerts, mirror and backups
 - [docs/CLIPPER.md](docs/CLIPPER.md): installing the web clipper (browser extension, bookmarklet, iPhone Shortcut)
+- [docs/DESKTOP.md](docs/DESKTOP.md): the Windows and macOS desktop app (install, Gatekeeper steps, usage, building and releases)
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes after v1
 
 ## Licence

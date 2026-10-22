@@ -5,6 +5,7 @@
 import { CircleCheck, NotebookText } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
+import { desktop } from '../../desktop/bridge';
 import { fromShare, targetLabel, type CaptureInput } from '../../features/capture';
 import type { CaptureOutcome } from '../../features/captureSync';
 import { navigateTo, openPath } from '../../features/navigation';
@@ -58,6 +59,13 @@ export function CapturePage() {
     if (shareId && shareId !== 'lost') void forgetShared(shareId).catch(() => undefined);
   };
 
+  // The desktop app's capture window closes instead (ROADMAP item 41); a browser goes to the app.
+  const cancel = () => {
+    const shell = desktop();
+    if (shell?.isCaptureWindow) shell.closeCapture();
+    else navigateTo('/');
+  };
+
   const another = () => {
     setDone(null);
     setRound((n) => n + 1);
@@ -97,7 +105,7 @@ export function CapturePage() {
               {data.notice}
             </p>
           )}
-          <CaptureForm key={round} initial={round === 0 ? data.initial : {}} initialFiles={round === 0 ? data.files : []} onDone={finish} onCancel={() => navigateTo('/')} />
+          <CaptureForm key={round} initial={round === 0 ? data.initial : {}} initialFiles={round === 0 ? data.files : []} onDone={finish} onCancel={cancel} />
         </>
       ) : (
         <div className="view-loading" aria-busy="true" />
