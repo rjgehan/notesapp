@@ -76,6 +76,12 @@ describe('service worker caches', () => {
     ]);
   });
 
+  it('precaches only the WOFF2 of a font (browsers never fetch the .woff and .ttf fallbacks)', () => {
+    expect(
+      precacheUrls(['assets/KaTeX_Main-Regular-a.woff2', 'assets/KaTeX_Main-Regular-b.woff', 'assets/KaTeX_Main-Regular-c.ttf', 'assets/katex-d.css']),
+    ).toEqual(['/assets/KaTeX_Main-Regular-a.woff2', '/assets/katex-d.css']);
+  });
+
   it("leaves PDF.js's assets to the HTTP cache too", () => {
     expect(precacheUrls(['assets/pdfjs-6.4.299/cmaps/UniJIS-UCS2-H.bcmap', 'assets/pdfjs-6.4.299/wasm/openjpeg.wasm', 'assets/pdfLib-abc.js'])).toEqual([
       '/assets/pdfLib-abc.js',
