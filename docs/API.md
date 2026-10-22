@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. 2026-10-21: the PDF viewer (item 32) in §9.1; voice notes and transcription (item 33) in §3, §17, §18, §19 and §23. 2026-10-21: Ask your vault and summaries (item 18) in §3, §5, §17, §18, §19 and §24. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. 2026-10-21: the PDF viewer (item 32) in §9.1; voice notes and transcription (item 33) in §3, §17, §18, §19 and §23. 2026-10-21: Ask your vault and summaries (item 18) in §3, §5, §17, §18, §19 and §24. 2026-10-21: properties (item 13) in §12.1, §16.4, §17, §18, §19 and §38. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -1134,7 +1134,8 @@ unary   = [ "-" ] primary                                         ; "-" followed
 primary = group | scoped | clause
 group   = "(" ws* [ or ] ws* ( ")" | end-of-query )
 scoped  = ( "line:" | "section:" ) ( group | clause )
-clause  = [ "tag:" | "path:" | "file:" ] ( regex | phrase | word ) ; keywords are case-insensitive
+clause  = property | [ "tag:" | "path:" | "file:" ] ( regex | phrase | word ) ; keywords are case-insensitive
+property = "[" 1*( char - "[" - "]" - newline ) "]"           ; only before ws, ")" or the end; else a word
 regex   = "/" 1*( "\" char | char - "/" ) "/"                     ; only before ws, ")" or the end; else a word
 phrase  = '"' { char - '"' } ( '"' | end-of-query )              ; an unterminated phrase runs to the end
 word    = 1*( char - ws - '"' )                                   ; inside a group, ")" also ends a word
@@ -1150,6 +1151,7 @@ Parsing never fails: a keyword with nothing after it is an ordinary word, an emp
 | `tag:x` / `tag:#x` | Notes tagged `x` or any nested `x/…`. `tag:/regex/`: a tag (without `#`) matching it. |
 | `path:x` | Case-insensitive substring of the full vault path. `path:/regex/`: a path matching it. |
 | `file:x` | Case-insensitive substring of the file name. `file:/regex/`: a name matching it. |
+| `[name]` | Notes with the frontmatter property `name` (names compare case-insensitively; ROADMAP item 13, §38). `[name:value]`: a value of the property (the value, or an item of a list) contains `value`, case- and width-insensitively; numbers and booleans compare whole (`[rating:4]`, `[done:true]`). `[name:"value"]`: a value equals `value`. `[name:]`: the property is there but empty. A clause without a name (`[:x]`) is dropped. Everything up to the first `:` is the name, so a name with `:` or brackets cannot be searched this way. |
 | `a OR b` | Either side |
 | `( … )` | Groups clauses |
 | `line:(…)` | Every clause inside matches within one line of the body (frontmatter lines excluded). Filters inside keep their file-level meaning. |
@@ -1824,6 +1826,7 @@ data: {"serverTime":"2026-10-16T14:05:20.004Z"}
 | `history.committed` | `HistoryCommittedEvent` | yes | A commit was made. `paths` has at most 100 entries, and `truncated` is true when there were more. Not sent when an operation had nothing to commit. |
 | `settings.changed` | `SettingsChangedEvent` | no | The settings were saved |
 | `searches.changed` | `SavedSearchesChangedEvent` | no | The saved searches were saved (§12.4); refetch them |
+| `types.changed` | `PropertyTypesChangedEvent` | no | The vault's property types changed (§38.2), by a type change or a property rename; refetch `GET /api/properties/types` |
 | `bookmarks.changed` | `BookmarksChangedEvent` | no | The bookmarks were saved (§21). After a move or a trash restore the server re-keys them itself and sends this with `origin: null`, so it reaches every client, the mover's included. Refetch `GET /api/bookmarks`. |
 | `status.changed` | `StatusChangedEvent` | yes | Something shown by `GET /api/status` changed state (`git.state`, `watcher.mode`, `settings.readOnly`, `mirror.state`, or free space crossing 1 GiB), or a push requested with §6.4 ended; refetch it |
 | `flashcards.changed` | `FlashcardsChangedEvent` | no | Flashcard review records or settings changed (§34.7). Not in `VAULT_EVENT_NAMES`: the flashcards feature registers it with `registerEventHandler`. |
@@ -2117,7 +2120,7 @@ export interface FolderResult { folder: FolderEntry; createdFolders: VaultPath[]
 export interface MoveRequest { from: VaultPath; to: VaultPath; updateLinks?: boolean; dryRun?: boolean }
 export interface MovedFile { from: VaultPath; to: VaultPath }
 export interface LinkUpdate { path: VaultPath; links: number; version: Version | null }
-export type FailedReason = 'not-utf8' | 'not-rewritable' | 'span-mismatch' | 'io-error';
+export type FailedReason = 'not-utf8' | 'not-rewritable' | 'span-mismatch' | 'io-error' | 'property-exists';
 export interface FailedUpdate { path: VaultPath; reason: FailedReason }
 export interface MoveResult {
   dryRun: boolean;
@@ -2537,12 +2540,13 @@ export interface VaultEventMap {
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
   'searches.changed': SavedSearchesChangedEvent;
+  'types.changed': PropertyTypesChangedEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'bookmarks.changed', 'status.changed',
-  'resync', 'searches.changed',
+  'resync', 'searches.changed', 'types.changed',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
 
@@ -2745,6 +2749,36 @@ export interface DatedNotesResponse {
   properties: string[];         // the properties read, ['date'] by default
   notes: DatedNote[];           // by day, then path; a note once per day
 }
+
+// ---------- Properties (API.md §38, ROADMAP item 13) ----------
+export type PropertyType = 'text' | 'multitext' | 'number' | 'checkbox' | 'date' | 'datetime' | 'aliases' | 'tags';
+export interface PropertyInfo {
+  name: string;                 // as most notes spell it; names compare case-insensitively
+  count: number;                // notes that have it
+  type: PropertyType | null;    // in the vault's type registry, or null
+  inferred: PropertyType;       // what its values look like
+}
+export interface PropertiesResponse { properties: PropertyInfo[] }   // sorted by name
+export interface PropertyTypesResponse {
+  types: Record<string, string>;   // name → type, in file order (an unknown type is kept as written)
+  version: Version | null;         // of .notesapp/types.json; null while it does not exist
+  source: 'notesapp' | 'obsidian' | null;   // obsidian: read from .obsidian/types.json until the first change
+}
+export interface PropertyTypeRequest { name: string; type: PropertyType | null }   // null removes the type
+export interface PropertyValue { value: string; count: number }
+export interface PropertyValuesResponse { name: string; values: PropertyValue[] }   // most used first, at most 500
+export interface PropertyRenameRequest { from: string; to: string; dryRun?: boolean }
+export interface PropertyUpdate { path: VaultPath; version: Version | null }   // version null in a dry run
+export interface PropertyRenameResult {
+  dryRun: boolean;
+  from: string;
+  to: string;
+  updates: PropertyUpdate[];
+  failed: FailedUpdate[];       // 'property-exists': the note already has the new name
+  typeMoved: boolean;           // the property's type moved to the new name
+  commitId: string | null;
+}
+export interface PropertyTypesChangedEvent { version: Version; origin: string | null }
 ```
 
 ---
@@ -2831,6 +2865,11 @@ export interface DatedNotesResponse {
 | POST | `/api/ai/ask` | `AiAskRequest` | 200 `text/event-stream` | 24.2 |
 | POST | `/api/ai/summarize` | `AiSummarizeRequest` | 200 `text/event-stream` | 24.3 |
 | GET | `/api/notes/by-date?from=&to=&property=` | | 200 `DatedNotesResponse` | 25.1 |
+| GET | `/api/properties` | | 200 `PropertiesResponse` | 38.1 |
+| GET | `/api/properties/types` | | 200 `PropertyTypesResponse` | 38.2 |
+| PUT | `/api/properties/types` | `PropertyTypeRequest` | 200 `PropertyTypesResponse` | 38.2 |
+| GET | `/api/properties/values?name=` | | 200 `PropertyValuesResponse` | 38.3 |
+| POST | `/api/properties/rename` | `PropertyRenameRequest` | 200 `PropertyRenameResult` | 38.4 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
 **SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions) and `/capture` (quick capture, DESIGN §6.27). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
@@ -2878,6 +2917,8 @@ export interface DatedNotesResponse {
 | `FlashcardConfig`, `FlashcardCardState`, `FlashcardCard`, `FlashcardsResponse`, `FlashcardReview`, `FlashcardReviewRequest`, `FlashcardUndoRequest`, `FlashcardPruneRequest`, `FlashcardConfigUpdateRequest`, `FlashcardWriteResult`, `FlashcardNote`, `FlashcardNotesResponse` | Same (§34) | `FlashcardCardState.phase` is the enum `FlashcardPhase`; `FlashcardConfigUpdateRequest.config` is a `JsonNode`, validated field by field; `FlashcardReview` and `FlashcardUndoRequest` take `at` as a string, parsed as an ISO-8601 instant |
 | `HabitNote`, `DailyNoteValues`, `HabitsResponse` | Same (§35) | `HabitNote.properties` is a `Map<String, @Nullable Object>` (the frontmatter as parsed, §5.5.3 of DESIGN); `DailyNoteValues.values` holds `Boolean`, `Number` and `String` values only |
 | `DatedNote`, `DatedNotesResponse` | Same (§25) | Built by `calendar.DatedNoteService` from the index's parsed frontmatter |
+| `PropertyInfo`, `PropertiesResponse`, `PropertyTypesResponse`, `PropertyTypeRequest`, `PropertyValue`, `PropertyValuesResponse`, `PropertyRenameRequest`, `PropertyUpdate`, `PropertyRenameResult` | Same (§38) | Types are `String`s (`PropertyType` is not an enum, so a types file with a type this version does not know still reads); every request component is `@Nullable` and checked by `properties.PropertyTypeService` / `PropertyService`. `FailedUpdate.reason` gains `PROPERTY_EXISTS` (`property-exists`). |
+| `PropertyTypesChangedEvent` | Same name in `com.rjgehan.notes.events` | Echoes `origin` like `SavedSearchesChangedEvent` |
 | `FlashcardsChangedEvent` | Same name in `com.rjgehan.notes.events` | An extension event (§34.7): it echoes `origin` like a content event, and `cards` maps removed records to `null` |
 | `AiSettings` | Same name in `com.rjgehan.notes.settings` | `model` is a `String` checked against `AiSettings.MODELS` |
 | `AiAskRequest`, `AiSummarizeRequest`, `AiTurn`, `AiPrompt`, `AiStatus`, `AiModelInfo`, `AiSource`, `AiStartEvent`, `AiDeltaEvent`, `AiRestartEvent`, `AiUsage`, `AiDoneEvent`, `AiErrorEvent` | Same | Every request component is `@Nullable` (the service validates and applies defaults). `AiStatus.state` is the enum `AiState` (`off`, `not-configured`, `over-budget`, `ready`). The stream events are written by `AiController` through an `SseEmitter`, not through `EventHub`. |
@@ -3495,3 +3536,84 @@ The client read the note, found the block (DESIGN §6.37) and names the line its
 | `409 block-not-found` (`line`): the line is gone, or several lines read `lineText` |
 
 Events to other clients: `file.changed` when the note changed. An open note there with unsaved edits merges them or shows the conflict banner, as for any change from elsewhere (§16.5). The calling client gets no event; it applies `file` itself (DESIGN §6.37). The change is committed with the next batch, like a save.
+
+## 38. Properties (ROADMAP item 13)
+
+A note's properties are its frontmatter (DESIGN §5.5.3). The client edits them as typed values in the note itself (DESIGN §6.38): each change rewrites only that property's YAML lines and is saved like any other edit, so there is no endpoint per value. The server adds what needs the whole vault: the list of every property, a property's values, the vault's property types, and renaming a property in every note. Search finds notes by property with `[name]`, `[name:value]` and `[name:"value"]` (§12.1).
+
+Property names compare case-insensitively everywhere, as in Obsidian: `Status` and `status` are one property.
+
+### 38.1 `GET /api/properties`
+
+`200 PropertiesResponse`, sorted by name (case-insensitively):
+
+```json
+{"properties": [
+  {"name": "due", "count": 12, "type": "date", "inferred": "date"},
+  {"name": "status", "count": 31, "type": null, "inferred": "text"}
+]}
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | The spelling most notes use |
+| `count` | Notes that have it (a note with `Status` and `status` counts once) |
+| `type` | The property's type in the vault's registry (§38.2), or `null` |
+| `inferred` | What its values look like, by majority: `checkbox` (booleans), `number`, `multitext` (lists), `date` (`YYYY-MM-DD`), `datetime` (`YYYY-MM-DDTHH:mm`, seconds optional, `T` or a space), else `text`. Empty values do not vote; a property with only empty values is `text`. |
+
+Notes whose frontmatter is not valid YAML are left out. Read from the index, so it costs no disk reads.
+
+### 38.2 Property types
+
+The vault's property types live in `.notesapp/types.json`, in Obsidian's own format, so the file can be copied to an Obsidian vault's `.obsidian/types.json` and back:
+
+```json
+{
+  "types": {
+    "due": "date",
+    "rating": "number"
+  }
+}
+```
+
+The types are Obsidian's: `text`, `multitext` (a list), `number`, `checkbox`, `date`, `datetime`, `tags`, `aliases`. While `.notesapp/types.json` does not exist, an imported Obsidian vault's `.obsidian/types.json` is read instead (`source: "obsidian"`); the first change writes `.notesapp/types.json` with those types and the change. Entries that are not strings are ignored; an unknown type string is kept as written (the client then infers the type from the values). Without an entry, `tags` and `aliases` (and the deprecated `tag` and `alias`) have their own types and `cssclasses` is a list, as in Obsidian; anything else is shown as its values look (`inferred`).
+
+**`GET /api/properties/types`**: `200 PropertyTypesResponse`: `{"types": {"due": "date"}, "version": "<blob id>" | null, "source": "notesapp" | "obsidian" | null}`. `version` is that of `.notesapp/types.json` (null while it does not exist).
+
+**`PUT /api/properties/types`**: request `PropertyTypeRequest` `{"name": "due", "type": "date"}`; `"type": null` removes the entry. One property changes at a time, under a lock on the server, so two devices changing different properties never conflict and need no version. The entry is matched case-insensitively and takes the request's spelling; an unchanged type writes nothing. `200 PropertyTypesResponse` with the new types. The file is written atomically, committed with the next history batch, and announced to the other clients with `types.changed` (`PropertyTypesChangedEvent {version, origin}`, §16.4).
+
+Errors: `400 bad-request` with `errors[]` for a missing or blank `name`, a name longer than 256 characters or with control characters, an unknown `type`, or more than 2,000 types; `503 busy` when the lock is not free within 5 s.
+
+### 38.3 `GET /api/properties/values?name={name}`
+
+`200 PropertyValuesResponse`: `{"name": "status", "values": [{"value": "open", "count": 20}, {"value": "done", "count": 11}]}`: the property's non-empty values (each item of a list on its own, numbers and booleans as they read in YAML), each with the number of notes that have it, most used first, at most 500. The client offers them as suggestions. `400 bad-request` without `name`.
+
+### 38.4 `POST /api/properties/rename`
+
+Request `PropertyRenameRequest`: `{"from": "status", "to": "phase", "dryRun": true}`.
+
+Renames the property in every note that has it (in any case). Only the key's own characters are replaced: values, comments, quoting, order, line endings and the rest of the note stay byte for byte. The new name is written plain when YAML reads it back as the same text (it starts with a letter or `_` and holds only letters, digits, spaces, `_`, `-`, `.` and `/`, and is not `true`, `false` or `null`), else double-quoted. The note is parsed again afterwards and must hold exactly the old properties under the new name; otherwise it is left alone.
+
+It runs like a move's link updates (§10.3): under the vault write lock, each note is read from disk (a note changed behind the watcher's back is indexed first, and committed as External, never reverted), the rewritten notes are committed together as `Rename property “status” → “phase” (N notes)`, and the other clients get `file.changed` for each, which an open note merges like any change from elsewhere. The property's type moves to the new name (unless the new name has a type of its own), with `types.changed`.
+
+`200 PropertyRenameResult`:
+
+```json
+{"dryRun": false, "from": "status", "to": "phase",
+ "updates": [{"path": "Projects/Plan.md", "version": "<blob id>"}],
+ "failed": [{"path": "Old.md", "reason": "property-exists"}],
+ "typeMoved": true, "commitId": "<commit id>"}
+```
+
+With `dryRun: true`, nothing is written: `updates` lists the notes that would change (`version: null`), `failed` those that would not, and `typeMoved` whether the type would move.
+
+| `failed[].reason` | Why the note keeps the old name |
+|---|---|
+| `property-exists` | It already has a property named `to` (in any case) |
+| `not-rewritable` | The key cannot be replaced in place: flow-style properties (`{a: 1}`), a key with a tag or an anchor, a complex (`?`) key, or a result that would not parse back the same |
+| `not-utf8` | The note is not valid UTF-8 |
+| `io-error` | The note could not be written |
+
+Errors: `400 bad-request` with `errors[]` for a missing or invalid `from` or `to` (as for `name` in §38.2), or `to` equal to `from` (a change of case only is a rename). `503 busy` when the vault lock is not free in time.
+
+The calling client applies `updates` itself, like a move's link updates (DESIGN §6.38).

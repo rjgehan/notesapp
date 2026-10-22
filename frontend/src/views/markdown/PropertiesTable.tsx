@@ -18,7 +18,7 @@ function readCollapsed(): boolean {
   }
 }
 
-function TextWithLinks({ text, sourcePath }: { text: string; sourcePath: string }) {
+export function TextWithLinks({ text, sourcePath }: { text: string; sourcePath: string }) {
   const tree = useTree().data;
   const links = findWikiLinks(text);
   if (links.length === 0) return <>{text}</>;

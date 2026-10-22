@@ -8,8 +8,9 @@ import { createRoot } from 'react-dom/client';
 import { api } from '../api/endpoints';
 import { currentTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
-import type { EmbedRequest } from '../editor/context';
+import type { EmbedRequest, PropertiesChange, PropertiesHandle } from '../editor/context';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { PropertiesEditor } from '../properties/ui/PropertiesEditor';
 import { PropertiesTable } from '../views/markdown/PropertiesTable';
 import { makeEmbedContext } from './context';
 import { hydrateEmbeds, unmountEmbeds } from './embeds';
@@ -62,16 +63,25 @@ export function renderLiveEmbed(el: HTMLElement, { entry, subpath, display, size
   };
 }
 
-/** Shows the note's properties in `el`, with an edit button when `onEdit` is given; returns what removes them. */
-export function renderLiveProperties(el: HTMLElement, yaml: string, onEdit: (() => void) | null, sourcePath: string): () => void {
+/**
+ * Shows the note's properties in `el`: the typed editor (ROADMAP 13) when `onChange` is given,
+ * else the properties table, with an edit button (the YAML as text) when `onEdit` is given. The handle
+ * shows new YAML in place, so a field being edited keeps its focus.
+ */
+export function renderLiveProperties(el: HTMLElement, yaml: string, onEdit: (() => void) | null, sourcePath: string, onChange: PropertiesChange | null = null): PropertiesHandle {
   const root = createRoot(el);
-  root.render(
-    <QueryClientProvider client={queryClient}>
-      <ErrorBoundary label="properties">
-        <PropertiesTable yaml={yaml} sourcePath={sourcePath} onEdit={onEdit} />
-      </ErrorBoundary>
-    </QueryClientProvider>,
-  );
-  // Unmounting synchronously during the editor's update (a widget is destroyed) is not allowed.
-  return () => queueMicrotask(() => root.unmount());
+  const render = (text: string) =>
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <ErrorBoundary label="properties">
+          {onChange ? <PropertiesEditor yaml={text} sourcePath={sourcePath} onEdit={onEdit} onChange={onChange} /> : <PropertiesTable yaml={text} sourcePath={sourcePath} onEdit={onEdit} />}
+        </ErrorBoundary>
+      </QueryClientProvider>,
+    );
+  render(yaml);
+  return {
+    update: render,
+    // Unmounting synchronously during the editor's update (a widget is destroyed) is not allowed.
+    destroy: () => queueMicrotask(() => root.unmount()),
+  };
 }

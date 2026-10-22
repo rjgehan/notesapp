@@ -64,6 +64,15 @@ const atom = new Atom();
 
 const cleanups = new WeakMap<HTMLElement, () => void>();
 
+/** What a properties widget's DOM shows, so new YAML can be shown in place (`updateDOM`). */
+interface ShownProperties {
+  editable: boolean;
+  source: string;
+  update: ((yaml: string) => void) | null;
+}
+
+const shownProperties = new WeakMap<HTMLElement, ShownProperties>();
+
 /** The note's properties, drawn by the app (`NoteContext.renderProperties`). */
 class PropertiesWidget extends WidgetType {
   readonly yaml: string;
@@ -83,14 +92,25 @@ class PropertiesWidget extends WidgetType {
     const el = document.createElement('div');
     el.className = 'cm-lp-properties';
     const note = view.state.facet(noteContext);
-    const unmount = note ? note.renderProperties(el, this.yaml, this.editable ? () => startEditingProperties(view) : null) : () => {};
+    const shown = note
+      ? note.renderProperties(el, this.yaml, this.editable ? () => startEditingProperties(view) : null, this.editable ? (edit) => applyPropertiesEdit(view, edit) : null)
+      : () => {};
     if (!note) el.textContent = 'Properties';
+    const unmount = typeof shown === 'function' ? shown : () => shown.destroy();
+    shownProperties.set(el, { editable: this.editable, source: this.source, update: typeof shown === 'function' ? null : (yaml) => shown.update(yaml) });
     const unmeasure = remeasureOnChange(view, el);
     cleanups.set(el, () => {
       unmeasure();
       unmount();
     });
     return el;
+  }
+  /** New YAML for the same note and mode is shown in place: a field being edited keeps its focus. */
+  override updateDOM(dom: HTMLElement): boolean {
+    const shown = shownProperties.get(dom);
+    if (!shown?.update || shown.editable !== this.editable || shown.source !== this.source) return false;
+    shown.update(this.yaml);
+    return true;
   }
   override destroy(dom: HTMLElement): void {
     cleanups.get(dom)?.();
@@ -271,6 +291,28 @@ function editingSpec(state: EditorState): TransactionSpec | null {
   return { changes: { from: fm.yamlFrom, insert: '\n' }, selection: EditorSelection.cursor(fm.yamlFrom), effects, scrollIntoView: true, userEvent: 'input' };
 }
 
+/**
+ * A typed edit of the properties (ROADMAP 13): `edit` maps the frontmatter's current YAML to the
+ * new YAML, and only what differs is replaced, as one undoable edit. It is not an `input` event,
+ * so the properties stay a block (the caret does not go into the YAML). Throws what `edit` throws.
+ */
+export function applyPropertiesEdit(view: EditorView, edit: (yaml: string) => string): boolean {
+  const fm = view.state.field(blocksField, false)?.frontmatter;
+  if (!fm || view.state.readOnly) return false;
+  const yaml = view.state.sliceDoc(fm.yamlFrom, fm.yamlTo);
+  const next = edit(yaml);
+  if (next === yaml) return true;
+  let start = 0;
+  while (start < yaml.length && start < next.length && yaml[start] === next[start]) start++;
+  let end = 0;
+  while (end < yaml.length - start && end < next.length - start && yaml[yaml.length - 1 - end] === next[next.length - 1 - end]) end++;
+  view.dispatch({
+    changes: { from: fm.yamlFrom + start, to: fm.yamlTo - end, insert: next.slice(start, next.length - end) },
+    userEvent: 'properties.edit',
+  });
+  return true;
+}
+
 /** The properties' edit button: shows their YAML as text, with the caret at its end. */
 export function startEditingProperties(view: EditorView): boolean {
   const spec = editingSpec(view.state);
@@ -441,4 +483,9 @@ const settleOnFocus = ViewPlugin.fromClass(
 /** The properties block and hidden comment blocks of Live Preview, and in an editable note the caret rules around them. */
 export function liveBlocks(config: BlocksConfig): Extension {
   return [blocksConfig.of(config), blocksField, config.locked ? [] : [settleAroundBlocks, guardBlockEdges, settleOnFocus, Prec.highest(blockKeymap)]];
+}
+
+/** Whether the properties show as a block in this editor (Live Preview, editable or locked). */
+export function hasPropertiesBlock(state: EditorState): boolean {
+  return state.field(blocksField, false) !== undefined;
 }

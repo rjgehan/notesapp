@@ -66,6 +66,7 @@ import { registerTasks } from '../tasks/register';
 import { registerFlashcards } from '../flashcards/register';
 import { registerHabits } from '../habits/register';
 import { registerCalendar } from '../calendar/register';
+import { registerProperties } from '../properties/register';
 import { registerCanvasView } from '../views/canvas/register';
 import { registerKanban } from '../views/kanban/register';
 import { registerEncryption } from '../views/encrypted/register';
@@ -432,6 +433,7 @@ export function registerBuiltins(): void {
   registerAi();
   // The calendar: daily notes and tasks by day (ROADMAP item 14, DESIGN §6.32).
   registerCalendar();
+  registerProperties();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

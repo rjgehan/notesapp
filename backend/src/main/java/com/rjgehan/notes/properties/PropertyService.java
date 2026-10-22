@@ -144,7 +144,10 @@ public class PropertyService {
 		for (Tally tally : tallies.values()) {
 			String name = mostUsed(tally.spellings, "");
 			String inferred = mostUsed(tally.kinds, "text");
-			properties.add(new PropertyInfo(name, tally.count, PropertyTypeService.typeOf(registry, name), inferred));
+			String type = PropertyTypeService.typeOf(registry, name);
+			// A type this version does not know is left to the values.
+			properties.add(new PropertyInfo(name, tally.count,
+					(type != null && PropertyTypeService.TYPES.contains(type)) ? type : null, inferred));
 		}
 		properties.sort(Comparator.comparing((PropertyInfo p) -> p.name().toLowerCase(Locale.ROOT))
 			.thenComparing(PropertyInfo::name));

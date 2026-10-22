@@ -207,3 +207,44 @@ describe('hidden comment blocks (ROADMAP 10b)', () => {
     expect(blocks(view).slice(1)).toEqual(['comment:%%\nhidden\n%%']);
   });
 });
+
+describe('typed property edits (ROADMAP 13)', () => {
+  it('replaces only what changed, as one undo step, and keeps the properties a block shown in place', () => {
+    const handles: Array<{ yaml: string; updates: string[]; change: ((edit: (yaml: string) => string) => boolean) | null }> = [];
+    const view = noteEditor('---\ntags: [a]\ntitle: T\n---\nBody', {
+      ctx: {
+        renderProperties: (el, yaml, _onEdit, onChange) => {
+          const h = { yaml, updates: [] as string[], change: onChange ?? null };
+          handles.push(h);
+          el.textContent = yaml;
+          return { update: (next: string) => h.updates.push(next), destroy: () => {} };
+        },
+      },
+    });
+    expect(handles).toHaveLength(1);
+    const change = handles[0].change!;
+    expect(change((y) => y.replace('title: T', 'title: New'))).toBe(true);
+    expect(view.state.doc.toString()).toBe('---\ntags: [a]\ntitle: New\n---\nBody');
+    // Shown in place: no new widget, the handle got the new YAML; the YAML is not opened as text.
+    expect(handles).toHaveLength(1);
+    expect(handles[0].updates).toEqual(['tags: [a]\ntitle: New\n']);
+    expect(editingProperties(view.state)).toBe(false);
+    undo(view);
+    expect(view.state.doc.toString()).toBe('---\ntags: [a]\ntitle: T\n---\nBody');
+  });
+
+  it('a locked note gets no typed editor; an edit that throws changes nothing', () => {
+    const changes: unknown[] = [];
+    const ctx = { renderProperties: (_el: HTMLElement, _yaml: string, _e: unknown, onChange?: unknown) => (changes.push(onChange ?? null), () => {}) };
+    noteEditor('---\na: 1\n---\n', { mode: 'locked', ctx });
+    expect(changes).toEqual([null]);
+    const view = noteEditor('---\na: 1\n---\n', { ctx });
+    const change = changes[1] as (edit: (yaml: string) => string) => boolean;
+    expect(() =>
+      change(() => {
+        throw new Error('bad');
+      }),
+    ).toThrow('bad');
+    expect(view.state.doc.toString()).toBe('---\na: 1\n---\n');
+  });
+});

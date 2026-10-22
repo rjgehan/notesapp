@@ -67,7 +67,7 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       linkTo: (path) => linkTo(path, session.path),
       showMenu: openContextMenu,
       renderEmbed: (el, embed) => renderLiveEmbed(el, embed, session.path),
-      renderProperties: (el, yaml, onEdit) => renderLiveProperties(el, yaml, onEdit, session.path),
+      renderProperties: (el, yaml, onEdit, onChange) => renderLiveProperties(el, yaml, onEdit, session.path, onChange ?? null),
       renderMarkdown: (el, block) => renderLiveMarkdown(el, block, session.path),
       renderMath: renderLiveMath,
       blocks: editorBlocks,

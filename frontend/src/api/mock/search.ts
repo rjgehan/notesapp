@@ -1,7 +1,7 @@
 // Full-text search for the dev-only mock API (API.md §12.1): the real query grammar
 // (features/searchQuery), evaluated with simple string matching instead of the server's index.
 // Typo tolerance and PDF text are server-only; the mock never reports corrections.
-import { parseSearchQuery, queryLeaves, toJsRegExp, type QueryLeaf, type QueryNode } from '../../features/searchQuery';
+import { parsePropertyClause, parseSearchQuery, propertyClauseMatches, queryLeaves, toJsRegExp, type QueryLeaf, type QueryNode } from '../../features/searchQuery';
 import { lastSegment, stripMd } from '../../features/paths';
 import type { SearchHit, SearchResponse, TextRange } from '../types';
 import { fail } from './problems';
@@ -78,6 +78,10 @@ class Evaluator {
         return regex ? regex.test(doc.path) : doc.path.toLowerCase().includes(leaf.value.toLowerCase());
       case 'file':
         return regex ? regex.test(name) : name.toLowerCase().includes(leaf.value.toLowerCase());
+      case 'property': {
+        const clause = parsePropertyClause(leaf.value);
+        return clause !== null && propertyClauseMatches(clause, doc.scan.frontmatter);
+      }
       case 'regex':
         return regex!.test(unit ? unit.text : doc.text);
       case 'phrase': {

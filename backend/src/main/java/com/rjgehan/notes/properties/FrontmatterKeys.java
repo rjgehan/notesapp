@@ -36,7 +36,7 @@ public final class FrontmatterKeys {
 	/** A key written without quotes: it starts with a letter or {@code _} and reads back as itself. */
 	private static final Pattern PLAIN_KEY = Pattern.compile("[\\p{L}_][\\p{L}\\p{N}_ .\\-/]*");
 
-	private static final Pattern RESERVED = Pattern.compile("(?i)true|false|null|yes|no|on|off|y|n");
+	private static final Pattern RESERVED = Pattern.compile("(?i)true|false|null");
 
 	private static final int CODE_POINT_LIMIT = 256 * 1024;
 
