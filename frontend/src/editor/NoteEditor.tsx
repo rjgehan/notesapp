@@ -11,6 +11,7 @@ import { wantsNoteFocus } from '../features/focus';
 import { openLink, openTag } from '../features/navigation';
 import { recentPaths } from '../features/recent';
 import { renderLiveEmbed, renderLiveProperties } from '../render/liveEmbeds';
+import { renderLiveMarkdown, renderLiveMath } from '../render/liveRich';
 import { usePrefs } from '../state/prefs';
 import type { DocumentSession } from '../sync/DocumentSession';
 import { clearActiveEditor, setActiveEditor } from './activeEditor';
@@ -66,6 +67,8 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       showMenu: openContextMenu,
       renderEmbed: (el, embed) => renderLiveEmbed(el, embed, session.path),
       renderProperties: (el, yaml, onEdit) => renderLiveProperties(el, yaml, onEdit, session.path),
+      renderMarkdown: (el, block) => renderLiveMarkdown(el, block, session.path),
+      renderMath: renderLiveMath,
     };
     const hooks: EditorHooks = {
       onLocalChange: () => session.markDirty(),

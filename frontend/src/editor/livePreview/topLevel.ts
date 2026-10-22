@@ -1,5 +1,6 @@
 // The note's top-level blocks that Live Preview shows as block widgets (ROADMAP 10b, 10c): tables
-// (grids) and comment blocks. One walk over the top level of the Lezer tree per tree, shared by
+// (grids), comment blocks, and the rich blocks (callouts, `$$` math, Mermaid; ROADMAP item 3). One
+// walk over the top level of the Lezer tree per tree, shared by
 // the state fields that need them, with a cursor (no node objects), so a keystroke in a
 // 10,000-line note costs little here.
 import { syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
@@ -17,24 +18,34 @@ export interface TopLevelBlock {
   complete: boolean;
   /** A comment block whose `%%` is closed. */
   closed?: boolean;
+  /** A rich block's kind. */
+  rich?: RichKind;
 }
+
+export type RichKind = 'callout' | 'math' | 'mermaid';
+
+/** A blockquote whose first line is a callout header (`> [!type]`, with an optional `|metadata`, fold and title). */
+const CALLOUT_START = /^[ \t]*>[ \t]?\[![^\]|\s]+(?:\|[^\]]*)?\][+-]?(?:[ \t]|$)/;
 
 export interface TopLevel {
   tables: readonly TopLevelBlock[];
   comments: readonly TopLevelBlock[];
+  /** Callouts, `$$` math blocks and Mermaid code blocks. */
+  rich: readonly TopLevelBlock[];
   /** Where the last top-level block the parse reached starts: before it, the parse is final. */
   lastFrom: number;
 }
 
 const cache = new WeakMap<Tree, TopLevel>();
 
-/** The tables and comment blocks at the top level of the note (not in quotes or lists), as far as it is parsed. */
+/** The tables, comment blocks and rich blocks at the top level of the note (not in quotes or lists), as far as it is parsed. */
 export function topLevel(state: EditorState): TopLevel {
   const tree = syntaxTree(state);
   let found = cache.get(tree);
   if (found) return found;
   const tables: TopLevelBlock[] = [];
   const comments: TopLevelBlock[] = [];
+  const rich: TopLevelBlock[] = [];
   // The Markdown body: the frontmatter's sibling, or the top node itself.
   const cursor = tree.cursor();
   if (cursor.firstChild()) {
@@ -54,12 +65,29 @@ export function topLevel(state: EditorState): TopLevel {
       } else if (cursor.name === 'CommentBlock') {
         last = { from: cursor.from, to: cursor.to, complete: false, closed: cursor.node.getChildren('CommentMark').length >= 2 };
         comments.push(last);
+      } else {
+        const kind = richKind(state, cursor.name, cursor.from, cursor.to, () => cursor.node.getChild('CodeInfo'));
+        if (kind) {
+          last = { from: cursor.from, to: cursor.to, complete: false, rich: kind };
+          rich.push(last);
+        }
       }
     } while (cursor.nextSibling());
   }
-  found = { tables, comments, lastFrom };
+  found = { tables, comments, rich, lastFrom };
   cache.set(tree, found);
   return found;
+}
+
+function richKind(state: EditorState, name: string, from: number, to: number, info: () => { from: number; to: number } | null): RichKind | null {
+  if (name === 'BlockMath') return 'math';
+  if (name === 'Blockquote') return CALLOUT_START.test(state.doc.lineAt(from).text) ? 'callout' : null;
+  if (name === 'FencedCode') {
+    const node = info();
+    // Only an info string of mermaid's length is read: a keystroke reads no other code block again (10c).
+    return node && node.to <= to && node.to - node.from === 7 && state.doc.sliceString(node.from, node.to).toLowerCase() === 'mermaid' ? 'mermaid' : null;
+  }
+  return null;
 }
 
 /** Whether the parse has reached past `to` (the end of a block's last line): its next line, so the block is not cut short. */

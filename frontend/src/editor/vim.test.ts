@@ -8,7 +8,8 @@ import { setHotkey } from '../features/hotkeyPrefs';
 import { installHotkeys } from '../features/hotkeys';
 import { isApple } from '../features/platform';
 import { DEFAULT_PREFS, PREFS_KEY, usePrefs } from '../state/prefs';
-import { plainTextExtensions } from './editorSetup';
+import { noteExtensions, plainTextExtensions } from './editorSetup';
+import { testContext } from '../test/noteEditor';
 import { attachVim, currentVimMode, loadedVim, loadVim, vimAvailable, vimWanted } from './vimMode';
 
 const mod = isApple ? { metaKey: true } : { ctrlKey: true };
@@ -167,5 +168,52 @@ describe('vim keys', () => {
     expect(switcher).toHaveBeenCalledTimes(1);
     expect(ev.defaultPrevented).toBe(true);
     expect(view.state.selection.main.head).toBe(before);
+  });
+});
+
+describe('vim in the note editor (Live Preview and source mode)', () => {
+  beforeEach(async () => {
+    await loadVim();
+  });
+
+  function noteVim(mode: 'live' | 'source', doc: string): EditorView {
+    const hooks = {
+      onLocalChange: () => {},
+      onBlur: () => {},
+      readOnly: false,
+      spellcheck: false,
+      autocorrect: false,
+      vim: true,
+      livePreview: mode === 'live' ? { visibility: 'hide-all' as const, locked: false, checkboxes: true } : null,
+    };
+    const view = new EditorView({ state: EditorState.create({ doc, extensions: noteExtensions(testContext(), hooks) }), parent: document.body });
+    views.push(view);
+    return view;
+  }
+
+  for (const mode of ['live', 'source'] as const) {
+    it(`edits with vim keys and keeps the app's formatting keys (${mode})`, () => {
+      const view = noteVim(mode, 'word here');
+      view.focus();
+      expect(getCM(view)).not.toBeNull();
+      expect(currentVimMode()).toBe('NORMAL');
+      type(view, 'x');
+      expect(view.state.doc.toString()).toBe('ord here');
+      // Mod-B (bold) runs before vim's own keys, in normal mode too.
+      type(view, 'viw');
+      press(view, 'b', { code: 'KeyB', ...mod });
+      expect(view.state.doc.toString()).toBe('**ord** here');
+      press(view, 'Escape');
+      type(view, 'A');
+      expect(currentVimMode()).toBe('INSERT');
+    });
+  }
+
+  it('Mod-E is inline code in Live Preview text', () => {
+    const view = noteVim('live', 'word');
+    view.focus();
+    type(view, 'viw');
+    press(view, 'e', { code: 'KeyE', ...mod });
+    expect(view.state.doc.toString()).toBe('`word`');
   });
 });

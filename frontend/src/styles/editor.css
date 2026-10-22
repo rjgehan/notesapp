@@ -809,7 +809,10 @@ th.cm-lp-cell {
 .cm-lp-embed-note,
 .cm-lp-embed-pdf,
 .cm-lp-embed-video,
-.cm-lp-embed-audio {
+.cm-lp-embed-audio,
+.cm-lp-embed-text,
+.cm-lp-embed-other {
+  /* Other files embed through their view (a task list, a spreadsheet, a canvas, a drawing). */
   width: 100%;
 }
 
@@ -939,4 +942,41 @@ th.cm-lp-cell {
     width: 44px;
     height: 44px;
   }
+}
+
+/* ---------- callouts, math and Mermaid (ROADMAP items 3 and 10) ---------- */
+
+/* A rendered rich block: the reading look (reading.css and rich.css, through .markdown-rendered),
+   in the flow of the note's lines. */
+.cm-lp-rich {
+  padding: 2px 0;
+  white-space: normal;
+  cursor: text;
+}
+
+.cm-lp-rich.markdown-rendered {
+  contain: none;
+}
+
+.cm-lp-rich > :first-child {
+  margin-top: 0;
+}
+
+.cm-lp-rich > :last-child {
+  margin-bottom: 0;
+}
+
+.cm-lp-locked .cm-lp-rich {
+  cursor: auto;
+}
+
+/* Inline math: typeset in the line; display math (`$$x$$` in a paragraph) on a line of its own. */
+.cm-lp-math {
+  white-space: normal;
+}
+
+.cm-lp-math.is-display {
+  display: block;
+  margin: 6px 0;
+  text-align: center;
 }

@@ -37,6 +37,26 @@ export interface NoteContext {
    * edit button when `onEdit` is given. Returns what removes them.
    */
   renderProperties(el: HTMLElement, yaml: string, onEdit: (() => void) | null): () => void;
+  /**
+   * Live Preview's rich blocks (ROADMAP items 3 and 10): renders a block of the note's Markdown
+   * (a callout, a `$$` math block, a Mermaid diagram) in `el` as the reading of the note always did.
+   * Absent in editors without the app (tests, a canvas card): the blocks stay text. Returns what
+   * removes it.
+   */
+  renderMarkdown?(el: HTMLElement, block: MarkdownBlockRequest): () => void;
+  /** Live Preview's inline math (`$x$`): KaTeX into `el`. Absent: math stays text. */
+  renderMath?(el: HTMLElement, tex: string, display: boolean): void;
+}
+
+/** A block of the note to render: its Markdown, and what a tap on one of its task checkboxes does. */
+export interface MarkdownBlockRequest {
+  source: string;
+  /** Images from other sites load (else a click loads one). */
+  remoteImages: boolean;
+  /** Task checkboxes can be toggled. */
+  checkboxes: boolean;
+  /** Toggles the task on the block's 0-based line `line` (a checkbox tap); false when it could not. */
+  toggleTask(line: number): boolean;
 }
 
 /** An embed to show: the file, the part of it (`#Heading`, `#page=2`), the display text and the size. */

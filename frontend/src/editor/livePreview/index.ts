@@ -19,6 +19,7 @@ import { formatToolbar } from './formatToolbar';
 import { inputRules } from './inputRules';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
 import { isPointerSelection, touchTracking } from './pointer';
+import { richMarkdown } from './rich';
 import { deleteNextToTable, tableBlocks, tables } from './table';
 import { tableCellHost } from './table/facets';
 
@@ -441,6 +442,8 @@ export function livePreview(config: LivePreviewConfig): Extension {
     tables({ locked: config.locked, remoteImages: config.remoteImages }),
     livePreviewInline(config),
     footnoteTooltips(),
+    // Callouts, math and Mermaid, rendered by the app (ROADMAP item 3).
+    richMarkdown({ locked: config.locked, remoteImages: config.remoteImages ?? true, checkboxes: config.checkboxes }),
     config.locked ? [] : inputRules(),
   ];
 }
