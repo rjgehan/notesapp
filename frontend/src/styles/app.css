@@ -1162,3 +1162,10 @@ body.is-resizing {
     animation: none;
   }
 }
+
+/* Vim mode (DESIGN §6.36): NORMAL, INSERT, VISUAL… */
+.status-vim {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--text-normal);
+}

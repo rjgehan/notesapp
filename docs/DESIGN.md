@@ -1177,7 +1177,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | | `maxContextChars` | `60000` (4,000 to 400,000) |
 | | `monthlyBudgetUsd` | `5` |
 
-**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on) and `loadRemoteImages` (default on). They are edited under Settings, "This device". Other per-device state also stays in `localStorage`: command keys (`notesapp:hotkeys`, Settings, "Hotkeys", §6.25), recent files (`notesapp:recentFiles`) and collapsed bookmark groups (§6.23).
+**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on), `loadRemoteImages` (default on), `offlineNotes` (default on, §6.26) and `vimMode` (default off, §6.36). They are edited under Settings, "This device". Other per-device state also stays in `localStorage`: command keys (`notesapp:hotkeys`, Settings, "Hotkeys", §6.25), recent files (`notesapp:recentFiles`) and collapsed bookmark groups (§6.23).
 
 ### 5.13 Identity
 
@@ -1809,6 +1809,8 @@ frontend/src/
 │   ├── completion.ts         [[ / [[Note# / [[# / # completion sources
 │   ├── editorSetup.ts        noteExtensions(): the full extension list (§6.6)
 │   ├── editorCommands.ts     toggle checkbox, bold, italic, insert link, follow link
+│   ├── vimMode.ts            vim's compartment, the editor command keys facet, the mode store (§6.36)
+│   ├── vim.ts                vim mode's lazy chunk: @replit/codemirror-vim, ex commands, key order (§6.36)
 │   ├── smartPunctuation.ts   input filter that undoes iOS smart quotes and dashes in frontmatter and code
 │   ├── unresolved.ts         decoration for links the client resolver cannot resolve
 │   ├── outline.ts            headings from the live Lezer tree (Outline panel, [[# completion)
@@ -2024,8 +2026,9 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | 12 | `smartPunctuationGuard` | An input transaction filter for iOS Smart Punctuation, which WebKit reportedly ties to `spellcheck` (to be confirmed on the device, smoke item 22). Inside frontmatter, fenced or inline code, and for `--`/`---` at the start of a line, it reverts the substitutions: `—` back to `--`, curly double quotes to `"`, curly single quotes to `'`. Otherwise iOS would silently break frontmatter delimiters, YAML strings and `"[[Link]]"` property values. |
 | 13 | `EditorView.scrollMargins` + `cursorScrollMargin` | Keeps the caret clear of the sticky banner and the toolbar |
 | 14 | `EditorState.readOnly` / `EditorView.editable` | For `lossy` files |
-| 15 | Keymap, highest first | `Prec.highest`: `Mod-Alt-ArrowLeft` / `Mod-Alt-ArrowRight` (navigate back and forward; CodeMirror's `defaultKeymap` binds `Alt-ArrowLeft/Right` to syntax-wise cursor moves outside macOS). Then the app keymap (`Mod-s` flush, `Mod-Enter` follow, `Mod-l` toggle checkbox, `Mod-b`, `Mod-i`, `Mod-k`), then `closeBracketsKeymap`, `completionKeymap`, `searchKeymap`, `historyKeymap`, `defaultKeymap`, `indentWithTab` (`Esc` then `Tab` leaves the editor, §6.14) |
+| 15 | Keymap, highest first | `Prec.highest`: `Mod-Alt-ArrowLeft` / `Mod-Alt-ArrowRight` (navigate back and forward; CodeMirror's `defaultKeymap` binds `Alt-ArrowLeft/Right` to syntax-wise cursor moves outside macOS). Then the app keymap (`Mod-s` flush, `Mod-Enter` follow, `Mod-l` toggle checkbox, `Mod-b`, `Mod-i`, `Mod-k`), then `closeBracketsKeymap`, `completionKeymap`, `searchKeymap`, `historyKeymap`, `defaultKeymap`, `indentWithTab` (`Esc` then `Tab` leaves the editor, §6.14). The app's command keys are also the `editorCommandKeys` facet, which vim mode runs before its own keys |
 | 16 | `EditorView.updateListener` | Calls `session.markDirty()` on `docChanged` when the transaction is not annotated `Transaction.remote` |
+| 17 | `vimCompartment` (`editor/vimMode.ts`) | Empty, or vim mode when this device turned it on (§6.36): a lazy chunk at `Prec.highest` |
 
 The document is always **LF-only**; there is no `lineSeparator` facet. CRLF files are converted at the session boundary (§6.9), because CodeMirror counts a line break as one position whatever the separator, and `Text.toString()` always joins with `\n`.
 
@@ -2611,7 +2614,7 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 |---|---|
 | Global | The command hotkeys above. `Esc` closes the topmost overlay or the drawer. `Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,` and `Mod-Alt-←/→` work even while the editor has focus, and so do commands registered with `globalHotkey` (quick add, `Mod-Alt-T`, §6.22), and every key chosen under Settings, "Hotkeys" (§6.25). Off Apple platforms AltGr arrives as Ctrl+Alt: in a text field, a key that types a character with it (AltGr+T is ț in Romanian) types that character rather than running a hotkey. |
 | Task list page | `Enter` or `Space` on a task opens its inline editor (`Esc` or Done closes it); `Alt-↑/↓` move it among its siblings; `Alt-→` makes it a subtask of the task above, `Alt-←` moves it out of its parent (§6.22) |
-| Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`. **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. |
+| Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`. **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. With **Vim key bindings** on (Settings › This device, §6.36): vim's keys, with the app's keys above taking precedence; `:w` saves, `:q` leaves the editor. |
 | Explorer (focused) | `↑/↓` move; `←/→` collapse and expand; `Enter` opens; `F2` renames; `Delete` deletes (with confirmation); `Mod-Alt-N` creates a new note in the focused folder |
 | Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Esc` |
 | Conflict banner | Buttons reachable with `Tab`; `Esc` dismisses Compare |
@@ -3346,6 +3349,22 @@ The code is in `frontend/src/habits/`: `model.ts` (habits from notes, schedules)
 **Check-ins from daily notes:** the property in the note itself (in source mode, or the properties editor of item 13 once built), and the **Habits** panel (`registerPanel`, right side; the bottom sheet on phones), which lists the habits for the day of the daily note in view (today for any other note) with check buttons. A `habittracker` code block, Habit Tracker 21's way to show a grid in a note, is not rendered yet: the reading view has no code-block renderer registry (item 3 adds code-block rendering on another branch).
 
 **Live sync.** Habits and check-ins are notes, so other devices' changes arrive as `file.*` and `entry.moved` events; the page's query is refetched half a second after a note event (not for attachments), only while a page or the panel is open.
+
+### 6.36 Vim mode (ROADMAP item 36)
+
+Vim keys in the note editor and the plain-text editor, from `@replit/codemirror-vim` 6.4.0 (MIT; it pulls in `@replit/codemirror-vim-core` 0.1.0, MIT), as Obsidian's "Vim key bindings" option.
+
+- **Setting.** Settings › This device › **Vim key bindings**, the per-device preference `vimMode` (`notesapp:prefs`, §5.12), **off by default**. It applies only where the primary pointer is fine (a mouse or a trackpad): with `(pointer: coarse)` (phones, tablets) the row is disabled with the reason and the editor never loads vim, because normal mode would swallow what the on-screen keyboard types. Turning it on or off remounts the open editor, as spell check does.
+- **Lazy chunk.** `editor/vimMode.ts` (in the main bundle) holds a `Compartment` that every editor includes (`common()` in `editorSetup.ts`), empty unless vim is on and loaded. The first editor that mounts with vim on imports `editor/vim.ts` (the library and the app's glue: 122 kB, 39 kB gzip; the service worker precaches it with the other lazy chunks, §6.26) and reconfigures the compartment; later editors get vim at creation. Without the preference the chunk is never requested. The editor starts each mount in normal mode, as in Obsidian.
+- **Key order.** The vim extension is `Prec.highest([appKeysFirst, vim(), modeIndicator])`, so it sees keys before CodeMirror's keymaps (the library's requirement):
+  1. The global handler (§6.25) runs first anyway, in the window's capture phase: the always-global keys (`Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,`, back and forward), `globalHotkey` commands (quick add) and every key chosen on this device work in every vim mode. On Windows and Linux this means `Ctrl-O` opens the switcher rather than vim's jump back, as in Obsidian.
+  2. `appKeysFirst` runs the editor's command keys, declared once as the `editorCommandKeys` facet (`Mod-S`, `Mod-Enter`, `Mod-L`, `Mod-B`, `Mod-I`, `Mod-K`, `Mod-E`, `Mod-F`; the text editor has `Mod-S` and `Mod-F`), so bold, find or reading view keep their keys over vim's `Ctrl-B`, `Ctrl-F`, `Ctrl-E`, `Ctrl-I` there. A command given another key under Settings › Hotkeys steps aside (`ifDefault`), and its old key then goes to vim: removing Find's key gives `Ctrl-F` back to vim's page down. On Apple platforms `Mod` is Cmd, so nothing overlaps.
+  3. Vim. Normal-mode keys have no `Mod` or `Alt`, so they can never be an app hotkey (`eventSpec` returns null for them).
+  4. CodeMirror's keymaps, for what vim leaves (completion's `Enter` and arrows in insert mode, undo on `Mod-Z`, …).
+- **Escape.** `appKeysFirst` also closes the completion list on `Esc` (vim then leaves insert mode) and re-arms CodeMirror's tab escape, which vim's handling of `Esc` would otherwise skip, so `Esc` then `Tab` still moves focus out of the editor (§6.14).
+- **Ex commands** (`Vim.defineEx`, global, each finding its editor through the adapter): `:w` runs the editor's `editor.save` binding (the session flushes now), `:q` leaves the editor (there are no tabs or panes to close, and the note autosaves, so `:q!` discards nothing), `:wq` and `:x` save and leave. The other built-in ex commands (`:s`, `:sort`, `:noh`, `:map`, …) work as in the library. The `:` and `/` prompts are a bottom panel (`.cm-vim-panel`) styled like the search panel.
+- **Mode indicator.** A plugin listens to `vim-mode-change` and publishes `NORMAL`, `INSERT`, `VISUAL`, `VISUAL LINE`, `VISUAL BLOCK` or `REPLACE` to a tiny store (`useVimMode`) that the desktop status bar shows (§6.5); the editor that last had focus wins, and the item disappears with the editor. Narrower windows have no status bar: there the block cursor (normal and visual mode, in the accent colour) against the bar cursor (insert mode) shows the mode.
+- **Where it applies.** `NoteEditor` hosts (Markdown notes and plain-text files). Small editors are plain fields and stay unaffected: the inline title, properties, the task editor, spreadsheet cells, the capture box. An editor built elsewhere with its own `EditorView` (a canvas card on its own branch) gets no vim because it does not include the compartment; a one-line editor whose `Esc` closes it would fight vim's `Esc`.
 
 ---
 
