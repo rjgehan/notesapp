@@ -182,6 +182,21 @@ class PublishRendererTest {
 	}
 
 	@Test
+	void encryptedSectionsFoundByTheIndexAreNeverPublishedEither() {
+		// The publisher strips whatever its own matcher or the index's EncryptedSections finds: the unmarked
+		// "%%🔐 …🔐%%" form where %% is not a comment (inside $$ math), a section in a code span, and a bare unmarked
+		// "🔐 💡hint💡<base64> 🔐" outside comments.
+		String lock = "🔐";
+		String bulb = "💡";
+		String html = render("Start\n\n$$\nx %%" + lock + " " + bulb + "math hint" + bulb + "TWF0aENpcGhlcnRleHQx " + lock
+				+ "%%\n$$\n\nCode `" + lock + "β " + bulb + "code hint" + bulb + "Q29kZUNpcGhlcnRleHQx " + lock
+				+ "` and bare " + lock + " " + bulb + "bare hint" + bulb + "QmFyZUNpcGhlcnRleHQx " + lock + " end.\n");
+		assertThat(html).contains("Start").contains("bare").contains("end.");
+		assertThat(html).doesNotContain("hint").doesNotContain("TWF0aE").doesNotContain("Q29kZU")
+			.doesNotContain("QmFyZU");
+	}
+
+	@Test
 	void textOfLinksIsEscaped() {
 		String html = render("[[Missing|<b onmouseover=x>bold</b>]] [[Other|*not emphasis* <i>]]");
 		assertThat(html).contains("&lt;b onmouseover=x&gt;bold&lt;/b&gt;").contains("*not emphasis* &lt;i&gt;")

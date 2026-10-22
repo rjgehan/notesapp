@@ -72,7 +72,7 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
 		response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=()");
 		response.setHeader(BUILD_HEADER, this.buildSha);
-		if (path.startsWith("/api/") && !setsOwnCaching(path)) {
+		if (path.startsWith("/api/") && !setsOwnCaching(request.getMethod(), path)) {
 			response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
 		}
 		else if (path.equals(SERVICE_WORKER)) {
@@ -87,8 +87,14 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		chain.doFilter(request, new OverridingHeadersResponse(response));
 	}
 
-	/** The raw-file endpoints and the event stream set their own {@code Cache-Control}. */
-	static boolean setsOwnCaching(String path) {
+	/**
+	 * The raw-file downloads and the event stream set their own {@code Cache-Control}; an upload (`PUT /api/files/raw`)
+	 * answers JSON like every other endpoint and gets `no-store`.
+	 */
+	static boolean setsOwnCaching(String method, String path) {
+		if (!"GET".equals(method) && !"HEAD".equals(method)) {
+			return false;
+		}
 		return path.equals("/api/files/raw") || path.equals("/api/history/raw") || path.equals("/api/events")
 				|| (path.startsWith("/api/trash/") && path.endsWith("/raw"));
 	}

@@ -218,7 +218,6 @@ Vitest, ESLint and so on) are not shipped.
 | delaunator | ISC | <https://github.com/mapbox/delaunator> |
 | detect-node-es | MIT | <https://github.com/thekashey/detect-node> |
 | dompurify | (MPL-2.0 OR Apache-2.0) | <https://github.com/cure53/DOMPurify> |
-| elkjs | EPL-2.0 | <https://github.com/kieler/elkjs> |
 | entities | BSD-2-Clause | <https://github.com/fb55/entities> |
 | es-errors | MIT | <https://github.com/ljharb/es-errors> |
 | es-toolkit | MIT | <https://es-toolkit.dev> |

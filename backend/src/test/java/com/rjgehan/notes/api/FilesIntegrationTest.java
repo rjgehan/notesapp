@@ -452,7 +452,10 @@ class FilesIntegrationTest {
 		for (int i = 0; i < png.length; i++) {
 			png[i] = (byte) i;
 		}
-		JsonNode file = this.api.putBytes("/api/files/raw?path=" + Api.enc("Pics/pic.png"), png).ok(201).get("file");
+		Reply upload = this.api.putBytes("/api/files/raw?path=" + Api.enc("Pics/pic.png"), png);
+		// The upload answers JSON, so it is no-store like every /api response (API.md §2); only downloads cache.
+		assertThat(upload.header("Cache-Control")).isEqualTo("no-store");
+		JsonNode file = upload.ok(201).get("file");
 		assertThat(file.get("kind").asString()).isEqualTo("image");
 		assertThat(file.get("version").isNull()).isTrue();
 

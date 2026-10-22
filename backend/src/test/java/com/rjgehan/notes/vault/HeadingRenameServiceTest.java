@@ -139,6 +139,8 @@ class HeadingRenameServiceTest {
 	void theNoteMustHaveTheNewHeadingAndNoLongerTheOldOne() throws Exception {
 		write("Plan.md", "# Old\n# New\n");
 		write("Image.png", "x");
+		write("Budget.sheet", "{\"type\":\"notesapp-sheet\",\"version\":1,\"sheets\":[{\"id\":\"s1\",\"name\":\"Old\",\"cells\":{}}]}\n");
+		write("Board.canvas", "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"text\":\"# Old\",\"x\":0,\"y\":0,\"width\":10,\"height\":10}],\"edges\":[]}");
 		start();
 		assertThatThrownBy(() -> rename("Plan.md", "Old", "New", false)).isInstanceOfSatisfying(NotesException.class,
 				(ex) -> assertThat(ex.code()).isEqualTo(ErrorCode.BAD_REQUEST));
@@ -150,6 +152,11 @@ class HeadingRenameServiceTest {
 			.isInstanceOfSatisfying(NotesException.class, (ex) -> assertThat(ex.code()).isEqualTo(ErrorCode.BAD_REQUEST));
 		assertThatThrownBy(() -> rename("Image.png", "Old", "New", false))
 			.isInstanceOfSatisfying(NotesException.class, (ex) -> assertThat(ex.code()).isEqualTo(ErrorCode.TYPE_MISMATCH));
+		// Indexed documents have no editable headings either (409, not 400 "no heading").
+		for (String doc : new String[] { "Budget.sheet", "Board.canvas" }) {
+			assertThatThrownBy(() -> rename(doc, "Old", "New", false)).isInstanceOfSatisfying(NotesException.class,
+					(ex) -> assertThat(ex.code()).isEqualTo(ErrorCode.TYPE_MISMATCH));
+		}
 		assertThatThrownBy(() -> rename("Nope.md", "Old", "New", false))
 			.isInstanceOfSatisfying(NotesException.class, (ex) -> assertThat(ex.code()).isEqualTo(ErrorCode.NOT_FOUND));
 	}
