@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -444,7 +445,15 @@ public class ReminderScheduler implements DisposableBean {
 	}
 
 	private ZoneId zone() {
-		return (this.zone != null) ? this.zone : this.clock.getZone();
+		return (this.zone != null) ? this.zone : ianaZone(this.clock.getZone());
+	}
+
+	/**
+	 * The server's zone as an IANA id: the clock's UTC is {@code ZoneOffset.UTC}, whose id is {@code Z}, which the
+	 * status would report and clients would send back; it reads as {@code UTC}.
+	 */
+	static ZoneId ianaZone(ZoneId zone) {
+		return zone.normalized().equals(ZoneOffset.UTC) ? ZoneId.of("UTC") : zone;
 	}
 
 	private void prune(Instant now) {

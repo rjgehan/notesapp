@@ -3499,7 +3499,7 @@ A reminder's `at` is a local date-time with no zone. The server reads it in the 
 
 ### 28.1 Status and zone
 
-**`GET /api/reminders/status`** → `200 RemindersStatus`: the zone in use, each route's readiness (whether a route is *on* is in `settings.reminders`), the subscribed devices (never their endpoints or keys), the last delivery and the last problem (since the server started), and the next five reminders.
+**`GET /api/reminders/status`** → `200 RemindersStatus`: the zone in use (always an IANA id: the server's own UTC is `"UTC"`, never `"Z"`), each route's readiness (whether a route is *on* is in `settings.reminders`), the subscribed devices (never their endpoints or keys), the last delivery and the last problem (since the server started), and the next five reminders.
 
 - `webPush.available` is false, with `reason`, when `<secrets-dir>/push.json` cannot be read or is malformed. `webPush.publicKey` is null until the key pair exists (`POST /api/push/key`).
 - `ntfy.configured` is false, with `reason`, when `<secrets-dir>/ntfy.json` is missing or invalid (the same file as the app alerts, §6.6). `ownTopic` is true when it has `"reminders": {"topic": …}`; otherwise reminders go to its default topic. The topic and token are never shown.
