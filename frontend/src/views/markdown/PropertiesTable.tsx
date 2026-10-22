@@ -1,6 +1,6 @@
-// Read-only, collapsible "Properties" table above the reading view (DESIGN §6.7 #7). Editing
-// properties uses source mode in v1.
-import { Calendar, ChevronDown, ChevronRight, Hash, Link2, List, ToggleLeft, Type } from 'lucide-react';
+// The collapsible "Properties" table of a note's frontmatter (DESIGN §6.6.1, §6.7 #7), shown by
+// Live Preview. Its edit button shows the YAML for editing (a typed editor is ROADMAP 13).
+import { Calendar, ChevronDown, ChevronRight, Hash, Link2, List, Pencil, ToggleLeft, Type } from 'lucide-react';
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { useTree } from '../../api/hooks';
 import { parseFrontmatter } from '../../features/frontmatter';
@@ -90,11 +90,15 @@ function iconFor(name: string, value: unknown) {
   return <Type size={14} aria-hidden />;
 }
 
-export function PropertiesTable({ yaml, sourcePath }: { yaml: string; sourcePath: string }) {
+/**
+ * A note's properties. In Live Preview (ROADMAP 10b) `onEdit` adds an edit button, which shows the
+ * frontmatter's YAML in the editor; empty properties then still show, to be edited.
+ */
+export function PropertiesTable({ yaml, sourcePath, onEdit = null }: { yaml: string; sourcePath: string; onEdit?: (() => void) | null }) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const parsed = useMemo(() => parseFrontmatter(yaml), [yaml]);
   const entries = parsed.data ? Object.entries(parsed.data) : [];
-  if (parsed.data && entries.length === 0) return null;
+  if (parsed.data && entries.length === 0 && !onEdit) return null;
 
   const toggle = () => {
     const next = !collapsed;
@@ -108,15 +112,31 @@ export function PropertiesTable({ yaml, sourcePath }: { yaml: string; sourcePath
 
   return (
     <section className="properties" aria-label="Properties">
-      <button type="button" className="properties-heading" aria-expanded={!collapsed} onClick={toggle}>
-        {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
-        Properties
-      </button>
+      <div className="properties-header">
+        <button type="button" className="properties-heading" aria-expanded={!collapsed} onClick={toggle}>
+          {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+          Properties
+        </button>
+        {onEdit && (
+          <button
+            type="button"
+            className="icon-button properties-edit"
+            aria-label="Edit properties"
+            title="Edit properties"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onEdit}
+          >
+            <Pencil size={14} aria-hidden />
+          </button>
+        )}
+      </div>
       {!collapsed &&
         (parsed.error ? (
           <div className="properties-error" role="note">
             Invalid frontmatter: {parsed.error}
           </div>
+        ) : entries.length === 0 ? (
+          <div className="property-empty">No properties</div>
         ) : (
           <dl className="properties-list">
             {entries.map(([key, value]) => (

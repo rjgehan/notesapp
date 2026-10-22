@@ -10,10 +10,13 @@ import { isCustomized } from '../features/hotkeyPrefs';
 import { isIOS, modKey } from '../features/platform';
 import { headingSource, tagSource, wikilinkSource } from './completion';
 import { noteContext, type NoteContext } from './context';
-import { followLinkAtCursor, insertMarkdownLink, saveNow, toggleBold, toggleCheckbox, toggleItalic, toggleMode } from './editorCommands';
+import { followLink, followLinkAtCursor, saveNow, toggleCheckbox, toggleMode } from './editorCommands';
+import { formatting, toggleBold, toggleHighlight, toggleInlineCode, toggleItalic, toggleLink, toggleStrikethrough } from './formatting';
 import { lineClassPlugin, obsidianHighlight } from './highlight';
 import { linkAt } from './linkAt';
 import { markdownNoteLanguage } from './language';
+import { livePreview, livePreviewInline, type LivePreviewConfig } from './livePreview';
+import { cellLanguage, tableCellSetup } from './livePreview/table';
 import { pasteAndDrop } from './pasteAndDrop';
 import { isLocalEdit } from './remote';
 import { searchHighlight } from './searchHighlight';
@@ -28,11 +31,14 @@ export interface EditorHooks {
   onLocalChange(): void;
   /** Editor blur: the session flushes. */
   onBlur(): void;
+  /** The session cannot be written (a lossy or read-only file). */
   readOnly: boolean;
   spellcheck: boolean;
   autocorrect: boolean;
   /** Vim keys (DESIGN §6.36): the preference, on a device where vim applies. */
   vim?: boolean;
+  /** Live Preview (DESIGN §6.6.1); absent or null is styled source mode. A locked Live Preview is read-only. */
+  livePreview?: LivePreviewConfig | null;
 }
 
 /**
@@ -58,6 +64,7 @@ function coveredMargins(view: EditorView): { top: number } {
 }
 
 function common(hooks: EditorHooks): Extension[] {
+  const readOnly = hooks.readOnly || hooks.livePreview?.locked === true;
   return [
     // Vim (lazy, empty until its chunk has loaded); it sets its own precedence.
     vimSlot(hooks.vim === true),
@@ -82,8 +89,8 @@ function common(hooks: EditorHooks): Extension[] {
     }),
     EditorView.scrollMargins.of(coveredMargins),
     EditorView.cursorScrollMargin.of({ x: 5, y: 32 }),
-    EditorState.readOnly.of(hooks.readOnly),
-    EditorView.editable.of(!hooks.readOnly),
+    EditorState.readOnly.of(readOnly),
+    EditorView.editable.of(!readOnly),
     EditorView.updateListener.of((update) => {
       if (update.transactions.some(isLocalEdit)) hooks.onLocalChange();
       if (update.focusChanged && !update.view.hasFocus) hooks.onBlur();
@@ -114,10 +121,16 @@ const noteCommandKeys: readonly CommandKey[] = [
   { key: 'Mod-s', id: 'editor.save', run: saveNow, preventDefault: true },
   { key: 'Mod-Enter', id: 'editor.followLink', run: followLinkAtCursor },
   { key: 'Mod-l', id: 'editor.toggleCheckbox', run: toggleCheckbox, preventDefault: true },
+  // Formatting (DESIGN §6.6.1): toggles on the selection or at the cursor.
   { key: 'Mod-b', id: 'editor.bold', run: toggleBold, preventDefault: true },
   { key: 'Mod-i', id: 'editor.italic', run: toggleItalic, preventDefault: true },
-  { key: 'Mod-k', id: 'editor.insertLink', run: insertMarkdownLink, preventDefault: true },
-  { key: 'Mod-e', id: 'editor.toggleMode', run: toggleMode, preventDefault: true },
+  { key: 'Mod-k', id: 'editor.insertLink', run: toggleLink, preventDefault: true },
+  { key: 'Mod-Shift-x', id: 'editor.strikethrough', run: toggleStrikethrough, preventDefault: true },
+  { key: 'Mod-Shift-h', id: 'editor.highlight', run: toggleHighlight, preventDefault: true },
+  // Mod-E in the text: inline code while you edit; a locked note (read-only) unlocks, as Mod-E
+  // does outside the text. Each half follows its own command's key (Settings, Hotkeys).
+  { key: 'Mod-e', id: 'editor.inlineCode', run: (v) => !v.state.readOnly && toggleInlineCode(v), preventDefault: true },
+  { key: 'Mod-e', id: 'editor.toggleMode', run: (v) => v.state.readOnly && toggleMode(v), preventDefault: true },
 ];
 
 /** Mod-f, for vim's benefit only: the search keymap binds it in the editor (findKeymap). */
@@ -149,26 +162,56 @@ const clickNavigation: Extension = [
       const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos === null) return false;
       const hit = linkAt(view.state, pos);
-      const ctx = view.state.facet(noteContext);
-      if (!hit || !ctx) return false;
+      if (!hit || !view.state.facet(noteContext)) return false;
       event.preventDefault();
-      if (hit.kind === 'internal') ctx.openLink(hit.target, hit.subpath);
-      else if (hit.kind === 'tag') ctx.openTag(hit.tag);
-      else window.open(hit.url, '_blank', 'noopener,noreferrer');
-      return true;
+      return followLink(view, hit);
     },
   }),
 ];
 
-/** The Markdown note editor (DESIGN §6.6 #1–17). */
+/**
+ * The editor of a table cell being edited in Live Preview (DESIGN §6.6.1): one line of inline
+ * Markdown with the note's rendering, completion and formatting keys. Its undo history is the
+ * note's, and the grid adds the keys that move between cells.
+ */
+function tableCellExtensions(ctx: NoteContext, hooks: EditorHooks, config: LivePreviewConfig): Extension[] {
+  return [
+    noteContext.of(ctx),
+    isIOS ? [] : drawSelection(),
+    cellLanguage,
+    syntaxHighlighting(obsidianHighlight),
+    livePreviewInline({ ...config, locked: false }),
+    EditorView.lineWrapping,
+    EditorView.contentAttributes.of({
+      spellcheck: String(hooks.spellcheck),
+      autocorrect: hooks.autocorrect ? 'on' : 'off',
+      autocapitalize: 'sentences',
+      enterkeyhint: 'next',
+    }),
+    closeBrackets(),
+    formatting(),
+    autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
+    clickNavigation,
+    unresolvedLinks,
+    smartPunctuationGuard,
+    commandKeymap(noteCommandKeys.filter((k) => k.key !== 'Mod-l')),
+    keymap.of([...closeBracketsKeymap, ...defaultKeymap]),
+  ];
+}
+
+/** The Markdown note editor (DESIGN §6.6 #1–16), in Live Preview or styled source mode (§6.6.1). */
 export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[] {
+  const preview = hooks.livePreview;
   return [
     noteContext.of(ctx),
     common(hooks),
-    placeholder('Start writing…'),
+    preview?.locked ? [] : placeholder('Start writing…'),
     markdownNoteLanguage(),
     syntaxHighlighting(obsidianHighlight),
     lineClassPlugin,
+    preview ? livePreview(preview) : [],
+    preview && !preview.locked ? tableCellSetup.of(() => tableCellExtensions(ctx, hooks, preview)) : [],
+    formatting(),
     autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
     clickNavigation,
     unresolvedLinks,

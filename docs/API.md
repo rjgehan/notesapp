@@ -290,7 +290,7 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
 
 - `readOnly` is `true` when the file on disk was written by a newer version of the app or fails validation. The server then serves what it could read plus defaults, and refuses writes (DESIGN §5.12).
 - Fields in the file that this version does not know are **preserved** on write.
-- Per-device preferences (theme, spellcheck, autocorrect, remote images) are not vault settings; the client keeps them in `localStorage`.
+- Per-device preferences (theme, spellcheck, autocorrect, remote images, Live Preview syntax visibility) are not vault settings; the client keeps them in `localStorage`.
 - A vault's first start creates the settings from the defaults plus what its `.obsidian/` folder says, when it has one (ROADMAP item 24, DESIGN §5.23). The compatibility report (§11.5) shows the mapping and proposes it again later.
 
 ### `PUT /api/settings`
@@ -330,6 +330,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `excludedPaths` | Excluded from search results (§12.1) and from unlinked mentions (§11.2). |
 | `dailyNotes.*`, `templates.*` | See §15.2 and §15.4. |
 | `templates.folderTemplates` | Applied by the client: a note it creates (New note, a link to a missing note, the quick switcher) in a folder starts from the template of the deepest rule whose `folder` contains it, rendered as in §15.4. Notes created in `templates.folder` get none. |
+| `editor.defaultMode` | How notes open: `edit` in the editor (Live Preview, DESIGN §6.6.1), `read` in the reading view. Source mode and lock editing are per-note choices on the client. |
 | `editor.*` | UI preferences that apply on all devices. `strictLineBreaks: false` (the default, as in Obsidian) renders a single newline as a line break in reading view. |
 | `ai.*` | Ask your vault and summaries (§24). `enabled` is off by default: until it is on, nothing is ever sent to Anthropic. `provider`: `claude-code` (default), the server's Claude Code CLI with the user's Claude subscription, or `api`, the Anthropic API billed per token. `excludedPaths` (default `["Private"]`) and `files.excludedPaths` are never read for a request. `maxContextChars` caps the note text of one request, earlier turns included; `monthlyBudgetUsd` refuses requests once the month's estimated spend reaches it. |
 

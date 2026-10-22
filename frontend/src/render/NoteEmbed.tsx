@@ -35,7 +35,7 @@ export default function NoteEmbed({ path, subpath, sourcePath, depth }: EmbedPro
 
   return (
     <div className="markdown-embed" data-source={path} data-embedded-in={sourcePath}>
-      <a className="markdown-embed-title internal-link" data-href={path} href={noteRoute(path, subpath)}>
+      <a className="markdown-embed-title internal-link" data-href={subpath ? `${path}#${subpath}` : path} href={noteRoute(path, subpath)}>
         <FileText size={14} aria-hidden />
         <span>{title}</span>
       </a>

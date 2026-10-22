@@ -8,6 +8,7 @@ import { smartPunctuationGuard } from './smartPunctuation';
 function typeSmart(doc: string, cursor: number, replaceFrom: number, insert: string): string {
   let state = EditorState.create({ doc, selection: EditorSelection.cursor(cursor), extensions: [markdownNoteLanguage(), smartPunctuationGuard] });
   ensureSyntaxTree(state, state.doc.length, 5000);
+  state = state.update({}).state;
   state = state.update({ changes: { from: replaceFrom, to: cursor, insert }, userEvent: 'input.type' }).state;
   return state.doc.toString();
 }

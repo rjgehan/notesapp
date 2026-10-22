@@ -101,6 +101,26 @@ You don't want to "code" a note and then switch to a preview to see it. These th
 
 **One line:** notes render as you type, in the one editor. There is no separate preview, Markdown syntax is hidden by default, and tables show and edit as a grid. The file on disk stays plain Markdown, byte for byte what you wrote.
 
+**Status:** built (2026-10-21, branch `feat/live-preview`): phases 10a, 10b and 10c as below, then a review of the whole item whose findings are fixed (each with a test that failed first). Design in DESIGN §6.6.1, the reading view in §6.7, tests in §8.2 and smoke items 37–41 in §8.3. Not yet checked on a real iPhone. Deviations and additions:
+
+- **The reading view is locked Live Preview**, as planned, and the v1 reading view is removed. markdown-it stays only for notes embedded with `![[Note]]`, so the *Strict line breaks* setting now affects only embedded notes (and how rich paste writes a line break); a note itself always shows its lines as typed.
+- **Frontmatter** shows as the reading view's properties table (collapsible), with an edit button that shows the YAML as text until the caret leaves it; item 13 still turns it into a typed editor.
+- **Code blocks** hide their fences, and show the language, only while no selection touches the block; the caret going in shows them.
+- **Grids and hidden blocks are top-level only**: tables and `%%` comment blocks inside quotes or lists stay text. An unclosed `%%` stays text while you edit, so typing `%%` never hides the rest of the note.
+- **Embeds** go through the reading view's embed code (`NoteContext.renderEmbed`, which uses `loadEmbed()` for registered view types). Table cells show images; other embeds and footnotes stay as typed there.
+- **Formatting with nothing selected** is *pending*: nothing is written until you type (a faint mark shows the formats on), so an unused toggle leaves no empty `****` behind. `Mod-E` toggles inline code in the text and lock editing elsewhere. The selection toolbar is desktop only; the phone has the keyboard toolbar and the system's selection menu.
+- **Rich paste** also pastes plain text into code and the properties, pastes a code editor's copy (VS Code, JetBrains) as text, drops `data:` and local images (keeping their alt text), and keeps a pasted rule from turning the paragraph above it into a heading.
+- **Typing `---` then Enter** on a note's first line starts properties, as in Obsidian.
+- **iPhone:** taps count as clicks for the caret rules, a selection handle dragged into hidden markup stops at its edge (the markup stays hidden), widgets cannot be long-press selected, and small targets are 44 px.
+- **Performance:** in a 10,000-line note a keystroke costs about what styled source mode does (2–5 ms in jsdom; about 7 ms in Chromium), from one shared walk over the note's top-level blocks and state that maps through edits.
+
+Known leftovers, low severity, left for later:
+
+- **Android and pending formats:** Android keyboards compose every word (IME composition); text composed while a format is pending may not go inside its markers. Not tried on a device.
+- **Bolding inside `a(b)c`:** bolding `(b)` writes `a**(b)**c`, which Markdown does not read as bold (the markers sit between a letter and punctuation), so the asterisks show.
+- **A `%%` comment block inside a quote** is not hidden (only top-level comment blocks are).
+- **Redo after another device's edit** can spill past the step that was undone.
+
 | Value | Effort | Depends on |
 |---|---|---|
 | H | L | 3 helps (callouts, math and Mermaid render inside it once 3 lands) |

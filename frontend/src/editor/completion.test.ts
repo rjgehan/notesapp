@@ -8,8 +8,10 @@ import { buildVaultTree } from '../api/vaultTree';
 import { basenameOf, extensionOf, lastSegment } from '../features/paths';
 import { DEFAULT_SETTINGS } from '../features/settings';
 import { headingSource, tagSource, wikilinkSource } from './completion';
-import type { NoteContext } from './context';
+import { noteContext, type NoteContext } from './context';
 import { noteExtensions } from './editorSetup';
+import { cellLanguage } from './livePreview/table';
+import { tableCellHost } from './livePreview/table/facets';
 
 function entry(path: string, aliases: string[] = [], mtime = '2026-10-16T10:00:00.000Z'): FileEntry {
   const ext = extensionOf(path);
@@ -56,6 +58,9 @@ function context(settings: Settings = DEFAULT_SETTINGS, path = 'Welcome.md'): No
     toggleMode: () => {},
     insertFiles: () => {},
     linkTo: (path) => `[[${path}]]`,
+    showMenu: () => {},
+    renderEmbed: () => () => {},
+    renderProperties: () => () => {},
   };
 }
 
@@ -70,7 +75,7 @@ afterEach(() => {
 function makeView(doc: string, cursor: number, ctx = context()): EditorView {
   const state = EditorState.create({ doc, selection: EditorSelection.cursor(cursor), extensions: noteExtensions(ctx, hooks) });
   ensureSyntaxTree(state, state.doc.length, 5000);
-  const view = new EditorView({ state });
+  const view = new EditorView({ state: state.update({}).state });
   views.push(view);
   return view;
 }
@@ -157,6 +162,13 @@ describe('heading completion', () => {
     expect(result.options.map((o) => o.label)).toEqual(['Title', 'Second part']);
     pick(view, result, 'Second part');
     expect(view.state.doc.toString()).toBe('# Title\n\n## Second part\n\n[[#Second part]]');
+  });
+
+  it('[[# in a table cell lists the note’s headings', async () => {
+    const note = makeView('# Title\n\n## Second part\n\n| a |\n|---|\n| b |', 0);
+    const cell = EditorState.create({ doc: '[[#Sec', selection: EditorSelection.cursor(6), extensions: [noteContext.of(context()), tableCellHost.of(note), cellLanguage] });
+    const result = (await headingSource(new CompletionContext(cell, 6, false))) as CompletionResult;
+    expect(result.options.map((o) => o.label)).toEqual(['Second part']);
   });
 
   it('[[Other# uses the note metadata', async () => {

@@ -1,6 +1,7 @@
 // Lezer markdown extension for Obsidian syntax (DESIGN §6.6 #6): WikiLink, Embed, Hashtag,
-// Highlight (==x==) and Comment (%%x%%, inline and block). The tag and wikilink rules use the
-// shared patterns of features/syntax.ts (API.md §15.6).
+// Highlight (==x==), Comment (%%x%%, inline and block) and footnotes (`[^label]` references,
+// `^[inline notes]` and `[^label]: text` definitions, as the markdown-it footnote plugin reads
+// them). The tag and wikilink rules use the shared patterns of features/syntax.ts (API.md §15.6).
 import { styleTags, tags as t, Tag } from '@lezer/highlight';
 import type { BlockContext, DelimiterType, InlineContext, Line, MarkdownConfig } from '@lezer/markdown';
 import { isWhitespace, matchWikiLinkAt, splitWikiBody, tagBodyLength } from '../features/syntax';
@@ -12,6 +13,7 @@ export const obsidianTags = {
   hashtag: Tag.define(t.labelName),
   highlight: Tag.define(),
   comment: Tag.define(t.comment),
+  footnote: Tag.define(t.labelName),
 };
 
 const HighlightDelim: DelimiterType = { resolve: 'Highlight', mark: 'HighlightMark' };
@@ -73,13 +75,24 @@ function parseInlineComment(cx: InlineContext, next: number, pos: number): numbe
   return cx.addElement(cx.elt('Comment', pos, end, [cx.elt('CommentMark', pos, pos + 2), cx.elt('CommentMark', end - 2, end)]));
 }
 
-/** A `%%` at the start of a line whose comment does not close on that line: runs to the closing `%%` (or EOF). */
-function parseCommentBlock(cx: BlockContext, line: Line): boolean {
+/** Whether `line` starts a comment block: `%%` at its start, unless the comment closes on the line with text after it. */
+function startsCommentBlock(line: Line): boolean {
   const text = line.text;
   if (!text.startsWith('%%', line.pos)) return false;
   const rest = text.slice(line.pos + 2);
+  const close = rest.indexOf('%%');
+  return close < 0 || rest.slice(close + 2).trim() === '';
+}
+
+/**
+ * A `%%` at the start of a line whose comment does not close on that line: runs to the closing `%%`
+ * (or EOF). It interrupts a paragraph, as in the markdown-it reading of the note (render.ts).
+ */
+function parseCommentBlock(cx: BlockContext, line: Line): boolean {
+  const text = line.text;
+  if (!startsCommentBlock(line)) return false;
+  const rest = text.slice(line.pos + 2);
   const sameLineClose = rest.indexOf('%%');
-  if (sameLineClose >= 0 && rest.slice(sameLineClose + 2).trim() !== '') return false;
   const start = cx.lineStart + line.pos;
   if (sameLineClose >= 0) {
     const end = cx.lineStart + text.length;
@@ -104,6 +117,72 @@ function parseCommentBlock(cx: BlockContext, line: Line): boolean {
   return true;
 }
 
+// ---------- footnotes ----------
+
+/** `[^label]`: a reference to a footnote. The label has no blanks; `[^x](url)` stays a link. */
+function parseFootnoteReference(cx: InlineContext, next: number, pos: number): number {
+  if (next !== 91 /* [ */ || cx.char(pos + 1) !== 94 /* ^ */) return -1;
+  let end = pos + 2;
+  for (; end < cx.end; end++) {
+    const ch = cx.char(end);
+    if (ch === 93 /* ] */) break;
+    if (ch === 32 || ch === 9 || ch === 10 || ch === 13) return -1;
+  }
+  if (end >= cx.end || end === pos + 2 || cx.char(end + 1) === 40 /* ( */) return -1;
+  return cx.addElement(cx.elt('FootnoteReference', pos, end + 1, [cx.elt('FootnoteMark', pos, pos + 2), cx.elt('FootnoteLabel', pos + 2, end), cx.elt('FootnoteMark', end, end + 1)]));
+}
+
+/** `^[text]`: a footnote written in place, its text parsed as inline Markdown. */
+function parseInlineFootnote(cx: InlineContext, next: number, pos: number): number {
+  if (next !== 94 /* ^ */ || cx.char(pos + 1) !== 91 /* [ */) return -1;
+  let depth = 0;
+  for (let i = pos + 1; i < cx.end; i++) {
+    const ch = cx.char(i);
+    if (ch === 92 /* \ */) {
+      i++;
+    } else if (ch === 91) {
+      depth++;
+    } else if (ch === 93 && --depth === 0) {
+      if (i === pos + 2) return -1;
+      const content = cx.parser.parseInline(cx.slice(pos + 2, i), pos + 2);
+      return cx.addElement(cx.elt('InlineFootnote', pos, i + 1, [cx.elt('FootnoteMark', pos, pos + 2), ...content, cx.elt('FootnoteMark', i, i + 1)]));
+    }
+  }
+  return -1;
+}
+
+/** Where the text of a footnote definition starts on `line` (`[^label]:`), or -1. */
+function footnoteDefinitionText(line: Line): number {
+  if (line.indent - line.baseIndent >= 4) return -1;
+  const m = /^\[\^[^\]\s]+\]:/.exec(line.text.slice(line.pos));
+  return m ? line.pos + m[0].length : -1;
+}
+
+/**
+ * `[^label]: text`: a footnote's definition, with its text parsed as inline Markdown. At the top
+ * level of the note, the indented lines after it continue it. It interrupts a paragraph, as in
+ * markdown-it.
+ */
+function parseFootnoteDefinition(cx: BlockContext, line: Line): boolean {
+  const textAt = footnoteDefinitionText(line);
+  if (textAt < 0) return false;
+  const topLevel = cx.parentType().name === 'Document';
+  const start = cx.lineStart + line.pos;
+  const children = [cx.elt('FootnoteLabel', start, cx.lineStart + textAt)];
+  const inline = (from: number, to: number) => {
+    if (to > from) children.push(...cx.parser.parseInline(line.text.slice(from - cx.lineStart, to - cx.lineStart), from));
+  };
+  let end = cx.lineStart + line.text.length;
+  inline(cx.lineStart + textAt, end);
+  while (cx.nextLine() && topLevel) {
+    if (line.pos === line.text.length || line.indent < 4) break;
+    end = cx.lineStart + line.text.length;
+    inline(cx.lineStart + line.pos, end);
+  }
+  cx.addElement(cx.elt('FootnoteDefinition', start, end, children));
+  return true;
+}
+
 export const ObsidianSyntax: MarkdownConfig = {
   defineNodes: [
     { name: 'WikiLink' },
@@ -118,14 +197,24 @@ export const ObsidianSyntax: MarkdownConfig = {
     { name: 'Comment' },
     { name: 'CommentBlock', block: true },
     { name: 'CommentMark' },
+    { name: 'FootnoteReference' },
+    { name: 'InlineFootnote' },
+    { name: 'FootnoteDefinition', block: true },
+    { name: 'FootnoteMark' },
+    { name: 'FootnoteLabel' },
   ],
   parseInline: [
     { name: 'Comment', parse: parseInlineComment, before: 'Emphasis' },
     { name: 'WikiLink', parse: parseWikiLink, before: 'Link' },
     { name: 'Hashtag', parse: parseHashtag, before: 'Emphasis' },
     { name: 'Highlight', parse: parseHighlight, after: 'Emphasis' },
+    { name: 'FootnoteReference', parse: parseFootnoteReference, before: 'Link' },
+    { name: 'InlineFootnote', parse: parseInlineFootnote, before: 'Link' },
   ],
-  parseBlock: [{ name: 'CommentBlock', parse: parseCommentBlock, before: 'FencedCode' }],
+  parseBlock: [
+    { name: 'CommentBlock', parse: parseCommentBlock, endLeaf: (_cx, line) => line.indent - line.baseIndent < 4 && startsCommentBlock(line), before: 'FencedCode' },
+    { name: 'FootnoteDefinition', parse: parseFootnoteDefinition, endLeaf: (_cx, line) => footnoteDefinitionText(line) >= 0, before: 'FencedCode' },
+  ],
   props: [
     styleTags({
       'WikiLink/WikiLinkTarget Embed/WikiLinkTarget': obsidianTags.wikiLink,
@@ -135,6 +224,7 @@ export const ObsidianSyntax: MarkdownConfig = {
       'Link/Hashtag Image/Hashtag': t.link,
       Highlight: obsidianTags.highlight,
       'Comment CommentBlock CommentMark': obsidianTags.comment,
+      'FootnoteMark FootnoteLabel': obsidianTags.footnote,
     }),
   ],
 };

@@ -95,3 +95,47 @@ describe('ObsidianSyntax: highlight and comments', () => {
     expect(baseParser.configure([ObsidianSyntax]).parse('# x').topNode.name).toBe('Document');
   });
 });
+
+describe('ObsidianSyntax: footnotes (ROADMAP 10b)', () => {
+  it('reads references, inline footnotes and definitions as the markdown-it plugin does', () => {
+    const text = 'Text[^1] and [^note] and ^[inline **b**].\n[^1]: The **first**.\n    More of it.\n[^note]: http://x.com\n\nNot [^a b] nor [^](x) nor [^x](url).';
+    expect(nodes(text, 'FootnoteReference', 'InlineFootnote', 'FootnoteDefinition', 'FootnoteLabel')).toEqual([
+      ['FootnoteReference', '[^1]'],
+      ['FootnoteLabel', '1'],
+      ['FootnoteReference', '[^note]'],
+      ['FootnoteLabel', 'note'],
+      ['InlineFootnote', '^[inline **b**]'],
+      ['FootnoteDefinition', '[^1]: The **first**.\n    More of it.'],
+      ['FootnoteLabel', '[^1]:'],
+      ['FootnoteDefinition', '[^note]: http://x.com'],
+      ['FootnoteLabel', '[^note]:'],
+    ]);
+    // The text of an inline footnote and of a definition is inline Markdown.
+    expect(nodes(text, 'StrongEmphasis').map(([, t]) => t)).toEqual(['**b**', '**first**']);
+    // Not footnotes: a label with a blank, an empty label, a link.
+    expect(nodes(text, 'Link').map(([, t]) => t)).toEqual(['[^a b]', '[^](x)', '[^x](url)']);
+  });
+
+  it('a definition interrupts a paragraph; one indented four spaces is code', () => {
+    expect(nodes('Para\n[^1]: note', 'Paragraph', 'FootnoteDefinition')).toEqual([
+      ['Paragraph', 'Para'],
+      ['FootnoteDefinition', '[^1]: note'],
+    ]);
+    expect(nodes('    [^1]: note', 'FootnoteDefinition', 'CodeBlock')).toEqual([['CodeBlock', '[^1]: note']]);
+  });
+});
+
+describe('ObsidianSyntax: comment blocks interrupt paragraphs (as in markdown-it)', () => {
+  it('a `%%` line under a paragraph starts a comment block', () => {
+    expect(nodes('Para\n%%\nhidden\n%%\nafter', 'Paragraph', 'CommentBlock')).toEqual([
+      ['Paragraph', 'Para'],
+      ['CommentBlock', '%%\nhidden\n%%'],
+      ['Paragraph', 'after'],
+    ]);
+    // An inline comment with text after it stays part of the paragraph.
+    expect(nodes('Para\n%%c%% more', 'Paragraph', 'CommentBlock', 'Comment')).toEqual([
+      ['Paragraph', 'Para\n%%c%% more'],
+      ['Comment', '%%c%%'],
+    ]);
+  });
+});

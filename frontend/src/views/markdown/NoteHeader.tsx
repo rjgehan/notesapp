@@ -1,46 +1,77 @@
-// Note header (DESIGN §6.5): inline title (edit = rename), save status and the mode toggle. On
+// Note header (DESIGN §6.5): inline title (edit = rename), save status and the mode controls. On
 // phones only the inline title is shown, because the TopBar already has the rest; tablets keep the
-// save status here and the mode toggle in the TopBar. On desktop the bar also has back and forward
+// save status here and the lock toggle in the TopBar. On desktop the bar also has back and forward
 // buttons around a centred breadcrumb, as Obsidian's view header does.
-import { ArrowLeft, ArrowRight, BookOpen, Pencil } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, CodeXml, Lock, LockOpen, Pencil } from 'lucide-react';
 import { runCommand } from '../../features/commands';
 import { BookmarkToggle } from '../../components/BookmarkToggle';
 import { SaveStatus } from '../../components/SaveStatus';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
+import { toggleNoteMode, toggleSourceMode } from '../../features/noteMode';
 import { displayName, folderOf } from '../../features/paths';
 import { keyHint, useHotkeyOverrides } from '../../features/hotkeyPrefs';
 import { keyLabel } from '../../features/platform';
-import type { NoteMode } from '../../state/ui';
+import type { ViewMode } from '../../state/ui';
 import type { SessionSnapshot } from '../../sync/DocumentSession';
 import { InlineTitle } from './InlineTitle';
 
 interface Props {
   path: string;
   snapshot: SessionSnapshot | null;
-  mode: NoteMode;
-  modes: NoteMode[];
-  onToggleMode(): void;
+  mode: ViewMode;
   /** The title can be edited (renamed). */
   editable: boolean;
 }
 
-export function ModeToggle({ mode, onToggle }: { mode: NoteMode; onToggle(): void }) {
+/**
+ * Lock editing (DESIGN §6.6.1): a note locks and unlocks editing (Live Preview, read-only, which is
+ * also the reading view). Views with `edit` and `read` switch between the two. Mod-E does the same,
+ * except in a note's text, where it toggles inline code; so only unlocking names it.
+ */
+export function ModeToggle({ mode }: { mode: ViewMode }) {
   useHotkeyOverrides();
-  const next = mode === 'edit' ? 'reading' : 'editing';
+  const shortcut = keyHint('editor.toggleMode', keyLabel);
+  if (mode === 'read' || mode === 'edit') {
+    const next = mode === 'edit' ? 'reading' : 'editing';
+    return (
+      <button type="button" className="icon-button mode-toggle" onClick={toggleNoteMode} aria-label={`Switch to ${next} view`} title={`Switch to ${next} view${shortcut}`}>
+        {mode === 'edit' ? <BookOpen size={17} /> : <Pencil size={17} />}
+      </button>
+    );
+  }
+  const locked = mode === 'locked';
   return (
     <button
       type="button"
       className="icon-button mode-toggle"
-      onClick={onToggle}
-      aria-label={`Switch to ${next} view`}
-      title={`Switch to ${next} view${keyHint('editor.toggleMode', keyLabel)}`}
+      onClick={toggleNoteMode}
+      aria-label="Lock editing"
+      aria-pressed={locked}
+      title={locked ? `Unlock editing${shortcut}` : 'Lock editing'}
     >
-      {mode === 'edit' ? <BookOpen size={17} /> : <Pencil size={17} />}
+      {locked ? <Lock size={17} /> : <LockOpen size={17} />}
     </button>
   );
 }
 
-export function NoteHeader({ path, snapshot, mode, modes, onToggleMode, editable }: Props) {
+/** Live Preview or the Markdown source of a note. */
+export function SourceToggle({ mode }: { mode: ViewMode }) {
+  const source = mode === 'source';
+  return (
+    <button
+      type="button"
+      className="icon-button source-toggle"
+      onClick={toggleSourceMode}
+      aria-label="Source mode"
+      aria-pressed={source}
+      title={source ? 'Show Live Preview' : 'Show the Markdown source'}
+    >
+      <CodeXml size={17} />
+    </button>
+  );
+}
+
+export function NoteHeader({ path, snapshot, mode, editable }: Props) {
   useHotkeyOverrides();
   const breakpoint = useBreakpoint();
   const phone = breakpoint === 'phone';
@@ -69,7 +100,12 @@ export function NoteHeader({ path, snapshot, mode, modes, onToggleMode, editable
           <span className="note-header-actions">
             {snapshot && <SaveStatus snapshot={snapshot} />}
             <BookmarkToggle path={path} />
-            {modes.length > 1 && breakpoint === 'desktop' && <ModeToggle mode={mode} onToggle={onToggleMode} />}
+            {breakpoint === 'desktop' && (
+              <>
+                <SourceToggle mode={mode} />
+                <ModeToggle mode={mode} />
+              </>
+            )}
           </span>
         </div>
       )}

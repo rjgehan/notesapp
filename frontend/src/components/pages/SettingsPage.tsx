@@ -22,7 +22,7 @@ import { vimAvailable } from '../../editor/vimMode';
 import { clearOfflineCopies, noteCache } from '../../offline/offlineStore';
 import { setOfflineMedia } from '../../pwa/serviceWorker';
 import { pageBuild } from '../../state/buildCheck';
-import { usePrefs, type ThemePref } from '../../state/prefs';
+import { usePrefs, type SyntaxVisibility, type ThemePref } from '../../state/prefs';
 import { toast } from '../../state/toasts';
 import { useUi } from '../../state/ui';
 import type { DiscardedRecord } from '../../sync/drafts';
@@ -404,8 +404,8 @@ function EditorSection({ settings: s, set, disabled }: VaultSectionProps) {
           value={e.defaultMode}
           disabled={disabled}
           options={[
-            ['edit', 'Editing view'],
-            ['read', 'Reading view'],
+            ['edit', 'Live Preview (editing)'],
+            ['read', 'Locked (reading)'],
           ]}
           onChange={(v) => editor({ defaultMode: v })}
         />
@@ -413,7 +413,7 @@ function EditorSection({ settings: s, set, disabled }: VaultSectionProps) {
       <Row label="Readable line length" description="Limit the line width of notes.">
         <Toggle label="Readable line length" checked={e.readableLineLength} disabled={disabled} onChange={(v) => editor({ readableLineLength: v })} />
       </Row>
-      <Row label="Strict line breaks" description="Off (as in Obsidian): a single line break shows as a line break in reading view.">
+      <Row label="Strict line breaks" description="Off (as in Obsidian): a single line break shows as a line break in embedded notes. A note itself always shows its lines as typed.">
         <Toggle label="Strict line breaks" checked={e.strictLineBreaks} disabled={disabled} onChange={(v) => editor({ strictLineBreaks: v })} />
       </Row>
     </>
@@ -688,6 +688,17 @@ function DeviceSection() {
             ['system', 'Follow the system'],
           ]}
           onChange={(theme) => prefs.update({ theme })}
+        />
+      </Row>
+      <Row label="Markdown syntax" description="In Live Preview: always hidden, or shown for the element you are editing.">
+        <Select<SyntaxVisibility>
+          label="Markdown syntax"
+          value={prefs.syntaxVisibility}
+          options={[
+            ['hide-all', 'Hide all'],
+            ['reveal-at-cursor', 'Reveal at cursor'],
+          ]}
+          onChange={(syntaxVisibility) => prefs.update({ syntaxVisibility })}
         />
       </Row>
       <Row label="Spell check">

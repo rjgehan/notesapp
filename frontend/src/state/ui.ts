@@ -4,7 +4,14 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 export type ConnectionState = 'live' | 'reconnecting' | 'offline';
 export type SaveSummary = 'saved' | 'saving' | 'unsaved' | 'offline' | 'storage-error' | 'conflict';
-export type NoteMode = 'edit' | 'read';
+/**
+ * How a file shows (DESIGN §6.6.1, §6.8). Notes: `live` (Live Preview, the default), `source`
+ * (styled source) and `locked` (Live Preview, read-only, which is also the reading view since
+ * ROADMAP 10b). Other views use `edit` and `read`; a note asked for `read` shows `locked`.
+ */
+export type ViewMode = 'live' | 'source' | 'locked' | 'read' | 'edit';
+/** The modes of a note. */
+export type NoteMode = Exclude<ViewMode, 'edit' | 'read'>;
 export type ExplorerSort = 'name' | 'mtime';
 /** The topmost modal overlay; later work packages add their own ids. */
 export type OverlayId = string;
@@ -30,8 +37,11 @@ export interface UiState {
   saveSummary: SaveSummary;
   newBuildAvailable: boolean;
   draftsFailing: boolean;
-  /** Mode chosen in this page load; null means `settings.editor.defaultMode`. */
-  noteMode: NoteMode | null;
+  /**
+   * Modes chosen in this page load, per file path; they follow renames and moves. A file without
+   * one shows `settings.editor.defaultMode` (`edit` is Live Preview, `read` a locked note).
+   */
+  noteModes: Record<string, ViewMode>;
   /**
    * A note this tab just created: it opens in the editor whatever the mode of other notes, so
    * its body can be typed at once (DESIGN §6.15). Follows the note when it is renamed.
@@ -61,7 +71,8 @@ export interface UiState {
   setSaveSummary(summary: SaveSummary): void;
   setNewBuildAvailable(v: boolean): void;
   setDraftsFailing(v: boolean): void;
-  setNoteMode(mode: NoteMode | null): void;
+  /** Sets (or, with null, clears) the mode chosen for `path`. */
+  setNoteMode(path: string, mode: ViewMode | null): void;
   setEditingNew(path: string | null): void;
   setExplorerSort(sort: ExplorerSort): void;
   setExpanded(path: string, expanded: boolean): void;
@@ -70,6 +81,13 @@ export interface UiState {
   revealInExplorer(path: string): void;
   /** Keeps expanded folders expanded after a folder move. */
   rekeyExpanded(from: string, to: string): void;
+  /** Keeps the modes chosen for a moved file, or for a moved folder's files. */
+  rekeyNoteModes(from: string, to: string): void;
+}
+
+/** `path` after moving `from` to `to` (a file, or a folder and everything under it). */
+function rebased(path: string, from: string, to: string): string {
+  return path === from ? to : path.startsWith(from + '/') ? to + path.slice(from.length) : path;
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -97,7 +115,7 @@ export const useUi = create<UiState>()(
       saveSummary: 'saved',
       newBuildAvailable: false,
       draftsFailing: false,
-      noteMode: null,
+      noteModes: {},
       editingNew: null,
       explorerSort: 'name',
       expanded: {},
@@ -122,7 +140,14 @@ export const useUi = create<UiState>()(
       setSaveSummary: (saveSummary) => set({ saveSummary }),
       setNewBuildAvailable: (newBuildAvailable) => set({ newBuildAvailable }),
       setDraftsFailing: (draftsFailing) => set({ draftsFailing }),
-      setNoteMode: (noteMode) => set({ noteMode }),
+      setNoteMode: (path, mode) =>
+        set((s) => {
+          if ((s.noteModes[path] ?? null) === mode) return {};
+          const noteModes = { ...s.noteModes };
+          if (mode === null) delete noteModes[path];
+          else noteModes[path] = mode;
+          return { noteModes };
+        }),
       setEditingNew: (editingNew) => set({ editingNew }),
       setExplorerSort: (explorerSort) => set({ explorerSort }),
       setExpanded: (path, expanded) =>
@@ -144,11 +169,22 @@ export const useUi = create<UiState>()(
           let changed = false;
           const expanded: Record<string, boolean> = {};
           for (const [path, open] of Object.entries(s.expanded)) {
-            const next = path === from ? to : path.startsWith(from + '/') ? to + path.slice(from.length) : path;
+            const next = rebased(path, from, to);
             if (next !== path) changed = true;
             expanded[next] = open;
           }
           return changed ? { expanded } : {};
+        }),
+      rekeyNoteModes: (from, to) =>
+        set((s) => {
+          let changed = false;
+          const noteModes: Record<string, ViewMode> = {};
+          for (const [path, mode] of Object.entries(s.noteModes)) {
+            const next = rebased(path, from, to);
+            if (next !== path) changed = true;
+            noteModes[next] = mode;
+          }
+          return changed ? { noteModes } : {};
         }),
     }),
     {

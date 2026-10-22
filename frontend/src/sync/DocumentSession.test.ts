@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, TransientError } from '../api/client';
 import { MockVault } from '../api/mock/vault';
 import type { Problem, SaveFileRequest, WriteResult } from '../api/types';
+import { noteExtensions } from '../editor/editorSetup';
 import { isLocalEdit } from '../editor/remote';
+import { testContext } from '../test/noteEditor';
 import { serverToDocOffset } from '../features/eol';
 import { lineHash, toggleTaskAtLine } from '../render/render';
 import { fakeApi, MemoryDraftStore, sessionDeps } from '../test/fakes';
@@ -157,6 +159,33 @@ describe('DocumentSession conflicts', () => {
     expect(status(session)).toBe('conflict');
     expect(session.getSnapshot().conflict?.historyBlocked).toBe(true);
     expect(text(session)).toBe('hello mine');
+  });
+
+  it('Take theirs and its undo give the editor exactly their text in Live Preview, a table row added there included', async () => {
+    const table = '| Name | Qty |\n|:-----|----:|\n| Tea  |   2 |';
+    const { vault, session } = setup(`x\n\n${table}`);
+    await session.ready;
+    const view = new EditorView({
+      state: session.prepareState((st) =>
+        st.update({
+          effects: StateEffect.reconfigure.of([
+            noteExtensions(testContext(), { onLocalChange: () => session.markDirty(), onBlur: () => {}, readOnly: false, spellcheck: false, autocorrect: false, livePreview: { visibility: 'hide-all', locked: false, checkboxes: true } }),
+          ]),
+        }).state,
+      ),
+    });
+    session.attach(view);
+    const theirs = `x\n\n${table}\n| Jam  |   1 |\n\nafter`;
+    vault.externalWrite('a.md', theirs);
+    view.dispatch({ changes: { from: 1, insert: ' mine' }, userEvent: 'input' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(status(session)).toBe('conflict');
+    await session.takeTheirs();
+    // The table's edge rules (a line under a table, a blank line before text) leave it as it is.
+    expect(text(session)).toBe(theirs);
+    undo(view);
+    expect(text(session)).toBe(`x mine\n\n${table}`);
+    view.destroy();
   });
 
   it('Take theirs is undoable and keeps mine in the discarded store', async () => {
