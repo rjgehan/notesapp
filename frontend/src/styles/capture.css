@@ -173,3 +173,66 @@ textarea.text-input.capture-text {
   font-size: var(--font-ui-small);
   white-space: pre;
 }
+
+/* Web clipper: the /clip page (DESIGN §6.27.1). */
+
+.clip-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.clip-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clip-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clip-meta {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.clip-source {
+  color: var(--text-muted);
+}
+
+.clip-preview {
+  margin-top: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.clip-paste {
+  display: block;
+  margin-top: 12px;
+  padding: 24px 16px;
+  border: 2px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+  cursor: text;
+}
+
+.clip-paste:focus {
+  outline: 2px solid var(--interactive-accent);
+}
+
+.clip-bookmarklet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-m);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  text-decoration: none;
+  cursor: grab;
+}

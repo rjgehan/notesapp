@@ -10,6 +10,15 @@ ARG GIT_SHA=dev
 ENV VITE_BUILD_SHA=${GIT_SHA}
 RUN npm run build
 
+# ---------- 1b) web clipper (ROADMAP item 19, DESIGN §6.27.1): the scripts served under /clipper/ (the /clip page's
+# extractor, the bookmarklet, the iOS Shortcut's script); arch-independent like the frontend ----------
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS clipper
+WORKDIR /src/clipper
+COPY clipper/package.json clipper/package-lock.json ./
+RUN npm ci
+COPY clipper/ ./
+RUN npm run build
+
 # ---------- 2) backend: runs natively on the build host; the jar is arch-independent (bytecode for Java 21) ----------
 FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk-noble AS backend
 WORKDIR /src/backend
@@ -18,6 +27,7 @@ COPY backend/mvnw backend/pom.xml ./
 RUN sh ./mvnw -B -ntp -q dependency:go-offline || true
 COPY backend/src/ src/
 COPY --from=frontend /src/frontend/dist/ src/main/resources/static/
+COPY --from=clipper /src/clipper/dist/web/ src/main/resources/static/clipper/
 RUN sh ./mvnw -B -ntp -DskipTests package \
  && cp target/notesapp-*.jar /tmp/application.jar \
  && java -Djarmode=tools -jar /tmp/application.jar extract --layers --destination /extracted \

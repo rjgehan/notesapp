@@ -103,4 +103,10 @@ describe('share target', () => {
   it('serves the capture page offline like any client route', () => {
     expect(classify(req('/capture?share=abc', { mode: 'navigate', destination: 'document' }), ORIGIN, PRECACHED)).toBe('navigate');
   });
+
+  it('leaves the clip page to the network, which sends it without Cross-Origin-Opener-Policy (DESIGN §6.27.1)', () => {
+    expect(isSpaRoute('/clip')).toBe(false);
+    expect(classify(req('/clip?via=bookmarklet', { mode: 'navigate', destination: 'document' }), ORIGIN, PRECACHED)).toBe('network');
+    expect(classify(req('/clipper/clipper.js', { destination: 'script' }), ORIGIN, PRECACHED)).toBe('network');
+  });
 });

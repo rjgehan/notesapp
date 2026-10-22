@@ -30,6 +30,14 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 	/** The service worker script (DESIGN §6.26), built into the static root by the frontend build. */
 	static final String SERVICE_WORKER = "/sw.js";
 
+	/**
+	 * The web clipper's hand-over page (DESIGN §6.27.1). The bookmarklet opens it from the clipped page and posts it the
+	 * page; {@code Cross-Origin-Opener-Policy: same-origin} would put it in a new browsing context group and cut that
+	 * window reference, so this one page is sent with {@code unsafe-none}. It only receives a clip and saves it after
+	 * the user's Save; its CSP, framing and resource policies stay those of the app.
+	 */
+	static final String CLIP_PAGE = "/clip";
+
 	/** The web app manifest (DESIGN §6.26). */
 	static final String MANIFEST = "/manifest.webmanifest";
 
@@ -59,11 +67,11 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		response.setHeader("X-Content-Type-Options", "nosniff");
 		response.setHeader("Referrer-Policy", "no-referrer");
 		response.setHeader("X-Frame-Options", "DENY");
-		response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+		String path = RequestPaths.of(request);
+		response.setHeader("Cross-Origin-Opener-Policy", path.equals(CLIP_PAGE) ? "unsafe-none" : "same-origin");
 		response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
 		response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=()");
 		response.setHeader(BUILD_HEADER, this.buildSha);
-		String path = RequestPaths.of(request);
 		if (path.startsWith("/api/") && !setsOwnCaching(path)) {
 			response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
 		}

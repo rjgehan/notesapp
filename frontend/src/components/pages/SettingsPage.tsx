@@ -28,6 +28,7 @@ import type { DiscardedRecord } from '../../sync/drafts';
 import { documents, draftStore } from '../../sync/instance';
 import { useBreakpoint } from '../layout/useBreakpoint';
 import { CaptureSettings } from '../capture/CaptureSettings';
+import { ClipperSettings } from '../clip/ClipperSettings';
 import { OrphanDraftList } from '../OrphanDrafts';
 import { HotkeysSection } from './HotkeysSection';
 import { usePageTitle } from './usePageTitle';
@@ -44,6 +45,7 @@ const SECTIONS = [
   { id: 'editor', title: 'Editor' },
   { id: 'hotkeys', title: 'Hotkeys' },
   { id: 'capture', title: 'Quick capture' },
+  { id: 'clipper', title: 'Web clipper' },
   { id: 'ai', title: 'Ask and summaries' },
   { id: 'device', title: 'This device' },
   { id: 'about', title: 'About' },
@@ -756,7 +758,7 @@ export default function SettingsPage() {
             </h1>
             {saving && <span className="muted">Saving…</span>}
           </header>
-          {section !== 'device' && section !== 'hotkeys' && section !== 'about' && section !== 'capture' && (
+          {section !== 'device' && section !== 'hotkeys' && section !== 'about' && section !== 'capture' && section !== 'clipper' && (
             <>
               {readOnly && (
                 <div className="banner banner-warning" role="status">
@@ -777,6 +779,7 @@ export default function SettingsPage() {
           {section === 'editor' && <EditorSection {...props} />}
           {section === 'hotkeys' && <HotkeysSection />}
           {section === 'capture' && <CaptureSettings />}
+          {section === 'clipper' && <ClipperSettings />}
           {section === 'ai' && <AiSection {...props} />}
           {section === 'device' && <DeviceSection />}
           {section === 'about' && <AboutSection />}

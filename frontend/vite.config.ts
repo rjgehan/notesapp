@@ -91,9 +91,32 @@ function packageAssetsPlugin(): Plugin {
   }
 }
 
+// The web clipper's scripts (DESIGN §6.27.1): the server serves clipper/dist/web at /clipper/ (the
+// Dockerfile copies it in); the dev server does the same once `npm run build` ran in clipper/.
+function clipperDevPlugin(): Plugin {
+  const dir = resolve('..', 'clipper', 'dist', 'web')
+  return {
+    name: 'notesapp-clipper-dev',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url?.split('?')[0] ?? ''
+        if (!url.startsWith('/clipper/')) return next()
+        const file = resolve(dir, decodeURIComponent(url.slice('/clipper/'.length)))
+        if (!file.startsWith(dir + sep) || !statSync(file, { throwIfNoEntry: false })?.isFile()) {
+          res.statusCode = 404
+          res.end()
+          return
+        }
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+        createReadStream(file).pipe(res)
+      })
+    },
+  }
+}
+
 export default defineConfig({
   // The service worker is built after the app, from the files the build wrote (DESIGN §6.26).
-  plugins: [react(), packageAssetsPlugin(), serviceWorker({ entry: 'src/sw/sw.ts', buildSha })],
+  plugins: [react(), packageAssetsPlugin(), clipperDevPlugin(), serviceWorker({ entry: 'src/sw/sw.ts', buildSha })],
   define: {
     'import.meta.env.VITE_BUILD_SHA': JSON.stringify(buildSha),
     'import.meta.env.VITE_EXCALIDRAW_ASSETS': JSON.stringify('/' + excalidrawAssets),

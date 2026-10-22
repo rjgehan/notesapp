@@ -233,7 +233,7 @@ class SecurityIntegrationTest {
 
 	@ParameterizedTest
 	@ValueSource(strings = { "/n/Some%20Note.md", "/n/Projects/Plan.md", "/", "/search", "/trash", "/settings",
-			"/settings/this-device", "/x/kanban/board" })
+			"/settings/this-device", "/x/kanban/board", "/capture", "/clip" })
 	void clientRoutesServeTheAppShell(String route) throws IOException {
 		Reply page = this.api.get(route);
 		assertThat(page.status()).isEqualTo(200);
@@ -244,6 +244,31 @@ class SecurityIntegrationTest {
 		assertThat(page.header("Content-Security-Policy")).isEqualTo(APP_CSP);
 		assertThat(page.header("X-Frame-Options")).isEqualTo("DENY");
 		assertThat(page.header("X-Notes-Build")).isEqualTo("dev");
+	}
+
+	@Test
+	void theClipPageKeepsItsOpenerAndNothingElseDoes() {
+		// DESIGN §6.27.1: the bookmarklet's window must keep its handle on /clip to post it the page.
+		Reply clip = this.api.get("/clip?via=bookmarklet");
+		assertThat(clip.status()).isEqualTo(200);
+		assertThat(clip.header("Cross-Origin-Opener-Policy")).isEqualTo("unsafe-none");
+		assertThat(clip.header("Content-Security-Policy")).isEqualTo(APP_CSP);
+		assertThat(clip.header("X-Frame-Options")).isEqualTo("DENY");
+		assertThat(clip.header("Cross-Origin-Resource-Policy")).isEqualTo("same-origin");
+		assertThat(this.api.get("/").header("Cross-Origin-Opener-Policy")).isEqualTo("same-origin");
+		assertThat(this.api.get("/capture").header("Cross-Origin-Opener-Policy")).isEqualTo("same-origin");
+		assertThat(this.api.get("/clip/x").header("Cross-Origin-Opener-Policy")).isEqualTo("same-origin");
+		assertThat(this.api.get("/api/tree").header("Cross-Origin-Opener-Policy")).isEqualTo("same-origin");
+	}
+
+	@Test
+	void theClipperScriptsAreSameOriginScriptsThatRevalidate() {
+		Reply script = this.api.get("/clipper/clipper.js");
+		assertThat(script.status()).isEqualTo(200);
+		assertThat(script.header("Content-Type")).startsWith("text/javascript");
+		assertThat(script.header("Cache-Control")).isEqualTo("no-cache");
+		assertThat(script.header("Cross-Origin-Resource-Policy")).isEqualTo("same-origin");
+		assertThat(script.text()).contains("NotesClipper");
 	}
 
 	@Test
