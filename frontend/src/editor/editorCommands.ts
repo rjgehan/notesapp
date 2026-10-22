@@ -4,7 +4,6 @@ import { startCompletion } from '@codemirror/autocomplete';
 import type { ChangeSpec } from '@codemirror/state';
 import type { Command, EditorView } from '@codemirror/view';
 import { noteContext } from './context';
-import { toggleInlineCode } from './formatting';
 import { linkAt, type LinkHit } from './linkAt';
 
 const TASK = /^(\s*(?:>\s?)*\s*(?:[-+*]|\d+[.)])\s+\[)([ xX])(\])/;
@@ -99,14 +98,3 @@ export const saveNow: Command = (view) => {
   view.state.facet(noteContext)?.save();
   return true;
 };
-
-export const toggleMode: Command = (view) => {
-  view.state.facet(noteContext)?.toggleMode();
-  return true;
-};
-
-/**
- * Mod-E in a note's text (DESIGN §6.6.1): inline code while you edit; in a locked note, which is
- * read-only, it unlocks, as Mod-E does everywhere outside the text.
- */
-export const inlineCodeOrUnlock: Command = (view) => (view.state.readOnly ? toggleMode(view) : toggleInlineCode(view));

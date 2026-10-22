@@ -13,6 +13,7 @@ import { EditorSelection, Facet, Prec, StateField, type EditorState, type Extens
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { noteContext, vaultChanged } from '../context';
 import { remeasureOnChange } from './embeds';
+import { revealSource } from './reveal';
 import { canRunScripts, fencedCode, ScriptBlockWidget, type ScriptsMode } from './scripts';
 import { topLevel, wholeLines, type RichKind } from './topLevel';
 
@@ -231,11 +232,23 @@ class MathWidget extends WidgetType {
     } else {
       el.textContent = this.tex;
     }
+    // A click puts the caret into the formula's TeX (after its opening `$` or `$$`), which then
+    // shows as text (reveal.ts).
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || !editable(view.state)) return;
+      e.preventDefault();
+      let from: number;
+      try {
+        from = view.posAtDOM(el);
+      } catch {
+        return;
+      }
+      revealSource(view, Math.min(from + (this.display ? 2 : 1), view.state.doc.length));
+    });
     return el;
   }
   override ignoreEvent(): boolean {
-    // A click puts the caret by the formula, which then shows as text.
-    return false;
+    return true;
   }
 }
 

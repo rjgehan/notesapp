@@ -46,7 +46,7 @@ export default function TextView({ path, readOnly = false }: FileViewProps & { r
         <SaveStatus snapshot={snapshot} />
       </header>
       {ready ? (
-        <NoteEditor session={session} readOnly={readOnly || snapshot.status === 'readonly' || snapshot.lossy} extensions={extensions} onToggleMode={() => {}} />
+        <NoteEditor session={session} readOnly={readOnly || snapshot.status === 'readonly' || snapshot.lossy} extensions={extensions} />
       ) : snapshot.status === 'loading' ? (
         <div className="view-loading" aria-busy="true">
           <div className="skeleton-line" />

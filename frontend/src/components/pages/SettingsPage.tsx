@@ -407,21 +407,11 @@ function FolderTemplates({ settings: s, set, disabled, errors }: VaultSectionPro
 
 function EditorSection({ settings: s, set, disabled }: VaultSectionProps) {
   const e = s.editor;
-  const editor = (patch: Partial<Settings['editor']>) => set({ ...s, editor: { ...e, ...patch } });
+  // Every note opens in Live Preview (DESIGN §6.6.1): `defaultMode` has no control, and a saved
+  // `read` (a locked default from an older build) is written back as `edit` with the next change.
+  const editor = (patch: Partial<Settings['editor']>) => set({ ...s, editor: { ...e, ...patch, defaultMode: 'edit' } });
   return (
     <>
-      <Row label="Default view for new tabs">
-        <Select
-          label="Default view"
-          value={e.defaultMode}
-          disabled={disabled}
-          options={[
-            ['edit', 'Live Preview (editing)'],
-            ['read', 'Locked (reading)'],
-          ]}
-          onChange={(v) => editor({ defaultMode: v })}
-        />
-      </Row>
       <Row label="Readable line length" description="Limit the line width of notes.">
         <Toggle label="Readable line length" checked={e.readableLineLength} disabled={disabled} onChange={(v) => editor({ readableLineLength: v })} />
       </Row>

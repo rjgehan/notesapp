@@ -10,7 +10,7 @@ import { isCustomized } from '../features/hotkeyPrefs';
 import { isIOS, modKey } from '../features/platform';
 import { headingSource, tagSource, wikilinkSource } from './completion';
 import { noteContext, type NoteContext } from './context';
-import { followLink, followLinkAtCursor, saveNow, toggleCheckbox, toggleMode } from './editorCommands';
+import { followLink, followLinkAtCursor, saveNow, toggleCheckbox } from './editorCommands';
 import { foldHeading, headingFolding, unfoldHeading } from './headingFold';
 import { listRenumbering } from './listRenumber';
 import { markupPairs } from './markupPairs';
@@ -134,10 +134,9 @@ const noteCommandKeys: readonly CommandKey[] = [
   { key: 'Mod-k', id: 'editor.insertLink', run: toggleLink, preventDefault: true },
   { key: 'Mod-Shift-x', id: 'editor.strikethrough', run: toggleStrikethrough, preventDefault: true },
   { key: 'Mod-Shift-h', id: 'editor.highlight', run: toggleHighlight, preventDefault: true },
-  // Mod-E in the text: inline code while you edit; a locked note (read-only) unlocks, as Mod-E
-  // does outside the text. Each half follows its own command's key (Settings, Hotkeys).
+  // Mod-E in the text: inline code (a read-only note does nothing). It no longer switches modes:
+  // every note is Live Preview (DESIGN §6.6.1).
   { key: 'Mod-e', id: 'editor.inlineCode', run: (v) => !v.state.readOnly && toggleInlineCode(v), preventDefault: true },
-  { key: 'Mod-e', id: 'editor.toggleMode', run: (v) => v.state.readOnly && toggleMode(v), preventDefault: true },
   // Heading folding (DESIGN §6.6.2).
   { key: 'Mod-Shift-[', id: 'editor.foldHeading', run: foldHeading, preventDefault: true },
   { key: 'Mod-Shift-]', id: 'editor.unfoldHeading', run: unfoldHeading, preventDefault: true },

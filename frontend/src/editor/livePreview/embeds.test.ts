@@ -29,6 +29,12 @@ function embeds(view: EditorView): string[] {
   });
 }
 
+/** A footnote tooltip's text, without its Edit button. */
+function tooltipText(view: EditorView): string {
+  const tooltip = view.dom.querySelector('.cm-lp-footnote-tooltip');
+  return [...(tooltip?.childNodes ?? [])].filter((n) => !(n instanceof HTMLElement && n.classList.contains('cm-lp-footnote-edit'))).map((n) => n.textContent).join('');
+}
+
 describe('images and embeds (ROADMAP 10b)', () => {
   it('shows vault files through the app’s embed renderer, with their part, text and size', () => {
     const view = editor('![[pic.png|300]] and ![[Note#Head|alias]]\n\n![[doc.pdf#page=2]] ![a cat|200x100](pic.png) ![[song.mp3]]');
@@ -134,7 +140,7 @@ describe('footnotes (ROADMAP 10b)', () => {
     const view = editor('Text[^1] more‸\n\n[^1]: The **note**, see [[Note]].');
     view.contentDOM.querySelector<HTMLElement>('.cm-lp-footnote')!.click();
     const tooltip = view.dom.querySelector('.cm-lp-footnote-tooltip');
-    expect(tooltip?.textContent).toBe('The note, see Note.');
+    expect(tooltipText(view)).toBe('The note, see Note.');
     expect(tooltip?.querySelector('strong')?.textContent).toBe('note');
     expect(press(view, 'Escape')).toBe(true);
     expect(view.dom.querySelector('.cm-lp-footnote-tooltip')).toBeNull();
@@ -154,7 +160,7 @@ describe('footnotes (ROADMAP 10b)', () => {
   it('an inline footnote shows its own text', () => {
     const view = editor('Text^[an *inline* note].');
     view.contentDOM.querySelector<HTMLElement>('.cm-lp-footnote')!.click();
-    expect(view.dom.querySelector('.cm-lp-footnote-tooltip')?.textContent).toBe('an inline note');
+    expect(tooltipText(view)).toBe('an inline note');
   });
 
   it('a footnote without text says so', () => {

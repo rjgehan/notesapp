@@ -14,6 +14,7 @@ import { noteContext, vaultChanged } from '../context';
 import { textReplace } from '../remote';
 import { remeasureOnChange } from './embeds';
 import { isPointerSelection } from './pointer';
+import { revealSource } from './reveal';
 import { tableEdit } from './table/facets';
 import { parsedPast, topLevel, wholeLines } from './topLevel';
 
@@ -56,6 +57,9 @@ const blocksConfig = Facet.define<BlocksConfig, BlocksConfig>({
 
 /** Shows (true) the properties' YAML for editing, or the properties block again (false). */
 export const editProperties = StateEffect.define<boolean>();
+
+/** Shows the block at a position (a comment block) as text for editing, until the caret leaves it. */
+export const editBlock = StateEffect.define<number>();
 
 class Atom extends RangeValue {}
 const atom = new Atom();
@@ -124,26 +128,67 @@ class PropertiesWidget extends WidgetType {
   }
 }
 
-/** A hidden comment block: nothing to see. */
+/**
+ * A hidden comment block. Locked: nothing to see. While the note can be edited: a slim marker
+ * whose click shows the comment as text with the caret in it (DESIGN §6.6.1, "Everything rendered
+ * is editable"); leaving the comment hides it again.
+ */
 class HiddenCommentWidget extends WidgetType {
-  override eq(): boolean {
-    return true;
+  readonly editable: boolean;
+  constructor(editable: boolean) {
+    super();
+    this.editable = editable;
   }
-  toDOM(): HTMLElement {
+  override eq(other: HiddenCommentWidget): boolean {
+    return other.editable === this.editable;
+  }
+  toDOM(view: EditorView): HTMLElement {
     const el = document.createElement('div');
-    el.className = 'cm-lp-hidden-comment';
-    el.setAttribute('aria-hidden', 'true');
+    el.className = this.editable ? 'cm-lp-hidden-comment is-editable' : 'cm-lp-hidden-comment';
+    if (!this.editable) {
+      el.setAttribute('aria-hidden', 'true');
+      return el;
+    }
+    const chip = document.createElement('span');
+    chip.className = 'cm-lp-comment-chip';
+    chip.setAttribute('role', 'button');
+    chip.setAttribute('aria-label', 'Comment (edit)');
+    chip.title = 'Comment';
+    el.appendChild(chip);
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      editCommentBlockAt(view, el);
+    });
     return el;
   }
   override ignoreEvent(): boolean {
     return true;
   }
   override get estimatedHeight(): number {
-    return 0;
+    return this.editable ? 20 : 0;
   }
 }
 
-const hiddenComment = new HiddenCommentWidget();
+const hiddenComment = new HiddenCommentWidget(false);
+const commentMarker = new HiddenCommentWidget(true);
+
+/** Shows the comment block drawn by `dom` as text, with the caret on its first line of text. */
+function editCommentBlockAt(view: EditorView, dom: HTMLElement): boolean {
+  if (view.state.readOnly) return false;
+  let from: number;
+  try {
+    from = view.posAtDOM(dom);
+  } catch {
+    return false;
+  }
+  const block = shownBlocks(view.state).find((b) => b.kind === 'comment' && from >= b.from && from <= b.to);
+  if (!block) return false;
+  const first = view.state.doc.lineAt(block.from);
+  // `%%` alone on its line: the caret goes to the start of the next; otherwise after the `%%`.
+  const pos = first.text.trim() === '%%' && first.to < block.to ? first.to + 1 : Math.min(block.from + 2, block.to);
+  return revealSource(view, pos, [editBlock.of(pos)]);
+}
 
 // ---------- finding the blocks ----------
 
@@ -198,7 +243,7 @@ function commentBlocks(state: EditorState, config: BlocksConfig, previous: Block
 
 /** Whether a transaction is your edit (or a search) that leaves the cursor in a block it should show as text. */
 function entersByEditing(tr: Transaction): boolean {
-  if (tr.isUserEvent('select.search')) return true;
+  if (tr.isUserEvent('select.search') || tr.isUserEvent('select.reveal')) return true;
   if (!tr.docChanged || tr.annotation(Transaction.remote)) return false;
   return tr.isUserEvent('input') || tr.isUserEvent('delete') || tr.isUserEvent('undo') || tr.isUserEvent('redo') || tr.isUserEvent('move');
 }
@@ -219,7 +264,7 @@ function build(state: EditorState, frontmatter: Frontmatter | null, candidates: 
   const shown = candidates.filter((b) => !editing || b.from !== editing.from);
   const decorations = Decoration.set(
     shown.map((b) => {
-      const widget = b.kind === 'properties' && frontmatter ? new PropertiesWidget(state.sliceDoc(frontmatter.yamlFrom, frontmatter.yamlTo), editable, state.facet(noteContext)?.path() ?? '') : hiddenComment;
+      const widget = b.kind === 'properties' && frontmatter ? new PropertiesWidget(state.sliceDoc(frontmatter.yamlFrom, frontmatter.yamlTo), editable, state.facet(noteContext)?.path() ?? '') : editable ? commentMarker : hiddenComment;
       return Decoration.replace({ widget, block: true }).range(b.from, b.to);
     }),
   );
@@ -244,7 +289,13 @@ const blocksField = StateField.define<Blocks>({
     }
     const editable = !config.locked && !tr.state.readOnly;
     let editing = !editable ? null : value.editing && tr.docChanged ? { from: tr.changes.mapPos(value.editing.from, 1), to: tr.changes.mapPos(value.editing.to, -1) } : value.editing;
-    for (const e of tr.effects) if (e.is(editProperties)) editing = e.value && frontmatter && editable ? { from: frontmatter.block.from, to: frontmatter.block.to } : null;
+    for (const e of tr.effects) {
+      if (e.is(editProperties)) editing = e.value && frontmatter && editable ? { from: frontmatter.block.from, to: frontmatter.block.to } : null;
+      if (e.is(editBlock) && editable) {
+        const b = candidates.find((c) => c.kind === 'comment' && e.value >= c.from && e.value <= c.to);
+        if (b) editing = { from: b.from, to: b.to };
+      }
+    }
     const head = tr.state.selection.main.head;
     const holding = (b: HiddenBlock) => head >= b.from && head <= b.to;
     if (editing) {
@@ -332,7 +383,7 @@ export function startEditingProperties(view: EditorView): boolean {
  */
 const settleAroundBlocks = EditorState.transactionFilter.of((tr) => {
   const selection = tr.selection;
-  if (tr.docChanged || !selection || tr.annotation(tableEdit) !== undefined || tr.effects.some((e) => e.is(editProperties))) return tr;
+  if (tr.docChanged || !selection || tr.annotation(tableEdit) !== undefined || tr.effects.some((e) => e.is(editProperties) || e.is(editBlock))) return tr;
   const blocks = shownBlocks(tr.startState);
   if (blocks.length === 0) return tr;
   const { doc } = tr.startState;

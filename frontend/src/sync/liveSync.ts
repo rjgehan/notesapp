@@ -35,9 +35,6 @@ export const syncTarget: SyncTarget = {
     rebaseWorkspace(from, to, type);
     if (type === 'folder') useUi.getState().rekeyExpanded(from, to);
     useUi.getState().rekeyNoteModes(from, to);
-    const editing = useUi.getState().editingNew;
-    const editingNext = editing === null ? null : type === 'file' ? (editing === from ? to : null) : rebasePath(editing, from, to);
-    if (editingNext !== null) useUi.getState().setEditingNew(editingNext);
     const current = activePath();
     const next = current === null ? null : type === 'file' ? (current === from ? to : null) : rebasePath(current, from, to);
     // A remote move of the open note replaces the stale URL (DESIGN §6.4).

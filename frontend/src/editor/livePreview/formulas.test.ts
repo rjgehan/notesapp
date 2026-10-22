@@ -36,7 +36,6 @@ function context(): NoteContext {
     vaultTags: async () => [],
     recentPaths: () => [],
     save: () => {},
-    toggleMode: () => {},
     insertFiles: () => {},
     linkTo: (p) => `[[${p}]]`,
     showMenu: () => {},

@@ -10,6 +10,7 @@ import { noteContext } from '../context';
 import { followLink } from '../editorCommands';
 import { linkAt } from '../linkAt';
 import { collectElements, type LiveElement } from './model';
+import { revealSource, sourceCaret } from './reveal';
 import { renderCell } from './table/render';
 
 /** A part of a footnote's text in the note: a line of its definition, or an inline footnote's text. */
@@ -198,13 +199,37 @@ function partsOf(state: EditorState, el: LiveElement): readonly FootnotePart[] |
   return footnotesOf(state).definition(spec.label);
 }
 
+/**
+ * The tooltip's edit button (an editable note): the caret goes into the reference's source
+ * (`[^label‸]`, `^[text‸]`), which then shows as text (reveal.ts). A definition's text is
+ * ordinary text under the note, edited where it is.
+ */
+function editButton(view: EditorView, el: LiveElement): HTMLElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'cm-lp-footnote-edit';
+  button.textContent = 'Edit';
+  button.title = 'Edit the footnote';
+  button.addEventListener('mousedown', (e) => e.preventDefault());
+  button.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // The element as the note is now (the tooltip may be older than an edit).
+    const now = footnoteAt(view.state, el.from, 1);
+    if (now) revealSource(view, sourceCaret(view.state, now), [showFootnote.of(null)]);
+  });
+  return button;
+}
+
 /** The tooltip's content: the footnote's text as inline Markdown (links follow on a click). */
-function tooltipDom(view: EditorView, parts: readonly FootnotePart[] | null): HTMLElement {
+function tooltipDom(view: EditorView, parts: readonly FootnotePart[] | null, el: LiveElement): HTMLElement {
   const dom = document.createElement('div');
   dom.className = 'cm-lp-footnote-tooltip';
+  const editable = !view.state.readOnly;
   if (!parts) {
     dom.classList.add('is-missing');
     dom.textContent = 'This footnote has no text: add a line “[^label]: text”.';
+    if (editable) dom.appendChild(editButton(view, el));
     return dom;
   }
   const note = view.state.facet(noteContext);
@@ -216,6 +241,7 @@ function tooltipDom(view: EditorView, parts: readonly FootnotePart[] | null): HT
     span.appendChild(renderCell(view.state.sliceDoc(part.from, part.to), { resolves }));
     dom.appendChild(span);
   });
+  if (editable) dom.appendChild(editButton(view, el));
   dom.addEventListener('mousedown', (e) => e.preventDefault());
   dom.addEventListener('click', (e) => {
     const link = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-pos]') : null;
@@ -230,7 +256,7 @@ function tooltipDom(view: EditorView, parts: readonly FootnotePart[] | null): HT
 }
 
 function tooltipFor(el: LiveElement): Tooltip {
-  return { pos: el.from, end: el.to, above: true, arrow: false, create: (view) => ({ dom: tooltipDom(view, partsOf(view.state, el)) }) };
+  return { pos: el.from, end: el.to, above: true, arrow: false, create: (view) => ({ dom: tooltipDom(view, partsOf(view.state, el), el) }) };
 }
 
 /** Opens (a position) or closes (null) the footnote tooltip that a tap or click pinned. */

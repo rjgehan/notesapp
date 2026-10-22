@@ -31,13 +31,12 @@ export interface NoteEditorProps {
   preview?: 'live' | 'locked';
   /** Builds the extension list; defaults to the Markdown note editor. */
   extensions?(ctx: NoteContext, hooks: EditorHooks): Extension[];
-  onToggleMode(): void;
   /** Called once the view exists (scroll restoration, heading targets). */
   onView?(view: EditorView): void;
   autoFocus?: boolean;
 }
 
-export function NoteEditor({ session, readOnly, preview, extensions = noteExtensions, onToggleMode, onView, autoFocus }: NoteEditorProps) {
+export function NoteEditor({ session, readOnly, preview, extensions = noteExtensions, onView, autoFocus }: NoteEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const spellcheck = usePrefs((s) => s.spellcheck);
@@ -47,13 +46,13 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
   const loadRemoteImages = usePrefs((s) => s.loadRemoteImages);
   const scripts = usePrefs((s) => s.scripts);
   const tree = useTree().data;
-  const callbacks = useRef({ onToggleMode, onView });
+  const callbacks = useRef({ onView });
   // Only the active pane's editor is the active editor and takes focus when mounted (DESIGN §6.40).
   const paneActive = usePaneActive();
   const paneActiveRef = useRef(paneActive);
 
   useLayoutEffect(() => {
-    callbacks.current = { onToggleMode, onView };
+    callbacks.current = { onView };
     paneActiveRef.current = paneActive;
   });
 
@@ -75,7 +74,6 @@ export function NoteEditor({ session, readOnly, preview, extensions = noteExtens
       vaultTags: async () => (await fetchTags()).tags.map((t) => t.tag),
       recentPaths,
       save: () => void session.flush(),
-      toggleMode: () => callbacks.current.onToggleMode(),
       insertFiles: (files, range, pasted) => void insertAttachments(session, files, range, pasted),
       linkTo: (path) => linkTo(path, session.path),
       showMenu: openContextMenu,

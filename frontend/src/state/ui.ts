@@ -5,11 +5,11 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 export type ConnectionState = 'live' | 'reconnecting' | 'offline';
 export type SaveSummary = 'saved' | 'saving' | 'unsaved' | 'offline' | 'storage-error' | 'conflict';
 /**
- * How a file shows (DESIGN §6.6.1, §6.8). Notes: `live` (Live Preview, the default), `source`
- * (styled source) and `locked` (Live Preview, read-only, which is also the reading view since
- * ROADMAP 10b). Other views use `edit` and `read`; a note asked for `read` shows `locked`.
+ * How a file shows (DESIGN §6.6.1, §6.8). Notes: `live` (Live Preview, rendered and editable:
+ * how every note opens) and `source` (the Markdown source, a troubleshooting escape hatch that is
+ * never remembered across reloads). Other views use `edit` and `read`.
  */
-export type ViewMode = 'live' | 'source' | 'locked' | 'read' | 'edit';
+export type ViewMode = 'live' | 'source' | 'read' | 'edit';
 /** The modes of a note. */
 export type NoteMode = Exclude<ViewMode, 'edit' | 'read'>;
 export type ExplorerSort = 'name' | 'mtime';
@@ -38,15 +38,10 @@ export interface UiState {
   newBuildAvailable: boolean;
   draftsFailing: boolean;
   /**
-   * Modes chosen in this page load, per file path; they follow renames and moves. A file without
-   * one shows `settings.editor.defaultMode` (`edit` is Live Preview, `read` a locked note).
+   * The notes shown as Markdown source in this page load (never saved, so a reload shows every
+   * note in Live Preview again); they follow renames and moves. Any other note shows `live`.
    */
-  noteModes: Record<string, ViewMode>;
-  /**
-   * A note this tab just created: it opens in the editor whatever the mode of other notes, so
-   * its body can be typed at once (DESIGN §6.15). Follows the note when it is renamed.
-   */
-  editingNew: string | null;
+  noteModes: Record<string, 'source'>;
   explorerSort: ExplorerSort;
   expanded: Record<string, boolean>;
   /** Path to reveal (scroll into view and select) in the explorer. */
@@ -71,9 +66,8 @@ export interface UiState {
   setSaveSummary(summary: SaveSummary): void;
   setNewBuildAvailable(v: boolean): void;
   setDraftsFailing(v: boolean): void;
-  /** Sets (or, with null, clears) the mode chosen for `path`. */
+  /** Shows `path` as Markdown source (`source`), or in Live Preview again (anything else). */
   setNoteMode(path: string, mode: ViewMode | null): void;
-  setEditingNew(path: string | null): void;
   setExplorerSort(sort: ExplorerSort): void;
   setExpanded(path: string, expanded: boolean): void;
   setRevealPath(path: string | null): void;
@@ -88,6 +82,15 @@ export interface UiState {
 /** `path` after moving `from` to `to` (a file, or a folder and everything under it). */
 function rebased(path: string, from: string, to: string): string {
   return path === from ? to : path.startsWith(from + '/') ? to + path.slice(from.length) : path;
+}
+
+/** A stored UI state without the keys that once held note modes (`noteModes`, `editingNew`). */
+export function stripNoteModes(persisted: unknown): Record<string, unknown> {
+  if (!persisted || typeof persisted !== 'object') return {};
+  const rest: Record<string, unknown> = { ...(persisted as Record<string, unknown>) };
+  delete rest.noteModes;
+  delete rest.editingNew;
+  return rest;
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -116,7 +119,6 @@ export const useUi = create<UiState>()(
       newBuildAvailable: false,
       draftsFailing: false,
       noteModes: {},
-      editingNew: null,
       explorerSort: 'name',
       expanded: {},
       revealPath: null,
@@ -142,13 +144,13 @@ export const useUi = create<UiState>()(
       setDraftsFailing: (draftsFailing) => set({ draftsFailing }),
       setNoteMode: (path, mode) =>
         set((s) => {
-          if ((s.noteModes[path] ?? null) === mode) return {};
+          const next = mode === 'source' ? 'source' : null;
+          if ((s.noteModes[path] ?? null) === next) return {};
           const noteModes = { ...s.noteModes };
-          if (mode === null) delete noteModes[path];
-          else noteModes[path] = mode;
+          if (next === null) delete noteModes[path];
+          else noteModes[path] = next;
           return { noteModes };
         }),
-      setEditingNew: (editingNew) => set({ editingNew }),
       setExplorerSort: (explorerSort) => set({ explorerSort }),
       setExpanded: (path, expanded) =>
         set((s) => {
@@ -178,7 +180,7 @@ export const useUi = create<UiState>()(
       rekeyNoteModes: (from, to) =>
         set((s) => {
           let changed = false;
-          const noteModes: Record<string, ViewMode> = {};
+          const noteModes: Record<string, 'source'> = {};
           for (const [path, mode] of Object.entries(s.noteModes)) {
             const next = rebased(path, from, to);
             if (next !== path) changed = true;
@@ -190,6 +192,12 @@ export const useUi = create<UiState>()(
     {
       name: 'notesapp:ui',
       storage: createJSONStorage(() => localStorage),
+      // Version 1 ("every note opens in Live Preview", DESIGN §6.6.1): note modes are never
+      // stored. Whatever an older build left (a mode per note, a note opened for editing) is
+      // dropped, so no note comes back locked or in source mode.
+      version: 1,
+      migrate: (persisted) => stripNoteModes(persisted) as unknown as UiState,
+      merge: (persisted, current) => ({ ...current, ...(stripNoteModes(persisted) as Partial<UiState>) }),
       partialize: (s) => ({
         leftOpen: s.leftOpen,
         rightOpen: s.rightOpen,

@@ -7,7 +7,7 @@ import type { NoteContext } from '../context';
 import { showsInCell } from './embeds';
 import { footnotesOf, type FootnoteIndex } from './footnotes';
 import { collectElements, hiddenPieces, isRevealed, layoutOf, type RevealOptions } from './model';
-import { widgetFor, type WidgetContext } from './widgets';
+import { CommentWidget, widgetFor, type WidgetContext } from './widgets';
 
 export interface LivePreviewConfig {
   visibility: SyntaxVisibility;
@@ -81,8 +81,14 @@ export function buildLivePreview(state: EditorState, ranges: readonly { from: nu
       if (el.kind === 'embed' && spec) decos.push(Decoration.widget({ widget: widgetFor(spec, widgets), side: 1 }).range(el.to));
       continue;
     }
+    // A hidden comment shows a marker that edits it, unless the note is locked (or it is in a table cell).
+    const commentChip = el.kind === 'comment' && !ctx.locked && !ctx.inCell;
     for (const p of el.pieces) {
       if (p.to <= p.from) continue;
+      if (commentChip) {
+        decos.push(Decoration.replace({ widget: new CommentWidget(state.sliceDoc(p.from + 2, Math.max(p.from + 2, p.to - 2))) }).range(p.from, p.to));
+        continue;
+      }
       decos.push((p.widget ? Decoration.replace({ widget: widgetFor(p.widget, widgets) }) : hidden).range(p.from, p.to));
       // A code block's hidden fences are slim lines.
       if (el.kind === 'codeblock') decos.push(fenceLine.range(state.doc.lineAt(p.from).from));

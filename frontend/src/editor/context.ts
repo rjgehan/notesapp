@@ -20,8 +20,6 @@ export interface NoteContext {
   recentPaths(): string[];
   /** Mod-S. */
   save(): void;
-  /** Locks or unlocks editing (Mod-E outside the text, or in a locked note). */
-  toggleMode(): void;
   /** Uploads files as attachments of this note and inserts their embeds at `range`. */
   insertFiles(files: File[], range: { from: number; to: number }, pasted: boolean): void;
   /** A link to a vault path as this note would write it (internal explorer drags). */

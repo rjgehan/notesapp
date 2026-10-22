@@ -7,7 +7,6 @@ import { autoGrow, useAutoGrow } from '../../components/autoGrow';
 import { activeEditor } from '../../editor/activeEditor';
 import { cancelNoteFocus, requestNoteFocus } from '../../features/focus';
 import { nameWithExtension, renameEntry, retitleNewNote, validateNewName } from '../../features/fileOps';
-import { currentNoteMode, editNote, isEditingMode } from '../../features/noteMode';
 import { titleOf } from '../../features/paths';
 import { takeTitleHandoff } from '../../state/pendingNote';
 import { toast } from '../../state/toasts';
@@ -100,13 +99,11 @@ export function InlineTitle({ path, editable, label = 'Note title', onEnter }: {
         // Focusing the editor inside the key press keeps the iOS keyboard open; the title's blur
         // then commits. A renamed note's editor remounts and takes the focus again.
         const editor = onEnter ? null : activeEditor();
-        const editing = isEditingMode(currentNoteMode());
         if (onEnter) onEnter();
-        else if (editor && editing) editor.focus();
+        else if (editor) editor.focus();
         else {
-          // No editor to write in: the note is locked, shows the reading view, or is still
-          // loading. Writing continues in the editor, which takes the focus when it mounts.
-          if (!editing) editNote(path);
+          // No editor yet (the note is still loading): writing continues in the editor, which
+          // takes the focus when it mounts.
           requestNoteFocus();
           e.currentTarget.blur();
         }

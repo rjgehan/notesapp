@@ -52,7 +52,7 @@ import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
 import { navigateTo, openSearch } from '../features/navigation';
 import { mirrorConfigured, pushMirrorNow } from '../features/mirror';
-import { toggleNoteMode, toggleSourceMode } from '../features/noteMode';
+import { toggleSourceMode } from '../features/noteMode';
 import { basenameOf, folderOf } from '../features/paths';
 import { promptText } from '../state/dialogs';
 import { toggleTheme } from '../state/prefs';
@@ -164,7 +164,7 @@ export function registerBuiltins(): void {
     match: (e) => (e.path.toLowerCase().endsWith('.md') ? 3 : 0),
     icon: FileText,
     textual: true,
-    modes: ['live', 'source', 'locked'],
+    modes: ['live', 'source'],
     load: () => import('../views/markdown/MarkdownView'),
     loadEmbed: () => import('../render/NoteEmbed'),
     sharedSession: true,
@@ -272,9 +272,9 @@ export function registerBuiltins(): void {
 
   // ---------- editor ----------
   const onNote = (c: { activePath: string | null }) => c.activePath !== null && isMarkdownViewPath(c.activePath);
-  // Mod-E outside the note's text; in the text it is inline code, and in a locked note it unlocks (DESIGN §6.6.1).
-  registerCommand({ id: 'editor.toggleMode', name: 'Toggle lock editing', hotkey: 'Mod-e', run: toggleNoteMode, when: onNote });
-  registerCommand({ id: 'editor.toggleSource', name: 'Toggle source mode', run: toggleSourceMode, when: onNote });
+  // Every note is Live Preview (DESIGN §6.6.1); the Markdown source is the escape hatch for when
+  // something has gone wrong (also in the note's ⋯ menu). Mod-E is inline code, never a mode switch.
+  registerCommand({ id: 'editor.toggleSource', name: 'Show Markdown source (toggle)', run: toggleSourceMode, when: onNote });
   registerCommand({
     id: 'editor.save',
     name: 'Save now',

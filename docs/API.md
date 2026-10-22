@@ -340,7 +340,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `excludedPaths` | Excluded from search results (§12.1) and from unlinked mentions (§11.2). |
 | `dailyNotes.*`, `templates.*` | See §15.2 and §15.4. |
 | `templates.folderTemplates` | Applied by the client: a note it creates (New note, a link to a missing note, the quick switcher) in a folder starts from the template of the deepest rule whose `folder` contains it, rendered as in §15.4. Notes created in `templates.folder` get none. |
-| `editor.defaultMode` | How notes open: `edit` in the editor (Live Preview, DESIGN §6.6.1), `read` in the reading view. Source mode and lock editing are per-note choices on the client. |
+| `editor.defaultMode` | Kept for compatibility; both values stay valid. The client ignores it: every note opens in Live Preview, which is rendered and editable (DESIGN §6.6.1), and the Settings page writes `edit` with its next editor change. Source mode is a per-note, per-page-load escape hatch on the client. |
 | `editor.*` | UI preferences that apply on all devices. `strictLineBreaks: false` (the default, as in Obsidian) renders a single newline as a line break in reading view. |
 | `ai.*` | Ask your vault and summaries (§24). `enabled` is off by default: until it is on, nothing is ever sent to Anthropic. `provider`: `claude-code` (default), the server's Claude Code CLI with the user's Claude subscription, or `api`, the Anthropic API billed per token. `excludedPaths` (default `["Private"]`) and `files.excludedPaths` are never read for a request. `maxContextChars` caps the note text of one request, earlier turns included; `monthlyBudgetUsd` refuses requests once the month's estimated spend reaches it. |
 
