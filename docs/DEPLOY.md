@@ -821,6 +821,61 @@ A transcription takes a fraction of the recording's length on a modern CPU with 
 
 To turn transcription off, empty `NOTES_TRANSCRIPTION_URL`, remove `transcription` from `COMPOSE_PROFILES` and run `docker compose up -d --remove-orphans`.
 
+### Public publishing
+
+**Off as shipped; nothing is public.** Publishing (ROADMAP item 26, DESIGN §5.28) shares chosen notes as read-only web pages with people outside your tailnet, through [Tailscale Funnel](https://tailscale.com/kb/1223/funnel). The app itself never goes through Funnel: a second, separate server inside the container, which can serve nothing but the snapshots of the notes you published, listens on `127.0.0.1:8081`, and Funnel exposes that port alone, as `https://notes.<tailnet>.ts.net:8443`. The app on `:443` stays tailnet-only and refuses any request that came through Funnel (`403 funnel-request`). A published page is a snapshot made when you publish: later edits stay private until you republish. Frontmatter and comments are left out, links to notes you have not published show as plain text (no paths), and only the images, audio and video the note embeds are copied with it.
+
+It takes **two** switches, and either one alone exposes nothing:
+
+1. **Tailnet policy**: Funnel needs the `funnel` node attribute for `tag:notes`. In the policy file (step 6) add:
+
+   ```jsonc
+     "nodeAttrs": [
+       { "target": ["tag:notes"], "attr": ["funnel"] },
+     ],
+   ```
+
+   and, so that your own devices can open the public links too (from the tailnet the name resolves to the node, where the grants of step 6 allow only `:443`), extend the NotesApp grant to `"ip": ["tcp:443", "tcp:8443"]`.
+
+2. **The publish server**, in `deploy/.env`:
+
+   ```sh
+   NOTES_PUBLISH_ENABLED=true
+   NOTES_PUBLISH_BASE_URL=https://notes.<tailnet>.ts.net:8443   # only for the links the app copies
+   ```
+
+3. **The Funnel entry**: replace `deploy/tailscale/serve.json` with the shipped variant, which adds `:8443` → `127.0.0.1:8081` with `AllowFunnel` true for that port only (`:443` keeps `false`):
+
+   ```sh
+   cp deploy/tailscale/serve.json deploy/tailscale/serve.json.tailnet-only
+   cp deploy/tailscale/serve.funnel.json.example deploy/tailscale/serve.json
+   ```
+
+   It reads:
+
+   ```json
+   {
+     "TCP": { "443": { "HTTPS": true }, "8443": { "HTTPS": true } },
+     "Web": {
+       "${TS_CERT_DOMAIN}:443": {
+         "Handlers": { "/": { "Proxy": "http://127.0.0.1:8080" } }
+       },
+       "${TS_CERT_DOMAIN}:8443": {
+         "Handlers": { "/": { "Proxy": "http://127.0.0.1:8081" } }
+       }
+     },
+     "AllowFunnel": { "${TS_CERT_DOMAIN}:443": false, "${TS_CERT_DOMAIN}:8443": true }
+   }
+   ```
+
+4. `docker compose up -d` (recreates `notes` with the new environment; `tailscale` picks up `serve.json` by itself). `docker compose logs notes | grep "Publish server"` shows *Publish server listening on 127.0.0.1:8081*, and `docker compose exec tailscale tailscale funnel status` lists `https://notes.<tailnet>.ts.net:8443 (Funnel on)` proxying to `http://127.0.0.1:8081` and `:443` as tailnet only.
+
+**Publishing a note**: the globe in the note's header, **Publish to the web** in the ⋯ menu, or the command palette. Choose the title and the address (`/p/<address>`) and publish; the dialog shows the public link and, later, whether the note changed since. **Settings › Publishing** lists every published note with Republish and Unpublish. Unpublishing deletes the page at once. The snapshots live in `/data/publish` (in the `notes-data` volume, outside the vault, so they are backed up); `.notesapp/publish.json` in the vault lists them.
+
+**Check it from outside the tailnet** (a phone on mobile data): the page opens; `https://notes.<tailnet>.ts.net:8443/`, `/api/tree` and `/n/anything` answer `Not found`; `https://notes.<tailnet>.ts.net/` does not answer at all.
+
+**Turning it off**: copy `serve.json.tailnet-only` back over `serve.json` (the internet loses access at once), set `NOTES_PUBLISH_ENABLED=false` and `docker compose up -d`. The published list and snapshots are kept; unpublish notes in Settings › Publishing (allowed while off) to delete them.
+
 ### Import an Obsidian vault
 
 NotesApp reads an Obsidian vault as it is (ROADMAP item 24): the same Markdown, wikilinks, embeds, tags, properties, daily notes and templates. `.obsidian/` is read but never written, so the vault keeps working in Obsidian; it stays hidden in NotesApp and is versioned except `workspace*.json`.
@@ -942,6 +997,14 @@ The `Host` the browser used is not in `NOTES_ALLOWED_HOSTS`: a typo, a renamed n
 ### `403 identity-not-allowed`
 
 The request's Tailscale login is not in `NOTES_IDENTITY_ALLOWED_LOGINS`. Compare with the [Users](https://login.tailscale.com/admin/users) page exactly. Requests from tagged devices (they carry no identity) and from users the node is shared with are refused by design.
+
+### `403 funnel-request`
+
+The request reached the app through Tailscale Funnel, which the app always refuses: `serve.json` allows Funnel on `:443`. Only `:8443` (the publish server) may have `AllowFunnel` true; restore `serve.json` from `serve.funnel.json.example` or the tailnet-only original ("Public publishing").
+
+### Published pages answer `Not found`
+
+Check, in order: `NOTES_PUBLISH_ENABLED=true` reached the container (`docker compose logs notes | grep -i publish`: *Publish server listening*, not *Public publishing is off*); the note is in **Settings › Publishing** and not marked *Page missing* (republish it); `tailscale funnel status` shows `:8443` with Funnel on (otherwise the tailnet policy lacks the `funnel` attribute). Any path other than `/p/<address>` answers `Not found` by design.
 
 ### Changes made over SSH appear late
 

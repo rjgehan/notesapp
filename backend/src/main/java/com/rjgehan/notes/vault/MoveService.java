@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 
 import com.rjgehan.notes.api.dto.EntryType;
 import com.rjgehan.notes.bookmarks.BookmarkService;
+import com.rjgehan.notes.publish.PublishService;
 import com.rjgehan.notes.api.dto.FailedReason;
 import com.rjgehan.notes.api.dto.FailedUpdate;
 import com.rjgehan.notes.api.dto.FileEntry;
@@ -81,9 +82,11 @@ public class MoveService {
 
 	private final BookmarkService bookmarks;
 
+	private final PublishService publish;
+
 	public MoveService(VaultPaths paths, VaultFs fs, VaultLocks locks, VaultIndex index, FileService files,
 			FileIndexer indexer, VaultReconciler reconciler, CommitBatcher batcher, EventHub hub, MoveLog moveLog,
-			SettingsService settings, BookmarkService bookmarks) {
+			SettingsService settings, BookmarkService bookmarks, PublishService publish) {
 		this.paths = paths;
 		this.fs = fs;
 		this.locks = locks;
@@ -96,6 +99,7 @@ public class MoveService {
 		this.moveLog = moveLog;
 		this.settings = settings;
 		this.bookmarks = bookmarks;
+		this.publish = publish;
 	}
 
 	/** {@code POST /api/move}. {@code updateLinks} defaults to {@code settings.files.autoUpdateLinks}. */
@@ -154,6 +158,8 @@ public class MoveService {
 			rewritten.entries().forEach((entry) -> this.hub.publish(FileEvent.changed(entry, origin)));
 			// Bookmarks follow the entry like links (committed with the next batch; announced to every client).
 			this.bookmarks.moved(from.nfc(), to.nfc(), type, identity);
+			// Published notes keep their public address and follow the note (DESIGN §5.28).
+			this.publish.moved(from.nfc(), to.nfc(), type, identity);
 			GitStore.Commit last = (linksCommit != null) ? linksCommit : renameCommit;
 			logger.info("MOVE {} links={} client={} user={} {}ms", description, rewritten.updates().size(), origin,
 					identity.login(), (System.nanoTime() - started) / 1_000_000);

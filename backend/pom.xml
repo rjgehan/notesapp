@@ -40,6 +40,7 @@
 		<!-- The official Claude API SDK (ROADMAP item 18, DESIGN §5.25). It brings Jackson 2 (com.fasterxml), OkHttp and
 		     the Kotlin standard library; none of them clash with the app's Jackson 3 (tools.jackson). -->
 		<anthropic-java.version>3.0.0</anthropic-java.version>
+		<commonmark.version>0.30.1</commonmark.version>
 		<!-- Surefire skips the @Tag("perf") tests by default; -DexcludedGroups= (empty) runs them. Set as a property,
 		     because an explicit plugin configuration value would win over -D. -->
 		<excludedGroups>perf</excludedGroups>
@@ -84,6 +85,43 @@
 			<groupId>com.anthropic</groupId>
 			<artifactId>anthropic-java</artifactId>
 			<version>${anthropic-java.version}</version>
+		</dependency>
+		<!-- Markdown to HTML for published snapshots (ROADMAP item 26, DESIGN §5.26): commonmark-java, BSD-2-Clause;
+		     the autolink extension brings autolink-java, MIT -->
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark</artifactId>
+			<version>${commonmark.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-gfm-tables</artifactId>
+			<version>${commonmark.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-gfm-strikethrough</artifactId>
+			<version>${commonmark.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-task-list-items</artifactId>
+			<version>${commonmark.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-footnotes</artifactId>
+			<version>${commonmark.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-heading-anchor</artifactId>
+			<version>${commonmark.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.commonmark</groupId>
+			<artifactId>commonmark-ext-autolink</artifactId>
+			<version>${commonmark.version}</version>
 		</dependency>
 
 		<dependency>

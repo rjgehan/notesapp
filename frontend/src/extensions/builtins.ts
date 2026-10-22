@@ -74,6 +74,7 @@ import { registerDrawingViews } from '../views/excalidraw/register';
 import { registerPdfView } from '../views/pdf/register';
 import { startVoiceNote, transcribeAtCursor } from '../features/voice/voiceNotes';
 import { registerAi } from '../features/ai/register';
+import { registerPublish } from '../components/publish/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerSheetView } from '../views/sheet/register';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
@@ -435,6 +436,7 @@ export function registerBuiltins(): void {
   registerCalendar();
   // Reminders and push notifications (ROADMAP items 9 and 4c, DESIGN §6.38).
   registerReminders();
+  registerPublish();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

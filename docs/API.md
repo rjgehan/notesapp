@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | **Binding.** WP-Backend and WP-Frontend implement this independently and in parallel. |
-| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. 2026-10-21: the PDF viewer (item 32) in §9.1; voice notes and transcription (item 33) in §3, §17, §18, §19 and §23. 2026-10-21: Ask your vault and summaries (item 18) in §3, §5, §17, §18, §19 and §24. |
+| Date | 2026-10-16 (revision 2, matching DESIGN.md revision 2; integration amendments in §6.3, §11.3, §14.4, §15.1 and §17, agreed by both sides). Roadmap amendments, 2026-10-17: drawings (item 5) in §10.3, §11.2, §12.1 and §12.2; §20 tasks (item 4), with additions to §2, §3, §10.3, §11.2, §12.1, §16.4 and §17 to §19. 2026-10-21, items 4 and 5 together: §1.8 indexed documents, which §10.3, §11.2, §12.1, §12.2 and §20.9 refer to. 2026-10-21: §21 bookmarks (item 12) and §22 heading renames (item 21), with additions to §16.4 and §17 to §19; spreadsheets (item 6) in §10.3, §12.1 and §12.3. 2026-10-21: quick capture (§8.5, §8.6) and the installable app's routes (§18), ROADMAP items 7 and 8. 2026-10-21: flashcards (item 34) in §16.4, §17, §18, §19 and §34; habits (item 35) in §17, §18, §19 and §35. 2026-10-21: canvases (item 25) as indexed documents in §1.8, §11.2, §12.1 and §12.2. 2026-10-21: the PDF viewer (item 32) in §9.1; voice notes and transcription (item 33) in §3, §17, §18, §19 and §23. 2026-10-21: Ask your vault and summaries (item 18) in §3, §5, §17, §18, §19 and §24. 2026-10-21: public publishing (item 26) in §3, §17, §18, §19 and §26. |
 | Change control | Only the architect changes this file. If an implementer finds a gap, they stop, raise it, and the file is amended first; both sides then adapt. |
 | Related | [DESIGN.md](DESIGN.md) explains *how* and *why*. This file defines *what goes over the wire*. |
 
@@ -195,6 +195,8 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `ai-excluded` | 403 | Excluded from Ask and summaries | §24: the note, folder or selection named is under `settings.ai.excludedPaths` or `settings.files.excludedPaths` | `path` |
 | `ai-budget-exceeded` | 429 | Monthly AI budget reached | §24: this month's estimated spend reached `settings.ai.monthlyBudgetUsd` | `limit` (the budget, USD), `spent` (USD) |
 | `block-not-found` | 409 | Block not found | §37: the line a block id was to go on is no longer in the note, or is no longer unique | `line` |
+| `funnel-request` | 403 | Not available through Funnel | The request carries `Tailscale-Funnel-Request`: it came from the internet through Tailscale Funnel. Every path, health included (§26) | |
+| `publishing-off` | 409 | Public publishing is off | §26.2: `NOTES_PUBLISH_ENABLED` is not `true` on the server | |
 
 ```ts
 export interface FieldError { field: string; message: string }   // e.g. {"field":"settings.files.newNoteFolder","message":"invalid path"}
@@ -1901,7 +1903,7 @@ export type ErrorCode =
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
   | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
-  | 'block-not-found';
+  | 'block-not-found' | 'funnel-request' | 'publishing-off';
 
 export interface FieldError { field: string; message: string }
 
@@ -2801,6 +2803,23 @@ export interface ReminderDueEvent {
   url: string;                    // an app path, such as '/x/tasks/today?task=<id>'
   sentAt: IsoInstant;
 }
+
+// ---------- Public publishing (API.md §26, ROADMAP item 26) ----------
+export type PublishedNoteState = 'current' | 'changed' | 'source-missing' | 'snapshot-missing';
+export interface PublishedNote {
+  path: VaultPath;              // follows moves and renames made in the app
+  slug: string;                 // the public page is /p/<slug>
+  title: string;
+  url: string;                  // baseUrl + '/p/' + slug, or only the path when there is no base URL
+  publishedAt: IsoInstant;
+  state: PublishedNoteState;    // changed: edited since publishing; the public page shows the snapshot
+}
+export interface PublishResponse {
+  enabled: boolean;             // NOTES_PUBLISH_ENABLED; false: nothing is served or publishable
+  baseUrl: string | null;       // NOTES_PUBLISH_BASE_URL without a trailing slash
+  notes: PublishedNote[];
+}
+export interface PublishRequest { path: VaultPath; slug?: string; title?: string }   // omitted: keep, or derive
 ```
 
 ---
@@ -2871,6 +2890,9 @@ export interface ReminderDueEvent {
 | POST | `/api/tasks/lists/{id}/sections/reorder` | `ReorderRequest` | 200 `TaskListWriteResult` | 20.5 |
 | GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
 | PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
+| GET | `/api/publish` | | 200 `PublishResponse` | 26.1 |
+| POST | `/api/publish` | `PublishRequest` | 200 `PublishedNote` | 26.2 |
+| DELETE | `/api/publish?path=` | | 204 | 26.3 |
 | POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
 | POST | `/api/notes/block-id` | `BlockIdRequest` | 200 `BlockIdResult` | 37 |
 | GET | `/api/transcription` | | 200 `TranscriptionStatus` | 23.1 |
@@ -2934,6 +2956,7 @@ export interface ReminderDueEvent {
 | `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
 | `BlockIdRequest`, `BlockIdResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]` |
 | `TranscriptionStatus`, `TranscriptionResult` | Same; the request is `TranscribeRequest(String path)` | |
+| `PublishResponse`, `PublishedNote`, `PublishRequest` | Same | `PublishedNote.state` is the enum `PublishedNoteState` (`current`, `changed`, `source-missing`, `snapshot-missing`); every `PublishRequest` component is `@Nullable` |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
 | `Task`, `TaskList`, `TaskSection`, `TaskRecurrence`, `TaskReminder`, `TaskFileProblem`, `TasksResponse`, `TaskListsResponse`, `TaskWriteResult`, `TaskListWriteResult`, `CompleteTaskRequest`, `ReorderTasksRequest`, `ReorderRequest`, `CreateTaskListRequest`, `SectionRequest` | Same | Enums `TaskStatus`, `TaskView` and `RecurrenceFrom` (for `TaskRecurrence.from`); `Task.priority` is an `int`. `CompleteTaskRequest.base` is a `JsonNode`. |
@@ -3419,6 +3442,43 @@ A value dates a note when it is a string holding a date (`2026-10-21`), a date-t
 ```
 
 `400 bad-request` names the first bad parameter. The answer is not pushed: clients refetch it after `file.*`, `entry.moved` and `folder.deleted` events for notes (§16.4), debounced.
+
+## 26. Public publishing (ROADMAP item 26)
+
+Chosen notes can be published as read-only public pages through Tailscale Funnel, **switched off as shipped**: the server starts its publish server only with `NOTES_PUBLISH_ENABLED=true`, and the internet reaches it only once `serve.json` has the Funnel entry (DEPLOY.md "Public publishing"). The endpoints below are on the app, which stays tailnet-only: any request that came through Funnel (it carries `Tailscale-Funnel-Request`) is refused with `403 funnel-request`, on every path. DESIGN §5.28 has the design and the rules for what a page contains.
+
+The public pages are served by a separate server (`127.0.0.1:8081`, behind Funnel on `https://<host>:8443`) that answers only `GET`/`HEAD` on `/p/<slug>`, `/p/<slug>/<asset>` and `/p/-/style.css`, with `404` for everything else. A page is a static snapshot rendered when the note is published: later edits stay private until the note is republished.
+
+### 26.1 `GET /api/publish`
+
+`200 PublishResponse`: `enabled` (the server switch), `baseUrl` (`NOTES_PUBLISH_BASE_URL` without a trailing slash, or `null`) and every published note, in the order published:
+
+| `PublishedNote` field | Meaning |
+|---|---|
+| `path` | The note. Follows moves and renames made through the app |
+| `slug` | The page is `/p/<slug>`: 1 to 80 of `a-z`, `0-9` and inner `-` |
+| `title` | The page's title |
+| `url` | `baseUrl + "/p/" + slug`, or only the path when `baseUrl` is null |
+| `publishedAt` | When the snapshot was made |
+| `state` | `current`; `changed` (the note was edited since); `source-missing` (the note is gone; the page stays public until unpublished); `snapshot-missing` (the page's files are not on the server, for example after a restore: republish) |
+
+The list is read from `.notesapp/publish.json`, which is committed with the vault's history.
+
+### 26.2 `POST /api/publish`
+
+Body `PublishRequest`: `path` (required, a note), `slug` and `title` (optional). Publishes the note, or republishes it: the snapshot is rendered again from the note as it is now and replaces the previous one. An omitted `title` keeps the current one, or for a first publish is the note's name; an omitted `slug` keeps the current one, or is made from the title (`-2`, `-3`… when taken; random when the title has no letters or digits). A new `slug` moves the page: the old address answers `404` at once.
+
+| Status | When |
+|---|---|
+| `200` | `PublishedNote` |
+| `400 bad-request` | No `path`; not a note (`.md`, not a drawing; an encrypted `.mdenc` note never); a `slug` outside the rule of §26.1; a `title` over 200 characters or with a line break |
+| `403 reserved-path`, `404 not-found` | The path is reserved, or no such note |
+| `409 already-exists` | Another note is published at that `slug` (`existingPath`) |
+| `409 publishing-off` | Publishing is switched off on the server |
+
+### 26.3 `DELETE /api/publish?path={path}`
+
+`204`: the page and its files are deleted and the address answers `404` from then on; the note itself is not changed. Allowed while publishing is off, so notes published earlier can be taken down. `404 not-found` when the path is not published.
 
 ## 27. Encrypted notes (ROADMAP item 27)
 
