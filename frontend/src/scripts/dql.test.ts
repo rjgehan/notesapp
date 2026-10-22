@@ -70,3 +70,10 @@ describe('Dataview-style queries (ROADMAP 17)', () => {
     expect(() => runQuery(parseQuery('LIST WHERE nope(1)'), NOTES, ctx)).toThrow('Unknown function nope()');
   });
 });
+
+describe('Dataview-style queries: display', () => {
+  it('shows a local time with a space, as a date reads', () => {
+    const out = runQuery(parseQuery('TABLE WITHOUT ID file.mtime'), NOTES.slice(0, 1), ctx);
+    expect(out).toEqual({ t: 'table', columns: ['file.mtime'], rows: [[{ t: 'text', v: '2026-10-20 10:00' }]] });
+  });
+});

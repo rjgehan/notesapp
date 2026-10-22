@@ -513,7 +513,9 @@ function cell(v: Value): OutputItem {
   if (isLink(v)) return { t: 'link', path: v.link, title: text(v) };
   if (Array.isArray(v) && v.length > 0 && v.every(isLink)) return { t: 'list', items: v.map(cell) };
   if (typeof v === 'number') return { t: 'text', v: Number.isInteger(v) ? String(v) : String(Number(v.toFixed(10))) };
-  return { t: 'text', v: text(v) };
+  // A local time (`file.mtime`) reads as 2026-10-22 11:56.
+  const s = text(v);
+  return { t: 'text', v: typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s) ? s.replace('T', ' ') : s };
 }
 
 const MAX_ROWS = 1000;
