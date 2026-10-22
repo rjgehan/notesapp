@@ -2131,3 +2131,36 @@ mark.match {
     animation: none;
   }
 }
+
+/* ---------- folder templates (Settings › Templates, ROADMAP item 30) ---------- */
+
+.folder-templates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-template {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 599px) {
+  .folder-template {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .folder-template > :nth-child(2) {
+    grid-column: 1;
+  }
+
+  .folder-template > :nth-child(3) {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
+}

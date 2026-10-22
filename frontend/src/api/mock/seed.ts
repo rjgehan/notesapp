@@ -153,8 +153,8 @@ tags: [meeting]
 ---
 ## Meeting {{date:dddd, MMMM Do YYYY}}
 
-- Attendees:
-- Notes:
+- Attendees: {{prompt:Who is attending?}}
+- Notes: {{cursor}}
 `;
 
 const WINDOWS_NOTE = '# Imported from Windows\r\n\r\nThis note uses CRLF line endings.\r\n\r\n- [ ] Toggle me: the file stays CRLF\r\n';

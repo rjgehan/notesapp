@@ -279,7 +279,7 @@ Settings follow the same protocol with `PUT /api/settings {settings, baseVersion
       "excludedPaths": []
     },
     "dailyNotes": { "format": "YYYY-MM-DD", "folder": "Daily", "template": "", "openOnStartup": false },
-    "templates": { "folder": "Templates", "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm" },
+    "templates": { "folder": "Templates", "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm", "folderTemplates": [] },
     "editor": { "defaultMode": "edit", "readableLineLength": true, "strictLineBreaks": false },
     "ai": { "enabled": false, "provider": "claude-code", "model": "claude-sonnet-5-5", "excludedPaths": ["Private"],
             "maxContextChars": 60000, "monthlyBudgetUsd": 5.0 }
@@ -304,7 +304,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `409 version-conflict` | `currentContent` is the settings JSON string |
 | `409 settings-read-only` | `reason` |
 
-**Validation.** All groups and fields are required.
+**Validation.** All groups and fields are required, except `templates.folderTemplates` (added 2026-10-21, ROADMAP item 30): a file or request without it reads as `[]`.
 
 | Field | Rule |
 |---|---|
@@ -314,6 +314,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `dailyNotes.template` | `""` or a valid file path (it need not exist) |
 | `format`, `dateFormat`, `timeFormat` | 1 to 100 characters |
 | `excludedPaths` | At most 100 valid paths (folder or file prefixes, matched case-insensitively) |
+| `templates.folderTemplates` | At most 100 `{folder, template}` objects: `folder` is `""` (every folder) or a valid folder path, at most one rule per folder; `template` is `""` (an unused row) or a valid file path (it need not exist). Errors name the entry, e.g. `settings.templates.folderTemplates[2].folder`. |
 | Enums | Exactly the strings in §17 |
 | `ai` (ROADMAP item 18) | **Optional**, unlike the other groups: it came after schema version 1, so a file or a request without it, or without one of its fields, is valid. A request without `ai` keeps the current values (an old page cannot switch it off by accident); a file without it gets the defaults. A field that is present must be valid: `enabled` a boolean; `provider` `claude-code` or `api`; `model` one of `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5`; `excludedPaths` as `files.excludedPaths`; `maxContextChars` an integer from 4,000 to 400,000; `monthlyBudgetUsd` a number above 0 and at most 10,000. |
 
@@ -328,6 +329,7 @@ Request `SettingsUpdateRequest`: `{"settings": { ...full Settings... }, "baseVer
 | `autoUpdateLinks` | The default for `MoveRequest.updateLinks`. |
 | `excludedPaths` | Excluded from search results (§12.1) and from unlinked mentions (§11.2). |
 | `dailyNotes.*`, `templates.*` | See §15.2 and §15.4. |
+| `templates.folderTemplates` | Applied by the client: a note it creates (New note, a link to a missing note, the quick switcher) in a folder starts from the template of the deepest rule whose `folder` contains it, rendered as in §15.4. Notes created in `templates.folder` get none. |
 | `editor.*` | UI preferences that apply on all devices. `strictLineBreaks: false` (the default, as in Obsidian) renders a single newline as a line break in reading view. |
 | `ai.*` | Ask your vault and summaries (§24). `enabled` is off by default: until it is on, nothing is ever sent to Anthropic. `provider`: `claude-code` (default), the server's Claude Code CLI with the user's Claude subscription, or `api`, the Anthropic API billed per token. `excludedPaths` (default `["Private"]`) and `files.excludedPaths` are never read for a request. `maxContextChars` caps the note text of one request, earlier turns included; `monthlyBudgetUsd` refuses requests once the month's estimated spend reaches it. |
 
@@ -656,7 +658,7 @@ At least one of `text` and `url` is required.
 
 - The entry starts on a new line and ends with one. An existing file keeps its bytes exactly (BOM, invalid UTF-8); the entry follows its line endings (CRLF when every line break in it is CRLF).
 - An existing note is found ignoring case (`daily/2026-10-16.MD` is appended to, not shadowed).
-- A new daily note starts with its rendered template (`dailyNotes.template`, placeholders as in §15.4, with `title` the note's name and "now" the capture's date and time); a missing template means an empty start. Its missing parent folders are created.
+- A new daily note starts with its rendered template (`dailyNotes.template`, placeholders as in §15.4, with `title` the note's name and "now" the capture's date and time; nobody answers its questions, so `{{prompt:…}}` renders its default or nothing, and `{{cursor}}` is removed); a missing template means an empty start. Its missing parent folders are created.
 - Nothing is replaced, so a capture never conflicts. Other clients get `file.changed` (or `folder.created` and `file.created`); an open note with unsaved edits there enters the ordinary conflict flow (§4 step 5).
 - Send an `Idempotency-Key` (§2): a retried capture whose response was lost is not appended twice.
 - Mutations need `X-Client-Id` (§2). A Shortcut sends a fixed id of its own, for example `ios-shortcut-capture`; it sends no `Origin`, so the Origin checks pass.
@@ -1644,13 +1646,20 @@ The algorithm is in DESIGN §5.5.7. Its outline:
 **Placeholder grammar.** This is normative.
 
 ```
-regex: /\{\{\s*(title|date|time)(?::([^}]*))?\s*\}\}/gi
+regex: /\{\{\s*(?:(title|date|time)(?::([^}]*))?|(cursor)|prompt:([^}|]*)(?:\|([^}]*))?)\s*\}\}/gi
 {{title}}        → basename (no .md) of the note being created or edited
 {{date}}         → now.format(settings.templates.dateFormat)      (default "YYYY-MM-DD")
 {{time}}         → now.format(settings.templates.timeFormat)      (default "HH:mm")
 {{date:FMT}}     → now.format(FMT)        {{time:FMT}} → now.format(FMT)
-any other {{…}}  → left unchanged
+{{cursor}}       → removed; the first one is where the caret goes          (ROADMAP item 30)
+{{prompt:Q}}     → the answer to question Q (trimmed), asked before rendering
+{{prompt:Q|D}}   → the same, with D (trimmed) as the default answer
+any other {{…}}  → left unchanged (also {{prompt:}} with an empty question, and {{cursor:1}})
 ```
+
+- The template is read, its CRLF line breaks become LF, and every placeholder is replaced in **one pass**: an answer or a title that contains `{{…}}` is never rendered again.
+- **Prompts.** The client asks every distinct question once, in order of first appearance, all in one dialog, pre-filled with the first default given for it; any answer may be empty. Cancelling inserts or creates nothing. Where nobody can answer (the server's capture, §8.5), each prompt renders its own default, or nothing.
+- **Cursor.** Inserting a template puts the caret at its first `{{cursor}}` (one in its frontmatter does not count), otherwise after the inserted body. A note created from a template opens with the caret there, unless its text changed before it opened.
 
 Vectors, with now = Fri 2026-10-16 14:03:09 local and title `Plan`:
 
@@ -1663,6 +1672,12 @@ Vectors, with now = Fri 2026-10-16 14:03:09 local and title `Plan`:
 | `{{date:YYYY-[W]WW}}` | `2026-W42` |
 | `{{DATE:YYYY}}` | `2026` |
 | `{{weather}}` | `{{weather}}` |
+| `a{{cursor}}b` | `ab`, caret at offset 1 |
+| `{{prompt:Topic}}`, answered `Roadmap` | `Roadmap` |
+| `{{ Prompt: Mood \| fine }}`, unanswered | `fine` |
+| `{{prompt:}} {{cursor:1}}` | `{{prompt:}} {{cursor:1}}` |
+
+**Folder templates** (`settings.templates.folderTemplates`, §5) are applied by the client to a note it creates in a folder; see DESIGN §6.12.
 
 **Frontmatter merge** applies when the template has frontmatter and is inserted into a note. It uses the `yaml` Document API so formatting is preserved.
 
@@ -2011,7 +2026,9 @@ export interface FilesSettings {
   excludedPaths: VaultPath[];
 }
 export interface DailyNotesSettings { format: string; folder: VaultPath; template: VaultPath; openOnStartup: boolean }
-export interface TemplatesSettings { folder: VaultPath; dateFormat: string; timeFormat: string }
+/** A folder template (ROADMAP item 30): new notes in `folder` (`""`: anywhere) start from `template`. */
+export interface FolderTemplate { folder: VaultPath; template: VaultPath }
+export interface TemplatesSettings { folder: VaultPath; dateFormat: string; timeFormat: string; folderTemplates: FolderTemplate[] }
 export interface EditorSettings { defaultMode: 'edit' | 'read'; readableLineLength: boolean; strictLineBreaks: boolean }
 /** Ask your vault and summaries (§24). Optional in a request: a body without it keeps the current values. */
 export interface AiSettings {

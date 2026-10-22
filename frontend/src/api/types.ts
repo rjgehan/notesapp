@@ -156,7 +156,9 @@ export interface FilesSettings {
   excludedPaths: VaultPath[];
 }
 export interface DailyNotesSettings { format: string; folder: VaultPath; template: VaultPath; openOnStartup: boolean }
-export interface TemplatesSettings { folder: VaultPath; dateFormat: string; timeFormat: string }
+/** A folder template (ROADMAP item 30): new notes in `folder` (`""`: anywhere) start from `template`. */
+export interface FolderTemplate { folder: VaultPath; template: VaultPath }
+export interface TemplatesSettings { folder: VaultPath; dateFormat: string; timeFormat: string; folderTemplates: FolderTemplate[] }
 export interface EditorSettings { defaultMode: 'edit' | 'read'; readableLineLength: boolean; strictLineBreaks: boolean }
 /** Ask your vault and summaries (§24). Optional in a request: a body without it keeps the current values. */
 export interface AiSettings {
