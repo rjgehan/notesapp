@@ -35,6 +35,7 @@ public record NotesProperties(
 		@DefaultValue("/data/secrets") Path secretsDir,
 		@DefaultValue Tasks tasks,
 		@DefaultValue Search search,
+		@DefaultValue Publish publish,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
 				"yml" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
@@ -179,6 +180,21 @@ public record NotesProperties(
 			@DefaultValue("2000") int maxPages,
 			@DefaultValue("1000000") int maxChars,
 			@DefaultValue("60s") Duration timeout) {
+	}
+
+	/**
+	 * Public publishing (DESIGN §5.26, ROADMAP item 26), off unless {@code enabled}. The separate publish server binds
+	 * {@code address:port} and serves only the snapshots under {@code dir} (outside the vault); {@code baseUrl} is the
+	 * public origin shown for copying links (the Funnel address, e.g. {@code https://notes.<tailnet>.ts.net:8443}).
+	 * Attachments larger than {@code maxAssetSize} are left out of a snapshot.
+	 */
+	public record Publish(
+			@DefaultValue("false") boolean enabled,
+			@DefaultValue("127.0.0.1") String address,
+			@DefaultValue("8081") int port,
+			@DefaultValue("/data/publish") Path dir,
+			@DefaultValue("") String baseUrl,
+			@DefaultValue("25MB") DataSize maxAssetSize) {
 	}
 
 	public record TailscaleWatchdog(
