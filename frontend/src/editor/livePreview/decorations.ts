@@ -27,6 +27,8 @@ export interface BuildContext extends LivePreviewConfig {
   focused: boolean;
   /** Autocompletion is open. */
   completing: boolean;
+  /** A mouse button or a finger is down on the editor: a link the caret lands in shows its markup once it is up. */
+  pointerHeld?: boolean;
   /** The app (link resolution, embeds); null in a plain editor. */
   note: NoteContext | null;
   /** The note's footnotes; read from the state by default. */
@@ -56,10 +58,10 @@ function mark(className: string): Decoration {
   return d;
 }
 
-export function revealOptions(ctx: Pick<BuildContext, 'visibility' | 'locked' | 'focused' | 'completing'>): RevealOptions {
+export function revealOptions(ctx: Pick<BuildContext, 'visibility' | 'locked' | 'focused' | 'completing' | 'pointerHeld'>): RevealOptions {
   if (ctx.locked) return { atCursor: false, atSelectionEnds: false, completing: false, comments: false, codeAtCursor: false };
   const reveal = ctx.visibility === 'reveal-at-cursor';
-  return { atCursor: reveal && ctx.focused, atSelectionEnds: true, completing: ctx.completing, comments: reveal, codeAtCursor: true };
+  return { atCursor: reveal && ctx.focused, atSelectionEnds: true, completing: ctx.completing, comments: reveal, codeAtCursor: true, linkAtCaret: ctx.focused && !ctx.pointerHeld };
 }
 
 /** Decorations and atomic ranges for `ranges` of `state` (the visible ranges in the editor). */

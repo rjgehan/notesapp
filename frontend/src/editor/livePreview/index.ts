@@ -6,7 +6,7 @@
 import { completionStatus } from '@codemirror/autocomplete';
 import { deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
-import { EditorSelection, EditorState, Facet, findClusterBreak, Prec, RangeSet, Transaction, type Extension, type SelectionRange, type StateCommand } from '@codemirror/state';
+import { EditorSelection, EditorState, Facet, findClusterBreak, Prec, RangeSet, StateEffect, Transaction, type Extension, type SelectionRange, type StateCommand } from '@codemirror/state';
 import { Direction, EditorView, keymap, ViewPlugin, type Command, type ViewUpdate } from '@codemirror/view';
 import { isCoarsePointer, isIOS, modKey } from '../../features/platform';
 import { noteContext, vaultChanged } from '../context';
@@ -17,7 +17,7 @@ import { buildLivePreview, revealOptions, type LivePreview, type LivePreviewConf
 import { footnoteTooltips } from './footnotes';
 import { formatToolbar } from './formatToolbar';
 import { inputRules } from './inputRules';
-import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
+import { collectElements, INLINE_KINDS, lineLayout, selectionInLink, type Layout, type Run } from './model';
 import { isPointerSelection, touchTracking } from './pointer';
 import { revealElementAt } from './reveal';
 import { richMarkdown } from './rich';
@@ -33,15 +33,54 @@ export const livePreviewConfig = Facet.define<LivePreviewConfig, LivePreviewConf
   combine: (values) => values[0] ?? null,
 });
 
+/** The pointer was released: a link the caret landed in may now show its markup. */
+const pointerReleased = StateEffect.define<null>();
+
+/**
+ * How long after the button comes up a link the click put the caret in shows its markup: long
+ * enough for a double-click to select a word of the link's text before the text moves.
+ */
+export const LINK_REVEAL_DELAY_MS = 250;
+
 const livePlugin = ViewPlugin.fromClass(
   class {
     live: LivePreview;
+    /**
+     * A mouse button or a finger is down on the editor. A link the caret lands in shows its markup
+     * only once it is up (DESIGN §6.6.1, "Editing a link"), so the text never moves under a drag.
+     */
+    held = false;
+    private timer: ReturnType<typeof setTimeout> | null = null;
+    private readonly release = () => {
+      if (!this.held) return;
+      if (this.timer !== null) clearTimeout(this.timer);
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.held = false;
+        this.view.dispatch({ effects: pointerReleased.of(null) });
+      }, LINK_REVEAL_DELAY_MS);
+    };
+    readonly view: EditorView;
     constructor(view: EditorView) {
-      this.live = build(view);
+      this.view = view;
+      this.live = build(view, false);
+      view.dom.ownerDocument.defaultView?.addEventListener('pointerup', this.release);
+      view.dom.ownerDocument.defaultView?.addEventListener('pointercancel', this.release);
+    }
+    press() {
+      if (this.timer !== null) clearTimeout(this.timer);
+      this.timer = null;
+      this.held = true;
+    }
+    destroy() {
+      if (this.timer !== null) clearTimeout(this.timer);
+      this.view.dom.ownerDocument.defaultView?.removeEventListener('pointerup', this.release);
+      this.view.dom.ownerDocument.defaultView?.removeEventListener('pointercancel', this.release);
     }
     update(update: ViewUpdate) {
       if (
         update.docChanged ||
+        update.transactions.some((tr) => tr.effects.some((e) => e.is(pointerReleased))) ||
         update.viewportChanged ||
         update.selectionSet ||
         update.focusChanged ||
@@ -51,19 +90,27 @@ const livePlugin = ViewPlugin.fromClass(
         // Embeds and links resolve against the vault.
         update.transactions.some((tr) => tr.effects.some((e) => e.is(vaultChanged)))
       ) {
-        this.live = build(update.view);
+        this.live = build(update.view, this.held);
       }
     }
   },
-  { decorations: (p) => p.live.decorations },
+  {
+    decorations: (p) => p.live.decorations,
+    eventHandlers: {
+      pointerdown(event) {
+        if (event.button === 0) this.press();
+      },
+    },
+  },
 );
 
-function build(view: EditorView): LivePreview {
+function build(view: EditorView, pointerHeld: boolean): LivePreview {
   const config = view.state.facet(livePreviewConfig) ?? { visibility: 'hide-all', locked: false, checkboxes: false };
   return buildLivePreview(view.state, view.visibleRanges, {
     ...config,
     selection: view.state.selection,
     focused: view.hasFocus,
+    pointerHeld,
     completing: completionStatus(view.state) !== null,
     note: view.state.facet(noteContext),
     inCell: view.state.facet(tableCellHost) !== null,
@@ -73,7 +120,13 @@ function build(view: EditorView): LivePreview {
 /** The hidden markup on the line at `pos`, as the editor currently shows it. */
 function layoutAt(view: EditorView, pos: number): Layout {
   const config = view.state.facet(livePreviewConfig);
-  const options = revealOptions({ visibility: config?.visibility ?? 'hide-all', locked: false, focused: view.hasFocus, completing: completionStatus(view.state) !== null });
+  const options = revealOptions({
+    visibility: config?.visibility ?? 'hide-all',
+    locked: false,
+    focused: view.hasFocus,
+    pointerHeld: view.plugin(livePlugin)?.held ?? false,
+    completing: completionStatus(view.state) !== null,
+  });
   return lineLayout(view.state, pos, view.state.selection, options);
 }
 
@@ -333,6 +386,8 @@ const removeEmptyFormatting = EditorState.transactionFilter.of((tr) => {
       .sort((a, b) => a.to - a.from - (b.to - b.from));
     const gone = [{ from: fromA, to: toA }];
     for (const el of elements) {
+      // A link edited with its markup showing (the caret was inside it) keeps its markup.
+      if (selectionInLink(el, tr.startState.selection)) continue;
       if (covered(gone, el.from, el.to) || !covered(gone, el.textFrom, el.textTo)) continue;
       gone.push({ from: el.from, to: el.to });
       removed.push({ from: tr.changes.mapPos(el.from, 1), to: tr.changes.mapPos(el.to, -1) });
@@ -400,6 +455,11 @@ const linkClicks = EditorView.domEventHandlers({
     if (embedLink && event.button === 0 && lastPointerType !== 'touch' && !modKey(event) && !view.state.readOnly && view.contentDOM.contains(embedLink)) {
       event.preventDefault();
       return revealElementAt(view, embedLink, ['embed']);
+    }
+    // Mod-click follows the link (on click) without adding a cursor in it, which would show its markup.
+    if (event.button === 0 && modKey(event) && view.state.facet(EditorView.editable) && linkElement(view, event.target)) {
+      event.preventDefault();
+      return true;
     }
     // A tap on a link while editing keeps the caret where it is (and the keyboard closed).
     if (lastPointerType !== 'touch' || !view.state.facet(EditorView.editable) || !linkElement(view, event.target)) return false;

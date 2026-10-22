@@ -87,6 +87,20 @@ type PieceDraft = Omit<Piece, 'kind'>;
 /** Elements whose visible text formatting continues into: deleting all of it removes the element. */
 export const INLINE_KINDS: ReadonlySet<ElementKind> = new Set(['emphasis', 'strong', 'strikethrough', 'highlight', 'code', 'link', 'wikilink', 'autolink']);
 
+/** Links, whose hidden target a caret inside them shows (DESIGN §6.6.1, "Editing a link"). */
+export const LINK_KINDS: ReadonlySet<ElementKind> = new Set(['link', 'wikilink', 'autolink']);
+
+/**
+ * Whether a selection lies inside the link `element` (a caret strictly between its first and last
+ * character, or a range within it): then the link shows its full markup, target included, to edit.
+ * A caret at either edge (before the link, after it) leaves it rendered, so typing next to a link
+ * and the deletion rules there work as before.
+ */
+export function selectionInLink(element: Pick<LiveElement, 'kind' | 'from' | 'to'>, selection: EditorSelection): boolean {
+  if (!LINK_KINDS.has(element.kind)) return false;
+  return selection.ranges.some((r) => r.from > element.from && r.to < element.to);
+}
+
 export interface LiveElement {
   kind: ElementKind;
   from: number;
@@ -566,11 +580,14 @@ export interface RevealOptions {
   comments: boolean;
   /** A code block's fences show while a selection touches the block: an editable note, in both visibilities. */
   codeAtCursor: boolean;
+  /** A link shows its markup (its target) while a selection lies inside it (`selectionInLink`): an editable, focused note, no button held. */
+  linkAtCaret?: boolean;
 }
 
 /** Whether the markup of `element` shows instead of being replaced. */
 export function isRevealed(element: LiveElement, selection: EditorSelection, options: RevealOptions): boolean {
   if (element.kind === 'comment' && options.comments) return true;
+  if (options.linkAtCaret && selectionInLink(element, selection)) return true;
   if (element.kind === 'codeblock') return options.codeAtCursor && selection.ranges.some((r) => r.from <= element.revealTo && r.to >= element.revealFrom);
   for (const r of selection.ranges) {
     if (options.atCursor && r.from <= element.revealTo && r.to >= element.revealFrom) return true;
