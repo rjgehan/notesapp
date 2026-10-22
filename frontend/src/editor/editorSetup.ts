@@ -11,6 +11,10 @@ import { isIOS, modKey } from '../features/platform';
 import { headingSource, tagSource, wikilinkSource } from './completion';
 import { noteContext, type NoteContext } from './context';
 import { followLink, followLinkAtCursor, saveNow, toggleCheckbox, toggleMode } from './editorCommands';
+import { foldHeading, headingFolding, unfoldHeading } from './headingFold';
+import { listRenumbering } from './listRenumber';
+import { markupPairs } from './markupPairs';
+import { slashMenuClass, slashMenuDocking, slashSource } from './slash';
 import { formatting, toggleBold, toggleHighlight, toggleInlineCode, toggleItalic, toggleLink, toggleStrikethrough } from './formatting';
 import { lineClassPlugin, obsidianHighlight } from './highlight';
 import { linkAt } from './linkAt';
@@ -132,6 +136,15 @@ const noteCommandKeys: readonly CommandKey[] = [
   // does outside the text. Each half follows its own command's key (Settings, Hotkeys).
   { key: 'Mod-e', id: 'editor.inlineCode', run: (v) => !v.state.readOnly && toggleInlineCode(v), preventDefault: true },
   { key: 'Mod-e', id: 'editor.toggleMode', run: (v) => v.state.readOnly && toggleMode(v), preventDefault: true },
+  // Heading folding (DESIGN §6.6.2).
+  { key: 'Mod-Shift-[', id: 'editor.foldHeading', run: foldHeading, preventDefault: true },
+  { key: 'Mod-Shift-]', id: 'editor.unfoldHeading', run: unfoldHeading, preventDefault: true },
+];
+
+/** The completion of `[[`, `#` and the `/` menu (DESIGN §6.6 #8, §6.6.2). */
+const completion = (): Extension => [
+  autocompletion({ override: [slashSource, wikilinkSource, headingSource, tagSource], icons: false, tooltipClass: slashMenuClass }),
+  slashMenuDocking,
 ];
 
 /** Mod-f, for vim's benefit only: the search keymap binds it in the editor (findKeymap). */
@@ -190,12 +203,13 @@ function tableCellExtensions(ctx: NoteContext, hooks: EditorHooks, config: LiveP
       enterkeyhint: 'next',
     }),
     closeBrackets(),
+    markupPairs,
     formatting(),
-    autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
+    completion(),
     clickNavigation,
     unresolvedLinks,
     smartPunctuationGuard,
-    commandKeymap(noteCommandKeys.filter((k) => k.key !== 'Mod-l')),
+    commandKeymap(noteCommandKeys.filter((k) => k.key !== 'Mod-l' && !k.id.endsWith('Heading'))),
     keymap.of([...closeBracketsKeymap, ...defaultKeymap]),
   ];
 }
@@ -213,7 +227,10 @@ export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[
     preview ? livePreview(preview) : [],
     preview && !preview.locked ? tableCellSetup.of(() => tableCellExtensions(ctx, hooks, preview)) : [],
     formatting(),
-    autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
+    markupPairs,
+    listRenumbering,
+    headingFolding(),
+    completion(),
     clickNavigation,
     unresolvedLinks,
     encryptedSections,

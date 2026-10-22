@@ -980,3 +980,80 @@ th.cm-lp-cell {
   margin: 6px 0;
   text-align: center;
 }
+
+/* ---------- the / menu and heading folds (DESIGN §6.6.2) ---------- */
+
+/*
+ * On a touch screen the / menu is docked above the editing toolbar, which sits right on the
+ * on-screen keyboard (§6.16): the shell follows the visual viewport (--vv-top, --vvh), so the
+ * menu's bottom edge is the toolbar's top, whatever the caret's place.
+ */
+@media (pointer: coarse) {
+  .cm-editor .cm-tooltip.cm-tooltip-autocomplete.cm-slash-menu {
+    position: fixed !important;
+    top: calc(var(--vv-top, 0px) + var(--vvh, 100dvh) - 56px) !important;
+    right: 8px !important;
+    left: 8px !important;
+    transform: translateY(-100%);
+  }
+
+  .cm-editor .cm-tooltip.cm-tooltip-autocomplete.cm-slash-menu > ul {
+    max-width: none;
+    max-height: min(300px, calc(var(--vvh, 100dvh) * 0.4));
+  }
+
+  .cm-editor .cm-tooltip.cm-tooltip-autocomplete.cm-slash-menu > ul > li {
+    min-height: 40px;
+    align-items: center;
+  }
+}
+
+.note-editor .cm-editor .cm-line.cm-fold-heading {
+  position: relative;
+}
+
+/* The chevron hangs in the margin left of the heading; a press there folds or unfolds it. */
+.note-editor .cm-editor .cm-line.cm-fold-heading::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -22px;
+  width: 20px;
+  height: 1.5em;
+  background-color: var(--text-faint);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.note-editor .cm-editor .cm-line.cm-fold-heading:hover::before,
+.note-editor .cm-editor .cm-line.cm-fold-heading.is-folded::before {
+  opacity: 1;
+}
+
+.note-editor .cm-editor .cm-line.cm-fold-heading.is-folded::before {
+  transform: rotate(-90deg);
+}
+
+@media (pointer: coarse) {
+  /* The phone's margin is 16 px. */
+  .note-editor .cm-editor .cm-line.cm-fold-heading::before {
+    left: -16px;
+    width: 16px;
+    opacity: 0.6;
+  }
+}
+
+.note-editor .cm-editor .cm-foldPlaceholder {
+  margin: 0 4px;
+  padding: 0 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: 12px;
+  cursor: pointer;
+}
