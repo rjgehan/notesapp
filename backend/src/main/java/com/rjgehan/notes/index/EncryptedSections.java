@@ -1,5 +1,7 @@
 package com.rjgehan.notes.index;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -21,6 +23,8 @@ public final class EncryptedSections {
 
 	private static final Pattern SECTION = Pattern
 		.compile("%%" + LOCK + "[αβ]? " + BODY + " " + LOCK + "%%|" + LOCK + "[αβ] " + BODY + " " + LOCK);
+
+	private static final Pattern UNMARKED_VISIBLE = Pattern.compile(LOCK + " " + BODY + " " + LOCK);
 
 	/** What Ask your vault sees instead of a section. */
 	public static final String PLACEHOLDER = "[encrypted]";
@@ -52,6 +56,30 @@ public final class EncryptedSections {
 			}
 		}
 		return (out != null) ? out.toString() : text;
+	}
+
+	/**
+	 * The {@code [start, end)} ranges of every section, in text order. With {@code lenient} (publishing, which must
+	 * never leak a section, DESIGN §5.28) also those of a visible section without its α or β mark,
+	 * {@code 🔐 💡hint💡BASE64 🔐}, which search and Ask your vault leave alone; the ranges may then overlap.
+	 */
+	public static List<int[]> ranges(String text, boolean lenient) {
+		List<int[]> out = new ArrayList<>();
+		if (!mayContain(text)) {
+			return out;
+		}
+		Matcher m = SECTION.matcher(text);
+		while (m.find()) {
+			out.add(new int[] { m.start(), m.end() });
+		}
+		if (lenient) {
+			Matcher u = UNMARKED_VISIBLE.matcher(text);
+			while (u.find()) {
+				out.add(new int[] { u.start(), u.end() });
+			}
+			out.sort((a, b) -> Integer.compare(a[0], b[0]));
+		}
+		return out;
 	}
 
 	/** The text with every section replaced by {@link #PLACEHOLDER}. Returns the same instance when there is none. */

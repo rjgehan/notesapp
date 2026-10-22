@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 import com.rjgehan.notes.api.dto.FileKind;
 import com.rjgehan.notes.api.dto.LinkStyle;
 import com.rjgehan.notes.api.dto.TextRange;
+import com.rjgehan.notes.index.EncryptedSections;
 import com.rjgehan.notes.index.LinkOcc;
 import com.rjgehan.notes.index.MarkdownScanner;
 import com.rjgehan.notes.index.NoteParse;
@@ -169,17 +170,28 @@ public final class PublishRenderer {
 				edits.add(new Edit(encrypted.start(), encrypted.end(), ENCRYPTED_PLACEHOLDER));
 			}
 		}
+		// Also whatever the index's matcher finds (the one search and Ask your vault use), wherever it is: in math, in
+		// code, and a bare unmarked "🔐 <base64> 🔐". Overlaps are merged below, never leaving part of a section.
+		for (int[] range : EncryptedSections.ranges(text, true)) {
+			if (range[1] > bodyStart) {
+				edits.add(new Edit(Math.max(range[0], bodyStart), range[1], ENCRYPTED_PLACEHOLDER));
+			}
+		}
 		for (LinkOcc link : parse.links()) {
 			if (link.inFrontmatter() || link.from() < bodyStart) {
 				continue;
 			}
 			edits.add(new Edit(link.from(), link.to(), replacement(notePath, link, context, marker, hrefs, media)));
 		}
-		edits.sort(Comparator.comparingInt(Edit::from));
+		edits.sort(Comparator.comparingInt(Edit::from).thenComparing(Comparator.comparingInt(Edit::to).reversed()));
 		StringBuilder out = new StringBuilder(text.length());
 		int position = bodyStart;
 		for (Edit edit : edits) {
 			if (edit.from() < position) {
+				// An encrypted section reaching past the previous edit removes the rest of itself too.
+				if (edit.to() > position && ENCRYPTED_PLACEHOLDER.equals(edit.replacement())) {
+					position = edit.to();
+				}
 				continue;
 			}
 			out.append(text, position, edit.from()).append(edit.replacement());
