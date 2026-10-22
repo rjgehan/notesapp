@@ -35,7 +35,7 @@ A Spring Boot 4 backend (Java 21 bytecode, run on JDK 25) serves the REST and SS
 | `backend/` | Spring Boot app (`com.rjgehan.notes`), Maven wrapper |
 | `frontend/` | React + TypeScript + Vite SPA |
 | `clipper/` | The web clipper: browser extension, bookmarklet and iOS Shortcut script ([docs/CLIPPER.md](docs/CLIPPER.md)) |
-| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, the empty mirror-token placeholder in `mirror/`, Tailscale serve config, `.env.example`, and for CasaOS `casaos-compose.yml` plus the optional `casaos-backup-compose.yml` |
+| `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, the empty mirror-token placeholder in `mirror/`, Tailscale serve config, `.env.example`, and for CasaOS `casaos-compose.yml` (the app on the host's Tailscale), the advanced `casaos-compose-sidecar.yml` and the optional `casaos-backup-compose.yml` and `casaos-whisper-compose.yml` |
 | `.github/` | CI, image publishing, Dependabot |
 | `Dockerfile` | Three stages: frontend build, backend build (JDK 21), JDK 25 runtime with an AOT cache |
 | `docs/` | Design, API contract, deployment runbook, roadmap |

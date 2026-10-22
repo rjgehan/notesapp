@@ -1,44 +1,52 @@
 # Installing NotesApp on CasaOS
 
-This is the short path for a CasaOS server: one compose file pasted into the CasaOS UI, no `.env` and no SSH required. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); everything it says about Tailscale, Watchtower and the app applies here too. The optional extras at the end (app alerts, the GitHub mirror, voice note transcription, Ask your vault with Claude, nightly backups) are off until you set them up; most need a shell on the server, over SSH or in CasaOS's terminal, and a fresh install needs none of them.
+This is the short path for a CasaOS server that already runs Tailscale on the host: one compose file pasted into the CasaOS UI, two commands over SSH, no `.env`. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); what it says about Watchtower and the app applies here too. The optional extras further down (app alerts, the GitHub mirror, voice note transcription, Ask your vault with Claude, nightly backups, public publishing) are off until you set them up, and a fresh install needs none of them.
 
-The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs three containers:
+The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs two containers:
 
 | Container | Job |
 |---|---|
-| `notesapp-tailscale` | Joins your tailnet as the machine `notes` and serves `https://notes.<tailnet>.ts.net` (HTTPS certificate included) |
-| `notesapp` | The app. It shares the Tailscale container's network, so it has **no LAN port** and is reachable only over the tailnet |
+| `notesapp` | The app, published on the host's port `18095` (CasaOS accepts only a bare port, so it listens on every interface of the host; see *Who can reach port 18095* below) |
 | `notesapp-watchtower` | Checks GHCR every 5 minutes and restarts `notesapp` when a new image is pushed to `main` |
 
-Data lives in `/DATA/AppData/notesapp/`: `data/vault` holds your notes, and `tailscale/` holds the node identity and certificates (never delete it). `data/secrets/` (the alert and mirror settings, the Claude token or Anthropic API key), `whisper/` (the transcription model) and `backup/` appear only if you set up the extras below.
+The **host's own Tailscale** gives the HTTPS address and your login: `tailscale serve` on the host proxies `https://homeserver.<tailnet>.ts.net:8443` to `127.0.0.1:18095` and adds the Tailscale identity headers the app requires. (`homeserver` stands for the host's machine name in your tailnet; `8443` because the host already serves another app on 443. If nothing else uses 443, serve on 443 and drop `:8443` everywhere below.)
 
-## 1. One-time Tailscale setup (admin console)
+Data lives in `/DATA/AppData/notesapp/data/`: `vault/` holds your notes and their git history. `secrets/` (the alert and mirror settings, the Claude token or Anthropic API key), `../whisper/` (the transcription model) and `../backup/` appear only if you set up the extras below.
 
-1. **DNS** page: turn on **MagicDNS** and **HTTPS Certificates**.
-2. **Access controls**: add a tag owner so the server can tag itself:
-   ```json
-   "tagOwners": { "tag:notes": ["autogroup:admin"] }
+An older layout with its own Tailscale container is kept as an appendix (*Advanced: own Tailscale container*); CasaOS cannot run it as it stands.
+
+## 1. Before installing (once)
+
+1. **Tailscale on the host**, logged in to your tailnet, with **MagicDNS** and **HTTPS Certificates** on (admin console → **DNS**). `tailscale status` shows the host's name; `tailscale cert` would issue its certificate. Note the full name, e.g. `homeserver.tail1234.ts.net`.
+2. **The data folder**, owned by the app's user (uid 1000), over SSH or in CasaOS's terminal:
+   ```sh
+   sudo mkdir -p /DATA/AppData/notesapp/data && sudo chown -R 1000:1000 /DATA/AppData/notesapp/data
    ```
-3. **Settings → Keys → Generate auth key**: Reusable **off**, Ephemeral **off**, Pre-approved **on**, Tags **tag:notes**. Copy the `tskey-auth-…` value.
+   Without it Docker creates the folder as root and the app cannot write its vault.
+3. **The image** `ghcr.io/rjgehan/notesapp` is a **public** GHCR package, so no `docker login` is needed. (If you build your own image with the Claude Code CLI inside, for *Ask your vault*, keep that package **private**: Claude Code is Anthropic's proprietary software. Then run `docker login ghcr.io -u <you>` once on the server with a classic token that has only `read:packages`, and uncomment `REPO_USER` / `REPO_PASS` in the `watchtower` service.)
 
-Tagged machines don't expire, so the key is used once; after the first start you can blank `TS_AUTHKEY` in the app's settings.
+## 2. Install
 
-## 2. Make the image pullable
+1. In the compose file, replace `homeserver.<tailnet>.ts.net` (twice, in `NOTES_ALLOWED_HOSTS`) with the host's name from step 1.1. Optionally uncomment `NOTES_IDENTITY_ALLOWED_LOGINS` and put your Tailscale login there (the email shown in the admin console; comma-separate several); unset, anyone on your tailnet who reaches the app is let in. Set `TZ` if you are not on New York time.
+2. CasaOS → **App Store → Custom Install** (the `+` at the top right) → **Import** → paste the file → **Submit**, then **Install**. The CasaOS tile turns green within a minute.
+3. **HTTPS on the tailnet**, once over SSH (it survives reboots):
+   ```sh
+   sudo tailscale serve --bg --https=8443 http://127.0.0.1:18095
+   tailscale serve status        # https://homeserver.<tailnet>.ts.net:8443 → http://127.0.0.1:18095
+   ```
+4. Open `https://homeserver.<tailnet>.ts.net:8443` on any tailnet device, including the iPhone (Safari → Share → Add to Home Screen for an app icon). The first visit can take ~30 s while the certificate is issued.
 
-Pushes from the private repo create a **private** package, and CasaOS cannot log in to GHCR from the UI. Pick one:
+### Who can reach port 18095
 
-- **Make the package public** (simplest) only if you build it without Claude Code (`CLAUDE_CODE_VERSION=none`, *Ask your vault*): it then contains only the app, never your notes. GitHub → your profile → **Packages → notesapp → Package settings → Change visibility → Public**. Nothing else to configure.
-- **Recommended: keep it private.** The image contains the Claude Code CLI for *Ask your vault*, which is Anthropic's proprietary software and must not be published. Create a classic GitHub token with only `read:packages` and no expiry, then on the server run `docker login ghcr.io -u rjgehan` once (paste the token as the password). Also uncomment `REPO_USER` / `REPO_PASS` in the `watchtower` service so updates can be pulled.
+The app answers only requests whose `Host` is in `NOTES_ALLOWED_HOSTS` and that carry Tailscale's identity headers (`Tailscale-User-Login`, which `tailscale serve` adds); anything else gets `421` or `403`. That is what keeps out a browser that opens `http://<server-ip>:18095`. But the port itself is open on the LAN (and on the host's tailnet address), and a program there can send those headers itself. On a LAN you do not fully trust, drop every connection to the port that does not come from the host itself (`tailscale serve` connects from the host, so it keeps working):
 
-## 3. Install
+```sh
+sudo iptables -I DOCKER-USER -p tcp -m conntrack --ctorigdstport 18095 --ctdir ORIGINAL -j DROP
+sudo ip6tables -I INPUT -p tcp --dport 18095 -j DROP     # Docker's proxy also listens on IPv6
+curl -sI http://127.0.0.1:18095 | head -1                # on the host: still answers (421 without a Host it knows)
+```
 
-1. Fill in the placeholders in the compose file:
-   - `TS_AUTHKEY`: the key from step 1.3.
-   - `notes.CHANGE-ME.ts.net` (four places): your tailnet's MagicDNS name, e.g. `notes.tail1234.ts.net`.
-   - `NOTES_IDENTITY_ALLOWED_LOGINS`: your Tailscale login (the email shown in the admin console).
-2. CasaOS → **App Store → Custom Install** (the `+` at the top right) → **Import** → paste the file → **Submit**, then **Install**.
-3. Wait about a minute. The `notes` machine appears in the Tailscale admin console and the CasaOS tile turns green.
-4. Open `https://notes.<tailnet>.ts.net` on any tailnet device, including the iPhone (Safari → Share → Add to Home Screen for an app icon). The first visit can take ~30 s while the HTTPS certificate is issued.
+`DOCKER-USER` is the chain Docker leaves for your own rules; the rule matches connections forwarded to the container that were addressed to port 18095, which is every connection from another machine. The rules last until the next reboot: save them with your distribution's tool (on Debian or Ubuntu `sudo apt install iptables-persistent`, then `sudo netfilter-persistent save`), or put the two commands in a boot-time script. To check from another machine on the LAN: `curl -m 5 http://<server-ip>:18095` now times out.
 
 ## Import an Obsidian vault
 
@@ -55,15 +63,15 @@ Do this right after installing, before you write notes in NotesApp: a vault whos
    docker start notesapp
    ```
    The app is ready at once and records the import in its history in the background. Once the notes show up, delete `vault.empty` (and `/tmp/MyVault`).
-3. **Check `https://notes.<tailnet>.ts.net/x/compat`**, the *Compatibility report* (also in the drawer and Settings › About): every Obsidian setting should be *In effect*. It lists the plugins the vault used and what NotesApp offers instead, and everything that does not carry over (Dataview queries, Templater commands, links to missing files or headings, …), each opening the note at its line. **Use them on this device** takes Obsidian's graph colors and forces for the graph view, once per device.
+3. **Check `https://homeserver.<tailnet>.ts.net:8443/x/compat`**, the *Compatibility report* (also in the drawer and Settings › About): every Obsidian setting should be *In effect*. It lists the plugins the vault used and what NotesApp offers instead, and everything that does not carry over (Dataview queries, Templater commands, links to missing files or headings, …), each opening the note at its line. **Use them on this device** takes Obsidian's graph colors and forces for the graph view, once per device.
 
 If the vault has its own `.git` (the obsidian-git plugin), it is kept and NotesApp commits to it; turn the plugin off in Obsidian. Into an installation that already has notes, copy the vault into a subfolder instead and leave out its `.obsidian` and `.git` (DEPLOY.md).
 
 ## Updating
 
-Push to `main`. CI builds and publishes the image, and Watchtower restarts `notesapp` within about 5 minutes. To update Tailscale or Watchtower themselves, use the CasaOS app's **Update** or **Rebuild**.
+Push to `main`. CI builds and publishes the image, and Watchtower restarts `notesapp` within about 5 minutes. Tailscale is the host's, updated with the host; to update Watchtower, use the CasaOS app's **Update** or **Rebuild**.
 
-**Status page.** `https://notes.<tailnet>.ts.net/x/status` (also in the drawer and the command palette) shows problems first, then the version, the Java runtime, history, disk space, the last backup and the alerts.
+**Status page.** `https://homeserver.<tailnet>.ts.net:8443/x/status` (also in the drawer and the command palette) shows problems first, then the version, the Java runtime, history, disk space, the last backup and the alerts.
 
 ## Optional extras
 
@@ -89,7 +97,7 @@ No restart is needed. On the status page, *App alerts* then says "sent to ntfy a
 
 Task reminders (set in a task's details) and an optional daily-note nudge (DEPLOY.md *Reminders*). Every way of delivering them is **off until you switch it on** in NotesApp's **Settings › Reminders**; nothing needs to change in CasaOS for Web Push or in-app reminders.
 
-- **Web Push to the iPhone** (iOS 16.4 or later): open `https://notes.<tailnet>.ts.net` in Safari, **Share › Add to Home Screen**, open NotesApp from the Home Screen icon, then **Settings › Reminders › Subscribe this device** and allow notifications. Switch on **Send by Web Push** and press **Send a test** next to the device. The app creates its push key in `/DATA/AppData/notesapp/data/secrets/push.json` on first use. Desktop Chrome, Edge and Firefox subscribe the same way, from a tab.
+- **Web Push to the iPhone** (iOS 16.4 or later): open `https://homeserver.<tailnet>.ts.net:8443` in Safari, **Share › Add to Home Screen**, open NotesApp from the Home Screen icon, then **Settings › Reminders › Subscribe this device** and allow notifications. Switch on **Send by Web Push** and press **Send a test** next to the device. The app creates its push key in `/DATA/AppData/notesapp/data/secrets/push.json` on first use. Desktop Chrome, Edge and Firefox subscribe the same way, from a tab.
 - **ntfy** (the ntfy app, no Home Screen app needed): it uses the `ntfy.json` of *App alerts* above. To keep reminders apart from app problems, give them their own topic, subscribe to it in the ntfy app, and add it to the file:
 
   ```sh
@@ -129,7 +137,7 @@ Questions about your notes with answers that cite them, summaries of a note, a f
 
 The **monthly budget** ($5 by default) caps the API value of your usage that Claude Code reports, as a guard against using up your plan; nothing is charged per question. To rotate the token, run `claude setup-token` again and replace the file's content; to stop, switch **Use Claude** off and delete the file.
 
-**Keep the GHCR package private** (section 2's second option) once the image contains Claude Code: Claude Code is Anthropic's proprietary software, and a public image would hand it out to anyone. If your package is public, either make it private, or build the image with `--build-arg CLAUDE_CODE_VERSION=none` (DEPLOY.md *Ask your vault* explains mounting the CLI instead).
+**Keep the GHCR package private** (section 1, step 3) once the image contains Claude Code: Claude Code is Anthropic's proprietary software, and a public image would hand it out to anyone. If your package is public, either make it private, or build the image with `--build-arg CLAUDE_CODE_VERSION=none` (DEPLOY.md *Ask your vault* explains mounting the CLI instead).
 
 With an Anthropic API key instead (billed per token): put the key in `/DATA/AppData/notesapp/data/secrets/anthropic-key` the same way and choose **Provider: Anthropic API**.
 
@@ -155,23 +163,29 @@ To turn it off, empty `NOTES_TRANSCRIPTION_URL`, then uninstall the NotesApp Whi
 
 ### Public publishing
 
-**Off as installed; nothing is public.** Publishing shares chosen notes as read-only web pages with people outside your tailnet through Tailscale Funnel, without exposing the app: a separate server inside the container serves only the snapshots of notes you published, on `https://notes.<tailnet>.ts.net:8443`, while the app on `:443` stays tailnet-only and refuses anything that came through Funnel. DEPLOY.md *Public publishing* has the background (what a page contains, how to check it from outside). It takes three changes; any one alone exposes nothing:
+**Off as installed; nothing is public.** Publishing shares chosen notes as read-only web pages with people outside your tailnet through Tailscale Funnel, without exposing the app: a separate server inside the container (port 8081, not the app's 8080) serves only the snapshots of notes you published, and the app itself refuses anything that came through Funnel. DEPLOY.md *Public publishing* has the background (what a page contains, how to check it from outside).
 
-1. **Tailscale admin console → Access controls**: allow Funnel for the server, and (if your policy has the grants of DEPLOY.md step 6) let your own devices reach the public port too:
-   ```jsonc
-   "nodeAttrs": [ { "target": ["tag:notes"], "attr": ["funnel"] } ],
-   // in the NotesApp grant: "ip": ["tcp:443", "tcp:8443"]
+The publish server listens on `127.0.0.1` inside the container unless `NOTES_PUBLISH_ADDRESS` says otherwise, so with this layout it takes these changes; none of them alone exposes anything to the internet:
+
+1. **Tailscale admin console → Access controls**: allow Funnel for the host, e.g. `"nodeAttrs": [ { "target": ["autogroup:member"], "attr": ["funnel"] } ]` (or a narrower target that includes the host).
+2. CasaOS → NotesApp → **Settings**, the `notes` container:
+   - add the port `18096` → container port `8081` (the publish server; it is reachable from the LAN like 18095, but serves only published pages);
+   - set `NOTES_PUBLISH_ENABLED` to `true`, `NOTES_PUBLISH_ADDRESS` to `0.0.0.0` (so the published port reaches it), and `NOTES_PUBLISH_BASE_URL` to `https://homeserver.<tailnet>.ts.net:10000` (only used for the links the app copies);
+   - **Save**. The log then says *Publish server listening on 0.0.0.0:8081*.
+3. Over SSH, put the publish server alone on the internet. Funnel offers the ports 443, 8443 and 10000; 443 and 8443 are taken here, so:
+   ```sh
+   sudo tailscale funnel --bg --https=10000 http://127.0.0.1:18096
+   tailscale funnel status       # :10000 (Funnel on) → 18096; :8443 (tailnet only) → 18095
    ```
-2. CasaOS → NotesApp → **Settings**, the `tailscale` container: set `NOTES_PUBLISH_FUNNEL` to `true`. On its next start it writes a `serve.json` that adds `:8443` → `127.0.0.1:8081` (the publish server only) with Funnel allowed for that port alone; `:443` keeps Funnel off. If you edit the compose file instead, the Funnel `serve.json` is the `if` branch of the `tailscale` command, and `notes.CHANGE-ME.ts.net` must be your host name there too.
-3. The `notes` container: set `NOTES_PUBLISH_ENABLED` to `true`, and `NOTES_PUBLISH_BASE_URL` to `https://notes.<tailnet>.ts.net:8443` (only used for the links the app copies). **Save**.
+   Never point Funnel at 18095: the app would refuse those requests anyway, but nothing of it belongs on the internet.
 
-The `notes` log then says *Publish server listening on 127.0.0.1:8081*. Publish a note with the globe in its header, **Publish to the web** in the ⋯ menu, or the command palette; **Settings › Publishing** lists published notes with Republish and Unpublish. Snapshots are stored in `/DATA/AppData/notesapp/data/publish`, outside the vault.
+Publish a note with the globe in its header, **Publish to the web** in the ⋯ menu, or the command palette; **Settings › Publishing** lists published notes with Republish and Unpublish. Snapshots are stored in `/DATA/AppData/notesapp/data/publish`, outside the vault.
 
-To turn it off, set `NOTES_PUBLISH_FUNNEL` back to `false` (the internet loses access as soon as the `tailscale` container restarts) and `NOTES_PUBLISH_ENABLED` to `false`. Unpublish notes in Settings › Publishing to delete their snapshots.
+To turn it off: `sudo tailscale funnel --https=10000 off` (the internet loses access at once), then set `NOTES_PUBLISH_ENABLED` to `false` and remove the 18096 port. Unpublish notes in Settings › Publishing to delete their snapshots.
 
 ### Nightly backups
 
-A second CasaOS app, [`deploy/casaos-backup-compose.yml`](../deploy/casaos-backup-compose.yml), takes encrypted [restic](https://restic.net) snapshots of the vault, its history and the Tailscale identity every night, to a second disk and optionally to Backblaze B2 or Amazon S3 (DEPLOY.md *Backups* explains the design: NotesApp is stopped for the seconds the local snapshot takes). It adds two containers:
+A second CasaOS app, [`deploy/casaos-backup-compose.yml`](../deploy/casaos-backup-compose.yml), takes encrypted [restic](https://restic.net) snapshots of the vault, its history (and, with the advanced layout, the Tailscale identity) every night, to a second disk and optionally to Backblaze B2 or Amazon S3 (DEPLOY.md *Backups* explains the design: NotesApp is stopped for the seconds the local snapshot takes). It adds two containers:
 
 | Container | Job |
 |---|---|
@@ -234,21 +248,39 @@ Use `offsite` instead of `local` when the second disk is gone. Check the result 
 
 | Symptom | Check |
 |---|---|
-| `notesapp` keeps restarting | CasaOS → app → **Logs**. `NOTES_ALLOWED_HOSTS ... must list` means a placeholder wasn't replaced. `No kernel-mode Tailscale interface` means `/dev/net/tun` is missing on the host. |
-| Image pull fails with `denied` / `unauthorized` | The package is still private and the server isn't logged in to GHCR (step 2). |
+| `notesapp` keeps restarting | CasaOS → app → **Logs**. `NOTES_ALLOWED_HOSTS ... must list`: the variable is empty. `No kernel-mode Tailscale interface`: `NOTES_SECURITY_REQUIRE_TAILSCALE_INTERFACE` must be `"false"` in this layout. *Access denied* or *not writable* on `/data`: the data folder isn't owned by uid 1000 (section 1, step 2). |
+| Image pull fails with `denied` / `unauthorized` | The package is private and the server isn't logged in to GHCR (section 1, step 3). |
 | `403` in the browser | Your Tailscale login doesn't match `NOTES_IDENTITY_ALLOWED_LOGINS`, or you're on a tagged device. |
-| `421` in the browser | The host name you opened doesn't match `NOTES_ALLOWED_HOSTS`. |
-| `notes` never appears in Tailscale | The auth key was wrong, already used, or `tag:notes` has no tag owner. Generate a new key and **Rebuild** the app. |
+| `421` in the browser | The host name you opened doesn't match `NOTES_ALLOWED_HOSTS` (a placeholder left in, or a typo in the tailnet name). Opening `http://<server-ip>:18095` always answers 421 or 403: use the `https://…ts.net:8443` address. |
+| `403` from `http://127.0.0.1:18095` but the HTTPS address works | Expected: only `tailscale serve` adds the identity headers. |
+| `https://…:8443` does not load | `tailscale serve status` must show `:8443` → `http://127.0.0.1:18095` (section 2, step 3); `curl -sI http://127.0.0.1:18095` on the host must answer. |
+| `notes` never appears in Tailscale (advanced layout) | The auth key was wrong, already used, or `tag:notes` has no tag owner. Generate a new key and **Rebuild** the app. |
 | Certificate warning | HTTPS Certificates aren't enabled in the tailnet's DNS settings. |
-| `502 Bad Gateway` after a Tailscale restart | The app reconnects on its own within a minute; if not, restart the CasaOS app. |
+| `502 Bad Gateway` | The app is (re)starting, e.g. after a Watchtower update; it is back within a minute. Otherwise check the app's log. |
 | `notesapp` keeps restarting, log says `notes.git.large-file-threshold (…) is below the largest text size limit` | Set `NOTES_GIT_LARGE_FILE_THRESHOLD` to `0` or at least `5MB` (*Large files*). |
 | *Mirror is off: …* in the status bar | `NOTES_MIRROR_URL` is not a plain `https://github.com/<you>/<repo>.git` URL (*GitHub mirror*). Other mirror messages: DEPLOY.md Part 3. |
 | The *Ask* panel says *no Claude Code token* or *not readable* | `/DATA/AppData/notesapp/data/secrets/claude-token` is missing, empty or not owned by uid 1000 (*Ask your vault*). *Claude Code refused the token*: run `claude setup-token` again and replace the file. *usage limit is reached*: your plan's limit; wait for it to reset. Other messages: DEPLOY.md *"Ask your vault says it is unavailable"*. |
 | NotesApp Backup does not install: `bind source path does not exist` | The repository directory (step 1), `backup/scripts` or `backup/secrets` (step 2) is missing, or the second disk is not mounted. |
 | *NotesApp backup failed* | The status page's *Backups* card has restic's message; DEPLOY.md *"NotesApp backup failed"* explains each one. `not initialized`: run `init` (step 4). |
-| *NotesApp is down after the backup* | Restart NotesApp in CasaOS (or `docker start notesapp-tailscale notesapp`), then read its log. |
+| *NotesApp is down after the backup* | Restart NotesApp in CasaOS (or `docker start notesapp`), then read its log. |
 | Status page: "No backup has reported here yet" | NotesApp Backup is not installed, or has not run yet (step 4). |
 | NotesApp Whisper does not install: `network notesapp_default not found` | Install NotesApp first; the Whisper app joins its network (*Voice note transcription*). |
 | *Transcribing … failed: cannot connect to http://notesapp-whisper:9000* | The NotesApp Whisper app is stopped or still downloading its model (its **Logs**). After reinstalling NotesApp, restart NotesApp Whisper so it joins the new network. |
 | *Transcription is off* | `NOTES_TRANSCRIPTION_URL` is empty in NotesApp's settings (*Voice note transcription*, step 4). |
 | *Microphone access was refused* | Safari's **aA** menu › Website Settings › Microphone › Allow (iPhone), or the site settings in the browser. |
+
+## Advanced: own Tailscale container
+
+[`deploy/casaos-compose-sidecar.yml`](../deploy/casaos-compose-sidecar.yml) is the earlier layout: a `notesapp-tailscale` container joins the tailnet as its own machine `notes` (with an auth key and `tag:notes`) and serves `https://notes.<tailnet>.ts.net`, and the app has no published port at all, so nothing on the LAN can reach it. It is for a host without Tailscale, or for a separate machine name in the tailnet.
+
+**CasaOS does not install it as it was designed.** The design shared the Tailscale container's network namespace (`network_mode: service:tailscale`), and CasaOS sets a hostname on every container it creates, which Docker refuses for a container that shares another's network (*conflicting options: hostname and the network mode*). The file therefore puts both containers on a private network, `notes-internal`, where `tailscale serve` reaches the app as `notesapp:8080` (and the publish server as `notesapp:8081`, with `NOTES_PUBLISH_ADDRESS: 0.0.0.0`); the app's own Tailscale interface check and netns watchdog are off. With plain Docker Compose (DEPLOY.md) the shared-namespace layout works unchanged.
+
+To use it:
+
+1. Tailscale admin console: MagicDNS and HTTPS Certificates on; a tag owner `"tagOwners": { "tag:notes": ["autogroup:admin"] }`; **Settings → Keys → Generate auth key** with Reusable off, Ephemeral off, Pre-approved on, Tags `tag:notes`. Tagged machines don't expire, so the key is used once; blank `TS_AUTHKEY` after the first start.
+2. In the file, replace `tskey-auth-CHANGE-ME`, `notes.CHANGE-ME.ts.net` (every place, including both `serve.json` branches) and `NOTES_IDENTITY_ALLOWED_LOGINS`. The `tailscale` container makes the data folder writable by uid 1000 itself.
+3. Install it as in section 2, then open `https://notes.<tailnet>.ts.net`. `/DATA/AppData/notesapp/tailscale/` holds the node identity and certificates; never delete it (the nightly backups include it).
+
+Publishing with this layout: set `NOTES_PUBLISH_FUNNEL` to `true` on the `tailscale` container (its next start writes a `serve.json` with `:8443` → `notesapp:8081` and Funnel for that port alone), `NOTES_PUBLISH_ENABLED` to `true` and `NOTES_PUBLISH_BASE_URL` to `https://notes.<tailnet>.ts.net:8443` on `notes`, and allow Funnel for `tag:notes` in the access controls (`"nodeAttrs": [ { "target": ["tag:notes"], "attr": ["funnel"] } ]`).
+
+The NotesApp Whisper app joins the network `notesapp_default`, which this layout does not create: change its `name:` under `networks` to `notesapp_notes-internal` first.

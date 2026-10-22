@@ -1,4 +1,6 @@
-# NotesApp for CasaOS: paste into App Store → Custom Install → Import (Docker Compose).
+# NotesApp for CasaOS, ADVANCED variant with its own Tailscale container (docs/CASAOS.md, appendix).
+# Most installs want deploy/casaos-compose.yml instead, which uses the host's Tailscale.
+# Paste into App Store → Custom Install → Import (Docker Compose).
 # Self-contained: no .env, no extra files on the server. Before installing, replace the
 # three CHANGE-ME values below (Tailscale auth key, tailnet host name, Tailscale login).
 #
@@ -28,7 +30,7 @@ services:
     # Writes serve.json (HTTPS :443 → the app at notesapp:8080 on the private notes-internal network, tailnet only) and makes the data
     # folder writable by the app's uid 1000, then hands over to Tailscale's normal entrypoint. Only with
     # NOTES_PUBLISH_FUNNEL=true below does serve.json also get :8443 → the read-only publish server on
-    # 127.0.0.1:8081 with Funnel allowed for that port alone (public publishing, docs/CASAOS.md).
+    # notesapp:8081 with Funnel allowed for that port alone (public publishing, docs/CASAOS.md).
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -120,9 +122,11 @@ services:
       # /DATA/AppData/notesapp/data/secrets/claude-token (or an API key in .../anthropic-key), and stays
       # off until switched on in Settings › Ask and summaries (docs/CASAOS.md "Ask your vault").
       # Public publishing (docs/CASAOS.md "Public publishing"): OFF, nothing is public. "true" starts the read-only
-      # publish server on 127.0.0.1:8081 (published snapshots only); it is reachable from the internet only when
-      # NOTES_PUBLISH_FUNNEL is "true" on the tailscale service above as well. Snapshots: data/publish.
+      # publish server on port 8081 of notes-internal (published snapshots only; no published port); it is reachable
+      # from the internet only when NOTES_PUBLISH_FUNNEL is "true" on the tailscale service above as well.
+      # Snapshots: data/publish.
       NOTES_PUBLISH_ENABLED: "false"
+      NOTES_PUBLISH_ADDRESS: 0.0.0.0            # tailscale serve reaches it as notesapp:8081
       NOTES_PUBLISH_BASE_URL: https://notes.CHANGE-ME.ts.net:8443
     volumes:
       - /DATA/AppData/notesapp/data:/data

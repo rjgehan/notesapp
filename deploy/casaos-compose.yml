@@ -1,47 +1,78 @@
-# NotesApp for CasaOS (simple): the app + Watchtower. Uses the Tailscale already running on the host.
-# (deploy/casaos-compose-sidecar.yml is the older own-Tailscale-container variant; CasaOS rejects its shared network.)
+# NotesApp for CasaOS: paste into App Store → Custom Install → Import (Docker Compose).
+# The app + Watchtower, using the Tailscale already running on the host (docs/CASAOS.md).
+# deploy/casaos-compose-sidecar.yml is the advanced variant with its own Tailscale container.
 #
-# Before installing, once over SSH on the server:
+# Before installing, once over SSH on the server (the app runs as uid 1000):
 #   sudo mkdir -p /DATA/AppData/notesapp/data && sudo chown -R 1000:1000 /DATA/AppData/notesapp/data
-# After installing, once (gives HTTPS on your tailnet; survives reboots):
-#   sudo tailscale serve --bg --https=443 http://127.0.0.1:8095
-# Then open https://homeserver.<tailnet>.ts.net
+# Replace homeserver.<tailnet>.ts.net below with the host's MagicDNS name (twice).
+# After installing, once (HTTPS on your tailnet with your Tailscale login passed to the app; survives reboots):
+#   sudo tailscale serve --bg --https=8443 http://127.0.0.1:18095
+# Then open https://homeserver.<tailnet>.ts.net:8443
+# (--https=443 and the name without :8443 work too when nothing else on the host serves 443.)
 #
-# The app listens only on the server's loopback (127.0.0.1:8095), so nothing on the LAN or internet can reach it;
-# tailscale serve is the only way in, and it passes your Tailscale login to the app.
+# Port 18095 is also reachable from the LAN; docs/CASAOS.md shows the firewall rule that limits it to the host.
+# Data lives under /DATA/AppData/notesapp/data: vault/ (your notes and their git history) and, only if you set
+# up the optional extras of docs/CASAOS.md, secrets/. A fresh install needs none of the extras.
 name: notesapp
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   notes:
     image: ghcr.io/rjgehan/notesapp:latest
     container_name: notesapp
     ports:
-      - "127.0.0.1:8095:8080"
+      - "18095:8080"                            # CasaOS accepts only a bare port here
     environment:
       TZ: America/New_York
-      SERVER_ADDRESS: 0.0.0.0
-      NOTES_ALLOWED_HOSTS: homeserver.<tailnet>.ts.net
-      NOTES_IDENTITY_ALLOWED_LOGINS: you@example.com   # your Tailscale login; comma-separate several
-      NOTES_SECURITY_REQUIRE_TAILSCALE_INTERFACE: "false"
+      SERVER_ADDRESS: 0.0.0.0                   # listen on the container's network, for the published port
+      # The names the app answers to: the host's MagicDNS name, with and without the serve port.
+      NOTES_ALLOWED_HOSTS: homeserver.<tailnet>.ts.net,homeserver.<tailnet>.ts.net:8443
+      # Optional: only these Tailscale logins (comma-separated); unset = anyone on your tailnet.
+      # NOTES_IDENTITY_ALLOWED_LOGINS: you@example.com
+      NOTES_SECURITY_REQUIRE_TAILSCALE_INTERFACE: "false"   # Tailscale runs on the host, not in the container
       NOTES_TAILSCALE_WATCHDOG_ENABLED: "false"
+      # Files larger than this stay in the vault and in backups but out of git history (0 = version
+      # everything; otherwise at least 5MB, or the app refuses to start).
+      NOTES_GIT_LARGE_FILE_THRESHOLD: 25MB
+      # Optional mirror of the history to a private GitHub repository (docs/CASAOS.md "GitHub mirror").
+      # Empty = off. The token goes in /DATA/AppData/notesapp/data/secrets/mirror-token, never here.
+      NOTES_MIRROR_URL: ""
+      NOTES_MIRROR_TOKEN_FILE: /data/secrets/mirror-token
+      # Optional transcription of voice notes (docs/CASAOS.md "Voice note transcription"): with the NotesApp
+      # Whisper app (casaos-whisper-compose.yml) installed, http://notesapp-whisper:9000. Empty = off.
+      NOTES_TRANSCRIPTION_URL: ""
     volumes:
       - /DATA/AppData/notesapp/data:/data
+      # The last nightly backup's status for the status page, read-only. Written by the optional
+      # NotesApp Backup app; until then the status page says no backup has reported.
+      - /DATA/AppData/notesapp/backup/state:/backup-state:ro
     mem_limit: 1g
     stop_grace_period: 45s
     labels:
       com.centurylinklabs.watchtower.enable: "true"
+    logging: *logging
     restart: unless-stopped
 
   watchtower:
-    image: nickfedor/watchtower:1.23.1
+    image: nickfedor/watchtower:1.23.1@sha256:3175c006eb20112f3a70f7002f82dbf4a4078c97e7033735a4d153668fc3dfb1
     container_name: notesapp-watchtower
     environment:
-      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"           # only updates the notesapp container
       WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_POLL_INTERVAL: "300"
+      WATCHTOWER_POLL_INTERVAL: "300"           # checks GHCR every 5 minutes
+      WATCHTOWER_TIMEOUT: 45s
       TZ: America/New_York
+      # Only if the GHCR package is PRIVATE: a classic GitHub token with read:packages.
+      # REPO_USER: rjgehan
+      # REPO_PASS: ghp_CHANGE-ME
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    logging: *logging
     restart: unless-stopped
 
 x-casaos:
@@ -49,6 +80,12 @@ x-casaos:
     - amd64
     - arm64
   main: notes
+  author: rjgehan
+  category: Productivity
   title:
     en_us: NotesApp
+  tagline:
+    en_us: Self-hosted Obsidian-style notes, tailnet only
+  description:
+    en_us: Markdown vault with wikilinks, backlinks, search, history and live sync. Open it at https://homeserver.<tailnet>.ts.net:8443 from any Tailscale device.
   icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/obsidian.png

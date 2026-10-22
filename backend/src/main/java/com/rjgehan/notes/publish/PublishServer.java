@@ -27,7 +27,8 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
 /**
- * The public publish server (ROADMAP item 26, DESIGN §5.28): a JDK {@link HttpServer} on {@code 127.0.0.1:8081},
+ * The public publish server (ROADMAP item 26, DESIGN §5.28): a JDK {@link HttpServer} on {@code notes.publish.address:port}
+ * (default {@code 127.0.0.1:8081}; {@code 0.0.0.0} when the port is published from a container, docs/CASAOS.md),
  * separate from the app's Tomcat, so none of the app's controllers, filters, API or SPA can ever answer on it. It
  * starts only when {@code notes.publish.enabled} is true, and answers only:
  * <ul>

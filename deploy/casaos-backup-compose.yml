@@ -73,7 +73,7 @@ services:
       NOTES_BACKUP_STATE_DIR: /state
       NOTES_BACKUP_APP_CONTAINER: notesapp      # the container names of casaos-compose.yml
       NOTES_BACKUP_CONTAINER: notesapp-backup
-      NOTES_BACKUP_UP_HINT: docker start notesapp-tailscale notesapp   # or restart NotesApp in CasaOS
+      NOTES_BACKUP_UP_HINT: docker start notesapp   # or restart NotesApp in CasaOS
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # docker stop/start notesapp, docker exec into notesapp-backup
       - type: bind
