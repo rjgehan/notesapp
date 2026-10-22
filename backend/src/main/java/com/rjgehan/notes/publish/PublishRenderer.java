@@ -49,7 +49,7 @@ import org.commonmark.renderer.html.HtmlWriter;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Turns one note into the static HTML of a published snapshot (DESIGN §5.26). The output never reveals what was not
+ * Turns one note into the static HTML of a published snapshot (DESIGN §5.28). The output never reveals what was not
  * chosen for publishing:
  * <ul>
  * <li>frontmatter, {@code %% %%} and {@code <!-- -->} comments, raw HTML (except {@code <br>}) and code blocks that
@@ -97,6 +97,11 @@ public final class PublishRenderer {
 	private static final Pattern BLOCK_ID_SUFFIX = Pattern.compile("(?:^|\\s)\\^[A-Za-z0-9-]+\\s*$");
 
 	private static final Pattern CALLOUT = Pattern.compile("^\\[!([A-Za-z0-9_-]+)\\][+-]?\\s*");
+
+	/** An inline encrypted section of Meld Encrypt (ROADMAP item 27); an unclosed one runs to the end. */
+	private static final Pattern ENCRYPTED = Pattern.compile("(?s)\\x{1F510}[\\x{3B1}\\x{3B2}].*?(?:\\x{1F510}|\\z)");
+
+	private static final String ENCRYPTED_PLACEHOLDER = "🔒 *encrypted*";
 
 	private static final Pattern BR = Pattern.compile("(?i)<br\\s*/?>");
 
@@ -155,6 +160,15 @@ public final class PublishRenderer {
 				edits.add(new Edit(zone.from(), zone.to(), ""));
 			}
 		}
+		// Encrypted sections (ROADMAP item 27, Meld Encrypt's "🔐β 💡hint💡<ciphertext> 🔐") are never published, not
+		// even their hint: each becomes a placeholder. Those inside %% %% went with the comment above.
+		Matcher encrypted = ENCRYPTED.matcher(text);
+		encrypted.region(bodyStart, text.length());
+		while (encrypted.find()) {
+			if (!inCode(parse.excluded(), text, encrypted.start())) {
+				edits.add(new Edit(encrypted.start(), encrypted.end(), ENCRYPTED_PLACEHOLDER));
+			}
+		}
 		for (LinkOcc link : parse.links()) {
 			if (link.inFrontmatter() || link.from() < bodyStart) {
 				continue;
@@ -173,6 +187,17 @@ public final class PublishRenderer {
 		}
 		out.append(text, Math.max(position, bodyStart), text.length());
 		return out.toString();
+	}
+
+	/** True inside a code span, a fenced block or math, where the text is shown as written. */
+	private static boolean inCode(List<TextRange> zones, String text, int position) {
+		for (TextRange zone : zones) {
+			if (zone.from() <= position && position < zone.to() && !text.startsWith("%%", zone.from())
+					&& !text.startsWith("<!--", zone.from())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static String replacement(String notePath, LinkOcc link, Context context, String marker,
@@ -342,6 +367,11 @@ public final class PublishRenderer {
 						first.setLiteral(Character.toUpperCase(type.charAt(0)) + type.substring(1));
 						first.insertBefore(title);
 						title.appendChild(first);
+					}
+					// The title is a line of its own, as in Obsidian.
+					if (title.getNext() instanceof SoftLineBreak soft) {
+						soft.insertBefore(new HardLineBreak());
+						soft.unlink();
 					}
 				}
 			}

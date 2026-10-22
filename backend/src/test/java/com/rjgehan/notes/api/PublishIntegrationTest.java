@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * Public publishing switched on (ROADMAP item 26, DESIGN §5.26, API.md §26): the publish API on the app, and the
+ * Public publishing switched on (ROADMAP item 26, DESIGN §5.28, API.md §26): the publish API on the app, and the
  * separate publish server, which must answer with nothing but published snapshots. Every private thing a request to
  * it could try to reach (private notes, the API, the SPA, attachments no published note embeds, {@code .notesapp},
  * {@code .git}, other files in the snapshot folder) is a {@code 404}.
@@ -224,6 +224,10 @@ class PublishIntegrationTest {
 			.isEqualTo("bad-request");
 		assertThat(this.api.postJson("/api/publish", Map.of("path", ".git/config.md")).status()).isIn(403, 404);
 		assertThat(this.api.postJson("/api/publish", Map.of("path", "Nope.md")).problem(404)).isEqualTo("not-found");
+		// Encrypted notes (ROADMAP item 27, .mdenc) are never published.
+		this.api.putBytes("/api/files/raw?path=" + Api.enc("Vault/Secret.mdenc"), utf8("{\"version\":\"2.0\"}")).ok(201);
+		assertThat(this.api.postJson("/api/publish", Map.of("path", "Vault/Secret.mdenc")).problem(400))
+			.isEqualTo("bad-request");
 		assertThat(this.api.postJson("/api/publish", Map.of("path", "A.md"), "X-Client-Id", null).problem(403))
 			.isEqualTo("client-id-required");
 	}

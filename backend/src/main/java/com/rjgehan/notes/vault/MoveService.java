@@ -158,7 +158,7 @@ public class MoveService {
 			rewritten.entries().forEach((entry) -> this.hub.publish(FileEvent.changed(entry, origin)));
 			// Bookmarks follow the entry like links (committed with the next batch; announced to every client).
 			this.bookmarks.moved(from.nfc(), to.nfc(), type, identity);
-			// Published notes keep their public address and follow the note (DESIGN §5.26).
+			// Published notes keep their public address and follow the note (DESIGN §5.28).
 			this.publish.moved(from.nfc(), to.nfc(), type, identity);
 			GitStore.Commit last = (linksCommit != null) ? linksCommit : renameCommit;
 			logger.info("MOVE {} links={} client={} user={} {}ms", description, rewritten.updates().size(), origin,

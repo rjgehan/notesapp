@@ -135,6 +135,22 @@ Voice notes record without any setup (**Record voice note** in the command palet
 
 To turn it off, empty `NOTES_TRANSCRIPTION_URL`, then uninstall the NotesApp Whisper app if you like. NotesApp runs the same with or without it. Other engines (whisper.cpp's server, speaches, an API) are in DEPLOY.md *Voice notes*; an API key goes in `/DATA/AppData/notesapp/data/secrets/transcription-key`, never in an environment variable.
 
+### Public publishing
+
+**Off as installed; nothing is public.** Publishing shares chosen notes as read-only web pages with people outside your tailnet through Tailscale Funnel, without exposing the app: a separate server inside the container serves only the snapshots of notes you published, on `https://notes.<tailnet>.ts.net:8443`, while the app on `:443` stays tailnet-only and refuses anything that came through Funnel. DEPLOY.md *Public publishing* has the background (what a page contains, how to check it from outside). It takes three changes; any one alone exposes nothing:
+
+1. **Tailscale admin console → Access controls**: allow Funnel for the server, and (if your policy has the grants of DEPLOY.md step 6) let your own devices reach the public port too:
+   ```jsonc
+   "nodeAttrs": [ { "target": ["tag:notes"], "attr": ["funnel"] } ],
+   // in the NotesApp grant: "ip": ["tcp:443", "tcp:8443"]
+   ```
+2. CasaOS → NotesApp → **Settings**, the `tailscale` container: set `NOTES_PUBLISH_FUNNEL` to `true`. On its next start it writes a `serve.json` that adds `:8443` → `127.0.0.1:8081` (the publish server only) with Funnel allowed for that port alone; `:443` keeps Funnel off. If you edit the compose file instead, the Funnel `serve.json` is the `if` branch of the `tailscale` command, and `notes.CHANGE-ME.ts.net` must be your host name there too.
+3. The `notes` container: set `NOTES_PUBLISH_ENABLED` to `true`, and `NOTES_PUBLISH_BASE_URL` to `https://notes.<tailnet>.ts.net:8443` (only used for the links the app copies). **Save**.
+
+The `notes` log then says *Publish server listening on 127.0.0.1:8081*. Publish a note with the globe in its header, **Publish to the web** in the ⋯ menu, or the command palette; **Settings › Publishing** lists published notes with Republish and Unpublish. Snapshots are stored in `/DATA/AppData/notesapp/data/publish`, outside the vault.
+
+To turn it off, set `NOTES_PUBLISH_FUNNEL` back to `false` (the internet loses access as soon as the `tailscale` container restarts) and `NOTES_PUBLISH_ENABLED` to `false`. Unpublish notes in Settings › Publishing to delete their snapshots.
+
 ### Nightly backups
 
 A second CasaOS app, [`deploy/casaos-backup-compose.yml`](../deploy/casaos-backup-compose.yml), takes encrypted [restic](https://restic.net) snapshots of the vault, its history and the Tailscale identity every night, to a second disk and optionally to Backblaze B2 or Amazon S3 (DEPLOY.md *Backups* explains the design: NotesApp is stopped for the seconds the local snapshot takes). It adds two containers:

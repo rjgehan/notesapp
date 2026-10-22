@@ -1,0 +1,111 @@
+/* Public publishing (ROADMAP item 26, DESIGN §5.28): the publish dialog and Settings › Publishing. */
+
+.publish-dialog {
+  max-width: 520px;
+}
+
+.publish-explain,
+.publish-off {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.publish-off code {
+  font-size: var(--font-ui-small);
+}
+
+.publish-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.publish-link code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  font-size: var(--font-ui-small);
+  white-space: pre;
+}
+
+.publish-slug {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.publish-slug .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.publish-state {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.publish-state-current {
+  color: var(--text-success);
+}
+
+.publish-state-changed,
+.publish-state-snapshot-missing {
+  color: var(--text-warning);
+}
+
+.publish-state-source-missing {
+  color: var(--text-error);
+}
+
+.published-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.published-row {
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.published-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.published-meta {
+  font-size: var(--font-ui-small);
+  overflow-wrap: anywhere;
+}
+
+.published-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.published-actions .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.publish-toggle.is-on {
+  color: var(--interactive-accent);
+}
+
+.publish-toggle.is-stale {
+  color: var(--text-warning);
+}

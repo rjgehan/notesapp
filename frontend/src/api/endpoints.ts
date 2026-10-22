@@ -6,6 +6,9 @@ import type {
   AttachmentResult,
   BacklinksResponse,
   BookmarksResponse,
+  PublishRequest,
+  PublishResponse,
+  PublishedNote,
   BookmarksUpdateRequest,
   CaptureRequest,
   CaptureResult,
@@ -144,6 +147,12 @@ export interface Endpoints {
   getBookmarks(): Promise<BookmarksResponse>;
   putBookmarks(req: BookmarksUpdateRequest): Promise<BookmarksResponse>;
   renameHeading(req: HeadingRenameRequest): Promise<HeadingRenameResult>;
+  /** Published notes and whether publishing is on (API.md §26.1). */
+  getPublish(): Promise<PublishResponse>;
+  /** Publishes or republishes a note (API.md §26.2). */
+  publishNote(req: PublishRequest): Promise<PublishedNote>;
+  /** Unpublishes a note: its public page is gone at once (API.md §26.3). */
+  unpublishNote(path: string): Promise<void>;
   getTranscriptionStatus(): Promise<TranscriptionStatus>;
   /** The transcript of a recording in the vault (API.md §23.2); it can take minutes. */
   transcribe(path: string): Promise<TranscriptionResult>;
@@ -221,6 +230,9 @@ export const httpEndpoints: Endpoints = {
   getBookmarks: () => apiFetch('/api/bookmarks'),
   putBookmarks: (req) => apiFetch('/api/bookmarks', { method: 'PUT', json: req }),
   renameHeading: (req) => apiFetch('/api/notes/rename-heading', { method: 'POST', json: req }),
+  getPublish: () => apiFetch('/api/publish'),
+  publishNote: (req) => apiFetch('/api/publish', { method: 'POST', json: req }),
+  unpublishNote: (path) => apiFetch('/api/publish' + query(p(path)), { method: 'DELETE' }),
   getTranscriptionStatus: () => apiFetch('/api/transcription'),
   transcribe: (path) => apiFetch('/api/transcriptions', { method: 'POST', json: { path } }),
   rawUrl: (entry, opts) =>

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** The publishing rules of DESIGN §5.26: what a snapshot may and may not contain. */
+/** The publishing rules of DESIGN §5.28: what a snapshot may and may not contain. */
 class PublishRendererTest {
 
 	private static final String NOTE = "Blog/Post.md";
@@ -167,6 +167,21 @@ class PublishRendererTest {
 	}
 
 	@Test
+	void encryptedSectionsAreNeverPublished() {
+		// Meld Encrypt's inline sections (ROADMAP item 27): "🔐β 💡hint💡<ciphertext> 🔐", alone or inside %% %%.
+		String lock = "🔐";
+		String bulb = "💡";
+		String html = render("Before %%" + lock + "β " + bulb + "comment hint" + bulb + "c2VjcmV0Y29tbWVudA== " + lock
+				+ "%% between\n" + lock + "β " + bulb + "my hint" + bulb + "U2VjcmV0IGNpcGhlcnRleHQ+/= " + lock
+				+ " after.\n\n`" + lock + "β code stays" + lock + "`\n\n" + lock + "α bG9uZyBvbGQ= [[Other]] unclosed\n"
+				+ "still part of it\n");
+		assertThat(html).contains("Before").contains("between").contains("after.").contains("<em>encrypted</em>")
+			.contains("code stays");
+		assertThat(html).doesNotContain("hint").doesNotContain("c2VjcmV0").doesNotContain("U2VjcmV0")
+			.doesNotContain("bG9uZ").doesNotContain("/p/other").doesNotContain("still part");
+	}
+
+	@Test
 	void textOfLinksIsEscaped() {
 		String html = render("[[Missing|<b onmouseover=x>bold</b>]] [[Other|*not emphasis* <i>]]");
 		assertThat(html).contains("&lt;b onmouseover=x&gt;bold&lt;/b&gt;").contains("*not emphasis* &lt;i&gt;")
@@ -208,7 +223,7 @@ class PublishRendererTest {
 				""");
 		assertThat(html).doesNotContain("Private").doesNotContain("^abc123").doesNotContain("[!warning]");
 		assertThat(html).contains("<h1 id=\"intro\">Intro</h1>").contains("const kept = true;")
-			.contains("<strong>Careful</strong>").contains("Body text")
+			.contains("<strong>Careful</strong><br />\nBody text")
 			.contains("type=\"checkbox\"").contains("<table>").contains("<del>struck</del>")
 			.contains("The note.");
 	}

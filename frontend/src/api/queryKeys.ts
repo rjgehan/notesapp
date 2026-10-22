@@ -30,6 +30,8 @@ export const queryKeys = {
   /** The Obsidian compatibility report (API.md §11.5). */
   compat: () => ['compat'] as const,
   transcription: () => ['transcription'] as const,
+  /** Published notes (API.md §26.1). */
+  publish: () => ['publish'] as const,
 };
 
 export const STALE = {
@@ -51,4 +53,5 @@ export const STALE = {
   templates: 60_000,
   bookmarks: Infinity,
   transcription: 300_000,
+  publish: 30_000,
 } as const;

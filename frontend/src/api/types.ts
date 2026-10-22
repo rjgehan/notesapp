@@ -24,7 +24,8 @@ export type ErrorCode =
   | 'io-error' | 'permission-denied' | 'internal-error'
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
-  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded';
+  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
+  | 'funnel-request' | 'publishing-off';
 
 export interface FieldError { field: string; message: string }
 
@@ -842,3 +843,20 @@ export interface HabitsResponse {
   dailyFolder: VaultPath;       // the daily-notes folder, as it is in the vault
   daily: DailyNoteValues[];     // daily notes with simple frontmatter values
 }
+
+// ---------- Public publishing (API.md §26, ROADMAP item 26) ----------
+export type PublishedNoteState = 'current' | 'changed' | 'source-missing' | 'snapshot-missing';
+export interface PublishedNote {
+  path: VaultPath;              // follows moves and renames made in the app
+  slug: string;                 // the public page is /p/<slug>
+  title: string;
+  url: string;                  // baseUrl + '/p/' + slug, or only the path when there is no base URL
+  publishedAt: IsoInstant;
+  state: PublishedNoteState;    // changed: edited since publishing; the public page shows the snapshot
+}
+export interface PublishResponse {
+  enabled: boolean;             // NOTES_PUBLISH_ENABLED; false: nothing is served or publishable
+  baseUrl: string | null;       // NOTES_PUBLISH_BASE_URL without a trailing slash
+  notes: PublishedNote[];
+}
+export interface PublishRequest { path: VaultPath; slug?: string; title?: string }   // omitted: keep, or derive

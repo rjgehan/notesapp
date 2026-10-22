@@ -1,7 +1,7 @@
 // Phone and tablet top bar (DESIGN §6.16): ☰, the note title with the connection dot,
 // switcher/search, mode toggle and ⋯ (palette, panels, file actions, template, today, reload).
 // On tablets it also toggles the right sidebar overlay.
-import { CalendarDays, CloudUpload, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Star, StarOff, Sun, Trash, TriangleAlert, Waypoints } from 'lucide-react';
+import { CalendarDays, CloudUpload, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, Globe, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Star, StarOff, Sun, Trash, TriangleAlert, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { matchPath, useLocation } from 'react-router';
 import { useTree } from '../../api/hooks';
@@ -89,6 +89,7 @@ function MoreMenu({ path, onClose }: { path: string | null; onClose(): void }) {
       {hasFile && command('file.rename', 'Rename', <Pencil size={16} />)}
       {hasFile && command('file.move', 'Move to…', <FolderInput size={16} />)}
       {hasFile && command('file.delete', 'Delete', <Trash size={16} />)}
+      {note && command('file.publish', 'Publish to the web', <Globe size={16} />)}
       {note && command('templates.insert', 'Insert template', <LayoutTemplate size={16} />)}
       {command('daily.today', 'Today', <CalendarDays size={16} />)}
       <div className="menu-separator" role="separator" />

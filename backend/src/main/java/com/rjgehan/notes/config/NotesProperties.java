@@ -183,7 +183,7 @@ public record NotesProperties(
 	}
 
 	/**
-	 * Public publishing (DESIGN §5.26, ROADMAP item 26), off unless {@code enabled}. The separate publish server binds
+	 * Public publishing (DESIGN §5.28, ROADMAP item 26), off unless {@code enabled}. The separate publish server binds
 	 * {@code address:port} and serves only the snapshots under {@code dir} (outside the vault); {@code baseUrl} is the
 	 * public origin shown for copying links (the Funnel address, e.g. {@code https://notes.<tailnet>.ts.net:8443}).
 	 * Attachments larger than {@code maxAssetSize} are left out of a snapshot.

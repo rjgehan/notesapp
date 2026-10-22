@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * The published snapshots on disk (DESIGN §5.26): {@code <notes.publish.dir>/<slug>/index.html} and the snapshot's
+ * The published snapshots on disk (DESIGN §5.28): {@code <notes.publish.dir>/<slug>/index.html} and the snapshot's
  * attachments beside it, outside the vault. {@link #served} is the only thing the publish server consults: a slug and
  * an asset name are served only when they are listed there and match {@link #SLUG} and {@link #ASSET}, so nothing
  * else in the directory, and nothing outside it, can ever be reached through it.

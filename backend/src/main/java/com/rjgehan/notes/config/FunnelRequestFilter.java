@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * The app is never reachable through Tailscale Funnel (DESIGN §5.26, ROADMAP item 26): Tailscale's proxy marks every
+ * The app is never reachable through Tailscale Funnel (DESIGN §5.28, ROADMAP item 26): Tailscale's proxy marks every
  * request that arrived from the public internet with {@code Tailscale-Funnel-Request}, and any request carrying that
  * header, whatever its value and path (health included), is refused with {@code 403 funnel-request} before the Host
  * and identity allowlists run. Only the separate publish server (port 8081) may ever be behind Funnel.

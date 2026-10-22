@@ -38,6 +38,9 @@ import type {
   Mention,
   MoveRequest,
   MoveResult,
+  PublishRequest,
+  PublishResponse,
+  PublishedNote,
   NoteMeta,
   OnConflict,
   RestoreRequest,
@@ -571,6 +574,50 @@ export class MockVault {
 
   pushMirror(): MirrorStatus {
     return fail('bad-request', 'The mirror is off: not configured');
+  }
+
+  // ---------- public publishing (API.md §26) ----------
+
+  /** The mock publishes like a server with NOTES_PUBLISH_ENABLED=true; tests turn it off. */
+  publishEnabled = true;
+
+  private published: Array<{ path: string; slug: string; title: string; publishedAt: number; version: string | null }> = [];
+
+  private publishedView(p: { path: string; slug: string; title: string; publishedAt: number; version: string | null }): PublishedNote {
+    const f = this.files.get(p.path);
+    const state = !f ? 'source-missing' : this.entry(f).version !== p.version ? 'changed' : 'current';
+    return { path: p.path, slug: p.slug, title: p.title, url: '/p/' + p.slug, publishedAt: isoMs(p.publishedAt), state };
+  }
+
+  getPublish(): PublishResponse {
+    return { enabled: this.publishEnabled, baseUrl: null, notes: this.published.map((p) => this.publishedView(p)) };
+  }
+
+  publishNote(req: PublishRequest): PublishedNote {
+    if (!this.publishEnabled) fail('publishing-off', 'Public publishing is off; it is switched on with NOTES_PUBLISH_ENABLED (DEPLOY.md)');
+    const f = this.existing(req.path);
+    if (kindOf(f.path) !== 'note') fail('bad-request', 'Only notes can be published');
+    const previous = this.published.find((p) => p.path === f.path);
+    const title = req.title?.trim() || previous?.title || basenameOf(f.path);
+    let slug = req.slug?.trim() || previous?.slug || '';
+    if (req.slug !== undefined && req.slug.trim() !== '' && !/^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/.test(slug)) {
+      fail('bad-request', 'The address must be 1 to 80 lower-case letters, digits and inner hyphens');
+    }
+    const owner = this.published.find((p) => p.slug === slug && p.path !== f.path);
+    if (slug && owner) fail('already-exists', 'Another note is published at /p/' + slug, { existingPath: owner.path });
+    if (!slug) {
+      const base = title.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'note';
+      slug = base;
+      for (let n = 2; this.published.some((p) => p.slug === slug); n++) slug = base + '-' + n;
+    }
+    const entry = { path: f.path, slug, title, publishedAt: Date.now(), version: this.entry(f).version };
+    this.published = previous ? this.published.map((p) => (p === previous ? entry : p)) : [...this.published, entry];
+    return this.publishedView(entry);
+  }
+
+  unpublishNote(path: string): void {
+    if (!this.published.some((p) => p.path === path)) fail('not-found', 'That note is not published', { path });
+    this.published = this.published.filter((p) => p.path !== path);
   }
 
   // ---------- voice notes (API.md §23) ----------

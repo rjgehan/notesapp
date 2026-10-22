@@ -47,7 +47,7 @@ import tools.jackson.databind.json.JsonMapper;
 import org.springframework.stereotype.Service;
 
 /**
- * Public publishing (ROADMAP item 26, DESIGN §5.26). {@code .notesapp/publish.json} lists the published notes (path,
+ * Public publishing (ROADMAP item 26, DESIGN §5.28). {@code .notesapp/publish.json} lists the published notes (path,
  * slug, title, when, the version published and the snapshot's attachments) and is committed like the bookmarks; the
  * snapshots themselves live outside the vault in {@link SnapshotStore}. Publishing renders the note once, at that
  * moment: the public server never reads the vault.
@@ -130,6 +130,9 @@ public class PublishService {
 			throw NotesException.badRequest("path is required");
 		}
 		String path = nfc(rawPath);
+		if (path.toLowerCase(Locale.ROOT).endsWith(".mdenc")) {
+			throw NotesException.badRequest("Encrypted notes cannot be published");
+		}
 		if (!PathNames.isMarkdown(path) || path.toLowerCase(Locale.ROOT).endsWith(".excalidraw.md")) {
 			throw NotesException.badRequest("Only notes can be published");
 		}

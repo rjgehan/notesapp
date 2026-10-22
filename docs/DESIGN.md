@@ -406,6 +406,7 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `WebConfig` | `WebMvcConfigurer`: registers `ApiGuardInterceptor` on `/api/**`, the `/assets/**` immutable resource handler, and `IdentityArgumentResolver`. |
 | | `SpaController` | Serves `classpath:/static/index.html` (no-cache) for client routes `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**` and `/x/**` (pages registered by extensions, §6.8). |
 | | `SecurityHeadersFilter` | `OncePerRequestFilter`, highest precedence: sets the security headers in §5.14, `Cache-Control: no-store` on API JSON, and `X-Notes-Build`. |
+| | `FunnelRequestFilter` | Next: `403 funnel-request` for any request carrying `Tailscale-Funnel-Request`, health included (§5.28). |
 | | `HostAndIdentityFilter` | Next in precedence: the Host allowlist (`421 unknown-host`) and the identity allowlist (`403 identity-not-allowed`); health paths are exempt (§5.13). |
 | | `RequestSizeFilter` | Rejects JSON bodies over `notes.limits.max-json-body` with `413` before they are read (§5.14). |
 | | `ApiGuardInterceptor` | Mutating `/api/**` requests: requires `X-Client-Id`, validates Origin and `Sec-Fetch-Site`. |
@@ -467,6 +468,7 @@ The last section is the large-file policy (§5.8 *Large files*): one line per fi
 | | `EventIds` | Formats and parses `bootId.seq`. |
 | `search` | `SavedSearchService` | Saved searches in `.notesapp/searches.json`, with a version token (API.md §12.4). |
 | `settings` | `Settings` (+ nested records), `SettingsService`, `SettingsSeed` | Load, validate and save `.notesapp/settings.json`, with a version token, unknown-field preservation and read-only mode (§5.12); a missing file starts from the defaults plus every `SettingsSeed` (§5.23). |
+| `publish` | `PublishService`, `PublishRenderer`, `PublishPage`, `SnapshotStore`, `PublishServer` | Public publishing (§5.28): `.notesapp/publish.json`, the snapshot renderer, the snapshots outside the vault and the separate publish server on 8081. |
 | `bookmarks` | `BookmarkService`, `BookmarkCodec` | Load, check and save `.notesapp/bookmarks.json` with a version token; re-key bookmarks after moves and trash restores (§5.21). |
 | `vault` | `HeadingRenameService` | Rewrites `[[Note#Heading]]` links (and heading bookmarks) after a heading is renamed (§5.22). |
 | `startup` | `VaultStartup` | `SmartInitializingSingleton` that runs the ordered startup sequence (§5.17). |
@@ -1217,7 +1219,9 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 - **`'wasm-unsafe-eval'`** (added with ROADMAP item 32) lets the app compile WebAssembly: PDF.js's JPEG 2000, JBIG2 and ICC colour decoders and its PostScript-function compiler (§6.8.3), and Excalidraw's font subsetting. It allows no JavaScript `eval` or `new Function`; injected script still cannot run (`script-src 'self'`), and the WebAssembly the app compiles is fetched from `'self'` (`connect-src 'self'`). A worker's policy comes from its own script's response, which carries the same header. Without it PDF.js falls back to slower JavaScript decoders, which on a 300-page scan on the iPhone is the difference that matters.
 - **PDF.js** (§6.8.3) works under the rest of the policy as it is: its worker is a same-origin module script (`worker-src 'self'`, served as `text/javascript`, which `nosniff` requires); CMaps, standard fonts and decoders are fetched from `/assets/pdfjs-<version>/`; fonts embedded in a PDF become `FontFace`s from bytes (or `data:` URLs, `font-src data:`); the document's own JavaScript never runs (no scripting manager, and `quickjs-eval` is not shipped).
 
-**2. `HostAndIdentityFilter`**: the Host and identity allowlists of §5.13 (`421`, `403`).
+**2. `FunnelRequestFilter`**: any request carrying `Tailscale-Funnel-Request` (it came through Tailscale Funnel) is refused with `403 funnel-request`, health endpoints included; only the separate publish server may be behind Funnel (§5.28).
+
+**2a. `HostAndIdentityFilter`**: the Host and identity allowlists of §5.13 (`421`, `403`).
 
 **3. `RequestSizeFilter`** on JSON endpoints (every `/api/**` path except the raw uploads `/api/files/raw`, `/api/attachments` and `/api/capture/file`): a `Content-Length` above `notes.limits.max-json-body` (16 MiB) is rejected with `413 too-large` before the body is read; chunked bodies are counted while reading and cut off at the same limit. Without it, one buggy client or a pasted multi-hundred-MB string would be deserialized in full before the text size check, exhaust the heap, and, through `ExitOnOutOfMemoryError`, kill in-flight saves. The limit must stay above the largest text size limit plus JSON escaping overhead; the app checks this at startup.
 
@@ -1282,6 +1286,7 @@ public record NotesProperties(
     @DefaultValue("/data/secrets") Path secretsDir /* NOTES_SECRETS_DIR: ntfy.json and other secrets the app holds (§4.1) */,
     @DefaultValue Tasks tasks /* ROADMAP item 4: the archive rollover, §5.20 */,
     @DefaultValue Search search /* notes.search.*, §5.5.10 */,
+    @DefaultValue Publish publish /* notes.publish.*: enabled (false), address (127.0.0.1), port (8081), dir (/data/publish), base-url, max-asset-size (25MB); §5.28 */,
     @DefaultValue({"md","markdown","txt","json","canvas","excalidraw","sheet","tasks","csv","tsv","yaml","yml"}) List<String> textExtensions,
     @DefaultValue("true") boolean welcomeNote,
     @DefaultValue("dev") String buildSha /* NOTES_BUILD_SHA, set by the image; shown in /api/status, hello and X-Notes-Build */) {
@@ -1660,6 +1665,48 @@ Questions about the notes answered by Claude with citations, summaries of a note
 **Alternatives considered.** Embeddings (a vector index needs an embedding provider, since Anthropic has no embeddings API, and its storage and refresh; BM25 over the existing index answers personal-scale questions well, and the roadmap defers embeddings). Server-side conversations (they would keep questions and answers on the server and need their own retention; the device keeping them matches "conversation history per device"). Tool use to let Claude search the vault itself (more calls and cost per question, and harder to keep excluded folders out). Opus as the default (the roadmap's first choice; Sonnet 5.5 answers note questions well at half the price, and Opus is one setting away).
 
 **Tests.** `ClaudeCodeGatewayTest` with the CLI replaced by a fake process (the locked-down command line and environment, the stream-json lines, an older CLI without partial messages, a refused token, a usage limit, a crash with its stderr scrubbed, cancellation and the timeout); `AiServiceTest` (the providers, availability, retrieval, exclusions, caps, the byte-for-byte rebuild of earlier turns, summaries, suggestions, the stream of events, the spend guard, a browser leaving part way) with a recording gateway; `AnthropicGatewayTest` against a local HTTP server that replays recorded Messages API streams (the request's shape, the key as a bearer token, the fallback, refusals, error mapping without the key, stopping on a listener's exception); `ExcerptsTest`, `QueryTermsTest`, the settings tests, and `AiIntegrationTest` (the HTTP contract with `notes.ai.fake`). No test calls Anthropic.
+
+### 5.28 Public publishing through Tailscale Funnel (ROADMAP item 26)
+
+**Decision (2026-10-17): built switched off.** Nothing is public until the server owner does two things: sets `NOTES_PUBLISH_ENABLED=true` (`notes.publish.enabled`, default `false`), which starts the publish server, and replaces `serve.json` with the Funnel variant (`deploy/tailscale/serve.funnel.json.example`; on CasaOS `NOTES_PUBLISH_FUNNEL: "true"`), which lets the internet reach that server's port. Either step alone exposes nothing (DEPLOY.md and CASAOS.md "Public publishing"). `PublishDeployDefaultsTest` holds the shipped defaults: the property, both compose files, `.env.example` and `serve.json`.
+
+**A separate server, not a second connector.** An extra Tomcat connector would serve the same servlet context: every controller, all of `/api/**` and the SPA would answer on it, unauthenticated. `PublishServer` is instead a JDK `HttpServer` (module `jdk.httpserver`, part of the JRE) bound to `notes.publish.address:port` (`127.0.0.1:8081`), started as a `SmartLifecycle` only when enabled, on virtual threads. It shares no filter, handler or resource with the app, and answers only:
+
+| Request | Response |
+|---|---|
+| `GET`/`HEAD /p/<slug>` | the snapshot page, `text/html; charset=utf-8` |
+| `GET`/`HEAD /p/<slug>/<asset>` | an attachment of that snapshot (`Accept-Ranges: bytes`; single ranges, which iPhone video needs) |
+| `GET`/`HEAD /p/-/style.css` | the one stylesheet (`-` is never a slug) |
+| anything else, any other method | `404` `Not found` (the JDK server itself answers `400` to a malformed request target) |
+
+Paths are matched raw against `/p/[a-z0-9-]{1,80}` and `/p/[a-z0-9-]{1,80}/[0-9a-f]{20}\.[a-z0-9]{1,10}`, never decoded, so escapes, dot segments and `;` parameters match nothing. A matching slug or asset is then served only if `SnapshotStore.served()` lists it (the slugs of `publish.json` entries whose snapshot exists, and each one's asset names), from `<notes.publish.dir>/<slug>/` after a normalize-and-`startsWith` check, without following symlinks. Every response carries `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` (attachments add `sandbox`), so no script runs and nothing loads from elsewhere, plus `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Resource-Policy: same-origin`, `X-Robots-Tag: noindex, nofollow` and `Cache-Control: no-cache` with an `ETag`, so an unpublish takes effect at once.
+
+**The app refuses Funnel traffic.** `FunnelRequestFilter` (after `SecurityHeadersFilter`, before `HostAndIdentityFilter`) answers `403 funnel-request` to any request carrying `Tailscale-Funnel-Request`, whatever its value or path, health endpoints included. Tailscale adds that header to everything arriving through Funnel, so even a `serve.json` that funnelled `:443` by mistake would expose nothing; the Host and identity allowlists of §5.13 would refuse it as well.
+
+**Snapshots, never live reads.** Publishing (`PublishService.publish`) reads the note once through `FileService.readText` (path safety, reserved paths), renders it, and writes the page and its attachments to a staging folder that replaces `<dir>/<slug>` in one rename (`SnapshotStore.write`). The publish server never touches the vault. `notes.publish.dir` (default `/data/publish`, in the data volume beside the vault and so backed up; dev `../dev-publish`) is outside the vault, so snapshots are neither indexed nor versioned. `.notesapp/publish.json` lists the published notes and is committed with the normal batch:
+
+```json
+{ "notes": [ { "path": "Blog/Hello.md", "slug": "hello", "title": "Hello", "publishedAt": "2026-10-21T10:00:00Z",
+               "sourceVersion": "<blob id published>", "assets": ["0123456789abcdef0123.png"] } ] }
+```
+
+Hand-edited entries are taken only as far as they are well formed (a bad slug or asset name is dropped). A move or rename through the app re-keys the entry (`MoveService` calls `PublishService.moved`); the address stays. A deleted note keeps its public page until it is unpublished; the list shows it as `source-missing`. Unpublishing stops serving the slug first, then deletes the snapshot. Links between published notes are resolved when the linking note is rendered: publishing B later does not change A's snapshot until A is republished, and unpublishing B leaves A with a link that now answers `404`.
+
+**What a snapshot contains** (`PublishRenderer`, commonmark-java 0.30.1 with tables, strikethrough, task lists, footnotes, heading anchors and autolinks). The source is rewritten first with the offsets of `MarkdownScanner` (§5.5.2), then parsed, cleaned up and rendered by a renderer that overrides links, images and raw HTML:
+
+- Left out: frontmatter; `%% %%` and `<!-- -->` comments; HTML blocks and inline HTML (only `<br>` survives); fenced blocks that query the vault (`query`, `dataview`, `dataviewjs`, `tasks`, `base`, `bases`); block ids (`^id`). Encrypted sections (ROADMAP item 27, Meld Encrypt's `🔐β 💡hint💡<ciphertext> 🔐`, an unclosed one to the end of the note) become a "🔒 *encrypted*" placeholder, hint included, and are never decrypted; encrypted notes (`.mdenc`) cannot be published at all. A callout's marker becomes a bold title.
+- Wikilinks and Markdown links to notes: a link to `/p/<slug>[#heading-id]` only when the target is published (to the note itself: `#heading-id`); otherwise plain text: the alias, or the target's name **without its folder** (`Name > Heading`, as Obsidian shows it), escaped so it cannot become Markdown or HTML. Unresolved links are plain text too. No vault path ever reaches the page.
+- Embeds: an image, audio or video file the note embeds (`![[x.png|300]]`, `![alt](x.png)`) is copied into the snapshot as `<sha-256 prefix>.<ext>` (files over `notes.publish.max-asset-size`, 25MB, are left out). An embed of a published note becomes a link with its title; an embed of anything else leaves nothing, not even its name.
+- Other URLs: only `http(s)://` and `mailto:` become links (`rel="nofollow noopener noreferrer"`), plus in-page `#anchors`; `javascript:`, `data:`, `file:`, `obsidian:`, protocol-relative URLs and reference-style links to vault files are plain text. External images become links, never loads.
+- Internal links are rewritten to a per-render random marker scheme that only the renderer resolves, so text in the note cannot forge one.
+
+The page (`PublishPage`) is a fixed template: the escaped title as `<title>` and `<h1>`, the body, a "Published <date>" footer, `noindex` and `no-referrer` metas and the stylesheet link; light and dark follow `prefers-color-scheme`. Math, Mermaid and other client-rendered blocks show as their source.
+
+**API** (API.md §26, tailnet only): `GET /api/publish` (`enabled`, `baseUrl`, the notes and their state: `current`, `changed` since publishing, `source-missing`, `snapshot-missing`), `POST /api/publish {path, slug?, title?}` (publish or republish; the slug defaults to the current one or to one made from the title, `-2`… on a clash; `409 already-exists` for another note's slug; `409 publishing-off` while disabled), `DELETE /api/publish?path=` (allowed while disabled, to clean up). `notes.publish.base-url` (`NOTES_PUBLISH_BASE_URL`, the Funnel origin such as `https://notes.<tailnet>.ts.net:8443`) only makes the copied links absolute.
+
+**UI** (`components/publish`, `features/publish.ts`). A globe in the note header (desktop and tablet; shown while publishing is on, or for a published note) and "Publish to the web" in the ⋯ menu and the command palette (`file.publish`, plain notes only) open the publish dialog, registered with `registerOverlay` (§6.8): for an unpublished note, what becomes public, the title and the address (`/p/` + slug, checked like the server); for a published note, its public link (copy, open), its state and when it was published, Republish and Unpublish (confirmed). Settings › Publishing says whether publishing is on (and how it is turned on) and lists every published note with its link, state and path, Open note, Republish and Unpublish.
+
+**Tests.** `PublishRendererTest` (what must not leak: frontmatter, comments, raw HTML, private link targets and their folders, private embeds, unsafe URLs, forged markers, unescaped text; what must work: published links, anchors, assets, tables, task lists, footnotes, callouts), `PublishIntegrationTest` (the page and its asset with their headers; `404` from the publish server for `/`, `/api/tree`, `/api/files?path=…`, `/api/files/raw?path=…`, `/n/x`, the SPA's routes, health, unpublished slugs, a snapshot folder and files not listed in `publish.json`, an attachment only a private note embeds, `.notesapp/publish.json`, `.git/config`, escaped and dot-segment variants, and every method but `GET`/`HEAD`; republish, a new address, rename, unpublish; validation; `403 funnel-request` from the app), `PublishOffIntegrationTest` (the default: no listener on the configured port, `409 publishing-off`), `PublishDeployDefaultsTest`, and the frontend's `Publish.test.tsx`.
 
 ### 5.34 Flashcard review records (ROADMAP item 34)
 
@@ -3588,6 +3635,8 @@ volumes:
 ```
 
 containerboot substitutes `${TS_CERT_DOMAIN}` with the node's FQDN. The file must not be inlined into compose, which would interpolate the variable itself.
+
+Public publishing (§5.28) is off in the shipped file: no Funnel and no second port. `deploy/tailscale/serve.funnel.json.example` is the opt-in variant: it adds `"8443": { "HTTPS": true }`, `${TS_CERT_DOMAIN}:8443` → `http://127.0.0.1:8081` (the publish server only) and `AllowFunnel` true for `:8443` alone; `:443` stays tailnet-only. It is copied over `serve.json` by hand (DEPLOY.md "Public publishing"). The tailnet policy must also grant `tag:notes` the `funnel` node attribute.
 
 ### 7.4 `deploy/.env.example`
 

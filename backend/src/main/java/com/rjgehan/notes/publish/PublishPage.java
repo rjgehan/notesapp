@@ -7,7 +7,7 @@ import java.util.Locale;
 
 /**
  * The HTML document around a published note's body, and the one stylesheet every published page links (DESIGN
- * §5.26). The page loads nothing but that stylesheet and the snapshot's own attachments, and runs no script.
+ * §5.28). The page loads nothing but that stylesheet and the snapshot's own attachments, and runs no script.
  */
 public final class PublishPage {
 

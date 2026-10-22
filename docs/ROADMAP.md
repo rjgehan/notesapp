@@ -76,7 +76,7 @@ DESIGN.md has the details.
 | 23 | Large-attachment policy for git history | M | S | 1 |
 | 24 | Obsidian vault import and compatibility kit | M | S | |
 | 25 | Canvas (JSON Canvas, Obsidian-compatible) | M | L | |
-| 26 | Publish a note publicly through Tailscale Funnel | M | M | 3 helps |
+| 26 | Publish a note publicly through Tailscale Funnel *(built 2026-10-21, `feat/publish`, switched off)* | M | M | 3 helps |
 | 27 | Per-note encryption | M | M | |
 | 28 | Vault-wide timeline and restoring deleted files from git | M | M | |
 | 29 | Customizable hotkeys and per-device preferences | L | S | |
@@ -893,7 +893,7 @@ Plugs into the view registry. `.canvas` is already a text kind.
 - **Elsewhere.** `![[Board.canvas]]` shows a scaled preview; search finds cards; notes on a canvas list it among their backlinks (the `DocumentIndexer` extension point, shared with item 5).
 - **Moves.** The server rewrites a canvas's links after a move (card links and file nodes, replacing only those JSON strings); an open canvas also follows moves its tab saw and offers to relink a missing file.
 
-### 26. Publish a note publicly through Tailscale Funnel
+### 26. Publish a note publicly through Tailscale Funnel *(built 2026-10-21, switched off)*
 
 **One line:** share a read-only page for chosen notes with people outside the tailnet, without exposing the app.
 
@@ -910,6 +910,8 @@ Plugs into the view registry. `.canvas` is already a text kind.
 - `serve.json` adds `:8443` → `127.0.0.1:8081` with `AllowFunnel` true for that port only. `:443` stays tailnet-only.
 - Integration tests request `/api/tree`, `/api/files?path=…`, `/n/x` and `/` on 8081 and expect 404.
 - Prerequisite: the v1 identity and Host allowlists (DESIGN §5.13) are in place.
+
+**Status: built 2026-10-21** on `feat/publish` (DESIGN §5.28, API.md §26), switched off: `NOTES_PUBLISH_ENABLED` defaults to `false` in the app, `docker-compose.yml`, `.env.example` and `casaos-compose.yml`, and the shipped `serve.json` has no Funnel entry; `deploy/tailscale/serve.funnel.json.example` (CasaOS: `NOTES_PUBLISH_FUNNEL`) is the opt-in, documented in DEPLOY.md and CASAOS.md "Public publishing". The publish server is a JDK `HttpServer` on `127.0.0.1:8081` that serves only snapshots listed in `.notesapp/publish.json` (stored outside the vault in `/data/publish`), `404` for everything else; the app answers `403 funnel-request` to anything carrying `Tailscale-Funnel-Request`. Snapshots are rendered on the server (commonmark-java) with no app JavaScript and a CSP without scripts: frontmatter, comments, raw HTML and vault queries are left out, links to unpublished notes become plain text without their folder, and only the attachments the note embeds are copied. Publish, republish (title, address) and unpublish from the note header, the ⋯ menu or the palette, and a list in Settings › Publishing. The integration tests request `/api/tree`, `/api/files?path=…`, `/n/x`, `/`, unreferenced attachments, `.notesapp` and `.git` paths (escaped and dot-segment variants too) on the publish server and get `404`. Not yet: math and Mermaid show as source on public pages; a snapshot links to another published note only if that note was published first (republish to update).
 
 ### 27. Per-note encryption
 

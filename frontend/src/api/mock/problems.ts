@@ -35,6 +35,8 @@ const TABLE: Record<ErrorCode, [number, string]> = {
   'ai-unavailable': [409, 'Ask and summaries are unavailable'],
   'ai-excluded': [403, 'Excluded from Ask and summaries'],
   'ai-budget-exceeded': [429, 'Monthly AI budget reached'],
+  'funnel-request': [403, 'Not available through Funnel'],
+  'publishing-off': [409, 'Public publishing is off'],
 };
 
 /** Builds and throws the server's problem document for `code` (API.md §3). */
