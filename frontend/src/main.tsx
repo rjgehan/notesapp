@@ -9,6 +9,7 @@ import { installViewportVars } from './editor/mobileViewport';
 import { registerBuiltins } from './extensions/builtins';
 import { installInputModality } from './features/focus';
 import { clearStaleOverlayEntry } from './features/overlayHistory';
+import { installDesktopBridge } from './desktop/bridge';
 import { installCaptureSync } from './features/captureSync';
 import { installHotkeys } from './features/hotkeys';
 import { prepareReload, registerServiceWorker, setOfflineMedia } from './pwa/serviceWorker';
@@ -49,6 +50,8 @@ async function boot(): Promise<void> {
   documents.installLifecycle(() => currentBreakpoint() === 'desktop');
   void startLiveSync();
   installCaptureSync();
+  // Inside the desktop app (ROADMAP item 41): tray commands, resume, and the title's connection state.
+  installDesktopBridge();
 
   // Navigations render synchronously (no transitions), so an input shown by a tap or key handler
   // can take focus within the same user gesture, which iOS needs to open the keyboard (§6.13).

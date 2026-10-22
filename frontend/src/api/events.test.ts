@@ -253,6 +253,23 @@ describe('EventStream', () => {
     t.stream.stop();
   });
 
+  it('reconnects on demand (the desktop app after resume) and revalidates documents once caught up', () => {
+    const t = setup();
+    t.stream.start('b.1');
+    t.current().hello({}, 'b.1');
+    t.current().emit('file.changed', { file: {} }, 'b.2');
+    t.stream.reconnect();
+    expect(t.sources).toHaveLength(2);
+    expect(t.sources[0].closed).toBe(true);
+    expect(t.current().lastEventId).toBe('b.2');
+    t.current().hello({ replayed: 0 }, 'b.2');
+    t.current().emit('file.changed', { file: {} }, 'b.3');
+    expect(t.deps.revalidateDocuments).toHaveBeenCalledTimes(1);
+    t.stream.stop();
+    t.stream.reconnect();
+    expect(t.sources).toHaveLength(2);
+  });
+
   it('reports the server build of every hello', () => {
     const t = setup();
     t.stream.start('b.1');
