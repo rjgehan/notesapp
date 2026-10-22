@@ -1,7 +1,8 @@
 // The `sheet` view descriptor (DESIGN §6.21.5): `.sheet` files open in the spreadsheet grid, a
 // lazy chunk with Glide Data Grid and HyperFormula, and `![[x.sheet]]` embeds render through
-// loadEmbed(), a small chunk without the engine (§6.21.7). Everything here is in the main bundle
-// and small: the format and the cell-level merge, so conflicts merge without loading the engine.
+// loadEmbed(), a small chunk without the engine (§6.21.7). This module is in the main bundle and
+// small; the format and the cell-level merge are a chunk that loads with the view
+// (views/lazyMerge.ts), so conflicts merge without loading the engine.
 import { FileSpreadsheet } from 'lucide-react';
 import { pickFiles } from '../../features/attachments';
 import { registerCommand, type Command } from '../../features/commands';
@@ -12,9 +13,12 @@ import { toast } from '../../state/toasts';
 
 /** What the import buttons and commands accept (importExport.ts reads them). */
 export const IMPORT_ACCEPT = '.csv,.tsv,.txt,.xlsx,.xlsm,.xls,.ods,text/csv,text/tab-separated-values';
-import { newSheetFile, serializeSheet } from '../../sheets/format';
-import { mergeSheetText } from '../../sheets/merge';
+import { NEW_SHEET_TEXT } from '../../sheets/newSheet';
+import { lazyMerge, withMerge } from '../lazyMerge';
 import { registerView } from '../registry';
+
+/** The cell-level merge (sheets/merge.ts). */
+export const sheetMerge = lazyMerge(() => import('../../sheets/merge').then((m) => m.mergeSheetText));
 
 /** `.sheet` (6, the length of the suffix). */
 export function matchSheet(path: string): number {
@@ -98,10 +102,10 @@ export function registerSheetView(): void {
     icon: FileSpreadsheet,
     textual: true,
     modes: ['edit'],
-    load: () => import('./SheetView'),
-    loadEmbed: () => import('./SheetEmbed'),
-    create: { label: 'spreadsheet', extension: 'sheet', initialContent: () => serializeSheet(newSheetFile()) },
-    merge: mergeSheetText,
+    load: withMerge(sheetMerge, () => import('./SheetView')),
+    loadEmbed: withMerge(sheetMerge, () => import('./SheetEmbed')),
+    create: { label: 'spreadsheet', extension: 'sheet', initialContent: () => NEW_SHEET_TEXT },
+    merge: sheetMerge.merge,
     commands: SHEET_COMMANDS,
   });
   registerCommand({ id: 'sheet.importAsFile', name: 'Import spreadsheet from CSV or Excel…', icon: FileSpreadsheet, run: (c) => importAsNewFile(c.activePath) });
