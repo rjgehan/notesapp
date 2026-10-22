@@ -236,3 +236,9 @@ textarea.text-input.capture-text {
   text-decoration: none;
   cursor: grab;
 }
+
+/* Running text with inline code and emphasis: .setting-note alone is a flex row. */
+.setting-note.clip-note {
+  display: block;
+  line-height: 1.55;
+}

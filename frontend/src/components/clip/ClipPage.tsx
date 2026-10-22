@@ -222,7 +222,7 @@ export function ClipPage() {
             <span className="setting-label">Folder</span>
             <input className="text-input" value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="Folder" />
           </label>
-          <p className="setting-note clip-meta">
+          <p className="setting-note clip-note clip-meta">
             {plannedPath && (
               <>
                 Saves as <code>{plannedPath}</code> (a number is added if the name is taken).{' '}

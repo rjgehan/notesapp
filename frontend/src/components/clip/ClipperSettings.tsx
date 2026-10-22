@@ -77,7 +77,7 @@ export function ClipperSettings() {
 
   return (
     <>
-      <p className="setting-note">
+      <p className="setting-note clip-note">
         Saves a web page as a Markdown note in <strong>Clippings</strong>: the readable article (or what you selected), with its title, address and
         the date in the properties. The page is read in your browser or on your phone, never fetched by the server. Clips travel over the tailnet,
         so Tailscale must be connected.
@@ -87,10 +87,10 @@ export function ClipperSettings() {
       {bookmarklet.state === 'missing' && <p className="field-warning">{MISSING}</p>}
       {href && (
         <>
-          <p className="setting-note">
+          <p className="setting-note clip-note">
             Drag this button to the bookmarks bar: <BookmarkletLink href={href} />
           </p>
-          <p className="setting-note">
+          <p className="setting-note clip-note">
             On a page, click it: NotesApp opens in a new window with a preview, where you choose the name and folder and press <strong>Save</strong>.
             Select text first to clip only that. Allow pop-ups for the site if the browser blocks the window. A few sites keep other windows from
             talking to them; the window then asks you to copy and paste what you want to keep. Images stay links to the web.
@@ -99,7 +99,7 @@ export function ClipperSettings() {
       )}
 
       <h3 className="settings-subtitle">Browser extension (Chrome, Edge, Firefox)</h3>
-      <p className="setting-note">
+      <p className="setting-note clip-note">
         The extension adds a toolbar button and <em>Clip this page / the selection to NotesApp</em> to the right-click menu, works on every site,
         can save the article&rsquo;s images as attachments, and can save without the preview. It is not in a store: build it from the repository
         (<code>clipper/</code>, see <code>docs/CLIPPER.md</code>), then load <code>clipper/dist/chrome</code> (chrome://extensions or
@@ -135,7 +135,7 @@ export function ClipperSettings() {
         </li>
         <li>Optionally end with <em>Show Notification</em> (&ldquo;Clipped&rdquo;).</li>
       </ol>
-      <p className="setting-note">
+      <p className="setting-note clip-note">
         Share a page from Safari and pick <strong>Clip to Notes</strong>. Select text first to clip only that. The note goes to{' '}
         <code>Clippings/</code> under the article&rsquo;s title (a number is added when the name is taken); images stay links to the web.
       </p>
