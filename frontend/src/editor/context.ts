@@ -2,6 +2,7 @@
 // testable and never import React or global singletons directly.
 import { Facet, StateEffect } from '@codemirror/state';
 import type { NoteMeta, Settings } from '../api/types';
+import type { NoteBlock } from '../features/blocks';
 import type { VaultTree } from '../api/vaultTree';
 
 export interface NoteContext {
@@ -25,6 +26,16 @@ export interface NoteContext {
   insertFiles(files: File[], range: { from: number; to: number }, pasted: boolean): void;
   /** A link to a vault path as this note would write it (internal explorer drags). */
   linkTo(path: string): string;
+  /**
+   * `[[Note#^` completion (ROADMAP item 20): the current text of another note, and the id of one
+   * of its blocks (read from `text`), added under `wanted` (or another free id) when it has none.
+   * A failure is reported to the user by the implementation. Absent where blocks of other notes
+   * are not offered.
+   */
+  blocks?: {
+    noteText(path: string): Promise<string>;
+    ensureBlockId(path: string, text: string, block: NoteBlock, wanted: string): Promise<string>;
+  };
 }
 
 export const noteContext = Facet.define<NoteContext, NoteContext | null>({

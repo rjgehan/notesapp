@@ -6,6 +6,7 @@ import { lazy, Suspense, type ComponentType } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { queryClient } from '../api/queryClient';
 import type { FileEntry } from '../api/types';
+import { blockSubpathId } from '../features/blocks';
 import { formatBytes } from '../features/format';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { isMarkdownViewPath, viewFor, type EmbedProps, type FileViewDescriptor } from '../views/registry';
@@ -114,9 +115,10 @@ export function hydrateEmbeds(container: Element, ctx: EmbedContext): void {
         continue;
       }
       // Transclusion is one level deep and never of the note itself (the renderer turns deeper
-      // embeds into links; this guards any placeholder that did not come from it). A note another
+      // embeds into links; this guards any placeholder that did not come from it), except by one of
+      // its blocks (`![[#^id]]`, rendered at depth 1, so it embeds nothing further). A note another
       // view shows (a drawing) embeds nothing further, so it is embedded at any depth.
-      if (entry.kind === 'note' && isMarkdownViewPath(entry.path) && (ctx.depth >= 1 || entry.path === ctx.sourcePath)) continue;
+      if (entry.kind === 'note' && isMarkdownViewPath(entry.path) && (ctx.depth >= 1 || (entry.path === ctx.sourcePath && !blockSubpathId(subpath)))) continue;
       mountReact(
         el,
         <Embed

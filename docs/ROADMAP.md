@@ -70,7 +70,7 @@ DESIGN.md has the details.
 | 17 | Dataview-style query blocks *(shrinks to a `query()` helper inside 40)* | M | S | 40; 13 helps |
 | 18 | Ask your vault and summaries, powered by Claude | H | M | |
 | 19 | Web clipper | M | M | 7 |
-| 20 | Block references and block embeds | M | M | |
+| 20 | Block references and block embeds *(built 2026-10-21, `feat/block-refs`)* | M | M | |
 | 21 | Update `[[Note#Heading]]` links when a heading is renamed | M | S | |
 | 22 | Search upgrades: OR, regex, saved searches, PDF text | M | M | |
 | 23 | Large-attachment policy for git history | M | S | 1 |
@@ -801,6 +801,15 @@ Results update through SSE.
 
 ### 20. Block references and block embeds
 
+**Status: built (2026-10-21, branch `feat/block-refs`).** DESIGN §5.37 and §6.37, API.md §37.
+
+- **`[[Note#^` picker** (also `[[#^`, `![[…#^`, and Markdown links): the target's paragraphs, headings, list items, tables, quotes, callouts, code and math blocks with their text, filtered as you type. Picking a block without an id gives it one in Obsidian's shape (` ^a1b2c3`, or `^a1b2c3` on its own line after a structured block). In another note the server adds it to the current file (`POST /api/notes/block-id`), so an edit made there meanwhile is kept; in the same note the id and the link are one undo step.
+- **Embeds:** `![[Note#^id]]` shows the block (a list item with its children, a heading with its section) in the reading view, through the shared note embed, so Live Preview (item 10) gets it too. A note can embed its own blocks. Block ids are hidden in the reading view.
+- **Navigation:** a `#^id` link opens the note at the block and flashes it, in the editor and the reading view.
+- **Backlinks:** links to blocks show their `^id`, and *Linked blocks* lists the note's linked blocks with their text and link counts.
+- **Compatibility report:** block references are no longer a finding; links to missing blocks still are.
+- **Not done:** a block moved to another note is not followed (Obsidian does not follow it either; the report lists the broken links). Within a note nothing is needed: the id moves with its text.
+
 **One line:** `[[Note#^` autocomplete, automatic `^id` generation, `![[Note#^id]]` transclusion, and highlighting of the target block on navigation.
 
 | Value | Effort | Depends on |
@@ -864,7 +873,7 @@ A managed section of `info/exclude` holds the exclusions, and `/api/status` show
 - **Findings go beyond syntax**: links to missing files, headings and `^blocks` (and, as information, notes that do not exist yet), notes NotesApp cannot read (frontmatter, UTF-8, size, skipped names), Excalidraw files, canvases and bases. Each finding lists up to 200 places, each opening the note at its line. Code is never reported.
 - **Seeding happens once.** Only a vault without `.notesapp/settings.json` takes Obsidian's settings; afterwards the report proposes them. Unusable values (a regular expression in *Excluded files*, a nested attachment subfolder) are reported, not applied.
 - **`.obsidian/` is never written**, stays hidden from the app, and is versioned except `workspace*.json`, so the same vault keeps working in Obsidian.
-- **For the integrator:** the callout, Mermaid and math findings (item 3), block references (item 20), Dataview (items 17 and 40) and the plugin table (`ObsidianPlugins`) describe this branch's renderer; drop or update them as those items merge.
+- **For the integrator:** the callout, Mermaid and math findings (item 3), block references (item 20, removed on its branch), Dataview (items 17 and 40) and the plugin table (`ObsidianPlugins`) describe this branch's renderer; drop or update them as those items merge.
 
 **One line:** importing an existing Obsidian vault seeds NotesApp settings from `.obsidian/` (`app.json`, `daily-notes.json`, `templates.json`) and produces a compatibility report listing the syntax and plugins NotesApp does not render yet.
 

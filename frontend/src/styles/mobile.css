@@ -28,6 +28,7 @@ select {
   .backlink-section-header,
   .search-match,
   .backlink-context,
+  .backlink-block,
   .history-row {
     min-height: 44px;
   }

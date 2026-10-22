@@ -52,8 +52,6 @@ public final class CompatScanner {
 				"Blocks such as ```chart, ```button, ```timeline or ```ad-note (Admonition) show as code.", null),
 		TEMPLATER("templater", Category.SYNTAX, Severity.WARNING, "Templater commands",
 				"<% … %> commands are not run: templates insert them as text. Core {{date}} and {{title}} work.", null),
-		BLOCK_REFERENCES("block-references", Category.SYNTAX, Severity.INFO, "Block references",
-				"[[Note#^id]] links open the note at the top, and ![[Note#^id]] embeds do not show the block.", 20),
 		OBSIDIAN_URIS("obsidian-uris", Category.SYNTAX, Severity.INFO, "obsidian:// links",
 				"Links that open the Obsidian app work only on devices where Obsidian is installed.", null),
 		HTML_REMOVED("html-removed", Category.SYNTAX, Severity.INFO, "Embedded HTML that is removed",
@@ -328,10 +326,8 @@ public final class CompatScanner {
 		for (LinkGraph.Resolved resolved : view.links()) {
 			LinkOcc occ = resolved.occ();
 			String subpath = occ.subpath();
+			// Block references render since ROADMAP item 20; only those whose block is missing are findings.
 			boolean block = subpath != null && lastSegment(subpath).startsWith("^");
-			if (block) {
-				add(Rule.BLOCK_REFERENCES, source, occ.line(), occ.raw());
-			}
 			if (resolved.target() == null) {
 				FileKind kind = kinds.kindOf(occ.target());
 				boolean note = kind == FileKind.NOTE || kind == FileKind.OTHER;

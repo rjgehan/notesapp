@@ -13,6 +13,7 @@ import type { FileEntry } from '../api/types';
 import { splitFrontmatter } from '../features/frontmatter';
 import { noteRoute } from '../features/paths';
 import { isInternalDestination, isWhitespace, matchWikiLinkAt, parseMarkdownDestination, splitWikiBody, tagBodyLength } from '../features/syntax';
+import { blockSubpathId, extractBlock } from '../features/blocks';
 import { isMarkdownViewPath } from '../views/registry';
 import { richMarkdown } from './rich';
 
@@ -150,6 +151,64 @@ function commentBlockRule(state: StateBlock, startLine: number, endLine: number,
   return true;
 }
 
+const TRAILING_BLOCK_ID = /(^|[ \t])\^([A-Za-z0-9-]+)[ \t]*$/;
+
+/** The opening token of the block that ends at `tokens[close]` (a `*_close`, or a block without children). */
+function blockOpening(tokens: Token[], close: number): number {
+  const t = tokens[close];
+  if (t.nesting !== -1) return close;
+  for (let k = close - 1; k >= 0; k--) {
+    if (tokens[k].nesting === 1 && tokens[k].level === t.level) return k;
+  }
+  return -1;
+}
+
+/**
+ * Obsidian block ids (ROADMAP item 20, DESIGN §6.37): `^id` closing a paragraph, a heading or a
+ * list item's text is hidden and becomes the block's `data-block-id` (on the `<li>` for a list
+ * item); a paragraph holding nothing but `^id` names the block before it (a table, a quote, a
+ * code block, a list) and is removed. Scrolling to `#^id` and the block embeds use the attribute.
+ */
+function blockIds(state: StateCore): void {
+  const tokens = state.tokens;
+  for (let i = 1; i < tokens.length; i++) {
+    const inline = tokens[i];
+    const open = tokens[i - 1];
+    if (inline.type !== 'inline' || !inline.children?.length) continue;
+    if (open.type !== 'paragraph_open' && open.type !== 'heading_open') continue;
+    const children = inline.children;
+    const last = children[children.length - 1];
+    if (last.type !== 'text') continue;
+    const m = TRAILING_BLOCK_ID.exec(last.content);
+    if (!m) continue;
+    const id = m[2];
+    last.content = last.content.slice(0, m.index).replace(/[ \t]+$/, '');
+    if (last.content === '') {
+      children.pop();
+      while (children.length && (children[children.length - 1].type === 'softbreak' || children[children.length - 1].type === 'hardbreak')) children.pop();
+    }
+    inline.content = inline.content.replace(TRAILING_BLOCK_ID, '').trimEnd();
+    if (open.type === 'paragraph_open' && children.length === 0) {
+      // `^id` on its own: the block before it, else the container it is the first child of.
+      const before = i - 2;
+      let target = -1;
+      if (before >= 0) {
+        const prev = tokens[before];
+        target = prev.nesting === 1 ? before : blockOpening(tokens, before);
+      }
+      if (target >= 0 && !tokens[target].attrGet('data-block-id')) tokens[target].attrSet('data-block-id', id);
+      // Remove the empty paragraph (open, inline, close).
+      tokens.splice(i - 1, 3);
+      i -= 2;
+      continue;
+    }
+    let target = i - 1;
+    // A list item's first paragraph: the id names the item.
+    if (open.type === 'paragraph_open' && i >= 2 && tokens[i - 2].type === 'list_item_open') target = i - 2;
+    tokens[target].attrSet('data-block-id', id);
+  }
+}
+
 function headingText(inline: Token | undefined): string {
   return (inline?.content ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -182,6 +241,7 @@ function obsidianPlugin(md: Md): void {
   md.inline.ruler.before('emphasis', 'obsidian_comment', commentInlineRule);
   md.inline.ruler.push('hashtag', hashtagRule);
   md.block.ruler.before('fence', 'obsidian_comment_block', commentBlockRule, { alt: ['paragraph'] });
+  md.core.ruler.push('obsidian_block_ids', blockIds);
   md.core.ruler.push('obsidian_annotate', annotate);
 
   const r = md.renderer.rules;
@@ -299,7 +359,8 @@ function embedHtml(ctx: RenderContext, target: string, subpath: string | null, d
     case 'note':
       // A note another view shows (an .excalidraw.md drawing) embeds through that view, at any depth.
       if (!isMarkdownViewPath(entry.path)) return `<span class="internal-embed file-embed" data-embed-kind="file"${attrs}></span>`;
-      if (ctx.depth > 0 || subpath?.startsWith('^') || entry.path === ctx.sourcePath) {
+      // Transclusion is one level deep; a note embeds itself only by one of its blocks (`![[#^id]]`).
+      if (ctx.depth > 0 || (entry.path === ctx.sourcePath && !blockSubpathId(subpath))) {
         return internalLink(ctx, target, subpath, display ?? defaultLinkText(target, subpath));
       }
       return `<span class="internal-embed note-embed" data-embed-kind="note"${attrs}></span>`;
@@ -541,4 +602,11 @@ export function extractSection(text: string, subpath: string): string | null {
     }
   }
   return start < 0 ? null : lines.slice(start).join('\n');
+}
+
+/** The part of a note's text a subpath embeds: a block (`^id`), a heading's section, or all of it. */
+export function embeddedPart(text: string, subpath: string | null | undefined): string | null {
+  if (!subpath) return text;
+  const block = blockSubpathId(subpath);
+  return block !== null ? extractBlock(text, block) : extractSection(text, subpath);
 }

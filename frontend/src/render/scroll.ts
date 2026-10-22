@@ -25,3 +25,13 @@ export function topVisibleLine(container: HTMLElement, scroller: HTMLElement): n
   }
   return null;
 }
+
+/** The rendered block with Obsidian block id `id` (case-insensitive), outside embeds, or null. */
+export function findBlockElement(container: HTMLElement, id: string): HTMLElement | null {
+  const key = id.toLowerCase();
+  for (const el of container.querySelectorAll<HTMLElement>('[data-block-id]')) {
+    if (el.closest('[data-embed-root]')) continue;
+    if ((el.dataset.blockId ?? '').toLowerCase() === key) return el;
+  }
+  return null;
+}

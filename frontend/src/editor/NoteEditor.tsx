@@ -8,6 +8,7 @@ import { insertAttachments } from '../features/attachments';
 import { linkTo } from '../features/fileOps';
 import { wantsNoteFocus } from '../features/focus';
 import { openLink, openTag } from '../features/navigation';
+import { editorBlocks } from '../features/blockRefs';
 import { recentPaths } from '../features/recent';
 import { usePrefs } from '../state/prefs';
 import type { DocumentSession } from '../sync/DocumentSession';
@@ -55,6 +56,7 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
       toggleMode: () => callbacks.current.onToggleMode(),
       insertFiles: (files, range, pasted) => void insertAttachments(session, files, range, pasted),
       linkTo: (path) => linkTo(path, session.path),
+      blocks: editorBlocks,
     };
     const hooks: EditorHooks = {
       onLocalChange: () => session.markDirty(),

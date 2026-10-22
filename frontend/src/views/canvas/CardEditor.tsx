@@ -19,6 +19,7 @@ import { unresolvedLinks } from '../../editor/unresolved';
 import { linkTo } from '../../features/fileOps';
 import { uploadForCard } from './actions';
 import { openLink, openTag } from '../../features/navigation';
+import { editorBlocks } from '../../features/blockRefs';
 import { recentPaths } from '../../features/recent';
 import { usePrefs } from '../../state/prefs';
 
@@ -69,6 +70,7 @@ export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur 
         });
       },
       linkTo: (path) => linkTo(path, canvasPath),
+      blocks: editorBlocks,
     };
     const view: EditorView = new EditorView({
       parent,

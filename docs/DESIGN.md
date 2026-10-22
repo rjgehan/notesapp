@@ -650,7 +650,7 @@ Indented (4-space) code blocks are **not** excluded. Obsidian list continuation 
 - ATX headings: up to 3 leading spaces, then 1–6 `#`, then a space, tab or end of line. Text is trimmed and closing `#`s are removed.
 - Setext headings: a non-blank paragraph line followed by `===` (level 1) or `---` (level 2). The `---` rule never applies on line 1 when frontmatter could start there.
 - `HeadingOcc(level, text, line)`.
-- Block ids: `(?:^|\s)\^([A-Za-z0-9-]+)\s*$` at the end of a line outside excluded zones.
+- Block ids: `(?:^|\s)\^([A-Za-z0-9-]+)\s*$` at the end of a line outside excluded zones. Which block an id names, and adding one, are §5.37 and §6.37 (ROADMAP item 20).
 
 #### 5.5.5 Links, embeds and tags
 
@@ -1586,7 +1586,7 @@ An existing Obsidian vault is imported by copying it into the vault directory be
 
 | Category | Findings |
 |---|---|
-| Syntax | Dataview (```` ```dataview ````, ```` ```dataviewjs ````, inline `` `= …` ``), Tasks queries, embedded searches (```` ```query ````), other plugin blocks (```` ```ad-… ````, ```` ```chart ```` …), Templater `<% … %>`, block references (`#^id`), `obsidian://` links, HTML the sanitizer removes, Kanban boards (`kanban-plugin` property) |
+| Syntax | Dataview (```` ```dataview ````, ```` ```dataviewjs ````, inline `` `= …` ``), Tasks queries, embedded searches (```` ```query ````), other plugin blocks (```` ```ad-… ````, ```` ```chart ```` …), Templater `<% … %>`, `obsidian://` links, HTML the sanitizer removes, Kanban boards (`kanban-plugin` property) |
 | Links | Embeds and attachment links that lead nowhere; links to missing headings (matched as the client does, §6.4) or missing `^block-ids`; links to notes that do not exist yet (informational: following them creates the note) |
 | Files | Names the index skips (`/api/status` `vault.skipped`), notes over the text limit, invalid UTF-8, frontmatter that does not parse, notes with `excalidraw-plugin` properties not named `.excalidraw.md` (which open as Markdown), canvases, bases |
 
@@ -1699,6 +1699,15 @@ Habits keep no data of their own on the server: a habit is a note, and its check
 
 - **Why notes, not a store.** Check-ins in plain frontmatter are diffable, show in Obsidian (Habit Tracker 21 reads `entries`; Dataview and Tracker read daily-note properties), and need nothing new for history, trash, sync or conflicts: they are note edits (§6.35).
 - **Item 4 later.** ROADMAP item 35 depends on "4 or 13": this builds on daily-note properties (13's territory) and works without tasks. A habit note may later name a recurring task (`task: <id>`) whose completions count as check-ins, read by the same endpoint; nothing here would change.
+
+### 5.37 Block ids (ROADMAP item 20)
+
+The index has read block ids since v1 (§5.5.4, `NoteParse.blockIds`), so backlinks to `[[Note#^id]]` and the report's `missing-blocks` finding (§5.23) needed nothing new. The server's part of block references is adding an id when a link to a block that has none is made (`POST /api/notes/block-id`, API.md §37, `vault.BlockIdService`):
+
+- **The client decides where, the server decides when.** Which lines a block covers and where its id belongs are the client's block rules (§6.37); the request names the line and its text as the client read them. `FileService.editText` reads the file from disk under its path lock, applies the splice to the current text, writes atomically, indexes, marks the note for the next commit and publishes `file.changed`, like a quick capture (`appendText`, API.md §8.5): nothing the requester has not seen is replaced, so an edit made elsewhere between the client's read and the request is kept. When lines moved, the line is found again by its text if exactly one line has it; otherwise `409 block-not-found`, and the client asks the user to pick again.
+- **Idempotent.** A line that already ends with an id (or a structured block already followed by its `^id` line) answers with that id and writes nothing, so a retried or doubled request never adds two ids.
+- **Ids** are 6 random lower-case letters and digits (`SecureRandom`), as Obsidian makes them; the client may propose one (it writes the link with it at once) and gets another only when a line of the note already ends with it.
+- **Moves.** A link names the note and the id, and the id travels with its text: a block moved within its note keeps working with no rewrite. A block cut from one note and pasted into another is not followed (Obsidian does not follow it either); the report lists such links under `missing-blocks`.
 
 ---
 
@@ -3332,6 +3341,34 @@ The code is in `frontend/src/habits/`: `model.ts` (habits from notes, schedules)
 **Check-ins from daily notes:** the property in the note itself (in source mode, or the properties editor of item 13 once built), and the **Habits** panel (`registerPanel`, right side; the bottom sheet on phones), which lists the habits for the day of the daily note in view (today for any other note) with check buttons. A `habittracker` code block, Habit Tracker 21's way to show a grid in a note, is not rendered yet: the reading view has no code-block renderer registry (item 3 adds code-block rendering on another branch).
 
 **Live sync.** Habits and check-ins are notes, so other devices' changes arrive as `file.*` and `entry.moved` events; the page's query is refetched half a second after a note event (not for attachments), only while a page or the panel is open.
+
+### 6.37 Block references and block embeds (ROADMAP item 20)
+
+Obsidian's block references: a block of a note carries an id, `^a1b2c3`; `[[Note#^a1b2c3]]` links to it, `![[Note#^a1b2c3]]` shows it in place, `[[#^a1b2c3]]` names a block of the same note. Everything that reads blocks goes through `features/blocks.ts`, so the reading view, the embeds, the editor (and Live Preview, §6.6, which reuses the render and embed modules) agree.
+
+**What a block is** (`scanBlocks`, line-based, after the frontmatter, skipping `%%` comments; ids inside code fences are text):
+
+| Block | Lines | Where its id is |
+|---|---|---|
+| Paragraph | consecutive non-blank lines | end of its last line (`text ^id`, or `^id` alone on the next line) |
+| Heading (ATX or setext) | the heading | end of the heading line; an embed shows its whole section |
+| List item | the item and its nested items | end of the item's own last line; an embed outdents it to the top level |
+| Table, quote, callout, code block, math block, whole list | the block | `^id` alone on a line after it, usually after a blank line |
+
+**Linking.** `[[Note#^` (or `[[#^`, and the embed and Markdown-link forms) opens a picker of the target's blocks: paragraphs, headings, list items and structured blocks in document order, each with its text and, when it has one, its `^id`; typing filters them fuzzily by text and id. In the same note, the block the cursor is in is left out. Picking a block with an id inserts the link. Picking one without:
+
+- *in the same note*, the id and the link are one edit (one undo step);
+- *in another note*, the link is written at once with a new id the client proposes, and the server adds that id to the note's current file (API.md §37, `features/blockRefs.ts`). If the block got an id meanwhile, the link is corrected to it. If this tab holds unsaved edits of that note, the id is added to its buffer instead and saved with them. A failure (offline, `block-not-found`) is a toast; the link stays as written.
+
+The target's text comes from its open session when there is one, else from the file query (`fetchTextFile`). The reply's `file` is applied like a capture's (`applyBlockIdResult`): an open, clean session of the note re-reads it.
+
+**Reading view** (`render/render.ts`, `obsidian_block_ids`, a markdown-it core rule): a trailing `^id` is hidden and the block gets `data-block-id` (on the `<li>` for a list item; on the table, quote, callout, code, math or list for a `^id` line after it, which is removed). `![[Note#^id]]` is a note embed (`NoteEmbed`, through the note view's `loadEmbed`) that renders only that block (`embeddedPart`/`extractBlock`), titled `Note › ^id`, with *Block not found.* when the id is gone. A note may embed its own blocks (`![[#^id]]`); transclusion stays one level deep, so nested embeds are links.
+
+**Navigation.** A `#^id` route (a link, a backlink, an embed's title) scrolls to the block and flashes it: in the reading view through `data-block-id` (`findBlockElement`), in the editor through `scanBlocks` on the live text, with every line of the block flashed. A missing id opens the note at the top.
+
+**Backlinks.** Mentions that link to a block show a `^id` chip, and above them **Linked blocks** lists each block of the note that other notes link to, with its current text and the number of links; a click scrolls to the block.
+
+**Compatibility.** Ids round-trip byte for byte (the editor shows them as written; nothing reformats them), new ids use Obsidian's shape, and the report (§6.29) no longer lists block references, only links to blocks that are missing.
 
 ---
 

@@ -181,6 +181,7 @@ const FRIENDLY: Partial<Record<ErrorCode, string>> = {
   'insufficient-storage': 'The server is low on disk space.',
   'identity-not-allowed': "This device's Tailscale login is not allowed to use NotesApp.",
   'settings-read-only': 'Settings were written by a newer version of NotesApp and are read-only here.',
+  'block-not-found': 'That block changed in the meantime. Type the link again to pick it.',
 };
 
 /** User-facing text for an error (DESIGN §6.20). */

@@ -6,6 +6,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../api/queryKeys';
 import type {
   AttachmentResult,
+  BlockIdResult,
   CaptureResult,
   FileDeletedEvent,
   FileEntry,
@@ -210,6 +211,16 @@ export function applyHistoryRestoreResult(t: SyncTarget, r: HistoryRestoreResult
 function restoredInto(t: SyncTarget, file: FileEntry): void {
   refreshFileQuery(t.qc, file.path);
   void t.documents.get(file.path)?.onRemoteChanged(file, { quiet: true });
+}
+
+/**
+ * Own block id (API.md §37): the server added `^id` to the note, so this tab treats it like
+ * another device's change, as for a capture: an open, clean session re-reads the note.
+ */
+export function applyBlockIdResult(t: SyncTarget, r: BlockIdResult): void {
+  if (!r.created) return;
+  upsertFiles(t.qc, [r.file]);
+  restoredInto(t, r.file);
 }
 
 /**

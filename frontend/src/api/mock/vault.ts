@@ -1,10 +1,11 @@
 // In-memory vault behind the dev mock. It follows the server's rules closely enough that the UI
 // can be built and exercised without the backend: version protocol (API.md §4), name rules,
 // case policy, trash, link rewriting on move, backlinks, search, tags, history and events.
+import { BLOCK_ID, blockIdsIn, LINE_BLOCK_ID, newBlockId, noteLines, planBlockId } from '../../features/blocks';
 import { flattenItems as flattenBookmarkItems, rekeyBookmarks } from '../../features/bookmarks';
 import type { TimelineFilter } from '../endpoints';
 import { buildLinkIndex, createPath, encodeMdPath, linkText, linkTextRaw, resolve, type LinkIndex } from '../../features/links';
-import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, newPathError, pathSafetyError, rebasePath, stripMd } from '../../features/paths';
+import { extensionOf, folderOf, joinPath, lastSegment, basenameOf, isNotePath, newPathError, pathSafetyError, rebasePath, stripMd } from '../../features/paths';
 import { splitWikiBody } from '../../features/syntax';
 import { DEFAULT_SETTINGS } from '../../features/settings';
 import type {
@@ -12,6 +13,8 @@ import type {
   AttachmentResult,
   BacklinkGroup,
   BacklinksResponse,
+  BlockIdRequest,
+  BlockIdResult,
   BookmarkItem,
   BookmarksResponse,
   BookmarksUpdateRequest,
@@ -422,6 +425,25 @@ export class MockVault {
       ? this.commit(`Update links after renaming heading “${from}” → “${to}” in ${req.path} (${rewrites.length} notes)`, rewrites.map((r) => ({ path: r.path, change: 'modified' as const, renamedFrom: null })))
       : null;
     return { dryRun: false, path: req.path, from, to, linkUpdates, failed: [], bookmarks, commitId };
+  }
+
+  // ---------- block ids (API.md §37) ----------
+
+  addBlockId(req: BlockIdRequest, origin: string | null): BlockIdResult {
+    const note = this.existing(req.path);
+    if (!isNotePath(note.path)) fail('type-mismatch', 'Block ids belong in notes', { path: note.path, expected: 'note' });
+    if (req.placement !== 'end' && req.placement !== 'after') fail('bad-request', 'Invalid placement', { errors: [{ field: 'placement', message: 'invalid' }] });
+    if (req.id !== undefined && !BLOCK_ID.test(req.id)) fail('bad-request', 'Invalid id', { errors: [{ field: 'id', message: 'invalid' }] });
+    const text = this.textOf(note);
+    const taken = blockIdsIn(text);
+    const wanted = req.id !== undefined && !taken.some((t) => t.toLowerCase() === req.id!.toLowerCase()) ? req.id : newBlockId(taken);
+    const plan = planBlockId(text, req, wanted);
+    if (plan.kind === 'missing') fail('block-not-found', 'The block changed since it was read', { path: note.path });
+    if (plan.kind === 'existing') return { id: plan.id, created: false, line: lineOf(text, plan.id), file: this.entry(note) };
+    const next = text.slice(0, plan.from) + plan.insert + text.slice(plan.from);
+    const file = this.entry(this.writeRaw(note.path, encoder.encode(next)));
+    this.hub.publish('file.changed', { file, origin }, origin);
+    return { id: plan.id, created: true, line: lineOf(next, plan.id), file };
   }
 
   private renameHeadingBookmarks(path: string, from: string, to: string, dryRun: boolean): number {
@@ -1481,4 +1503,9 @@ function safeDecode(s: string): string {
   } catch {
     return s;
   }
+}
+
+/** The 0-based line that ends with block id `id`. */
+function lineOf(text: string, id: string): number {
+  return noteLines(text).findIndex((l) => LINE_BLOCK_ID.exec(l)?.[1] === id);
 }

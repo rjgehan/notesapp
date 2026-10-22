@@ -194,6 +194,7 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `ai-unavailable` | 409 | Ask and summaries are unavailable | §24: switched off in Settings, or the server has no usable Anthropic API key | `reason`: `"off"` or `"not-configured"` |
 | `ai-excluded` | 403 | Excluded from Ask and summaries | §24: the note, folder or selection named is under `settings.ai.excludedPaths` or `settings.files.excludedPaths` | `path` |
 | `ai-budget-exceeded` | 429 | Monthly AI budget reached | §24: this month's estimated spend reached `settings.ai.monthlyBudgetUsd` | `limit` (the budget, USD), `spent` (USD) |
+| `block-not-found` | 409 | Block not found | §37: the line a block id was to go on is no longer in the note, or is no longer unique | `line` |
 
 ```ts
 export interface FieldError { field: string; message: string }   // e.g. {"field":"settings.files.newNoteFolder","message":"invalid path"}
@@ -1066,7 +1067,7 @@ Request `ResolveRequest`:
 | `proposedSettings`, `settingsVersion` | The current settings with every `different` row applied, and the settings version they are based on. Clients apply them with `PUT /api/settings {settings: proposedSettings, baseVersion: settingsVersion}`; a `409` means the settings changed since, so the report is fetched again. `proposedSettings` is null without `.obsidian/`. |
 | `graph` | The options of `.obsidian/graph.json` the graph view understands (`search`, `showTags`, `showAttachments`, `hideUnresolved`, `showOrphans`, `colorGroups`, `showArrow`, `textFadeMultiplier`, `nodeSizeMultiplier`, `lineSizeMultiplier`, `centerStrength`, `repelStrength`, `linkStrength`, `linkDistance`) as Obsidian wrote them; null when there are none. Group colors stay `{a, rgb}` objects. |
 | `plugins` | The enabled core plugins (`core-plugins.json`), then the enabled community plugins (`community-plugins.json`, named from their `manifest.json`), each group ordered by `status` (`unsupported`, `unknown`, `planned`, `partial`, `supported`) and name. |
-| `issues` | One entry per finding with at least one occurrence, in a fixed order (syntax, links, files). `id` is stable (`dataview`, `tasks-query`, `search-query`, `plugin-blocks`, `templater`, `block-references`, `obsidian-uris`, `html-removed`, `kanban`, `missing-files`, `missing-headings`, `missing-blocks`, `missing-notes`, `skipped`, `too-large`, `not-utf8`, `frontmatter`, `excalidraw`, `canvas`, `bases`). `count` counts every occurrence, `noteCount` the files they are in; `occurrences` lists at most 200 in path order, with a 0-based `line` (null for whole files) and the text found (at most 160 characters), and `truncated` says there are more. |
+| `issues` | One entry per finding with at least one occurrence, in a fixed order (syntax, links, files). `id` is stable (`dataview`, `tasks-query`, `search-query`, `plugin-blocks`, `templater`, `obsidian-uris`, `html-removed`, `kanban`, `missing-files`, `missing-headings`, `missing-blocks`, `missing-notes`, `skipped`, `too-large`, `not-utf8`, `frontmatter`, `excalidraw`, `canvas`, `bases`). `count` counts every occurrence, `noteCount` the files they are in; `occurrences` lists at most 200 in path order, with a 0-based `line` (null for whole files) and the text found (at most 160 characters), and `truncated` says there are more. |
 | `totals` | Notes and files in the vault, and occurrences by severity. |
 
 | Errors |
@@ -1879,7 +1880,8 @@ export type ErrorCode =
   | 'io-error' | 'permission-denied' | 'internal-error'
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
-  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded';
+  | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
+  | 'block-not-found';
 
 export interface FieldError { field: string; message: string }
 
@@ -1896,6 +1898,7 @@ export interface Problem {
   kind?: FileKind;
   limit?: number;
   spent?: number;                 // ai-budget-exceeded: this month's estimated spend in USD
+  line?: number;                  // block-not-found: the line the request named (§37)
   from?: VaultPath;
   to?: VaultPath;
   reason?: string;
@@ -2159,6 +2162,19 @@ export interface HeadingRenameResult {
   failed: FailedUpdate[];
   bookmarks: number;              // heading bookmarks of the note that were (or would be) updated
   commitId: string | null;
+}
+export interface BlockIdRequest {   // §37
+  path: VaultPath;
+  line: number;                   // 0-based line the client read lineText on (the block's anchor)
+  lineText: string;
+  placement: 'end' | 'after';     // append ' ^id' to the line, or put '^id' on a line of its own after it
+  id?: string;                    // the id the client would like; another one is chosen when a block has it
+}
+export interface BlockIdResult {
+  id: string;                     // the block's id: the new one, or the one it already had (created: false)
+  created: boolean;
+  line: number;                   // 0-based line that holds the id
+  file: FileEntry;                // the note after the call
 }
 
 // ---------- graph (§11.4) ----------
@@ -2768,6 +2784,7 @@ export interface HabitsResponse {
 | GET | `/api/bookmarks` | | 200 `BookmarksResponse` | 21.1 |
 | PUT | `/api/bookmarks` | `BookmarksUpdateRequest` | 200 `BookmarksResponse` | 21.2 |
 | POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
+| POST | `/api/notes/block-id` | `BlockIdRequest` | 200 `BlockIdResult` | 37 |
 | GET | `/api/transcription` | | 200 `TranscriptionStatus` | 23.1 |
 | POST | `/api/transcriptions` | `TranscribeRequest` | 200 `TranscriptionResult` | 23.2 |
 | GET | `/api/flashcards` | | 200 `FlashcardsResponse` | 34.3 |
@@ -2818,6 +2835,7 @@ export interface HabitsResponse {
 | `TemplateEntry`, `TemplatesResponse` | Same | |
 | `BookmarksResponse`, `BookmarksUpdateRequest` | Same | `BookmarkItem` is not a record: items stay JSON objects (`ObjectNode`; `JsonNode` in the request), so fields from Obsidian or a newer build survive; `BookmarkCodec` checks the fields it knows (§21.2) |
 | `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
+| `BlockIdRequest`, `BlockIdResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]` |
 | `TranscriptionStatus`, `TranscriptionResult` | Same; the request is `TranscribeRequest(String path)` | |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
@@ -3383,3 +3401,31 @@ A **daily note** (a note in the daily-notes folder whose name parses with the da
 | `daily` | Every note at any depth under `dailyFolder` (habit notes excepted) with at least one frontmatter value that is a boolean, a number, or a string of at most 100 characters, under a key of at most 64; only those values are listed. The client maps paths to days with the daily-note format. |
 
 **Writes.** A check-in adds or removes the day in the habit note's `entries`; undoing a day that a daily note checked sets that note's property to `false`. Clients edit only those properties' lines (`PUT /api/files` with `baseVersion`, re-applying the edit after a `409 version-conflict`), so the rest of each note stays byte for byte. New habits are `POST /api/files` in `folder`. Other devices learn of them through the usual `file.*` events (§16.4).
+
+---
+
+## 37. Block references (ROADMAP item 20)
+
+Obsidian block references work as in Obsidian: a block of a note carries an id, `^a1b2c3` (letters, digits and `-`), and `[[Note#^a1b2c3]]` links to it, `![[Note#^a1b2c3]]` embeds it, and `[[#^a1b2c3]]` names a block of the same note. The index already reads block ids (DESIGN §5.5.4), backlinks count links to blocks like any link (§11.2, where `matched` holds the raw link, so a client reads the block id from it), and the compatibility report lists only links whose block is missing (`missing-blocks`, §11.5). Where an id goes, which text a block covers and how it renders are the client's (DESIGN §6.37); the server only adds ids.
+
+### `POST /api/notes/block-id`
+
+Request `BlockIdRequest`: `{"path": "Projects/Plan.md", "line": 12, "lineText": "Ship the beta", "placement": "end", "id": "k3x9qa"}`.
+
+The client read the note, found the block (DESIGN §6.37) and names the line its id belongs on (`placement: "end"`: a paragraph's last line, a heading, a list item's own last line) or the block's last line, after which the id gets a line of its own (`"after"`: a table, a quote or callout, a code or math block, a whole list). The server applies it to the note's **current** text under the file's lock, so nothing written meanwhile is lost:
+
+- The line is `line` when it still reads `lineText` (ignoring a trailing `\r`), else the only line of the note that reads `lineText`; otherwise `409 block-not-found` and nothing is written.
+- `"end"`: a line already ending with an id keeps it (`created: false`). Otherwise ` ^id` is appended, after trailing spaces and tabs are trimmed.
+- `"after"`: a line holding only `^id` within the next two lines (after at most one blank line) is the block's id already. Otherwise a blank line and `^id` follow the line, and a blank line separates it from a non-blank next line.
+- The id is `id` unless a line of the note already ends with it (compared ignoring case), else 6 random lower-case letters and digits. The file keeps its line endings (CRLF when every line break is CRLF) and its BOM; a file with invalid UTF-8 is never rewritten (`400`).
+
+`200 BlockIdResult`: `{"id": "k3x9qa", "created": true, "line": 12, "file": { …FileEntry }}`. `line` is the 0-based line holding the id; `file` is the note after the call.
+
+| Errors |
+|---|
+| `400 bad-request`: `path`, `line`, `lineText` or `placement` missing or invalid, an `id` that is not 1–64 letters, digits and `-`, or invalid UTF-8 in the note (`errors[]` names the field) |
+| `400 invalid-path`, `403 reserved-path`, `404 not-found`, `413 too-large` |
+| `409 type-mismatch` (`expected: "note"`) for a file that is not a note |
+| `409 block-not-found` (`line`): the line is gone, or several lines read `lineText` |
+
+Events to other clients: `file.changed` when the note changed. An open note there with unsaved edits merges them or shows the conflict banner, as for any change from elsewhere (§16.5). The calling client gets no event; it applies `file` itself (DESIGN §6.37). The change is committed with the next batch, like a save.

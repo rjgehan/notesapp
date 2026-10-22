@@ -5,7 +5,7 @@ import { registerBuiltins } from '../extensions/builtins';
 import { buildLinkIndex, resolve } from '../features/links';
 import { basenameOf, extensionOf, lastSegment } from '../features/paths';
 import { patchChildren } from './patch';
-import { extractSection, lineHash, onlyCheckboxesChanged, renderNote, renderNoteHtml, toggleTaskAtLine, type RenderContext } from './render';
+import { embeddedPart, extractSection, lineHash, onlyCheckboxesChanged, renderNote, renderNoteHtml, toggleTaskAtLine, type RenderContext } from './render';
 
 function entry(path: string, size = 100): FileEntry {
   const ext = extensionOf(path);
@@ -159,6 +159,58 @@ describe('render: embeds', () => {
 
   it('renders a self-embed as a link (cycle guard)', () => {
     expect(dom('![[Welcome]]').querySelector('[data-embed-kind]')).toBeNull();
+  });
+
+  it('embeds blocks of other notes and of the note itself, and links them at depth 1 (item 20)', () => {
+    const el = dom('![[Plan#^abc]]\n\n![[#^own]]');
+    const embeds = [...el.querySelectorAll('[data-embed-kind="note"]')];
+    expect(embeds.map((e) => e.getAttribute('data-embed-subpath'))).toEqual(['^abc', '^own']);
+    expect(embeds[1].getAttribute('data-embed-path')).toBe('Welcome.md');
+    const nested = dom('![[Plan#^abc]]', ctx({ depth: 1 }));
+    expect(nested.querySelector('[data-embed-kind]')).toBeNull();
+    expect(nested.querySelector('a.internal-link')?.getAttribute('data-href')).toBe('Plan#^abc');
+  });
+});
+
+describe('render: block ids (item 20)', () => {
+  it('hides ids and stamps paragraphs, headings and list items with data-block-id', () => {
+    const el = dom('# Title ^top\n\nSome text ^p1\n\nTwo lines\n^p2\n\n- item ^li\n- other\n');
+    expect(el.textContent).not.toContain('^');
+    expect(el.querySelector('h1')?.getAttribute('data-block-id')).toBe('top');
+    expect(el.querySelector('h1')?.getAttribute('data-heading')).toBe('Title');
+    const ps = [...el.querySelectorAll('p[data-block-id]')].map((p) => [p.getAttribute('data-block-id'), p.textContent]);
+    expect(ps).toEqual([
+      ['p1', 'Some text'],
+      ['p2', 'Two lines'],
+    ]);
+    expect(el.querySelector('li')?.getAttribute('data-block-id')).toBe('li');
+    expect(el.querySelector('li')?.textContent).toBe('item');
+  });
+
+  it('gives an id on its own line to the block before it and removes that line', () => {
+    const el = dom('| a | b |\n|---|---|\n| 1 | 2 |\n\n^tbl\n\n> quote\n\n^q\n\n```js\nx\n```\n\n^code\n\n- a\n- b\n\n^list');
+    expect(el.querySelector('table')?.getAttribute('data-block-id')).toBe('tbl');
+    expect(el.querySelector('blockquote')?.getAttribute('data-block-id')).toBe('q');
+    expect(el.querySelector('[data-block-id="code"]')).not.toBeNull();
+    expect(el.querySelector('ul')?.getAttribute('data-block-id')).toBe('list');
+    expect(el.textContent).not.toMatch(/\^(tbl|q|code|list)/);
+  });
+
+  it('leaves ids in code alone', () => {
+    const el = dom('```\nlet a ^x\n```\n\n`b ^y`');
+    expect(el.textContent).toContain('let a ^x');
+    expect(el.textContent).toContain('b ^y');
+    expect(el.querySelector('[data-block-id]')).toBeNull();
+  });
+});
+
+describe('embeddedPart', () => {
+  it('picks a block, a section or the whole note', () => {
+    const text = '# A\n\npara ^p\n\n# B\nend';
+    expect(embeddedPart(text, '^p')).toBe('para ^p');
+    expect(embeddedPart(text, 'B')).toBe('# B\nend');
+    expect(embeddedPart(text, null)).toBe(text);
+    expect(embeddedPart(text, '^missing')).toBeNull();
   });
 });
 

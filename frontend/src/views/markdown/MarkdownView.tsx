@@ -5,6 +5,7 @@ import { useLocation } from 'react-router';
 import { useVaultSettings } from '../../api/hooks';
 import { useWorkspaceScroller } from '../../components/layout/workspaceScroller';
 import { findHeading, headingsFromState } from '../../editor/outline';
+import { blockSubpathId, findBlock, scanBlocks } from '../../features/blocks';
 import { NoteEditor } from '../../editor/NoteEditor';
 import { setSearchHighlight } from '../../editor/searchHighlight';
 import { wantsNoteFocus } from '../../features/focus';
@@ -12,7 +13,7 @@ import { setNoteMode, setTopLineProbe, takePendingModeLine } from '../../feature
 import { useNoteScroll } from '../../features/noteScroll';
 import { highlightTerms } from '../../features/searchTerms';
 import { ReadingView } from '../../render/ReadingView';
-import { scrollToLine, topVisibleLine } from '../../render/scroll';
+import { findBlockElement, scrollToLine, topVisibleLine } from '../../render/scroll';
 import { flashBlock, highlightTermsIn } from '../../render/searchHits';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import type { FileViewProps } from '../registry';
@@ -89,8 +90,18 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
     const line = modeLine ?? hitLine;
     clearHighlights.current();
     clearHighlights.current = () => {};
+    // A `#^id` subpath scrolls to that block and flashes it (ROADMAP item 20).
+    const blockId = modeLine === null ? blockSubpathId(heading) : null;
     if (mode === 'edit' && editorView.current) {
       const v = editorView.current;
+      if (blockId) {
+        const block = findBlock(scanBlocks(v.state.doc.toString()), blockId);
+        if (block) {
+          scrollEditorToLine(v, block.start);
+          v.dispatch({ effects: setSearchHighlight.of({ terms: [], line: block.start, lineEnd: block.end }) });
+          return;
+        }
+      }
       if (heading && modeLine === null) {
         const h = findHeading(headingsFromState(v.state), heading);
         if (h) return scrollEditorToLine(v, h.line);
@@ -100,6 +111,16 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
       if (hitLine !== null) v.dispatch({ effects: setSearchHighlight.of({ terms, line: hitLine }) });
     } else if (mode === 'read' && reading.current) {
       const container = reading.current;
+      if (blockId) {
+        let el = findBlockElement(container, blockId);
+        if (!el) {
+          const block = findBlock(scanBlocks(session.getText()), blockId);
+          el = block ? scrollToLine(container, block.start) : null;
+        } else {
+          el.scrollIntoView({ block: 'start' });
+        }
+        if (el) return flashBlock(el);
+      }
       if (heading && modeLine === null) {
         const blocks = [...container.querySelectorAll<HTMLElement>('[data-heading]')].filter((el) => !el.closest('[data-embed-root]'));
         const hit = findHeading(blocks.map((el) => ({ el, text: el.dataset.heading ?? '' })), heading);
@@ -113,7 +134,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
         }
       }
     }
-  }, [mode, heading, lineParam, terms]);
+  }, [mode, heading, lineParam, terms, session]);
 
   // Heading links within the same note change only the hash; another hit changes only `?line=`.
   // Following the same link again is a new navigation (a new location key) and scrolls again.

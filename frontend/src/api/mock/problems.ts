@@ -35,6 +35,7 @@ const TABLE: Record<ErrorCode, [number, string]> = {
   'ai-unavailable': [409, 'Ask and summaries are unavailable'],
   'ai-excluded': [403, 'Excluded from Ask and summaries'],
   'ai-budget-exceeded': [429, 'Monthly AI budget reached'],
+  'block-not-found': [409, 'Block not found'],
 };
 
 /** Builds and throws the server's problem document for `code` (API.md §3). */

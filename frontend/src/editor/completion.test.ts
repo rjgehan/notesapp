@@ -168,6 +168,63 @@ describe('heading completion', () => {
   });
 });
 
+describe('block completion (item 20)', () => {
+  const PLAN = '# Plan\n\nAlpha idea ^alpha\n\nBeta idea\n\n| a |\n|---|\n';
+
+  function blockContext(): { ctx: NoteContext; calls: Array<{ path: string; anchor: number; wanted: string }>; answer: { id: string | null } } {
+    const calls: Array<{ path: string; anchor: number; wanted: string }> = [];
+    const answer: { id: string | null } = { id: null };
+    const ctx: NoteContext = {
+      ...context(),
+      blocks: {
+        noteText: async () => PLAN,
+        ensureBlockId: async (path, _text, block, wanted) => {
+          calls.push({ path, anchor: block.anchor, wanted });
+          return answer.id ?? wanted;
+        },
+      },
+    };
+    return { ctx, calls, answer };
+  }
+
+  it('[[Note#^ lists the blocks of another note and links to an existing id', async () => {
+    const { ctx, calls } = blockContext();
+    const view = makeView('[[Projects/Plan#^', 17, ctx);
+    const result = (await complete(headingSource, view))!;
+    expect(result.options.map((o) => o.label)).toEqual(['Plan', 'Alpha idea', 'Beta idea', 'a']);
+    expect(result.options[1].detail).toBe('^alpha');
+    pick(view, result, 'Alpha idea');
+    expect(view.state.doc.toString()).toBe('[[Projects/Plan#^alpha]]');
+    expect(calls).toEqual([]);
+  });
+
+  it('gives a block of another note a new id through the server, correcting the link when it differs', async () => {
+    const { ctx, calls, answer } = blockContext();
+    answer.id = 'given1';
+    const view = makeView('![[Projects/Plan#^bet', 21, ctx);
+    const result = (await complete(headingSource, view))!;
+    expect(result.options[0].label).toBe('Beta idea');
+    pick(view, result, 'Beta idea');
+    const provisional = calls[0].wanted;
+    expect(calls[0]).toMatchObject({ path: 'Projects/Plan.md', anchor: 4 });
+    expect(view.state.doc.toString()).toBe(`![[Projects/Plan#^${provisional}]]`);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(view.state.doc.toString()).toBe('![[Projects/Plan#^given1]]');
+  });
+
+  it('[[#^ adds the id to a block of this note in the same edit', async () => {
+    const doc = 'First thought\n\n| a |\n|---|\n\nSee [[#^';
+    const view = makeView(doc, doc.length);
+    const result = (await complete(headingSource, view))!;
+    expect(result.options.map((o) => o.label)).toEqual(['First thought', 'a']);
+    pick(view, result, 'a');
+    const text = view.state.doc.toString();
+    const id = /\^([a-z0-9]{6})\n/.exec(text)![1];
+    expect(text).toBe(`First thought\n\n| a |\n|---|\n\n^${id}\n\nSee [[#^${id}]]`);
+    expect(view.state.selection.main.head).toBe(text.length);
+  });
+});
+
 describe('tag completion', () => {
   it('completes vault and local tags after #', async () => {
     const view = makeView('#local here\n\nnew #pro', 21);

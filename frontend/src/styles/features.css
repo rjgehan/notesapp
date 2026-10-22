@@ -2131,3 +2131,49 @@ mark.match {
     animation: none;
   }
 }
+
+/* Links to blocks in the backlinks panel (ROADMAP item 20, DESIGN §6.37) */
+.backlink-block-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+  color: var(--text-faint);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+.backlink-blocks {
+  padding: 0 6px 4px;
+}
+
+.backlink-block {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px 4px 22px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.backlink-block:hover {
+  background: var(--background-modifier-hover);
+}
+
+.backlink-block .backlink-block-chip {
+  margin-left: 0;
+}
+
+.backlink-block-text {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

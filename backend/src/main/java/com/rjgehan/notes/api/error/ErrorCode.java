@@ -41,7 +41,8 @@ public enum ErrorCode {
 	TRANSCRIPTION_FAILED("transcription-failed", HttpStatus.SERVICE_UNAVAILABLE, "Transcription failed"),
 	AI_UNAVAILABLE("ai-unavailable", HttpStatus.CONFLICT, "Ask and summaries are unavailable"),
 	AI_EXCLUDED("ai-excluded", HttpStatus.FORBIDDEN, "Excluded from Ask and summaries"),
-	AI_BUDGET_EXCEEDED("ai-budget-exceeded", HttpStatus.TOO_MANY_REQUESTS, "Monthly AI budget reached");
+	AI_BUDGET_EXCEEDED("ai-budget-exceeded", HttpStatus.TOO_MANY_REQUESTS, "Monthly AI budget reached"),
+	BLOCK_NOT_FOUND("block-not-found", HttpStatus.CONFLICT, "Block not found");
 
 	private final String code;
 
