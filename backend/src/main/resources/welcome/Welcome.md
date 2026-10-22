@@ -5,6 +5,11 @@ tags: [welcome]
 
 This vault is a folder of plain Markdown files on your own server. Everything you write is saved as you type, and every change goes into history. This note is a short tour; delete it whenever you like.
 
+## Writing
+
+- Notes show formatted as you type, and you edit them right there: there is no separate reading view to switch to. Click any text, a table cell, an image, a callout or a formula to change it.
+- If something ever looks wrong, **Show Markdown source** (in the note's ⋯ menu or the command palette) shows the plain text; **Back to normal view** returns.
+
 ## Notes and links
 
 - Create a note with **New note** (`Mod-Alt-N`) or open the quick switcher (`Mod-O`) and type a name that does not exist yet.
@@ -33,7 +38,7 @@ This vault is a folder of plain Markdown files on your own server. Everything yo
 | Command palette | `Mod-P` |
 | New note | `Mod-Alt-N` |
 | Search in all notes | `Mod-Shift-F` |
-| Toggle reading and editing | `Mod-E` |
+| Inline code | `Mod-E` |
 | Follow the link under the cursor | `Mod-Enter` |
 | Toggle a checkbox | `Mod-L` |
 | Bold, italic, link | `Mod-B`, `Mod-I`, `Mod-K` |

@@ -17,12 +17,12 @@ This vault is served by the **in-memory mock** (\`VITE_MOCK_API=1\`). Everything
 - A Markdown link: [Alpha spec](Projects/Alpha/Spec.md) and an external one: [Obsidian](https://obsidian.md).
 - Tags: #welcome, #project/alpha and #🚀 work everywhere outside \`#code\`.
 
-Type \`[[\` in edit mode to link a note, \`[[Note#\` for its headings and \`#\` for tags.
+Type \`[[\` to link a note, \`[[Note#\` for its headings and \`#\` for tags. Every note is edited as it shows; if something looks wrong, **Show Markdown source** (⋯ menu or palette) shows the plain text.
 
 ## Formatting
 
 Single line breaks
-are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is hidden%% in Live Preview.
+are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is hidden%% in Live Preview (click its marker to edit it).
 
 > [!note] Quotes render as blockquotes.
 > - [ ] A task inside a quote
@@ -30,8 +30,8 @@ are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is
 ### Tasks
 
 - [x] Open the welcome note
-- [ ] Toggle a checkbox, also in a locked note
-- [ ] Lock editing with the lock button
+- [ ] Toggle a checkbox
+- [ ] Click an image, a callout or a formula to edit its source
 
 | Feature | Shortcut |
 | --- | --- |
