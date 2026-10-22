@@ -117,6 +117,9 @@ services:
       # NOTES_PUBLISH_FUNNEL is "true" on the tailscale service above as well. Snapshots: data/publish.
       NOTES_PUBLISH_ENABLED: "false"
       NOTES_PUBLISH_BASE_URL: https://notes.CHANGE-ME.ts.net:8443
+      # Multiple vaults (docs/CASAOS.md "Multiple vaults"): extra vaults are the folders under data/vaults, created
+      # from Settings › Vaults; the existing vault and its address never change. Add
+      # NOTES_VAULTS_ALLOW_CREATE: "false" to stop the app from creating them.
     volumes:
       - /DATA/AppData/notesapp/data:/data
       # The last nightly backup's status for the status page, read-only. Written by the optional

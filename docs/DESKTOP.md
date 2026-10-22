@@ -9,6 +9,8 @@ NotesApp has a desktop app for Windows and macOS (ROADMAP item 41). It is a thin
 - optional **launch at login**, straight into the tray;
 - the connection state in the window title (`— Reconnecting…`, `— Offline`), and offline use through the app's own offline mode (item 8).
 
+With several vaults on the server (ROADMAP item 37), the window switches vaults like the browser (the switcher in the sidebar); the capture window captures into the default vault, and the tray's *Open today's note* opens it in the vault the window shows.
+
 The design is in [DESIGN.md §6.39](DESIGN.md); the code is in [`desktop/`](../desktop).
 
 ## Requirements

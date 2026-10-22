@@ -87,7 +87,7 @@ DESIGN.md has the details.
 | 34 | Flashcards and spaced repetition | M | M | |
 | 35 | Habit tracker | L | M | 4 or 13 |
 | 36 | Vim mode | L | S | |
-| 37 | Multiple vaults | M | L | |
+| 37 | Multiple vaults *(built 2026-10-22, `feat/vaults`)* | M | L | |
 | 38 | Ops polish: JDK 25 runtime, faster start, app-error alerts, status page | M | S | |
 | 41 | **Desktop app (Windows and macOS) with live sync** *(new, 2026-10-17)* | M | M | 7 for quick capture; 8 for offline |
 
@@ -1138,6 +1138,13 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
 | L | S | |
 
 ### 37. Multiple vaults
+
+**Status:** built (2026-10-22, branch `feat/vaults`): DESIGN §5.38 (server) and §6.41 (app), API.md §38, DEPLOY.md and CASAOS.md *Multiple vaults*. The design note the effort called for is DESIGN §5.38. One process serves every vault: the default vault is the existing one at `/data/vault`, unchanged (same URLs, PWA, desktop app, shortcuts, clipper; no migration), and each folder under `/data/vaults/<name>` is an extra vault with an application context of its own (its own index, git repository, watcher, event stream, settings, trash, bookmarks, tasks, reminders and controllers), served at `/v/<name>/` and `/api/v/<name>/`. Measured: an extra vault starts in about 0.5 s on rgpc. Deviations and additions:
+- **One context per vault rather than vault-aware services.** Every existing service stayed a plain singleton; isolation comes from each vault having its own copies, so a vault's background threads can never act on another vault. Beans that must exist once (filters, alerts, ntfy, the Web Push key and devices, the AI providers and spend ledger, the publish server, the Tailscale checks) are marked `@ServerWide` and shared from the main context.
+- **Scope of server-wide features, decided:** publishing and the GitHub mirror stay with the default vault (an extra vault reports publishing off); backups cover every vault (the whole `notes-data` volume); push devices, ntfy, alerts and the AI monthly spend are shared; reminders are per vault and open their own vault; the share sheet, the clipper and the desktop capture window go to the default vault.
+- **Switching vaults reloads the app**, so no cache, event stream or store ever mixes vaults; storage that outlives a page (drafts, offline copies, capture queue, tabs, recent files, flashcard outbox, AI conversations) is keyed per vault, with the default vault's keys unchanged.
+- **Create, no rename or delete in the app:** Settings › Vaults creates a vault (`NOTES_VAULTS_ALLOW_CREATE=false` turns that off); renaming or deleting is a folder operation with the app stopped (DEPLOY.md).
+- **Not verified on a real iPhone:** the switcher in the drawer (checked in a 375 px emulated viewport) and a Web Push notification of an extra vault opening that vault from the lock screen.
 
 **One line:** several independent vaults (for example Personal and Work), each with its own index, git repo and watcher, a vault switcher, and URLs of the form `/v/<vault>/n/...`.
 

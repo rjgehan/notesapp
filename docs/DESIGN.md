@@ -1409,6 +1409,8 @@ logging.level.com.rjgehan.notes=DEBUG
 
 `notes.ai.*` (Ask your vault, ROADMAP item 18) is its own record, `AiProperties`, so it does not widen this one; its keys are in §5.25. The reminders (item 9, §5.26) read two optional keys directly: `notes.reminders.vapid-subject` (`NOTES_REMINDERS_VAPID_SUBJECT`, the VAPID contact; default `https://<first allowed host>`) and `notes.reminders.tick` (15s).
 
+Multiple vaults (item 37, §5.38) add `notes.vaults.dir` (`NOTES_VAULTS_DIR`, default `/data/vaults`; empty turns extra vaults off), `notes.vaults.default-name` (`main`), `notes.vaults.allow-create` (`true`) and `notes.vaults.max` (20). Integration tests set `notes.vaults.dir` to a folder with no vaults unless they test vaults.
+
 For phone testing against dev (§9.1 step 4), `NOTES_ALLOWED_HOSTS` overrides the list and adds `rgpc.<tailnet>.ts.net:5173`. Integration tests set `notes.allowed-hosts`, `notes.identity.allow-default` and `notes.security.require-tailscale-interface` explicitly.
 
 ### 5.17 Startup and shutdown
@@ -1820,6 +1822,41 @@ The index has read block ids since v1 (§5.5.4, `NoteParse.blockIds`), so backli
 - **Idempotent.** A line that already ends with an id (or a structured block already followed by its `^id` line) answers with that id and writes nothing, so a retried or doubled request never adds two ids.
 - **Ids** are 6 random lower-case letters and digits (`SecureRandom`), as Obsidian makes them; the client may propose one (it writes the link with it at once) and gets another only when a line of the note already ends with it.
 - **Moves.** A link names the note and the id, and the id travels with its text: a block moved within its note keeps working with no rewrite. A block cut from one note and pasted into another is not followed (Obsidian does not follow it either); the report lists such links under `missing-blocks`.
+
+### 5.38 Multiple vaults (ROADMAP item 37)
+
+One process serves several independent vaults. The design keeps the single-vault code untouched: every service that holds vault state (VaultFs, the index and search, links, the git store and batcher, the watcher and rescans, the trash, settings, bookmarks, saved searches, tasks and their archiver, reminders, flashcards, habits, the event hub and replay buffer, idempotency keys, the controllers) is still a plain singleton, and **each extra vault gets an application context of its own** built from the same components. Isolation is structural: no bean of one vault can reach another vault's files, and every background thread (watcher, batcher, schedulers, PDF text) belongs to exactly one vault.
+
+**Vaults and names.**
+- The **default vault** is the main application at `notes.vault-dir` (`/data/vault`), named `notes.vaults.default-name` (`main`). Its URLs do not change: `/`, `/n/...` and `/api/...`, so existing bookmarks, the installed PWA, the desktop app, shortcuts and the clipper keep working with no migration. It also answers as `/api/v/main/...`.
+- **Extra vaults** are the folders directly under `notes.vaults.dir` (`NOTES_VAULTS_DIR`, default `/data/vaults`, inside the `notes-data` volume; empty turns the feature off). A folder is a vault when its name is a valid vault name: 1 to 32 lowercase letters, digits and dashes, starting and ending with a letter or digit (`VaultNames`), so the name never needs escaping in a URL and cannot be `.`, `..` or differ only by case. Other folders, hidden ones, symlinks, a folder named like the default vault and a folder that is the default vault are skipped with a warning. When `notes.vaults.dir` is inside the default vault, extra vaults are off (`ERROR` at startup), since the default vault would index the others. At most `notes.vaults.max` (20) vaults in all.
+- An extra vault is served under **`/v/<name>/`** (the app) and **`/api/v/<name>/`** (its API: every default-vault endpoint with `/api` replaced). A new vault is an empty folder: its first start creates `.notesapp`, the git repository and the welcome note, as a first install does.
+- `POST /api/vaults` creates the folder and starts it (API.md §38.2) unless `notes.vaults.allow-create=false`. There is no rename or delete in the app: stop the container and rename or remove the folder (DEPLOY.md *Multiple vaults*).
+
+**Contexts** (`vaults.VaultRegistry`, a server-wide bean of the main context).
+- After `ApplicationReadyEvent` the registry lists the folders and starts one context per vault, one after another on a background thread, so the default vault's start and health check never wait for them. A context is a `SpringApplication` of `VaultApplication`: the same component scan and auto-configuration minus the `@ServerWide` classes, as an `AnnotationConfigServletWebApplicationContext` on the main servlet context (no second web server, no second port). Its environment is the main one's property sources under a few overrides: `notes.vault-dir` (the vault's folder), `notes.vaults.current` (its name), and the server-wide features off (below). Logging is not re-initialized (the main application's appenders, including the alert bridge, stay). A context takes about a second to start on rgpc; until it is ready its requests get `503 vault-unavailable` with `Retry-After: 2`, and one that fails to start is logged (`VAULT_START_FAILED`) and answers `503` with `reason: "failed"` until the next restart.
+- **`@ServerWide` beans** live only in the main context. An extra context does not create them; its beans that need one get the main instance as a resolvable dependency, never as one of its beans, so it receives no events and runs no `@Scheduled` method twice. They are: the request filters, the SPA controller, the vault registry and controller, `AppAlerts` and its log bridge, the ntfy client and `ntfy.json`, the backup status reader and runtime info, the Web Push store (`push.json`: one VAPID key pair and one device list for the server) and sender, the AI providers and the spend ledger, the publish server, and the Tailscale watchdog and interface check.
+- **Shutdown.** On the main context's `ContextClosedEvent` the registry closes every extra context first (their event streams end, their pending commits are flushed), then the web server drains as before.
+
+**Routing** (two filters, both server-wide).
+- `VaultRoutingFilter` runs first (`HIGHEST_PRECEDENCE`; the security headers filter moved one step later). A request whose raw URI is literally `/api/v/<name>/rest` with a valid name and no `.` or `..` segment continues as a request for `/api/rest` carrying the name in a request attribute. Every later filter (Funnel refusal, query parameters, Host and identity admission, size limits, security headers) and the CSRF guard therefore treat it exactly like the same request to the default vault; in particular the upload exemptions and `no-store` rules still match. A path that only decodes to `/api/v/...` (`%77ork`, `work;x=1`, upper case) is not rewritten and finds no handler, so no spelling of a URL reaches a vault other than the one its prefix names.
+- `VaultDispatchFilter` runs last (`LOWEST_PRECEDENCE`): a request routed to an extra vault is served by that vault's `DispatcherServlet` instead of the main one, `404 vault-not-found` for a name the server does not serve, `503 vault-unavailable` while it starts. It also runs for async and error dispatches, so an SSE stream's completion and a container error page reach the same context. A problem's `instance` is the path within the vault (`/api/tree`).
+- The SPA controller serves `index.html` for `/v/<name>/**` too; the app decides whether the vault exists (§6.41).
+
+**Path safety across vaults.** A vault's files are reachable only through its own `VaultFs`, rooted at its own folder, with the v1 rules (§4.4: no `..`, no absolute paths, no symlink escapes); the vault name selects a context, never a path, and comes only from the strict name pattern. `MultipleVaultsIntegrationTest` checks that relative, absolute and encoded paths in an extra vault never read the default vault, and that malformed or disguised vault names never reach a vault.
+
+**Per vault or server-wide.**
+
+| Feature | Scope |
+|---|---|
+| Files, index, search, links, tags, graph, history and timeline, trash, settings, bookmarks, saved searches, templates, daily notes, tasks and the task archiver, calendar, kanban, flashcards, habits, compatibility report, transcription of a vault's recordings, the event stream, status (`/api/status`) | per vault: each in its own folder (`.notesapp/…`, `.git`, `.trash`) |
+| Reminders | per vault: each vault's scheduler reads its own tasks and settings and keeps `.notesapp/reminders.json`. Delivery is shared: ntfy (`ntfy.json`) and Web Push (`push.json`, one subscription per device for all vaults). A notification opens and acts on its own vault (`/v/<name>/x/tasks/…`, `/api/v/<name>/reminders/…`); the in-app route reaches only tabs of that vault. |
+| Ask your vault | per vault (prompts, exclusions and the on/off switch are vault settings); the provider credentials and the monthly spend ledger are server-wide, so each vault's budget applies to the server's total spend |
+| Publishing | default vault only: an extra vault runs with `notes.publish.enabled=false` (`409 publishing-off`); one publish server, one snapshot folder |
+| History mirror (item 2) | default vault only (an extra vault runs with no mirror URL) |
+| Nightly backups (item 1) | server-wide: the snapshot covers the whole `notes-data` volume, so every vault, with each vault's `.notesapp/tmp` and `.notesapp/cache` excluded |
+| App-error alerts, status page extras, Tailscale watchdog | server-wide |
+| Share sheet, quick-capture shortcut, web clipper, desktop app's capture window | the default vault (`/capture`, `/clip`); an extra vault's own `/v/<name>/capture` and its Settings › Quick capture URLs (`/api/v/<name>/capture`) capture into it |
 
 ---
 
@@ -3967,6 +4004,19 @@ interface Workspace { panes: Record<id, Pane>; layout: Layout; activePane; close
 
 **Tests.** `workspace/model.test.ts` (every rule above), `geometry.test.ts`, `store.test.ts` (URL and history in step, persistence, gestures), `WorkspaceLayout.test.tsx` (shown tabs only, an inactive pane's navigation stays in its tab, focus by pointer, closing from ×) and `sync/DocumentSession.panes.test.ts` (two editors stay equal, one save, remote text, per-pane undo, the main history across remounts).
 
+### 6.41 Multiple vaults (ROADMAP item 37)
+
+The server side is §5.38. A page shows **one vault for its whole life** (`state/vault.ts`): the vault is read once from the address at startup, `/v/<name>/...` for an extra vault and anything else for the default vault. **Switching vaults loads the other vault's app** (`location.assign`), so the query cache, the event stream, the open documents, the tree, the stores and the workspace never mix two vaults, and none of them needed a vault key.
+
+- **Router.** `BrowserRouter` gets `basename="/v/<name>"` in an extra vault, so every route, `<Link>`, `navigate` and `useLocation` stays vault-relative (`/n/...`, `/x/...`, `/settings`). Code that reads `window.location` directly uses `appPathname()` (the path without the prefix), and the fallback navigator and other links built outside the router use `appUrl()`.
+- **API.** `apiFetch`, the raw-file, trash and history URLs, the event stream and the AI stream go through `apiUrl()`, which turns `/api/x` into `/api/v/<name>/x` in an extra vault. `/api/vaults` is server-wide and never prefixed. Nothing changes in the default vault: every URL is exactly the v1 one.
+- **Storage that outlives the page is per vault** (`vaultKey(key)`: the key itself in the default vault, `key@<name>` in an extra one, so existing data needs no migration): the drafts database and its tab channel (`notesapp`), the offline database (note cache, last tree, capture queue: `notesapp-offline`), the draft-replay and capture-queue locks, the workspace (tabs and panes), recent files and the last opened note, collapsed bookmark groups, the flashcard answer outbox and the AI conversations. Device preferences stay shared by all vaults: theme, editor and vim options, hotkeys, graph and calendar options, the voice and capture-target choices, the side panels and their widths.
+- **Service worker.** One worker and one app shell for the origin. The extra vault's routes are SPA routes (`isSpaRoute` strips the prefix; `/v/<name>/clip` stays uncached like `/clip`), content-addressed images of `/api/v/<name>/files/raw` are cached like the default vault's (their URLs differ, so the caches cannot mix). A reminder's notification acts on its own vault (`actionRequest` derives `/api/v/<name>/reminders/...` from the notification's app URL) and opens in a tab of that vault when there is one; a tab of another vault loads it (`openReminderUrl` with `routeOfAppUrl`). Shares from other apps go to the default vault's capture page.
+- **Titles.** An extra vault's browser tab titles carry its name (`Plan · work · Notes`), so windows of two vaults tell apart.
+- **Vault switcher** (`components/vaults/VaultSwitcher.tsx`): a native select at the top of the left sidebar on a desktop and of the drawer on a phone or tablet (the phone shows its own picker), listing every vault (one still starting is disabled) and **Manage vaults…**. It shows only when the server has more than one vault or the page shows an extra one, so a single-vault server looks exactly as before.
+- **Settings › Vaults** (`VaultsSettings.tsx`) lists the vaults (default, this vault, starting or failed) with **Open**, explains what stays with the default vault, and creates a vault from a name checked as the server checks it; the list polls every 2 s while a vault starts.
+- **Tests.** `state/vault.test.ts` (addresses, keys, titles, reminder links), `sw/core.test.ts` and `sw/push.test.ts` (vault routes, images and reminder actions), `components/vaults/Vaults.test.tsx` (switcher shown only with another vault, options and states, full-load switching, creation and its validation).
+
 ---
 
 ## 7. Infrastructure
@@ -4434,7 +4484,7 @@ If the `docker-compose` ecosystem is not available to the repository, the monthl
 
 | Volume | Mount | Owner | Contents |
 |---|---|---|---|
-| `notes-data` (external; recommended bind-backed at `/srv/notes/data`) | `/data` | uid/gid 1000 | `/data/vault` (the vault, its `.git`, `.notesapp` and `.trash`), `/data/.config` (JGit's config cache), `/data/secrets` (`ntfy.json`, §4.1, §5.18.1) and `/data/.watchdog-exits` |
+| `notes-data` (external; recommended bind-backed at `/srv/notes/data`) | `/data` | uid/gid 1000 | `/data/vault` (the vault, its `.git`, `.notesapp` and `.trash`), `/data/vaults/<name>` (extra vaults, §5.38, each laid out like `/data/vault`), `/data/.config` (JGit's config cache), `/data/secrets` (`ntfy.json`, §4.1, §5.18.1) and `/data/.watchdog-exits` |
 | `tailscale-state` (external) | `/var/lib/tailscale` | root | Node key and TLS certificates. **Deleting it** creates a new node (`notes-1`, which changes the URL) and requests new certificates (Let's Encrypt rate limits can lock you out for about 34 hours). |
 | `backup-cache` (Compose-managed, only with the backup profiles) | `/cache` in `backup` | root | restic's cache; disposable (§7.10). |
 | `backup-state` (Compose-managed; written with profile `backup`) | `/state` in `backup-scheduler`; `/backup-state` in `notes`, read-only | root (`status.json` is world-readable) | `status.json`, `last-success`, the run lock and the `app-stopped` marker (§7.10). |
