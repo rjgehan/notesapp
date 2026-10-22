@@ -19,9 +19,15 @@ export const sessionEdit = Annotation.define<boolean>();
  */
 export const textReplace = Annotation.define<boolean>();
 
+/**
+ * Marks a change copied from another editor of the same note (another pane, DESIGN §6.40): the
+ * editor where it was typed reports it, so this one does not count it again.
+ */
+export const paneSync = Annotation.define<boolean>();
+
 /** True for a transaction that changes the document on behalf of the user. */
 export function isLocalEdit(tr: Transaction): boolean {
-  return tr.docChanged && !tr.annotation(Transaction.remote) && !tr.annotation(sessionEdit);
+  return tr.docChanged && !tr.annotation(Transaction.remote) && !tr.annotation(sessionEdit) && !tr.annotation(paneSync);
 }
 
 export function remoteChanges(current: string, next: string): ChangeSpec[] {

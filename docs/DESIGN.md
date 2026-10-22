@@ -2027,6 +2027,8 @@ There is no `['resolve']` query: link resolution runs on the client over the tre
 - the SSE connection status and the `caughtUp` flag;
 - the global save summary.
 
+The workspace of tabs and split panes (ROADMAP item 11) has its own store, `workspace/store.ts`, persisted per device (§6.40).
+
 Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax visibility) live in `state/prefs.ts` (§5.12).
 
 **`DocumentSession`** (one per open text file, outside React, in a ref-counted registry) holds the editing state. Its state machine is in §6.10. Views use `useTextDocument(path)`.
@@ -2090,7 +2092,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax vi
 - Encode with `encodeRoutePath(p) = p.split('/').map(encodeURIComponent).join('/')`, so `Daily Notes/2026-10-16.md` becomes `/n/Daily%20Notes/2026-10-16.md`.
 - Decode **from `location.pathname`** segment by segment with `decodeURIComponent`. Do not use `useParams()['*']`, so the client controls the decoding exactly.
 - These are deep links: they work from bookmarks, shared tailnet URLs and reloads. The server's `SpaController` serves `index.html` for `/n/**`, `/search`, `/trash`, `/settings/**` and `/x/**`.
-- Browser back and forward are the app's navigation history, as in Obsidian.
+- Browser back and forward are the app's navigation history, as in Obsidian. With tabs (§6.40) the URL is always the **active pane's** shown tab, and back and forward walk that tab's own history.
 - A remote move of the open note uses `replace`, so the stale URL does not stay in history.
 - **Overlays on touch devices** (drawer, bottom sheet, switcher, palette, dialogs) push a history entry when they open, so Safari's edge swipe or the back button closes them instead of leaving the note.
 - Pages registered by extensions (`registerPage`, §6.8) live under the reserved prefix `/x/`, for example `/x/tasks/today`.
@@ -2119,9 +2121,11 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax vi
     ├ <Workspace>
     │   ├ <TopBar/>           phone/tablet: ☰, title (+ connection dot), switcher/search button, lock toggle, ⋯ menu
     │   │                     (⋯ has Source mode / Live Preview for notes)
-    │   └ <WorkspaceScroll>   THE scroll container: the title and properties scroll away with the text, as in Obsidian
-    │       ├ <ConflictBanner/>  (sticky; only in conflict/deleted states)
-    │       └ <Routes> → <FileView path> | registered pages
+    │   └ <WorkspaceLayout>   panes of the split layout (§6.40; phone: the active pane only)
+    │       └ <PaneView> ×N    <TabStrip/> (not on phones) · <PaneContext> · its own router location
+    │           └ <WorkspaceScroll>   THE scroll container of the pane: the title and properties scroll away with the text
+    │               ├ <ConflictBanner/>  (sticky; only in conflict/deleted states)
+    │               └ <AppRoutes location={shown tab}> → <FileView path> | registered pages
     │             └ registry view, e.g. <MarkdownView>
     │                  ├ <NoteHeader>  <InlineTitle/> (edit = rename) · <SaveStatus/> · source toggle · lock toggle
     │                  │               (phone: only <InlineTitle/>; the TopBar already has the rest)
@@ -2133,6 +2137,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax vi
     ├ <StatusBar/>            desktop: <ConnectionIndicator/> · save summary · history warning · words/chars · backlink count
     ├ <MobileToolbar/>        touch devices; always mounted, shown while the editor is focused or the toolbar is in use
     └ overlays: <QuickSwitcher/> <CommandPalette/> <TemplatePicker/> <PromptDialog/> <ConfirmDialog/> <MoveDialog/> <Toasts/>
+                <TabSwitcher/> (phone, §6.40)
 ```
 
 ### 6.6 Editor: CodeMirror 6 extension list
@@ -2492,6 +2497,8 @@ export interface FileViewDescriptor {
   create?: { label: string; extension: string; initialContent(): string }; // adds "New <label>" to explorer menu + palette
   merge?(base: string, mine: string, theirs: string): string | null;     // optional semantic 3-way merge for conflicts (null = fall back to banner)
   commands?: Command[];                          // contributed to the palette while this view is active
+  sharedSession?: boolean;                       // several panes may show the file at once (ROADMAP 11, §6.40): the view
+                                                 // reads the session's text on every change (CodeMirror editors)
 }
 export function registerView(d: FileViewDescriptor): void;
 export function viewFor(entry: FileEntry): FileViewDescriptor;   // never null: 'unsupported' matches everything with 1
@@ -3018,7 +3025,8 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 | Task list page | `Enter` or `Space` on a task opens its inline editor (`Esc` or Done closes it); `Alt-↑/↓` move it among its siblings; `Alt-→` makes it a subtask of the task above, `Alt-←` moves it out of its parent (§6.22) |
 | Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`, `Mod-Shift-X/H` (§6.6.1; `Mod-E` is inline code in the text and unlocks a locked note) and `Mod-Shift-V` (paste as plain text). In Live Preview the typing shortcuts of §6.6.1 apply; `Backspace`, `Delete` (and by word), `ArrowLeft` and `Enter` follow its cursor rules, and the arrow keys open a table's cells. In a table cell: `Tab`/`Shift-Tab` next and previous cell (a new row after the last), `Enter`/`Shift-Enter` the cell below and above, arrows across cell edges, `Esc` back to the note, `Shift-F10` the cell's menu (§6.6.1). **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. With **Vim key bindings** on (Settings › This device, §6.36): vim's keys, with the app's keys above taking precedence, in Live Preview and in source mode; `:w` saves, `:q` leaves the editor. |
 | Explorer (focused) | `↑/↓` move; `←/→` collapse and expand; `Enter` opens; `F2` renames; `Delete` deletes (with confirmation); `Mod-Alt-N` creates a new note in the focused folder |
-| Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Esc` |
+| Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Mod-Enter` (open in a new tab, §6.40), `Esc` |
+| Tabs and panes (§6.40) | New tab `Mod-Alt-T`, close tab `Mod-Alt-W`, reopen closed tab `Mod-Shift-T`, next and previous tab `Mod-Alt-PageDown`/`PageUp`, next and previous pane `Mod-Alt-]`/`[`; Mod-click or middle click opens in a new tab (Mod-Shift-click in an editable note); in a strip `←/→`, `Enter`, `Delete`, `Shift-F10` |
 | Conflict banner | Buttons reachable with `Tab`; `Esc` dismisses Compare |
 
 ### 6.15 File explorer
@@ -3042,7 +3050,7 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 
 | Breakpoint | Layout |
 |---|---|
-| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, **+** (quick capture, §6.27), a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, and ⋯ (Command palette, Backlinks, Outline, History, Bookmark, Rename, Move, Delete, Template, Today, Reload). **Drawer:** full-height, 88 % width, slides in from the left; Files, Search, Bookmarks, Tags and Recent files tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
+| **Phone** `< 768 px` | Single column. **TopBar:** ☰ (left drawer), title with the connection dot, **+** (quick capture, §6.27), a switcher/search button (quick switcher; its sheet has a "Search in notes" row), edit/read toggle, a **tabs button** with the number of open tabs (the tab switcher, §6.40), and ⋯ (Command palette, Backlinks, Outline, History, Bookmark, Rename, Move, Delete, Template, Today, Reload). Phones show one pane. **Drawer:** full-height, 88 % width, slides in from the left; Files, Search, Bookmarks, Tags and Recent files tabs (plus registered left panels), **New note** and **Today** buttons, and a footer with **Settings**, **Trash** and the **theme toggle**. Right-side panels open as a **bottom sheet** (70 % height), dismissed by dragging its handle, or by swiping down only when its content is scrolled to the top, so scrolling the sheet never closes it. |
 | **Tablet** `768–1199 px` | The ribbon is a collapsed icon rail (48 px) that is always visible, so every desktop entry point (switcher, search, Today, template, new note, palette, Trash, Settings) stays one tap away on an iPad. Both sidebars are overlays over the editor, toggled from the rail or the TopBar. |
 | **Desktop** `≥ 1200 px` | Ribbon (48 px), left sidebar (default 280 px, resizable 200–480), workspace (readable width 598 px, 46 em of the 13 px UI size, when `readableLineLength`), right sidebar (300 px, resizable). Status bar at the bottom. |
 
@@ -3905,6 +3913,59 @@ A Windows and macOS app in the top-level `desktop/` folder (its own `package.jso
 - **Tray.** Quick capture, Open NotesApp, Open today's note, Reload, Launch at login (a checkbox; the login item starts the app hidden in the tray), Settings…, the version, Quit. On Windows a click opens the app. macOS gets an application menu with Cut/Copy/Paste/Select All (which Electron needs for those shortcuts) and no Undo, Reload, Close or zoom shortcuts, so the app's own `Mod-Z`, `Mod-R`, `Mod-W` and `Mod--` keep working; Windows has no menu bar.
 - **Packaging and releases.** `desktop/electron-builder.yml`: a per-user NSIS installer (`NotesApp-Setup-<version>.exe`, not code-signed: SmartScreen asks once) and a universal dmg, ad-hoc signed only and not notarised (Gatekeeper steps in `docs/DESKTOP.md`). `.github/workflows/desktop.yml` runs only on `desktop-v*` tags (and by hand, publishing nothing): it creates the release, then a Windows and a macOS job run the shell's lint and tests, set the version from the tag, package, and attach the files with `gh release upload`. There is no auto-updater: the UI comes from the server.
 - **Tests.** `desktop/test/*.test.js` (`npm test`): address normalisation and every check failure, navigation classes and look-alike origins, permission requests and checks, IPC senders (including a `file:` page outside the package), renderer settings, window-state restore and clamping, settings sanitising and the atomic save (with a byte-order mark), titles. Frontend: `desktop/bridge.test.ts` and `EventStream.reconnect` in `api/events.test.ts`. Manual checklist (Windows, against the dev backend on `127.0.0.1:18330` and a `vite preview` on `127.0.0.1:5175`): first-run page rejects `http://` on a tailnet name and an unreachable address (offering Save anyway); Connect loads the app with `notesDesktop` and without `require`/`process`; the hotkey opens the capture window, Save appends to `Inbox.md`, "Open the note" opens it in the main window, Cancel hides it; `file:` navigations and `window.open` are refused; camera and location are denied, notifications granted; closing hides to the tray and a second launch or `window.focus()` shows it; with the server stopped a reload opens from the service worker's cache and the title says Offline, then Live again; a server address without a cached app shows the offline page, which reloads the app by itself once the server is back.
+
+### 6.40 Tabs and split panes (ROADMAP item 11)
+
+Several files open at once: tabs in panes, panes side by side or stacked, on desktop and tablet. Phones keep one pane and reach their tabs through a switcher. Everything lives in `src/workspace/`.
+
+**Model** (`model.ts`, pure functions, unit-tested). ROADMAP's shape, `panes: [{ tabs: [{path, mode}], active }]`, with a route in place of the path (a tab may show any page) and the mode left to `noteModes` (§6.6.1), which follow the file wherever it is shown:
+
+```ts
+interface Tab  { id; route /* pathname + search + hash */; pinned?; back: string[]; forward: string[]; nav? }
+interface Pane { id; tabs: Tab[]; active /* tab id */ }
+type Layout = { type: 'pane'; id } | { type: 'split'; id; dir: 'row' | 'column'; children: Layout[]; sizes: number[] /* fractions */ }
+interface Workspace { panes: Record<id, Pane>; layout: Layout; activePane; closed: { tab; pane; index }[] /* last 20 */ }
+```
+
+- **Tabs.** New tabs open after the active one. Closing selects the right neighbour, else the left; a pane's last tab closes the pane, and the last pane gets a new tab (`/x/new-tab`, a hidden page: Open a file, New note, Today, recent files). Closed tabs (with their history) are remembered for **Reopen closed tab**, which puts a tab back where it was. A **pinned** tab is skipped by Close tab, Close others and Close tabs to the right, shows a pin instead of ×, and a push navigation from it to another file or page opens a new tab next to it, so it keeps its file; a heading of the same note stays in it.
+- **History per tab.** Every tab has its own back and forward stacks (50 each). `nav` counts its navigations and is the key of its location, so following a link to where the tab already is still scrolls again (§6.4).
+- **Splits.** Split right or down creates a pane showing what the split pane shows (a new tab with the same route); a split in the direction of the split that holds the pane adds a sibling and halves the pane's share. Dragging a tab onto a pane's edge quarter (left, right, top, bottom) splits that pane with the tab; onto its middle, or onto a strip, moves the tab there (before or after the tab under the pointer). Closing a pane collapses one-child splits and merges a child split of the same direction into its parent. Dividers resize their two neighbours (each keeps at least 10 % of the split; arrow keys move a focused divider by 2 %).
+- **Moves.** A moved file or folder rebases every route that shows it, in all tabs, their histories and the closed tabs (`rebase`, called from `syncTarget.onEntryMoved` for own moves and `entry.moved` alike). Deleted files stay in their tabs, which show "File not found" and strike their title.
+
+**URL and history** (`store.ts`, `RouteSync`). The URL is the source of truth for the **active pane**: it is always the route of the active pane's shown tab, so deep links, bookmarks, reloads and `activePath()` work exactly as before.
+
+- A router navigation (a link, the explorer, `navigateTo`) lands in the active tab: a push adds to its history, a replace changes its route. `RouteSync` applies it in a layout effect, before the browser paints.
+- Changing what the active pane shows from the workspace's side (selecting a tab or a pane, closing, moving or splitting) **replaces** the URL; a new tab or a reopened one **pushes** it, so Back returns to the tab it came from.
+- **Back and forward** (the browser's, the mouse buttons, `nav.back`/`nav.forward`) walk the **active tab's own history**. A `POP` is read as back or forward from React Router's history index (`history.state.idx`): the tab takes its own previous or next route, and when the browser's entry belongs to another tab the URL is replaced with the tab's. A tab with no history that way selects a tab of the active pane showing the entry's route (the tab a Mod-click came from), else stays and puts its URL back. Overlay entries (§6.4) repeat the page's URL and index, so they change nothing.
+- At startup the persisted workspace **adopts the URL**: the active tab already showing it, else a tab of the active pane, else of any pane showing it, is selected; otherwise the active tab navigates there (its previous route goes into its history). `/` keeps its home-page behaviour (§6.4) in the active tab; `/capture` and the web clipper's `/clip` (§6.27.1) are outside the workspace.
+- **Persisted per device** in `localStorage` (`notesapp:workspace`, written 250 ms after a change and on `pagehide`), validated on load (`sanitize`); a damaged record starts over with one tab. Browser windows of one device share it; the last one written wins.
+
+**Rendering** (`WorkspaceLayout`, `PaneView`, `TabStrip`; §6.5).
+
+- Panes are a **flat list keyed by pane id**, absolutely positioned from the layout's geometry (`geometry.ts`), in creation order: splitting, resizing or closing a neighbour never remounts or moves a pane's DOM, so its editor, focus, scroll position and frames (a PDF) stay.
+- Each pane renders `AppRoutes` (§6.4's routes) inside its own `WorkspaceScroll`, with its shown tab's location (`<Routes location>`, whose `LocationContext` is what `useLocation()` reads inside the pane). Shell components (panels, status bar, top bar) read the real location, which is the active pane's: **backlinks, outline, local graph, history and the other panels follow the active pane** unchanged.
+- **Only each pane's shown tab is mounted** (lazy: restored and background tabs cost nothing until shown). Scroll positions are remembered per tab and route and restored when a tab is shown again; editing state, undo included, survives in the session (§6.3).
+- An inactive pane gets a `NavigationContext` whose navigator moves **its own tab**: a `<Navigate>` or `useNavigate()` inside it never touches the URL. A pointer or focus entering a pane makes it active first (`onPointerDownCapture`, `onFocusCapture`), so the click that follows acts in the active pane as before.
+- `PaneContext` (`{ paneId, active }`) gates what belongs to the page rather than to a pane: only the active pane's editor becomes the active editor (palette commands, the mobile toolbar) and takes focus when it mounts, answers Outline clicks and mode-switch scroll requests, records the file in Recent files and sets `document.title`; only its scroll container answers focus requests and carries `id="workspace-scroll"`. Outside a pane (tests, embeds) a component acts as the active pane's.
+- The strip: icon and title per tab (`labels.ts`: the file's name and its view's icon, or the page's title), × (or a pin), middle click closes, double click on the empty strip or **+** opens a new tab, a context menu (Close, Close others, Close tabs to the right, Pin/Unpin, Split right, Split down, Reopen closed tab, Close pane), and Split right, Split down and Close pane buttons. The active pane's shown tab carries an accent line when there are several panes. Keyboard: `←/→` move between tabs, `Enter` shows one, `Delete` closes it, `Shift-F10` or the menu key opens its menu.
+
+**One file in two panes** (`DocumentSession.routeTransactions`). A file shown in two panes has one `DocumentSession` (the registry is per path, §6.3); its holders keep it open until no pane shows it, and the last release flushes it.
+
+- Editors built on `NoteEditor` (`markdown` and `text`, which declare `sharedSession: true`, §6.8) all attach to it. Every editor dispatches through the session (`EditorView.dispatchTransactions`), which first copies each document change into the file's other editors, annotated `paneSync` (not a local edit, so it is not counted twice), kept out of their undo history, and with `filter: false`, so Live Preview's editing rules never alter a copied change and the documents stay identical. The editor where an edit was typed marks the session dirty and one save covers it; remote text goes into one editor and is copied to the others like any change. **Both stay in sync, and no conflict banner can arise between them.**
+- Each pane **undoes its own edits**. The first editor holds the session's main undo history; another gets the text with a history of its own. When the main editor unmounts while another stays, its state is parked and handed back (caught up with the current text, the difference not undoable) to the next editor that mounts or, when the last one closes, to the session, so switching modes with the file in two panes keeps the main history. Remote updates wait for an IME composition in any of the editors.
+- A **textual view that keeps its own model** (spreadsheets, drawings, canvases, encrypted notes) cannot share its file live, so it shows in **one pane at a time**: the active pane when it shows the file, else the first in layout order (`exclusiveOwner`). The other panes show "This file is open in another pane" with **Show it here**, which makes that pane active and so moves the view. Non-textual views (images, PDFs, media) show in every pane.
+
+**Opening in a new tab** (`gesture.ts`). The gesture is recorded in the capture phase and read by `navigateTo` while the event is dispatched, so every way of opening a file honours it without knowing about tabs:
+
+- **Mod-click** on anything that opens a file (explorer, bookmarks, recent files, search results, backlinks, outline, links in a locked note or an embed); in an **editable** note, where Mod-click follows a link (§6.6), **Mod-Shift-click** opens it in a new tab.
+- **Middle click** on those elements, replayed as a Mod-click flagged for a new tab (middle-button autoscroll is suppressed there; external links keep the browser's behaviour).
+- **Mod-Enter** in the quick switcher (its footer says so); the explorer menu has **Open in new tab** and **Open to the right**; the palette has **Open current file in new tab**.
+
+**Commands** (§6.13; keys customizable, §6.25). Browsers keep `Ctrl-T`, `Ctrl-W` and `Ctrl-Tab` for themselves, so the defaults add Alt: New tab `Mod-Alt-T`, Close tab `Mod-Alt-W`, **Reopen closed tab `Mod-Shift-T`** (it reaches the page in the desktop app, item 41; in a browser tab the browser reopens its own closed tab, so rebind it there), Go to next and previous tab `Mod-Alt-PageDown`/`PageUp`, Focus next and previous pane `Mod-Alt-]`/`[` (the newly active pane's scroll container takes the focus), plus Pin or unpin tab, Open current file in new tab, Split right, Split down, Close pane and Show open tabs (phones). All tab keys are `globalHotkey`, so they work while the editor has focus.
+
+**Phones** (§6.16). One pane, the active one, without a strip: exactly the v1 layout. The top bar's **tabs button** shows the number of open tabs and opens the **tab switcher**, a bottom sheet listing every tab of every pane (title, folder, pin), each with ×, plus **New tab**. Picking a tab of another pane makes that pane active. A layout made in a wider window survives and returns when the window widens.
+
+**Tests.** `workspace/model.test.ts` (every rule above), `geometry.test.ts`, `store.test.ts` (URL and history in step, persistence, gestures), `WorkspaceLayout.test.tsx` (shown tabs only, an inactive pane's navigation stays in its tab, focus by pointer, closing from ×) and `sync/DocumentSession.panes.test.ts` (two editors stay equal, one save, remote text, per-pane undo, the main history across remounts).
 
 ---
 

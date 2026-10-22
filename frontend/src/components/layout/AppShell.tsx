@@ -23,6 +23,7 @@ import { QuickSwitcher } from '../overlays/QuickSwitcher';
 import { TemplatePicker } from '../overlays/TemplatePicker';
 import { Toasts } from '../overlays/Toasts';
 import { VoiceRecorderPanel } from '../overlays/VoiceRecorderPanel';
+import { TabSwitcher } from '../../workspace/TabSwitcher';
 import { Overlay } from './Drawer';
 import { MobileToolbar } from './MobileToolbar';
 import { PanelTabs } from './Panels';
@@ -31,7 +32,6 @@ import { Ribbon } from './Ribbon';
 import { StatusBar } from './StatusBar';
 import { TopBar } from './TopBar';
 import { useBreakpoint } from './useBreakpoint';
-import { WorkspaceScroll } from './WorkspaceScroll';
 
 function Banners() {
   const newBuild = useUi((s) => s.newBuildAvailable);
@@ -213,7 +213,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="workspace">
         {!desktop && <TopBar />}
         <Banners />
-        <WorkspaceScroll>{children}</WorkspaceScroll>
+        {children}
       </main>
       {showRight && (
         <aside className="sidebar sidebar-right" aria-label="Note panels">
@@ -229,6 +229,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {phone && <DrawerActions />}
             {left}
           </Overlay>
+          {phone && <TabSwitcher />}
           <Overlay open={ui.sheetOpen} onClose={closeSheet} side={phone ? 'bottom' : 'right'} label="Note panels" full={phone && ui.rightTab === 'history'}>
             {right}
           </Overlay>

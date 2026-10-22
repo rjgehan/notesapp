@@ -61,7 +61,7 @@ DESIGN.md has the details.
 | 7 | Quick capture inbox and the iPhone Share Sheet *(built 2026-10-21, `feat/pwa-capture`)* | H | M | |
 | 8 | Installable PWA and offline mode *(declined for v1; built 2026-10-21, `feat/pwa-capture`)* | H | L | |
 | 9 | Reminders and push notifications *(built 2026-10-21, `feat/reminders`)* | H | M | 4; 8 for Web Push |
-| 11 | Tabs and split panes *(declined for v1)* | M | M | |
+| 11 | Tabs and split panes *(declined for v1; built 2026-10-21, `feat/tabs`)* | M | M | |
 | 12 | Bookmarks (starred) and a recent-files pane | M | S | |
 | 13 | Properties editor (typed frontmatter UI) | M | M | |
 | 14 | Calendar view *(built 2026-10-21, `feat/calendar`)* | M | M | 4 optional |
@@ -712,6 +712,8 @@ JGit push over HTTPS with a fine-grained PAT that has `contents: write`, scoped 
 - A workspace model, `panes: [{ tabs: [{path, mode}], active }]`, persisted per device.
 - `Mod`+click opens a new tab; drag a tab to split.
 - Phones keep a single pane with a tab switcher.
+
+**Built 2026-10-21** (`feat/tabs`, DESIGN §6.40): tabs per pane with their own back/forward history (browser back and forward walk the active tab's), open in a new tab by Mod-click, middle click, Mod-Enter in the quick switcher or the explorer menu, close, drag to reorder or to another pane, pin, Reopen closed tab (`Mod-Shift-T`); vertical and horizontal splits with resizable dividers, Split right/down, drag a tab onto a pane's edge to split; the URL stays the active pane's route, so deep links work; the layout is saved per device; panels follow the active pane; one note in two panes shares its session and both editors stay in sync; inactive tabs mount only when shown; phones keep one pane plus a tab switcher sheet.
 
 ### 12. Bookmarks (starred) and a recent-files pane
 

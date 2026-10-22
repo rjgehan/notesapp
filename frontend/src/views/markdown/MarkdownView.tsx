@@ -18,6 +18,7 @@ import { useNoteScroll } from '../../features/noteScroll';
 import { highlightTerms } from '../../features/searchTerms';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import { isKanbanText, KANBAN_PROBE_CHARS, setKanbanAsMarkdown, useKanbanAsMarkdown } from '../kanban/detect';
+import { usePaneActive } from '../../workspace/PaneContext';
 import type { FileViewProps } from '../registry';
 import { NoteHeader } from './NoteHeader';
 import { useHeadingRenameOffers } from './useHeadingRenameOffers';
@@ -47,6 +48,8 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
   const settings = useVaultSettings();
   const scroller = useWorkspaceScroller();
   const location = useLocation();
+  // The active pane's editor answers mode switches and outline clicks (DESIGN §6.40).
+  const paneActive = usePaneActive();
   const editorView = useRef<EditorView | null>(null);
   const heading = decodeHash(location.hash);
   const params = new URLSearchParams(location.search);
@@ -66,6 +69,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
   }, [mode]);
 
   useLayoutEffect(() => {
+    if (!paneActive) return;
     setTopLineProbe(() => {
       const el = scroller.current;
       const v = editorView.current;
@@ -74,7 +78,7 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
       return v.state.doc.lineAt(block.from).number - 1;
     });
     return () => setTopLineProbe(null);
-  }, [scroller]);
+  }, [scroller, paneActive]);
 
   // A note that never loaded has no buffer to show (its error panel offers Try again).
   const ready = snapshot.loaded;
@@ -120,11 +124,13 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
   const scrollRequest = useNoteScroll();
   const handledScroll = useRef(scrollRequest.seq);
   useEffect(() => {
+    // Another pane's request is not this one's to answer later.
+    if (!paneActive) handledScroll.current = scrollRequest.seq;
     if (!ready || scrollRequest.seq === handledScroll.current || scrollRequest.path !== session.path) return;
     handledScroll.current = scrollRequest.seq;
     targetLine.current = scrollRequest.line;
     scrollToTarget();
-  }, [scrollRequest, ready, session, scrollToTarget]);
+  }, [scrollRequest, ready, session, scrollToTarget, paneActive]);
 
   const board = ready && kanban && !asMarkdown;
 

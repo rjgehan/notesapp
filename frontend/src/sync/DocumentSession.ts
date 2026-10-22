@@ -11,7 +11,7 @@ import type { Endpoints } from '../api/endpoints';
 import type { FileEntry, TextFile, Version, WriteResult } from '../api/types';
 import { markdownNoteLanguage } from '../editor/language';
 import { tableBlocks } from '../editor/livePreview/table';
-import { isComposing, remoteChanges, remoteTransaction, sessionEdit, textReplace, waitForComposition } from '../editor/remote';
+import { applyRemoteTextToState, isComposing, paneSync, remoteChanges, remoteTransaction, sessionEdit, textReplace, waitForComposition } from '../editor/remote';
 import { trackedRange, trackedRangesField, trackRange, untrackRange } from '../editor/tracked';
 import { addUpload, endUpload, pendingUploads, uploadsField } from '../editor/uploads';
 import { detectEol, fromLf, toLf, type Eol } from '../features/eol';
@@ -138,7 +138,18 @@ export class DocumentSession {
   path: string;
   private readonly deps: SessionDeps;
   private state: EditorState;
+  /** The editor the session dispatches into: the one with the main undo history when it is mounted. */
   private view: EditorView | null = null;
+  /**
+   * Every mounted editor of this file (several panes, DESIGN §6.40). Their documents are kept equal:
+   * each change is copied into the others (`routeTransactions`).
+   */
+  private views: EditorView[] = [];
+  /** The editor holding the main undo history (the session's own state while none is mounted). */
+  private mainView: EditorView | null = null;
+  /** The main undo history, parked while only other editors are mounted. */
+  private parkedState: EditorState | null = null;
+  private nextIsMain = false;
   private selectionKnown = false;
   private serializer: Serializer | null = null;
 
@@ -320,10 +331,35 @@ export class DocumentSession {
     return this.baseText;
   }
 
-  /** Called by an editor host once its view exists. */
+  /** Called by an editor host once its view exists (with a state from `prepareState`). */
   attach(view: EditorView): void {
-    this.view = view;
+    if (!this.views.includes(view)) this.views.push(view);
+    if (this.nextIsMain) this.mainView = view;
+    this.nextIsMain = false;
+    this.view = this.mainView ?? this.views[0];
     this.selectionKnown = true;
+  }
+
+  /** How many editors show this file now (one per pane). */
+  get editorCount(): number {
+    return this.views.length;
+  }
+
+  /**
+   * Every transaction of an attached editor (its `dispatchTransactions`): applied there, and its
+   * changes copied into the file's other editors first, outside their undo history and their
+   * editing rules (`filter: false`), so all documents stay equal and the edit counts once.
+   */
+  routeTransactions(view: EditorView, trs: readonly Transaction[]): void {
+    if (this.views.length > 1 && this.views.includes(view)) {
+      for (const tr of trs) {
+        if (!tr.docChanged || tr.annotation(paneSync)) continue;
+        const annotations = [paneSync.of(true), Transaction.addToHistory.of(false)];
+        if (tr.annotation(Transaction.remote)) annotations.push(Transaction.remote.of(true));
+        for (const other of this.views) if (other !== view) other.dispatch({ changes: tr.changes, annotations, filter: false });
+      }
+    }
+    view.update(trs);
   }
 
   /**
@@ -353,16 +389,49 @@ export class DocumentSession {
     this.selectionKnown = true;
   }
 
-  /** Reconfigured state for a new editor mount (keeps doc, selection and undo history). */
+  /**
+   * Reconfigured state for a new editor mount (keeps doc, selection and undo history). A second
+   * editor of the same file (another pane) gets the text with an undo history of its own, unless
+   * the main history is parked (its editor remounted while another pane kept the file open).
+   */
   prepareState(reconfigure: (state: EditorState) => EditorState): EditorState {
-    this.state = reconfigure(this.editorState);
-    return this.state;
+    const live = this.view;
+    if (!live) {
+      this.nextIsMain = true;
+      this.state = reconfigure(this.state);
+      return this.state;
+    }
+    if (this.parkedState) {
+      const state = reconfigure(this.caughtUp(this.parkedState, live.state));
+      this.parkedState = null;
+      this.nextIsMain = true;
+      return state;
+    }
+    this.nextIsMain = false;
+    return reconfigure(EditorState.create({ doc: live.state.doc, selection: live.state.selection }));
+  }
+
+  /** `state` (an earlier state of this file) with `latest`'s text and selection, the difference not undoable. */
+  private caughtUp(state: EditorState, latest: EditorState): EditorState {
+    const next = applyRemoteTextToState(state, latest.doc.toString());
+    const head = Math.min(latest.selection.main.head, next.doc.length);
+    const anchor = Math.min(latest.selection.main.anchor, next.doc.length);
+    return next.update({ selection: { anchor, head }, annotations: Transaction.addToHistory.of(false) }).state;
   }
 
   detach(view: EditorView): void {
-    if (this.view !== view) return;
-    this.state = view.state;
-    this.view = null;
+    const at = this.views.indexOf(view);
+    if (at < 0) return;
+    this.views.splice(at, 1);
+    if (view === this.mainView) {
+      this.mainView = null;
+      if (this.views.length > 0) this.parkedState = view.state;
+      else this.state = view.state;
+    } else if (this.views.length === 0) {
+      this.state = this.parkedState ? this.caughtUp(this.parkedState, view.state) : view.state;
+      this.parkedState = null;
+    }
+    this.view = this.mainView ?? this.views[0] ?? null;
   }
 
   /**
@@ -515,8 +584,9 @@ export class DocumentSession {
    * `seq` took over.
    */
   private async replaceRemote(text: string, seq: number): Promise<'applied' | 'edited' | 'superseded'> {
-    const view = this.view;
-    if (view && isComposing(view)) {
+    // Any editor of the file may be composing (two panes).
+    const view = this.views.find((v) => isComposing(v)) ?? null;
+    if (view) {
       const before = this.changes;
       await waitForComposition(view);
       if (this.disposed || seq !== this.reconcileSeq) return 'superseded';

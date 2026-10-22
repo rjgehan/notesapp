@@ -16,6 +16,8 @@ import { displayName, pathFromLocation } from '../../features/paths';
 import { usePendingNote } from '../../state/pendingNote';
 import { resolvedTheme, toggleTheme, usePrefs } from '../../state/prefs';
 import { useUi, type ViewMode } from '../../state/ui';
+import { useWorkspace } from '../../workspace/store';
+import { TAB_SWITCHER } from '../../workspace/TabSwitcher';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
 import { ModeToggle } from '../../views/markdown/NoteHeader';
 import { isMarkdownViewPath, viewFor } from '../../views/registry';
@@ -108,6 +110,19 @@ function TopBarSaveStatus({ path }: { path: string }) {
   return <SaveStatus snapshot={snapshot} compact />;
 }
 
+/** The phone's way to its tabs (DESIGN §6.40): the count of open tabs; a tap shows them all. */
+function TabsButton() {
+  const count = useWorkspace((s) => Object.values(s.ws.panes).reduce((n, p) => n + p.tabs.length, 0));
+  const label = count === 1 ? 'Show open tabs (1 tab)' : 'Show open tabs (' + count + ' tabs)';
+  return (
+    <button type="button" className="icon-button top-bar-tabs" aria-label={label} title="Tabs" onClick={() => useUi.getState().setOverlay(TAB_SWITCHER)}>
+      <span className="top-bar-tab-count" aria-hidden>
+        {count > 99 ? '∞' : count}
+      </span>
+    </button>
+  );
+}
+
 export function TopBar() {
   useCommandsVersion();
   useExtensionsVersion();
@@ -162,6 +177,7 @@ export function TopBar() {
           <PanelRight size={20} />
         </button>
       )}
+      {phone && <TabsButton />}
       <div className="menu-anchor">
         <button type="button" className="icon-button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
           <Ellipsis size={20} />
