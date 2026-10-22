@@ -38,8 +38,9 @@ export interface UiState {
   newBuildAvailable: boolean;
   draftsFailing: boolean;
   /**
-   * The notes shown as Markdown source in this page load (never saved, so a reload shows every
-   * note in Live Preview again); they follow renames and moves. Any other note shows `live`.
+   * The notes shown as Markdown source in this page load, keyed by `noteModeKey(pane, path)` so
+   * each pane has its own (never saved, so a reload shows every note in Live Preview again); they
+   * follow renames and moves. Any other note shows `live`.
    */
   noteModes: Record<string, 'source'>;
   explorerSort: ExplorerSort;
@@ -66,8 +67,8 @@ export interface UiState {
   setSaveSummary(summary: SaveSummary): void;
   setNewBuildAvailable(v: boolean): void;
   setDraftsFailing(v: boolean): void;
-  /** Shows `path` as Markdown source (`source`), or in Live Preview again (anything else). */
-  setNoteMode(path: string, mode: ViewMode | null): void;
+  /** Shows `key` (a `noteModeKey`) as Markdown source (`source`), or in Live Preview again (anything else). */
+  setNoteMode(key: string, mode: ViewMode | null): void;
   setExplorerSort(sort: ExplorerSort): void;
   setExpanded(path: string, expanded: boolean): void;
   setRevealPath(path: string | null): void;
@@ -91,6 +92,18 @@ export function stripNoteModes(persisted: unknown): Record<string, unknown> {
   delete rest.noteModes;
   delete rest.editingNew;
   return rest;
+}
+
+const PANE_SEP = '\u0001';
+
+/** The `noteModes` key of `path` shown in `pane` (null outside any pane). */
+export function noteModeKey(pane: string | null, path: string): string {
+  return pane === null ? path : pane + PANE_SEP + path;
+}
+
+function rebasedKey(key: string, from: string, to: string): string {
+  const at = key.indexOf(PANE_SEP);
+  return at < 0 ? rebased(key, from, to) : key.slice(0, at + 1) + rebased(key.slice(at + 1), from, to);
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
@@ -182,7 +195,7 @@ export const useUi = create<UiState>()(
           let changed = false;
           const noteModes: Record<string, 'source'> = {};
           for (const [path, mode] of Object.entries(s.noteModes)) {
-            const next = rebased(path, from, to);
+            const next = rebasedKey(path, from, to);
             if (next !== path) changed = true;
             noteModes[next] = mode;
           }

@@ -4,7 +4,8 @@ import { queryClient } from '../api/queryClient';
 import { queryKeys } from '../api/queryKeys';
 import type { FileEntry, MoveResult, SettingsResponse, WriteResult } from '../api/types';
 import { usePendingNote } from '../state/pendingNote';
-import { stripNoteModes, useUi } from '../state/ui';
+import { noteModeKey, stripNoteModes, useUi } from '../state/ui';
+import { resetWorkspace, splitActive, workspace } from '../workspace/store';
 import { applyMoveResult } from '../sync/applyEvents';
 import { registerBuiltins } from '../extensions/builtins';
 import { syncTarget } from '../sync/liveSync';
@@ -13,6 +14,9 @@ import { createNote } from './fileOps';
 import { wantsNoteFocus } from './focus';
 import { currentNoteMode, isEditingMode, noteModeOf, setNoteMode, showLivePreview, toggleSourceMode, viewModeFor } from './noteMode';
 import { DEFAULT_SETTINGS } from './settings';
+
+/** The store key of `path` in the active pane. */
+const key = (path: string) => noteModeKey(workspace().activePane, path);
 
 function entry(path: string): FileEntry {
   return { path, name: path, basename: path.replace(/\.md$/, ''), extension: 'md', kind: 'note', size: 0, mtime: '2026-10-16T10:00:00.000Z', version: 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', aliases: [] };
@@ -26,10 +30,12 @@ function defaultMode(mode: 'edit' | 'read'): void {
 beforeEach(() => {
   queryClient.setQueryData(queryKeys.tree(), { eventId: 'b.1', folders: [], files: [entry('Welcome.md'), entry('Plan.md')] });
   window.history.replaceState(null, '', '/n/Welcome.md');
+  resetWorkspace();
   useUi.setState({ noteModes: {} });
 });
 
 afterEach(() => {
+  resetWorkspace();
   vi.restoreAllMocks();
   queryClient.clear();
   usePendingNote.setState({ pending: null, handoff: null });
@@ -53,7 +59,7 @@ describe('every note opens in Live Preview (DESIGN §6.6.1)', () => {
     expect(noteModeOf('read')).toBe('live');
     expect(noteModeOf(undefined)).toBe('live');
     expect(noteModeOf('source')).toBe('source');
-    useUi.setState({ noteModes: { 'Welcome.md': 'locked' as 'source' } });
+    useUi.setState({ noteModes: { [key('Welcome.md')]: 'locked' as 'source' } });
     expect(currentNoteMode()).toBe('live');
   });
 
@@ -120,7 +126,19 @@ describe('Show Markdown source, the escape hatch', () => {
     setNoteMode('source');
     const result: MoveResult = { dryRun: false, type: 'file', from: 'Welcome.md', to: 'Hello.md', moved: [], createdFolders: [], linkUpdates: [], failed: [], commitId: null };
     applyMoveResult(syncTarget, result);
-    expect(useUi.getState().noteModes).toEqual({ 'Hello.md': 'source' });
+    expect(useUi.getState().noteModes).toEqual({ [key('Hello.md')]: 'source' });
+  });
+
+  it('source mode is per pane: the same note in another pane stays in Live Preview', () => {
+    const first = workspace().activePane;
+    setNoteMode('source');
+    splitActive('right');
+    const second = workspace().activePane;
+    expect(second).not.toBe(first);
+    expect(currentNoteMode()).toBe('live');
+    expect(useUi.getState().noteModes).toEqual({ [noteModeKey(first, 'Welcome.md')]: 'source' });
+    toggleSourceMode();
+    expect(useUi.getState().noteModes).toEqual({ [noteModeKey(first, 'Welcome.md')]: 'source', [noteModeKey(second, 'Welcome.md')]: 'source' });
   });
 
   it('switching from inside the note keeps the focus in the note', () => {

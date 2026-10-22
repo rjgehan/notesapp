@@ -6,7 +6,8 @@ import { queryClient } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
 import { registerBuiltins } from '../../extensions/builtins';
 import { currentNoteMode } from '../../features/noteMode';
-import { useUi } from '../../state/ui';
+import { noteModeKey, useUi } from '../../state/ui';
+import { workspace } from '../../workspace/store';
 import { NoteHeader } from './NoteHeader';
 import { noteMenuItems, sourceItemLabel } from './noteMenu';
 
@@ -67,7 +68,7 @@ describe('the note header has no mode toggles (DESIGN §6.6.1)', () => {
   });
 
   it('in source mode the item reads "Back to normal view" and goes back to Live Preview', () => {
-    useUi.setState({ noteModes: { 'Plan.md': 'source' } });
+    useUi.setState({ noteModes: { [noteModeKey(workspace().activePane, 'Plan.md')]: 'source' } });
     const items = noteMenuItems('Plan.md', 'source');
     const first = items[0];
     expect(first !== 'separator' && first.label).toBe('Back to normal view');
