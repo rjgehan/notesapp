@@ -36,7 +36,7 @@ public record NotesProperties(
 		@DefaultValue Tasks tasks,
 		@DefaultValue Search search,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
-				"yml" }) List<String> textExtensions,
+				"yml", "mdenc" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
 		@DefaultValue("dev") String buildSha) {
 

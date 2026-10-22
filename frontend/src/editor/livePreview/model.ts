@@ -500,7 +500,8 @@ function draftFor(state: EditorState, node: SyntaxNode): Draft | null {
     case 'FootnoteDefinition':
       return footnoteDefinition(state, node);
     case 'Comment':
-      return comment(state, node);
+      // An encrypted section (`%%🔐β …🔐%%`, ROADMAP item 27) is not a comment: it shows as its lock chip.
+      return isEncryptedSection(state, node.from) ? null : comment(state, node);
     case 'FencedCode':
       return codeBlock(state, node);
     case 'Hashtag':
@@ -653,3 +654,8 @@ export function lineLayout(state: EditorState, pos: number, selection: EditorSel
 
 /** Hide-all, ignoring the selection: every piece of markup is hidden. */
 export const HIDE_ALL: RevealOptions = { atCursor: false, atSelectionEnds: false, completing: false, comments: false, codeAtCursor: false };
+
+/** Whether an encrypted section (`%%🔐…`, ROADMAP item 27) starts at `from`: its chip shows instead of a hidden comment. */
+export function isEncryptedSection(state: EditorState, from: number): boolean {
+  return state.doc.sliceString(from, from + 4) === '%%🔐';
+}

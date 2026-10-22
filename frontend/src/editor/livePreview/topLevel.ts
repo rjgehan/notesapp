@@ -62,7 +62,8 @@ export function topLevel(state: EditorState): TopLevel {
       if (cursor.name === 'Table') {
         last = { from: cursor.from, to: cursor.to, complete: false };
         tables.push(last);
-      } else if (cursor.name === 'CommentBlock') {
+      } else if (cursor.name === 'CommentBlock' && state.doc.sliceString(cursor.from, cursor.from + 4) !== '%%🔐') {
+        // (A line that is an encrypted section, ROADMAP item 27, is not a comment block: its chip shows.)
         last = { from: cursor.from, to: cursor.to, complete: false, closed: cursor.node.getChildren('CommentMark').length >= 2 };
         comments.push(last);
       } else {

@@ -5,6 +5,9 @@
 // `renderMath`, so its modules import neither markdown-it nor KaTeX.
 import { currentSettings, currentTree } from '../api/hooks';
 import type { MarkdownBlockRequest } from '../editor/context';
+import { openSection, sectionFromText } from '../features/encryption/inline';
+import { toast } from '../state/toasts';
+import { documents } from '../sync/instance';
 import { makeEmbedContext, makeRenderContext } from './context';
 import { hydrateEmbeds, unmountEmbeds } from './embeds';
 import { handleRenderedClick } from './interaction';
@@ -23,7 +26,14 @@ export function renderLiveMarkdown(el: HTMLElement, block: MarkdownBlockRequest,
   }
   hydrateEmbeds(el, makeEmbedContext(sourcePath, tree));
   hydrateRich(el);
-  const onClick = (e: MouseEvent) => handleRenderedClick(e, sourcePath);
+  const onClick = (e: MouseEvent) => {
+    if (openChip(e, sourcePath)) e.preventDefault();
+    else handleRenderedClick(e, sourcePath);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if ((e.key === 'Enter' || e.key === ' ') && openChip(e, sourcePath)) e.preventDefault();
+  };
+  el.addEventListener('keydown', onKey);
   const onChange = (e: Event) => {
     const box = e.target;
     if (!(box instanceof HTMLInputElement) || !box.classList.contains('task-list-item-checkbox')) return;
@@ -38,6 +48,7 @@ export function renderLiveMarkdown(el: HTMLElement, block: MarkdownBlockRequest,
   return () => {
     el.removeEventListener('click', onClick);
     el.removeEventListener('change', onChange);
+    el.removeEventListener('keydown', onKey);
     unmountEmbeds(el);
   };
 }
@@ -46,4 +57,18 @@ export function renderLiveMarkdown(el: HTMLElement, block: MarkdownBlockRequest,
 export function renderLiveMath(el: HTMLElement, tex: string, display: boolean): void {
   el.textContent = tex;
   renderMath(el, tex, display).catch((e: unknown) => console.warn('[rich] rendering math failed', e));
+}
+
+/** An encrypted section's chip in a rendered block (ROADMAP item 27, DESIGN §6.33): opens its text in a dialog. */
+function openChip(e: Event, sourcePath: string): boolean {
+  const chip = e.target instanceof Element ? e.target.closest<HTMLElement>('.encrypted-chip') : null;
+  if (!chip) return false;
+  if (chip.closest('[data-embed-root]')) {
+    toast('Open the note itself to unlock its encrypted text');
+    return true;
+  }
+  const session = documents.get(sourcePath);
+  const section = session ? sectionFromText(session.getText(), chip.dataset.section ?? '') : null;
+  if (session && section) void openSection(session, section);
+  return true;
 }

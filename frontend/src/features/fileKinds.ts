@@ -3,7 +3,7 @@
 import type { FileKind } from '../api/types';
 import { extensionOf } from './paths';
 
-const TEXT = new Set('txt markdown json canvas excalidraw sheet tasks csv tsv yaml yml'.split(' '));
+const TEXT = new Set('txt markdown json canvas excalidraw sheet tasks csv tsv yaml yml mdenc'.split(' '));
 const BY_EXTENSION: Record<string, FileKind> = {};
 for (const e of 'png jpg jpeg gif webp avif bmp svg'.split(' ')) BY_EXTENSION[e] = 'image';
 for (const e of 'mp3 m4a ogg wav flac 3gp'.split(' ')) BY_EXTENSION[e] = 'audio';

@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import com.rjgehan.notes.index.EncryptedSections;
 import com.rjgehan.notes.index.FileRecord;
 import com.rjgehan.notes.index.NoteRecord;
 import com.rjgehan.notes.index.TagIndex;
@@ -296,7 +297,8 @@ final class PromptBuilder {
 	}
 
 	private Turn selection(Prompt prompt) {
-		String text = (prompt.text() != null) ? prompt.text() : "";
+		// Ciphertext of an encrypted section in the selection is never sent (ROADMAP item 27).
+		String text = (prompt.text() != null) ? EncryptedSections.strip(prompt.text()) : "";
 		boolean cut = text.length() > this.maxContext;
 		String body = cut ? Excerpts.head(text, this.maxContext) : text;
 		String path = prompt.path();
@@ -321,7 +323,7 @@ final class PromptBuilder {
 		if (withCandidates) {
 			NoteRecord note = this.index.note(path);
 			String title = PathNames.basenameOf(PathNames.nameOf(path));
-			List<String> terms = (note != null) ? QueryTerms.describing(title, note.text(), 24) : List.of();
+			List<String> terms = (note != null) ? QueryTerms.describing(title, EncryptedSections.strip(note.text()), 24) : List.of();
 			task.append("\n\n<candidates>\n");
 			for (VaultIndex.SearchHit hit : this.index.rankAny(terms,
 					(p) -> p.equals(path) || this.excluded.test(p), SUGGEST_CANDIDATES)) {
@@ -385,7 +387,7 @@ final class PromptBuilder {
 		if (note == null || file == null) {
 			return null;
 		}
-		Excerpts.Excerpt excerpt = Excerpts.select(note.text(), terms, budget);
+		Excerpts.Excerpt excerpt = Excerpts.select(EncryptedSections.strip(note.text()), terms, budget);
 		return new Source(path, link(path), date(file), excerpt.text(), excerpt.truncated());
 	}
 

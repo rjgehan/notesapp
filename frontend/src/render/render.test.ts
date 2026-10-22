@@ -128,6 +128,24 @@ describe('render: blocks', () => {
     expect(el.textContent).toContain('Visible');
     expect(el.textContent).toContain('After');
   });
+
+  it('shows encrypted sections as lock chips that carry only their ciphertext (item 27)', () => {
+    const b64 = 'QUJDREVGR0hJSktMTU5PUA==';
+    const hidden = `%%🔐β 💡pet💡${b64} 🔐%%`;
+    const visible = `🔐β ${b64} 🔐`;
+    const el = dom(`PIN: ${hidden} and ${visible} done.\n\n${hidden}\n\nAfter`);
+    const chips = [...el.querySelectorAll<HTMLElement>('.encrypted-chip')];
+    expect(chips).toHaveLength(3);
+    expect(chips[0].dataset.section).toBe(hidden);
+    expect(chips[0].textContent).toBe('🔒 Encrypted · pet');
+    expect(chips[1].dataset.section).toBe(visible);
+    expect(el.textContent).not.toContain(b64);
+    expect(el.textContent).toContain('PIN:');
+    expect(el.textContent).toContain('done.');
+    expect(el.textContent).toContain('After');
+    // An ordinary comment still hides.
+    expect(dom('a %%not a section%% b').textContent).not.toContain('section');
+  });
 });
 
 describe('render: embeds', () => {

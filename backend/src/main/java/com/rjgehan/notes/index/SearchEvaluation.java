@@ -404,7 +404,7 @@ final class SearchEvaluation {
 		}
 		NoteRecord note = ref.note();
 		return switch (state.leaf.kind()) {
-			case REGEX -> find(regex, note.text());
+			case REGEX -> find(regex, note.searchText());
 			case PATH -> find(regex, note.path());
 			case FILE -> find(regex, PathNames.nameOf(note.path()));
 			case TAG -> {
@@ -434,11 +434,15 @@ final class SearchEvaluation {
 
 		final CharSequence text;
 
+		/** The document's text with its encrypted sections blanked (ROADMAP item 27). */
+		final String searchText;
+
 		final Map<LeafState, long[]> masks = new IdentityHashMap<>();
 
 		DocContext(DocRef ref) {
 			this.ref = ref;
-			this.text = SearchRegex.text(ref.note().text(), SearchEvaluation.this.budget);
+			this.searchText = ref.note().searchText();
+			this.text = SearchRegex.text(this.searchText, SearchEvaluation.this.budget);
 		}
 
 		boolean occurs(LeafState state, Unit unit) {
@@ -450,7 +454,7 @@ final class SearchEvaluation {
 			int size = pattern.terms().size();
 			if (body == null || state.positions == null || size > SearchIndex.maxSequencePattern()) {
 				// No token sequence was kept for this document: tokenize the unit.
-				return pattern.occursIn(Tokenizer.tokenize(this.ref.note().text(), unit.from(), unit.to()));
+				return pattern.occursIn(Tokenizer.tokenize(this.searchText, unit.from(), unit.to()));
 			}
 			long[] termMasks = this.masks.computeIfAbsent(state, (s) -> {
 				Map<String, Long> positions = s.positions;
@@ -470,7 +474,7 @@ final class SearchEvaluation {
 	private boolean anyUnit(Scoped scoped, DocRef ref) {
 		DocContext context = new DocContext(ref);
 		NoteParse parse = ref.note().parse();
-		String text = ref.note().text();
+		String text = context.searchText;
 		int[] lineStarts = parse.lineStarts();
 		int lines = lineStarts.length;
 		int[] lineTokens = (ref.body() != null) ? ref.body().lineTokens() : null;

@@ -22,6 +22,7 @@ import { isLocalEdit } from './remote';
 import { searchHighlight } from './searchHighlight';
 import { smartPunctuationGuard } from './smartPunctuation';
 import { unresolvedLinks } from './unresolved';
+import { encryptedSections } from './encryptedSections';
 import { trackedRangesField } from './tracked';
 import { uploadsField } from './uploads';
 import { editorCommandKeys, vimSlot, type CommandKey } from './vimMode';
@@ -215,6 +216,7 @@ export function noteExtensions(ctx: NoteContext, hooks: EditorHooks): Extension[
     autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
     clickNavigation,
     unresolvedLinks,
+    encryptedSections,
     smartPunctuationGuard,
     searchHighlight,
     pasteAndDrop,

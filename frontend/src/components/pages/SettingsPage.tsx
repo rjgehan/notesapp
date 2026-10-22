@@ -22,7 +22,7 @@ import { vimAvailable } from '../../editor/vimMode';
 import { clearOfflineCopies, noteCache } from '../../offline/offlineStore';
 import { setOfflineMedia } from '../../pwa/serviceWorker';
 import { pageBuild } from '../../state/buildCheck';
-import { usePrefs, type SyntaxVisibility, type ThemePref } from '../../state/prefs';
+import { ENCRYPTION_LOCK_CHOICES, usePrefs, type SyntaxVisibility, type ThemePref } from '../../state/prefs';
 import { toast } from '../../state/toasts';
 import { useUi } from '../../state/ui';
 import type { DiscardedRecord } from '../../sync/drafts';
@@ -724,6 +724,17 @@ function DeviceSection() {
         <Toggle label="Keep recent notes for offline reading" checked={prefs.offlineNotes} onChange={(offlineNotes) => setOfflineCopies(offlineNotes)} />
       </Row>
       <VoiceRow />
+      <Row label="Lock encrypted notes after" description="Unlocked encrypted notes and sections lock after this long without typing or tapping, and whenever the page reloads.">
+        <Select<string>
+          label="Lock encrypted notes after"
+          value={String(prefs.encryptionLockMinutes)}
+          options={ENCRYPTION_LOCK_CHOICES.map((m) => [String(m), m === 1 ? '1 minute' : `${m} minutes`])}
+          onChange={(v) => prefs.update({ encryptionLockMinutes: Number(v) })}
+        />
+      </Row>
+      <Row label="Lock encrypted notes when the app is hidden" description="Switching to another tab or app, or locking the phone, locks them at once.">
+        <Toggle label="Lock encrypted notes when the app is hidden" checked={prefs.encryptionLockOnHide} onChange={(encryptionLockOnHide) => prefs.update({ encryptionLockOnHide })} />
+      </Row>
       <h3 className="settings-subtitle">Recently discarded edits</h3>
       {draftsFailing && (
         <p className="field-error">

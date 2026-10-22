@@ -15,11 +15,17 @@ export interface Prefs {
   /** Vim keys in the note and text editors (DESIGN §6.36); used only with a mouse or trackpad. */
   vimMode: boolean;
   syntaxVisibility: SyntaxVisibility;
+  /** Minutes without activity after which unlocked encrypted notes lock (DESIGN §6.33). */
+  encryptionLockMinutes: number;
+  /** Lock encrypted notes as soon as the app is hidden (another tab or app, the phone locked). */
+  encryptionLockOnHide: boolean;
 }
+
+export const ENCRYPTION_LOCK_CHOICES = [1, 5, 10, 30, 60] as const;
 
 export const PREFS_KEY = 'notesapp:prefs';
 
-export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true, vimMode: false, syntaxVisibility: 'hide-all' };
+export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true, vimMode: false, syntaxVisibility: 'hide-all', encryptionLockMinutes: 10, encryptionLockOnHide: false };
 
 function load(): Prefs {
   try {
@@ -34,6 +40,8 @@ function load(): Prefs {
       offlineNotes: typeof parsed.offlineNotes === 'boolean' ? parsed.offlineNotes : true,
       vimMode: parsed.vimMode === true,
       syntaxVisibility: parsed.syntaxVisibility === 'reveal-at-cursor' ? 'reveal-at-cursor' : 'hide-all',
+      encryptionLockMinutes: (ENCRYPTION_LOCK_CHOICES as readonly number[]).includes(parsed.encryptionLockMinutes as number) ? (parsed.encryptionLockMinutes as number) : 10,
+      encryptionLockOnHide: typeof parsed.encryptionLockOnHide === 'boolean' ? parsed.encryptionLockOnHide : false,
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -48,9 +56,9 @@ export const usePrefs = create<PrefsState>()((set, get) => ({
   ...load(),
   update(patch) {
     set(patch);
-    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility } = get();
+    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility, encryptionLockMinutes, encryptionLockOnHide } = get();
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility, encryptionLockMinutes, encryptionLockOnHide }));
     } catch {
       // Private mode or quota: the preference still applies to this page load.
     }

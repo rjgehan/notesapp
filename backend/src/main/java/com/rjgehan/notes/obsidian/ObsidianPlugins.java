@@ -73,6 +73,7 @@ final class ObsidianPlugins {
 			Map.entry("obsidian-admonition", k("Admonition", Support.UNSUPPORTED, "ad- blocks show as code blocks; Obsidian callouts replace them.")),
 			Map.entry("quickadd", k("QuickAdd", Support.PARTIAL, "Quick capture appends to Inbox.md or today's note from anywhere; macros and templates of QuickAdd are not offered.")),
 			Map.entry("omnisearch", k("Omnisearch", Support.SUPPORTED, "Full-text search is built in.")),
+			Map.entry("meld-encrypt", k("Meld Encrypt", Support.SUPPORTED, "Encrypted .mdenc notes and inline encrypted sections open in the browser with their passphrase, in the plugin's current format; they are never searched or sent to Ask your vault.", 27)),
 			Map.entry("table-editor-obsidian", k("Advanced Tables", Support.PARTIAL, "Tables render; editing them as a grid is planned.", 10)),
 			Map.entry("obsidian-outliner", k("Outliner", Support.PARTIAL, "Tab and Shift-Tab indent list items; outline folding is not offered.")),
 			Map.entry("obsidian-style-settings", k("Style Settings", Support.UNSUPPORTED, "Themes and CSS snippets are not used.")),

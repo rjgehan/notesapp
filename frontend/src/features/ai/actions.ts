@@ -8,6 +8,7 @@ import { currentBreakpoint } from '../../components/layout/useBreakpoint';
 import { showPanel } from '../../components/layout/showPanel';
 import { activeEditor } from '../../editor/activeEditor';
 import { dailyNotePath } from '../daily';
+import { stripSections } from '../encryption/meld';
 import { dayjs, type Dayjs } from '../dates';
 import { navigateTo } from '../navigation';
 import { folderOf, isNotePath } from '../paths';
@@ -55,10 +56,13 @@ export function summarizeFolder(folder: string): void {
 export function selectedText(): string {
   const view = activeEditor();
   if (!view) return '';
-  return view.state.selection.ranges
-    .filter((r) => !r.empty)
-    .map((r) => view.state.sliceDoc(r.from, r.to))
-    .join('\n\n');
+  // Encrypted sections become `[encrypted]`: their ciphertext never leaves for Claude (the server strips it too).
+  return stripSections(
+    view.state.selection.ranges
+      .filter((r) => !r.empty)
+      .map((r) => view.state.sliceDoc(r.from, r.to))
+      .join('\n\n'),
+  );
 }
 
 export function summarizeSelection(path: string | null): boolean {

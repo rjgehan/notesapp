@@ -16,6 +16,7 @@ import { isInternalDestination, isWhitespace, matchWikiLinkAt, parseMarkdownDest
 import { blockSubpathId, extractBlock } from '../features/blocks';
 import { isMarkdownViewPath } from '../views/registry';
 import { richMarkdown } from './rich';
+import { findSections, LOCK, sectionStartingAt } from '../features/encryption/meld';
 
 export interface RenderContext {
   sourcePath: string;
@@ -119,6 +120,54 @@ function hashtagRule(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
+/** An inline encrypted section (DESIGN §6.33): a lock chip carrying the ciphertext, never its text. */
+function encryptedSectionRule(state: StateInline, silent: boolean): boolean {
+  const section = sectionStartingAt(state.src, state.pos);
+  if (!section || section.to > state.posMax) return false;
+  if (!silent) {
+    const token = state.push('encrypted_section', '', 0);
+    token.meta = { text: section.text, hint: section.hint };
+  }
+  state.pos = section.to;
+  return true;
+}
+
+/**
+ * The visible form `🔐β …🔐` has no markdown-it terminator character, so the text rule swallows
+ * it: split such text tokens after inline parsing (the commented form is matched inline above).
+ */
+function splitEncryptedText(state: StateCore): void {
+  for (const block of state.tokens) {
+    if (block.type !== 'inline' || !block.children || !block.content.includes(LOCK)) continue;
+    const out: Token[] = [];
+    for (const child of block.children) {
+      const sections = child.type === 'text' ? findSections(child.content) : [];
+      if (sections.length === 0) {
+        out.push(child);
+        continue;
+      }
+      let at = 0;
+      for (const s of sections) {
+        if (s.from > at) {
+          const t = new state.Token('text', '', 0);
+          t.content = child.content.slice(at, s.from);
+          out.push(t);
+        }
+        const token = new state.Token('encrypted_section', '', 0);
+        token.meta = { text: s.text, hint: s.hint };
+        out.push(token);
+        at = s.to;
+      }
+      if (at < child.content.length) {
+        const t = new state.Token('text', '', 0);
+        t.content = child.content.slice(at);
+        out.push(t);
+      }
+    }
+    block.children = out;
+  }
+}
+
 function commentInlineRule(state: StateInline, silent: boolean): boolean {
   const start = state.pos;
   if (state.src.charCodeAt(start) !== 0x25 || state.src.charCodeAt(start + 1) !== 0x25) return false;
@@ -134,6 +183,8 @@ function commentBlockRule(state: StateBlock, startLine: number, endLine: number,
   const pos = state.bMarks[startLine] + state.tShift[startLine];
   const max = state.eMarks[startLine];
   if (state.src.slice(pos, pos + 2) !== '%%') return false;
+  // A line that starts with an encrypted section is a paragraph: the section shows as a chip.
+  if (sectionStartingAt(state.src, pos)) return false;
   const rest = state.src.slice(pos + 2, max);
   const sameLine = rest.indexOf('%%');
   if (sameLine >= 0 && rest.slice(sameLine + 2).trim() !== '') return false;
@@ -238,14 +289,21 @@ function annotate(state: StateCore): void {
 
 function obsidianPlugin(md: Md): void {
   md.inline.ruler.before('link', 'wikilink', wikilinkRule);
+  md.inline.ruler.before('emphasis', 'encrypted_section', encryptedSectionRule);
   md.inline.ruler.before('emphasis', 'obsidian_comment', commentInlineRule);
   md.inline.ruler.push('hashtag', hashtagRule);
   md.block.ruler.before('fence', 'obsidian_comment_block', commentBlockRule, { alt: ['paragraph'] });
   md.core.ruler.push('obsidian_block_ids', blockIds);
+  md.core.ruler.push('encrypted_text', splitEncryptedText);
   md.core.ruler.push('obsidian_annotate', annotate);
 
   const r = md.renderer.rules;
   r.obsidian_comment = () => '';
+  r.encrypted_section = (tokens, idx) => {
+    const { text, hint } = tokens[idx].meta as { text: string; hint: string };
+    const label = hint ? `Encrypted · ${escapeHtml(hint)}` : 'Encrypted';
+    return `<span class="encrypted-chip" role="button" tabindex="0" title="Encrypted text: click to open" data-section="${escapeHtml(text)}">🔒 ${label}</span>`;
+  };
   r.hashtag = (tokens, idx) => {
     const tag = tokens[idx].content;
     return `<a class="tag" href="#" data-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</a>`;

@@ -99,6 +99,8 @@ class AiServiceTest {
 		write("Private/Diary.md", "The kitchen budget worries me. Secret diary entry.");
 		write("Archive/Old kitchen.md", "Old kitchen budget notes, archived.");
 		write("Recipes/Soup.md", "Tomato soup. #cooking");
+		write("Safe/Locker.md", "Locker code: %%🔐β 💡birthday💡QUJDREVGR0hJSktMTU5PUA== 🔐%% then done.");
+		write("Safe/Vault.mdenc", "{\n  \"version\": \"2.0\",\n  \"hint\": \"\",\n  \"encodedData\": \"QUJDREVGR0hJSktMTU5PUA==\"\n}");
 		this.vault = TestVault.start(this.dir);
 		this.vault.settings.load();
 		this.ledger = new UsageLedger(this.vault.fs, this.vault.clock, TestVault.JSON, ZoneOffset.UTC);
@@ -444,6 +446,22 @@ class AiServiceTest {
 		assertThat(textOf(prepared)).contains("<selection>\nTiles arrive Monday.\n</selection>")
 			.doesNotContain("12k")
 			.contains("from [[Projects/Kitchen]]");
+	}
+
+	@Test
+	void encryptedSectionsAndNotesAreNeverSent() throws Exception {
+		key();
+		enable();
+		AiService.Prepared note = this.service
+			.prepareSummarize(new AiSummarizeRequest(null, "note", "Safe/Locker.md", null, null, null, null));
+		assertThat(textOf(note)).contains("Locker code: [encrypted] then done.").doesNotContain("QUJDREVG");
+		AiService.Prepared selection = this.service.prepareSummarize(new AiSummarizeRequest(null, "selection",
+				"Safe/Locker.md", null, "Code: 🔐β QUJDREVGR0hJSktMTU5PUA== 🔐", null, null));
+		assertThat(textOf(selection)).contains("Code: [encrypted]").doesNotContain("QUJDREVG");
+		AiService.Prepared folder = this.service
+			.prepareSummarize(new AiSummarizeRequest(null, "folder", "Safe", null, null, null, null));
+		assertThat(paths(folder.start())).containsExactly("Safe/Locker.md");
+		assertThat(textOf(folder)).doesNotContain("QUJDREVG");
 	}
 
 	@Test

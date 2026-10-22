@@ -68,6 +68,7 @@ import { registerHabits } from '../habits/register';
 import { registerCalendar } from '../calendar/register';
 import { registerCanvasView } from '../views/canvas/register';
 import { registerKanban } from '../views/kanban/register';
+import { registerEncryption } from '../views/encrypted/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { registerPdfView } from '../views/pdf/register';
 import { startVoiceNote, transcribeAtCursor } from '../features/voice/voiceNotes';
@@ -194,6 +195,7 @@ export function registerBuiltins(): void {
   // JSON Canvas boards (ROADMAP item 25).
   registerCanvasView();
   registerKanban();
+  registerEncryption();
   registerCreateCommands();
   onViewsChanged(registerCreateCommands);
   // Commands contributed by a view are active only while that view shows the open file.

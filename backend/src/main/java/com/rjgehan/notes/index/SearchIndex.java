@@ -228,7 +228,7 @@ public final class SearchIndex {
 		List<Tokenizer.Token> tags = new ArrayList<>();
 		parse.distinctTags().forEach((tag) -> tags.addAll(Tokenizer.tokenize(tag)));
 		return List.of(Tokenizer.tokenize(basename), aliases, headings, tags,
-				Tokenizer.tokenize(text, bodyStart(parse), text.length()));
+				Tokenizer.tokenize(EncryptedSections.blank(text), bodyStart(parse), text.length()));
 	}
 
 	/** The offset where the body starts: after the frontmatter, if any. */

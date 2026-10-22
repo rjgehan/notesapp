@@ -81,7 +81,7 @@ import { blobId } from './sha1';
 const TEXT_LIMIT = 5 * 1024 * 1024;
 /** The server's default large-file threshold (DESIGN §5.8): larger files are kept out of history. */
 const LARGE_FILE_LIMIT = 25 * 1024 * 1024;
-const TEXT_EXTENSIONS = new Set('txt markdown json canvas excalidraw sheet tasks csv tsv yaml yml'.split(' '));
+const TEXT_EXTENSIONS = new Set('txt markdown json canvas excalidraw sheet tasks csv tsv yaml yml mdenc'.split(' '));
 const KIND_BY_EXT: Record<string, FileKind> = {};
 for (const e of 'png jpg jpeg gif webp avif bmp svg'.split(' ')) KIND_BY_EXT[e] = 'image';
 for (const e of 'mp3 m4a ogg wav flac 3gp'.split(' ')) KIND_BY_EXT[e] = 'audio';

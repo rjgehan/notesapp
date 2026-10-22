@@ -51,7 +51,38 @@ export interface FieldsRequest {
   resolve(values: string[] | null): void;
 }
 
-export type DialogRequest = (PromptRequest | ConfirmRequest | ChoiceRequest | FieldsRequest) & { id: number };
+/**
+ * A passphrase for an encrypted note or section (DESIGN §6.33). The passphrase never leaves the
+ * dialog except into `submit`, which turns it into a key and answers with an error to show
+ * inline (a wrong passphrase) or null, which closes the dialog with `resolve(true)`.
+ */
+export interface PassphraseRequest {
+  kind: 'passphrase';
+  /** `unlock` asks once and shows the hint; `create` asks twice, asks for a hint and for the no-recovery acknowledgement. */
+  mode: 'unlock' | 'create';
+  title: string;
+  message?: string;
+  /** unlock: the stored hint; create: the hint field's initial value. */
+  hint?: string;
+  confirmLabel?: string;
+  submit(passphrase: string, hint: string): Promise<string | null>;
+  resolve(ok: boolean): void;
+}
+
+export type SecretResult = { action: 'save'; text: string; hint: string } | { action: 'decrypt'; text: string } | null;
+
+/** The decrypted text of an inline section, editable; it is encrypted again on Save. */
+export interface SecretRequest {
+  kind: 'secret';
+  title: string;
+  text: string;
+  hint: string;
+  /** New sections start empty and cannot be decrypted permanently. */
+  isNew?: boolean;
+  resolve(result: SecretResult): void;
+}
+
+export type DialogRequest = (PromptRequest | ConfirmRequest | ChoiceRequest | FieldsRequest | PassphraseRequest | SecretRequest) & { id: number };
 
 interface DialogState {
   stack: DialogRequest[];
@@ -85,6 +116,14 @@ export function promptText(opts: Omit<PromptRequest, 'kind' | 'resolve'>): Promi
 
 export function confirmAction(opts: Omit<ConfirmRequest, 'kind' | 'resolve'>): Promise<boolean> {
   return push<boolean>((resolve, id) => ({ ...opts, kind: 'confirm', id, resolve }));
+}
+
+export function askPassphrase(opts: Omit<PassphraseRequest, 'kind' | 'resolve'>): Promise<boolean> {
+  return push<boolean>((resolve, id) => ({ ...opts, kind: 'passphrase', id, resolve }));
+}
+
+export function editSecret(opts: Omit<SecretRequest, 'kind' | 'resolve'>): Promise<SecretResult> {
+  return push<SecretResult>((resolve, id) => ({ ...opts, kind: 'secret', id, resolve }));
 }
 
 export function chooseAction<T extends string>(opts: { title: string; message: string; choices: Choice<T>[] }): Promise<T | null> {

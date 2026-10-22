@@ -77,7 +77,7 @@ DESIGN.md has the details.
 | 24 | Obsidian vault import and compatibility kit | M | S | |
 | 25 | Canvas (JSON Canvas, Obsidian-compatible) | M | L | |
 | 26 | Publish a note publicly through Tailscale Funnel | M | M | 3 helps |
-| 27 | Per-note encryption | M | M | |
+| 27 | Per-note encryption *(built 2026-10-21, `feat/encryption`)* | M | M | |
 | 28 | Vault-wide timeline and restoring deleted files from git | M | M | |
 | 29 | Customizable hotkeys and per-device preferences | L | S | |
 | 30 | Templates v2: folder templates, prompts, cursor | M | S | |
@@ -968,6 +968,14 @@ Plugs into the view registry. `.canvas` is already a text kind.
 - WebCrypto AES-GCM-256, with the key derived by PBKDF2-SHA256 (600k iterations) or Argon2id (WASM).
 - Encrypted notes are not searchable.
 - Interoperability with the Obsidian Meld Encrypt plugin is to be evaluated.
+
+**Status: built 2026-10-21** on `feat/encryption` (DESIGN §5.27 server, §6.33 client; API.md §27). Encryption happens only in the browser with WebCrypto; the server, git, backups, drafts, the offline copies and history only ever hold ciphertext. Deviations and additions:
+
+- **Meld Encrypt's own format, so Obsidian reads the same notes.** Whole notes are `.mdenc` files and secrets inside a note are inline sections (`%%🔐β 💡hint💡… 🔐%%`), byte-compatible with the plugin (checked against its source, and tested against payloads made by an independent implementation). The key derivation is therefore the plugin's **PBKDF2-SHA-512 with 210,000 iterations** (OWASP's equivalent of SHA-256 at 600,000), not a new format; Argon2id was not used (a WASM dependency, and Obsidian could not open the notes). The plugin's older v1 notes and sections open and are saved as v2.
+- **Unlock per session, then auto-lock**: keys are kept only in memory, non-extractable, and forgotten after 1 to 60 minutes without activity (10 by default, per device), optionally when the app is hidden, on the Lock button, and on reload.
+- **Encrypted text is excluded** from search (sections are blanked, `.mdenc` files never indexed), backlinks and tags, and Ask your vault (item 18: replaced by `[encrypted]`, on the server and for selections on the client).
+- **Clear UX for the risks**: a no-recovery warning that must be acknowledged when choosing a passphrase, a minimum length with advice for weak passphrases, wrong passphrases reported in place with the hint, and warnings that encrypting existing text leaves its plain versions in history and that removing encryption makes text readable again.
+- **Not built**: a decrypting history preview (versions of an encrypted note show their ciphertext; restoring works) and the reading-view mode for `.mdenc` notes (they open in the editor). Publishing (item 26) must refuse `.mdenc` notes and keep sections encrypted when it is built.
 
 ### 28. Vault-wide timeline and restoring deleted files from git
 
