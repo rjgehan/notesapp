@@ -58,7 +58,7 @@ public final class CompatScanner {
 		OBSIDIAN_URIS("obsidian-uris", Category.SYNTAX, Severity.INFO, "obsidian:// links",
 				"Links that open the Obsidian app work only on devices where Obsidian is installed.", null),
 		HTML_REMOVED("html-removed", Category.SYNTAX, Severity.INFO, "Embedded HTML that is removed",
-				"<iframe>, <script>, <style>, <form> and similar tags are removed by the reading view's sanitizer.",
+				"<iframe>, <script>, <style>, <form> and similar tags are removed by the sanitizer that renders notes.",
 				null),
 
 		// ---------- links ----------
