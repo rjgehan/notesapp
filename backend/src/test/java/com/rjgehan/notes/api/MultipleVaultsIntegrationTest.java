@@ -131,6 +131,9 @@ class MultipleVaultsIntegrationTest {
 		assertThat(this.api.get("/api/v/main/tree").ok(200).get("files").size())
 			.isEqualTo(this.api.get("/api/tree").ok(200).get("files").size());
 		assertThat(this.api.get(WORK + "/vaults").status()).isEqualTo(404);
+		// Not under the default vault's own name either (it routes into the main context, where the list lives).
+		assertThat(this.api.get("/api/v/main/vaults").problem(404)).isEqualTo("not-found");
+		assertThat(this.api.postJson("/api/v/main/vaults", Map.of("name", "other")).problem(404)).isEqualTo("not-found");
 	}
 
 	@Test

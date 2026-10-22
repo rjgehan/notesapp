@@ -46,7 +46,8 @@ export interface Problem {
   line?: number;                  // block-not-found: the line the request named (§37)
   from?: VaultPath;
   to?: VaultPath;
-  reason?: string;
+  reason?: string;                // e.g. vault-unavailable: starting | failed (§41)
+  vault?: string;                 // vault-not-found, vault-unavailable: the vault name (§41)
   incidentId?: string;
   errors?: FieldError[];
 }
