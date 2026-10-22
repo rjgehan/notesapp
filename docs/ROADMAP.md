@@ -1034,6 +1034,15 @@ Plugs into the view registry. `.canvas` is already a text kind.
 
 ### 31. Slash commands and editor niceties
 
+**Status:** built (wave 3). A `/` menu at a line start or after a space, in Live Preview and source mode, with fuzzy filtering over headings, lists, checklist, quote, callouts of every type, tables, dividers, code blocks (16 languages by name), math, Mermaid, links, embeds, block references, dates and times, and the app's commands: insert template, image, attachment, a new embedded drawing, spreadsheet, canvas or board, encrypted text, voice note and new task. The items run the existing commands. Not in code, math, links or the frontmatter, nor in vim's normal mode; in a table cell only the inline items. On the phone it is docked above the keyboard toolbar, which gains a `/` button. Design in DESIGN §6.6.2. Deviations and additions:
+
+- **Renumbering** follows deleted, moved, pasted and indented lines, as one undo step with the edit (Enter already renumbered); typing a number is left alone. Also "Renumber numbered list".
+- **Heading folding**: a chevron left of each heading, `Mod-Shift-[` and `Mod-Shift-]`, and Fold and Unfold all headings; not saved with the note.
+- **Typing `*`, `_`, `~`, `=`, a backtick or `$` over selected text wraps it**, as in Obsidian.
+- **Move line up and down and Duplicate line** were already CodeMirror keys (`Alt-ArrowUp/Down`, `Shift-Alt-ArrowDown`); they are now also in the palette.
+- **Pasting a URL over selected text makes a link** (it already did, through lang-markdown). **Not built: the fetched page title** for a pasted bare URL. It needs the server to fetch arbitrary web pages (a new outbound connection, with SSRF guards), which would have to be optional and off by default; left for a decision.
+- **Table editing helpers** are the Live Preview grid's (item 10); nothing new beyond the menu.
+
 **One line:** small editing aids.
 
 | Value | Effort | Depends on |
