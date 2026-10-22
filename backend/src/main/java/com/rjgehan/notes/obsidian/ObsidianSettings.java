@@ -15,6 +15,7 @@ import com.rjgehan.notes.settings.EditorSettings;
 import com.rjgehan.notes.settings.FilesSettings;
 import com.rjgehan.notes.settings.LinkFormat;
 import com.rjgehan.notes.settings.NewNoteLocation;
+import com.rjgehan.notes.settings.RemindersSettings;
 import com.rjgehan.notes.settings.Settings;
 import com.rjgehan.notes.settings.SettingsSeed;
 import com.rjgehan.notes.settings.SettingsService;
@@ -176,6 +177,8 @@ public class ObsidianSettings implements SettingsSeed {
 		/** Not an Obsidian setting: kept as it is. */
 		private final AiSettings ai;
 
+		private final RemindersSettings reminders;
+
 		Builder(Settings current) {
 			this.current = current;
 			FilesSettings f = current.files();
@@ -202,6 +205,7 @@ public class ObsidianSettings implements SettingsSeed {
 			this.readableLineLength = e.readableLineLength();
 			this.strictLineBreaks = e.strictLineBreaks();
 			this.ai = current.ai();
+			this.reminders = current.reminders();
 		}
 
 		Settings build() {
@@ -211,7 +215,8 @@ public class ObsidianSettings implements SettingsSeed {
 							this.autoUpdateLinks, this.excludedPaths),
 					new DailyNotesSettings(this.dailyFormat, this.dailyFolder, this.dailyTemplate, this.openOnStartup),
 					new TemplatesSettings(this.templatesFolder, this.dateFormat, this.timeFormat),
-					new EditorSettings(this.defaultMode, this.readableLineLength, this.strictLineBreaks), this.ai);
+					new EditorSettings(this.defaultMode, this.readableLineLength, this.strictLineBreaks), this.ai,
+					this.reminders);
 		}
 
 		private void row(String source, JsonNode value, String setting, String current, String proposed,

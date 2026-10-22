@@ -97,6 +97,32 @@ public class TaskService {
 		return this.store.catalog().requireTask(id).task();
 	}
 
+	/**
+	 * The tasks whose reminders may fire (ROADMAP item 9): open, not archived, in a list that is not archived, with at
+	 * least one reminder.
+	 */
+	public List<Task> withReminders() {
+		TaskCatalog catalog = this.store.catalog();
+		List<Task> found = new ArrayList<>();
+		for (TaskCatalog.Located located : catalog.tasks()) {
+			Task task = located.task();
+			if (task.reminders().isEmpty() || task.archived() || task.status().isClosed()) {
+				continue;
+			}
+			TaskList list = catalog.list(task.listId());
+			if (list != null && !list.archived()) {
+				found.add(task);
+			}
+		}
+		return found;
+	}
+
+	/** The task with this id, or null. */
+	public @Nullable Task find(String id) {
+		TaskCatalog.Located located = this.store.catalog().task(id);
+		return (located != null) ? located.task() : null;
+	}
+
 	// ---------------------------------------------------------------- create
 
 	/**

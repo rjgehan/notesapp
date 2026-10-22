@@ -83,8 +83,9 @@ final class SettingsCodec {
 				reader.bool(editor, "settings.editor.readableLineLength", ed.readableLineLength()),
 				reader.bool(editor, "settings.editor.strictLineBreaks", ed.strictLineBreaks()));
 		AiSettings aiSettings = reader.ai(node.get("ai"));
+		RemindersSettings remindersSettings = reader.reminders(node.get("reminders"));
 		Settings settings = new Settings(Settings.SCHEMA_VERSION, filesSettings, dailySettings, templatesSettings,
-				editorSettings, aiSettings);
+				editorSettings, aiSettings, remindersSettings);
 		return new Parsed(settings, List.copyOf(reader.errors));
 	}
 
@@ -140,6 +141,14 @@ final class SettingsCodec {
 		ai.set("excludedPaths", aiExcluded);
 		ai.put("maxContextChars", a.maxContextChars());
 		ai.put("monthlyBudgetUsd", a.monthlyBudgetUsd());
+		RemindersSettings r = settings.reminders();
+		ObjectNode reminders = group(merged, "reminders");
+		reminders.put("webPush", r.webPush());
+		reminders.put("ntfy", r.ntfy());
+		reminders.put("ntfyTitleOnly", r.ntfyTitleOnly());
+		reminders.put("inApp", r.inApp());
+		reminders.put("dailyNote", r.dailyNote());
+		reminders.put("dailyNoteTime", r.dailyNoteTime());
 		return (ObjectNode) sorted(merged);
 	}
 
@@ -314,6 +323,35 @@ final class SettingsCodec {
 				}
 			}
 			return new AiSettings(enabled, provider, model, excluded, maxContext, budget);
+		}
+
+		/**
+		 * {@code settings.reminders} (ROADMAP item 9). Like {@code settings.ai} it came after schema version 1, so a
+		 * missing group or field gets its default; a field that is present must be valid.
+		 */
+		RemindersSettings reminders(@Nullable JsonNode group) {
+			RemindersSettings d = RemindersSettings.defaults();
+			if (group == null || group.isNull()) {
+				return d;
+			}
+			if (!group.isObject()) {
+				this.errors.add(new FieldError("settings.reminders", "must be an object"));
+				return d;
+			}
+			return new RemindersSettings(optionalBool(group, "settings.reminders.webPush", d.webPush()),
+					optionalBool(group, "settings.reminders.ntfy", d.ntfy()),
+					optionalBool(group, "settings.reminders.ntfyTitleOnly", d.ntfyTitleOnly()),
+					optionalBool(group, "settings.reminders.inApp", d.inApp()),
+					optionalBool(group, "settings.reminders.dailyNote", d.dailyNote()),
+					present(group, "dailyNoteTime") ? checked(group, "settings.reminders.dailyNoteTime",
+							d.dailyNoteTime(),
+							(s) -> RemindersSettings.TIME.matcher(s).matches() ? null : "must be a time HH:mm")
+							: d.dailyNoteTime());
+		}
+
+		private boolean optionalBool(JsonNode group, String field, boolean fallback) {
+			return present(group, field.substring(field.lastIndexOf('.') + 1)) ? bool(group, field, fallback)
+					: fallback;
 		}
 
 		private static boolean present(JsonNode group, String name) {
