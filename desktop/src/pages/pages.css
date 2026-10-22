@@ -1,0 +1,133 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f6f6;
+  --panel: #ffffff;
+  --text: #1e1e1e;
+  --muted: #5c5c5c;
+  --border: #d4d4d4;
+  --accent: #7c5cff;
+  --accent-text: #ffffff;
+  --error: #c62828;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e;
+    --panel: #262626;
+    --text: #dadada;
+    --muted: #9a9a9a;
+    --border: #3a3a3a;
+    --accent: #8f76ff;
+    --error: #ff6b6b;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+main {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.brand img {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+}
+h1 {
+  font-size: 20px;
+  margin: 0;
+}
+p {
+  margin: 0 0 12px;
+}
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+label {
+  display: block;
+  font-weight: 600;
+  margin: 16px 0 4px;
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+input[type='text'],
+input[type='url'] {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+button {
+  font: inherit;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.error {
+  color: var(--error);
+  margin-top: 12px;
+}
+[hidden] {
+  display: none !important;
+}
+.center {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+.center .actions {
+  justify-content: center;
+}
+.brand-center {
+  justify-content: center;
+}
+#version {
+  margin-top: 24px;
+}

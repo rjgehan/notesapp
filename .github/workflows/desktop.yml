@@ -1,0 +1,81 @@
+name: Desktop app
+# Builds the Windows installer and the macOS dmg (ROADMAP item 41, docs/DESKTOP.md) when a
+# `desktop-v*` tag is pushed (e.g. `desktop-v1.0.1`), and attaches them to that tag's release.
+# Not on ordinary pushes: the shell rarely changes, because its UI comes from the server.
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:          # a manual dry run: tests and packages both, publishes nothing
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create the release (once)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "NotesApp desktop ${TAG#desktop-v}" \
+                 --notes "Windows installer and macOS dmg (unsigned). Install steps: docs/DESKTOP.md."
+
+  build:
+    needs: release
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: --win nsis
+            files: dist/*.exe
+          - os: macos-15
+            target: --mac dmg
+            files: dist/*.dmg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - name: Take the version from the tag
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: npm version --no-git-tag-version --allow-same-version "${TAG#desktop-v}"
+      - name: Package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # unsigned; macOS gets an ad-hoc signature only
+        run: npx electron-builder ${{ matrix.target }} --publish never
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" ${{ matrix.files }} --clobber --repo "$GITHUB_REPOSITORY"
+      - name: List the packages (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/desktop-v') }}
+        run: ls -la dist && echo "Manual run: the packages were built; push a desktop-v* tag to publish them."

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'none'; base-uri 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NotesApp — Settings</title>
+    <link rel="stylesheet" href="pages.css" />
+    <script src="setup.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <img src="icon.png" alt="" />
+        <h1 id="heading">Connect to your NotesApp</h1>
+      </div>
+      <p class="muted" id="intro">
+        Enter the address of your NotesApp server on your tailnet. Tailscale must be connected on this computer.
+      </p>
+      <form id="form" novalidate>
+        <label for="serverUrl">Server address</label>
+        <input id="serverUrl" type="url" placeholder="https://notes.your-tailnet.ts.net" autocomplete="off" spellcheck="false" required />
+        <label for="captureHotkey">Quick-capture shortcut</label>
+        <input id="captureHotkey" type="text" placeholder="CommandOrControl+Shift+Space" autocomplete="off" spellcheck="false" />
+        <p class="muted">Works from any app. Leave empty for none.</p>
+        <label class="check"><input id="launchAtLogin" type="checkbox" /> Launch NotesApp at login (in the tray)</label>
+        <p class="error" id="error" role="alert" hidden></p>
+        <div class="actions">
+          <button type="submit" class="primary" id="save">Connect</button>
+          <button type="button" id="skip" hidden>Save anyway</button>
+          <button type="button" id="cancel">Cancel</button>
+        </div>
+      </form>
+      <p class="muted" id="version"></p>
+    </main>
+  </body>
+</html>

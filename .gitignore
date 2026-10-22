@@ -21,3 +21,6 @@ backend/target/
 
 # Build worktrees used while building the roadmap
 .wt/
+
+# Desktop app build output
+desktop/dist/
