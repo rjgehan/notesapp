@@ -42,7 +42,16 @@ export interface ChoiceRequest {
   resolve(id: string | null): void;
 }
 
-export type DialogRequest = (PromptRequest | ConfirmRequest | ChoiceRequest) & { id: number };
+/** Several answers at once, any of them empty (a template's questions, DESIGN §6.12). */
+export interface FieldsRequest {
+  kind: 'fields';
+  title: string;
+  fields: { label: string; value: string }[];
+  confirmLabel?: string;
+  resolve(values: string[] | null): void;
+}
+
+export type DialogRequest = (PromptRequest | ConfirmRequest | ChoiceRequest | FieldsRequest) & { id: number };
 
 interface DialogState {
   stack: DialogRequest[];
@@ -80,4 +89,9 @@ export function confirmAction(opts: Omit<ConfirmRequest, 'kind' | 'resolve'>): P
 
 export function chooseAction<T extends string>(opts: { title: string; message: string; choices: Choice<T>[] }): Promise<T | null> {
   return push<T | null>((resolve, id) => ({ ...opts, kind: 'choice', id, resolve: resolve as (v: string | null) => void }));
+}
+
+/** The answers in field order, or null when cancelled. */
+export function promptFields(opts: Omit<FieldsRequest, 'kind' | 'resolve'>): Promise<string[] | null> {
+  return push<string[] | null>((resolve, id) => ({ ...opts, kind: 'fields', id, resolve }));
 }

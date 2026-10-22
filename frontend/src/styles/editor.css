@@ -396,6 +396,36 @@
   background: rgba(224, 172, 0, 0.5);
 }
 
+/* ---------- vim mode (DESIGN §6.36) ---------- */
+
+/* The block cursor of normal and visual mode, in the accent colour rather than vim's pink. */
+.note-editor .cm-editor .cm-fat-cursor {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.note-editor .cm-editor:not(.cm-focused) .cm-fat-cursor {
+  background: none;
+  outline: 1px solid var(--interactive-accent);
+}
+
+/* The ex command line (`:w`) and vim's `/` search prompt. */
+.cm-editor .cm-panels.cm-panels-bottom {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.cm-editor .cm-vim-panel {
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.cm-editor .cm-vim-panel input {
+  flex: 1;
+  color: var(--text-normal);
+  font: inherit;
+}
+
 /* Plain text files use a monospace face. */
 .text-view .note-editor .cm-editor,
 .text-view .note-editor .cm-editor .cm-scroller {

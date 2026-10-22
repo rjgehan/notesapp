@@ -29,6 +29,8 @@ final class SettingsCodec {
 
 	static final int MAX_EXCLUDED_PATHS = 100;
 
+	static final int MAX_FOLDER_TEMPLATES = 100;
+
 	private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
 	private SettingsCodec() {
@@ -75,7 +77,8 @@ final class SettingsCodec {
 		TemplatesSettings templatesSettings = new TemplatesSettings(
 				reader.folder(templates, "settings.templates.folder", td.folder()),
 				reader.format(templates, "settings.templates.dateFormat", td.dateFormat()),
-				reader.format(templates, "settings.templates.timeFormat", td.timeFormat()));
+				reader.format(templates, "settings.templates.timeFormat", td.timeFormat()),
+				reader.folderTemplates(templates, "settings.templates.folderTemplates", td.folderTemplates()));
 		JsonNode editor = reader.group(node, "settings.editor", "editor");
 		EditorSettings ed = defaults.editor();
 		EditorSettings editorSettings = new EditorSettings(
@@ -125,6 +128,9 @@ final class SettingsCodec {
 		templates.put("folder", t.folder());
 		templates.put("dateFormat", t.dateFormat());
 		templates.put("timeFormat", t.timeFormat());
+		ArrayNode rules = NODES.arrayNode();
+		t.folderTemplates().forEach((rule) -> rules.addObject().put("folder", rule.folder()).put("template", rule.template()));
+		templates.set("folderTemplates", rules);
 		EditorSettings e = settings.editor();
 		ObjectNode editor = group(merged, "editor");
 		editor.put("defaultMode", wire(e.defaultMode()));
@@ -319,6 +325,46 @@ final class SettingsCodec {
 		private static boolean present(JsonNode group, String name) {
 			JsonNode value = group.get(name);
 			return value != null && !value.isNull();
+		}
+
+		/**
+		 * {@code templates.folderTemplates}: optional, since files written before it existed lack it (adding a field
+		 * needs no schema bump, DESIGN §5.12). Each rule has a folder ({@code ""}: every folder) and a template path
+		 * ({@code ""}: an unused row); a folder has at most one rule.
+		 */
+		List<TemplatesSettings.FolderTemplate> folderTemplates(@Nullable JsonNode group, String field,
+				List<TemplatesSettings.FolderTemplate> fallback) {
+			JsonNode value = (group == null) ? null : group.get(field.substring(field.lastIndexOf('.') + 1));
+			if (value == null || value.isNull()) {
+				return fallback;
+			}
+			if (!value.isArray()) {
+				return invalid(field, "must be a list of folder templates", fallback);
+			}
+			if (value.size() > MAX_FOLDER_TEMPLATES) {
+				return invalid(field, "must have at most " + MAX_FOLDER_TEMPLATES + " entries", fallback);
+			}
+			List<TemplatesSettings.FolderTemplate> rules = new ArrayList<>();
+			List<String> folders = new ArrayList<>();
+			int i = 0;
+			for (JsonNode item : value.values()) {
+				String itemField = field + "[" + i++ + "]";
+				if (!item.isObject()) {
+					return invalid(itemField, "must be an object", fallback);
+				}
+				int errors = this.errors.size();
+				String folder = folder(item, itemField + ".folder", "");
+				String template = folder(item, itemField + ".template", "");
+				if (this.errors.size() > errors) {
+					return fallback;
+				}
+				if (folders.contains(folder)) {
+					return invalid(itemField + ".folder", "already has a template", fallback);
+				}
+				folders.add(folder);
+				rules.add(new TemplatesSettings.FolderTemplate(folder, template));
+			}
+			return rules;
 		}
 
 		private String checked(@Nullable JsonNode group, String field, String fallback,

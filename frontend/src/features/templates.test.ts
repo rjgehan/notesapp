@@ -6,7 +6,8 @@ import { MockVault } from '../api/mock/vault';
 import { DocumentSession } from '../sync/DocumentSession';
 import { fakeApi, sessionDeps } from '../test/fakes';
 import { dayjs } from './dates';
-import { mergeFrontmatter, renderTemplate, templateInsertion } from './templates';
+import { useDialogs } from '../state/dialogs';
+import { askPrompts, mergeFrontmatter, renderTemplate, renderTemplateOutput, templateInsertion, templatePrompts } from './templates';
 
 const now = dayjs('2026-10-16T14:03:09');
 const ctx = { title: 'Plan', now, settings: { dateFormat: 'YYYY-MM-DD', timeFormat: 'HH:mm' } };
@@ -129,5 +130,63 @@ describe('insertion point of a session (DESIGN §6.12)', () => {
     undo({ state, dispatch: (tr) => (state = tr.state) });
     expect(state.doc.toString()).toBe('one\ntwo');
     s.dispose();
+  });
+});
+
+describe('Templates v2 placeholders (ROADMAP item 30)', () => {
+  it('removes {{cursor}} and reports where the first one was', () => {
+    expect(renderTemplateOutput('# {{title}}\n\n{{cursor}}\n- {{ CURSOR }}', ctx)).toEqual({ text: '# Plan\n\n\n- ', cursor: 8 });
+    expect(renderTemplateOutput('No caret', ctx)).toEqual({ text: 'No caret', cursor: null });
+    expect(renderTemplate('a{{cursor}}b', ctx)).toBe('ab');
+  });
+
+  it('renders prompts from the answers, else their default, and never renders an answer again', () => {
+    const tpl = 'Who: {{prompt:Attendees}}\nMood: {{ prompt: Mood | fine }}\nAgain: {{prompt:Attendees|ignored}}';
+    // Unanswered (as in a capture's daily note on the server), each renders its own default.
+    expect(renderTemplate(tpl, ctx)).toBe('Who: \nMood: fine\nAgain: ignored');
+    expect(renderTemplate(tpl, { ...ctx, answers: { Attendees: 'Ann {{title}}', Mood: '' } })).toBe('Who: Ann {{title}}\nMood: \nAgain: Ann {{title}}');
+  });
+
+  it('lists each question once, with its first default', () => {
+    expect(templatePrompts('{{prompt:Topic}} {{prompt:Mood|ok}} {{prompt:Topic|x}} {{prompt:}} {{prompt: Mood |bad}}')).toEqual([
+      { question: 'Topic', initial: '' },
+      { question: 'Mood', initial: 'ok' },
+    ]);
+    expect(templatePrompts('# {{title}} {{date}}')).toEqual([]);
+  });
+
+  it('keeps the Obsidian core syntax and leaves look-alikes alone', () => {
+    expect(renderTemplate('{{prompt:}} {{cursor:1}} {{prompts:x}} {{titles}}', ctx)).toBe('{{prompt:}} {{cursor:1}} {{prompts:x}} {{titles}}');
+  });
+
+  it('asks the questions in one dialog; cancelling resolves null', async () => {
+    const asked = askPrompts('{{prompt:Topic}} {{prompt:Mood|ok}}', 'Meeting');
+    const request = useDialogs.getState().stack.at(-1);
+    expect(request?.kind).toBe('fields');
+    if (request?.kind !== 'fields') return;
+    expect(request.title).toBe('Meeting');
+    expect(request.fields).toEqual([
+      { label: 'Topic', value: '' },
+      { label: 'Mood', value: 'ok' },
+    ]);
+    request.resolve(['Roadmap', 'great']);
+    await expect(asked).resolves.toEqual({ Topic: 'Roadmap', Mood: 'great' });
+    const cancelled = askPrompts('{{prompt:Topic}}', 'Meeting');
+    const second = useDialogs.getState().stack.at(-1);
+    if (second?.kind === 'fields') second.resolve(null);
+    await expect(cancelled).resolves.toBeNull();
+    await expect(askPrompts('No questions', 'Plain')).resolves.toEqual({});
+  });
+
+  it("puts the caret at the template's {{cursor}} in the inserted body", () => {
+    const out = renderTemplateOutput('---\ntags: [x]\n---\n## Log\n{{cursor}}\nEnd', ctx);
+    const note = 'Text';
+    const ins = templateInsertion(note, out.text, { from: 4, to: 4 }, out.cursor);
+    const result = apply(note, ins.changes);
+    expect(result).toBe('---\ntags: [x]\n---\nText## Log\n\nEnd');
+    expect(result.slice(0, ins.cursor)).toBe('---\ntags: [x]\n---\nText## Log\n');
+    // A {{cursor}} in the frontmatter does not count: the caret goes after the body.
+    const inYaml = renderTemplateOutput('---\na: {{cursor}}1\n---\nB', ctx);
+    expect(templateInsertion('', inYaml.text, { from: 0, to: 0 }, inYaml.cursor).cursor).toBe('---\na: 1\n---\nB'.length);
   });
 });

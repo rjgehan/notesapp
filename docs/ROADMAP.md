@@ -958,6 +958,15 @@ Plugs into the view registry. `.canvas` is already a text kind.
 
 ### 30. Templates v2
 
+**Status: built (2026-10-21, branch `feat/templates-v2`).** DESIGN §5.11 (grammar), §5.12, §6.12; API.md §5, §8.5, §15.4.
+
+- **Prompts:** `{{prompt:Question}}` and `{{prompt:Question|default}}`. All of a template's questions are asked in one small dialog (phone keyboard: Next, Done); the same question is asked once; Cancel inserts or creates nothing.
+- **Caret:** `{{cursor}}` puts the caret there after Insert template and in a note created from a template (also a folder template and today's daily note). Only the first one counts: the editor has no multiple selections, so there are no numbered tab stops.
+- **Folder templates:** Settings › Templates lists folder → template rules (`templates.folderTemplates`, optional in older settings files). New note, a view's "New note here", the quick switcher and links to missing notes use the deepest matching folder's template; an empty folder matches everywhere; notes in the templates folder get none.
+- **New note from template here** in every folder's explorer menu.
+- Daily notes use the new engine (questions, caret). Quick capture's server-side daily template renders prompts as their defaults and drops `{{cursor}}`.
+- Obsidian's `{{title}}`, `{{date[:FMT]}}`, `{{time[:FMT]}}` are unchanged. Left for later: the `/` menu's template entry (item 31).
+
 **One line:** templates applied automatically by folder, `{{prompt:Question}}` placeholders, `{{cursor}}` placement, and a "new note from template" picker in each folder's menu. There are no arbitrary-JavaScript templates.
 
 | Value | Effort | Depends on |
@@ -1049,6 +1058,8 @@ Scheduling uses `ts-fsrs` 5.4.2 (MIT). Review state is stored in `.notesapp/srs.
 | L | M | 4 or 13 |
 
 ### 36. Vim mode
+
+**Status:** built (on `feat/vim`): DESIGN §6.36. Settings › This device › **Vim key bindings**, off by default, adds vim keys to the note and plain-text editors through `@replit/codemirror-vim` 6.4.0 (MIT), a lazy chunk (122 kB, 39 kB gzip) loaded only once an editor mounts with it on. Disabled with a coarse pointer (phones, tablets), so touch typing is never affected. The status bar shows the mode (NORMAL, INSERT, VISUAL…). `:w` saves now, `:q` leaves the editor (no tabs or panes to close; notes autosave), `:wq` and `:x` do both. Key order: the global hotkeys (switcher, palette, search, quick add, every key chosen on this device) still run first, then the editor's command keys (`Mod-B/I/K/L/E/S/F/Enter`), then vim, then CodeMirror's keymaps; normal-mode keys carry no `Mod` or `Alt`, so they can never be app hotkeys. A command given another key under Settings › Hotkeys hands its old key to vim (removing Find's key gives `Ctrl-F` back for paging). `Esc` also closes the completion list and keeps `Esc` then `Tab` leaving the editor. Not built: a `jk` escape mapping or a vimrc (not asked for; vim's own `:imap jk <Esc>` works for the page's life); small editors (inline title, properties, task editor, sheet cells) are plain fields and have no vim.
 
 **One line:** a desktop-only, per-device toggle using `@replit/codemirror-vim` 6.4.0 (MIT).
 

@@ -10,7 +10,9 @@ import { newIdempotencyKey } from '../state/clientId';
 import { toast } from '../state/toasts';
 import { applyWriteResult } from '../sync/treePatch';
 import { dayjs, type Dayjs } from './dates';
+import { placeTemplateCursor } from './folderTemplates';
 import { openPath } from './navigation';
+import type { TemplateOutput } from './templates';
 import { isNotePath, isWithin, joinPath, lastSegment } from './paths';
 import { toastError } from './errors';
 
@@ -67,7 +69,8 @@ export function atTimeOf(day: Dayjs, now: Dayjs): Dayjs {
 
 /**
  * "Open today's daily note" (API.md §15.2): open it, or create it (201 and 409 both open it).
- * Resolves true when a note was opened; false when it failed (a toast says why).
+ * Resolves true when a note was opened; false when it failed (a toast says why) or the template's
+ * questions were cancelled.
  */
 export function openTodaysDailyNote(now: Dayjs = dayjs()): Promise<boolean> {
   return openDailyNote(now);
@@ -87,12 +90,15 @@ export async function openDailyNote(day: Dayjs): Promise<boolean> {
     openPath(hit.path);
     return true;
   }
-  let content = '';
+  let out: TemplateOutput = { text: '', cursor: null };
   if (s.template) {
     try {
       // Templates (and the YAML library behind them) load on first use.
       const { renderTemplateFile } = await import('./templates');
-      content = await renderTemplateFile(s.template, lastSegment(name), now);
+      const rendered = await renderTemplateFile(s.template, lastSegment(name), now);
+      // Cancelling the template's questions creates nothing.
+      if (!rendered) return false;
+      out = rendered;
     } catch (e) {
       if (isProblem(e, 'not-found')) toast('Daily note template not found', { kind: 'error' });
       else {
@@ -101,10 +107,12 @@ export async function openDailyNote(day: Dayjs): Promise<boolean> {
       }
     }
   }
+  const content = out.text;
   try {
     const result = await api.createFile({ path, content, onConflict: 'fail' }, { idempotencyKey: newIdempotencyKey() });
     applyWriteResult(queryClient, result, content);
     openPath(result.file.path, null, { newNote: true });
+    void placeTemplateCursor(result.file.path, out);
     return true;
   } catch (e) {
     if (isProblem(e, 'already-exists') || isProblem(e, 'case-collision')) {

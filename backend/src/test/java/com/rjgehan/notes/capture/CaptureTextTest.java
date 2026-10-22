@@ -66,4 +66,13 @@ class CaptureTextTest {
 			.isEqualTo("# 2026-10-16\n2026-10-16 14:03 Friday {{other}} $1");
 	}
 
+	@Test
+	void promptsRenderTheirDefaultAndTheCursorGoes() {
+		ZonedDateTime now = ZonedDateTime.of(LocalDateTime.of(2026, 10, 16, 14, 3), ZoneId.of("UTC"));
+		TemplatesSettings settings = new TemplatesSettings("Templates", "YYYY-MM-DD", "HH:mm");
+		String template = "{{prompt:Mood|ok }} [{{ Prompt: Who }}] {{cursor}}{{prompt:}} {{cursor:1}}";
+		assertThat(CaptureText.renderTemplate(template, "2026-10-16", now, settings))
+			.isEqualTo("ok [] {{prompt:}} {{cursor:1}}");
+	}
+
 }

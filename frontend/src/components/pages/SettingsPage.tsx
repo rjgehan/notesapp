@@ -10,7 +10,7 @@ import { api } from '../../api/endpoints';
 import { useMe, useSettings, useStatus, useTree } from '../../api/hooks';
 import { queryClient } from '../../api/queryClient';
 import { queryKeys, STALE } from '../../api/queryKeys';
-import type { Settings, SettingsResponse } from '../../api/types';
+import type { FolderTemplate, Settings, SettingsResponse } from '../../api/types';
 import { unsupportedTokens } from '../../features/dates';
 import { formatBytes, formatDateTime, formatRelative } from '../../features/format';
 import { formatLimit } from '../../features/largeFiles';
@@ -18,6 +18,7 @@ import { mirrorSummary } from '../../features/mirror';
 import { openPath } from '../../features/navigation';
 import { displayName, newNameError, pathSafetyError } from '../../features/paths';
 import { DEFAULT_SETTINGS } from '../../features/settings';
+import { vimAvailable } from '../../editor/vimMode';
 import { clearOfflineCopies, noteCache } from '../../offline/offlineStore';
 import { setOfflineMedia } from '../../pwa/serviceWorker';
 import { pageBuild } from '../../state/buildCheck';
@@ -65,6 +66,19 @@ function formatError(value: string): string | null {
   return bad ? `The token “${bad}” formats differently from Obsidian; avoid it` : null;
 }
 
+/** API.md §5: at most 100 rules, valid paths (an empty template is an unused row), one rule per folder. */
+function folderTemplatesError(rules: FolderTemplate[]): string | null {
+  if (rules.length > 100) return 'At most 100 folder templates';
+  const seen = new Set<string>();
+  for (const [i, r] of rules.entries()) {
+    const err = folderError(r.folder) ?? (r.template === '' ? null : pathSafetyError(r.template));
+    if (err) return `Folder template ${i + 1}: ${err}`;
+    if (seen.has(r.folder)) return `Folder template ${i + 1}: “${r.folder || 'Every folder'}” already has a template`;
+    seen.add(r.folder);
+  }
+  return null;
+}
+
 function validate(s: Settings): Record<string, string> {
   const errors: Record<string, string> = {};
   const add = (key: string, msg: string | null) => {
@@ -79,6 +93,7 @@ function validate(s: Settings): Record<string, string> {
   add('templatesFolder', folderError(s.templates.folder));
   add('dateFormat', s.templates.dateFormat.length < 1 || s.templates.dateFormat.length > 100 ? 'Use 1 to 100 characters' : null);
   add('timeFormat', s.templates.timeFormat.length < 1 || s.templates.timeFormat.length > 100 ? 'Use 1 to 100 characters' : null);
+  add('folderTemplates', folderTemplatesError(s.templates.folderTemplates));
   const paths = s.files.excludedPaths;
   if (paths.length > 100) add('excludedPaths', 'At most 100 paths');
   else add('excludedPaths', paths.map((p) => pathSafetyError(p)).find((e) => e) ?? null);
@@ -339,6 +354,41 @@ function TemplatesSection({ settings: s, set, disabled, errors }: VaultSectionPr
       <Row label="Time format" description="Used by {{time}}." error={errors.timeFormat} warning={unsupportedTokens(t.timeFormat) ? formatError(t.timeFormat) : null}>
         <TextSetting label="Template time format" value={t.timeFormat} disabled={disabled} onChange={(v) => templates({ timeFormat: v })} />
       </Row>
+      <FolderTemplates settings={s} set={set} disabled={disabled} errors={errors} />
+    </>
+  );
+}
+
+/** Folder templates (ROADMAP item 30): a folder and a template per row. */
+function FolderTemplates({ settings: s, set, disabled, errors }: VaultSectionProps) {
+  const t = s.templates;
+  const rules = t.folderTemplates;
+  const update = (next: FolderTemplate[], immediate = false) => set({ ...s, templates: { ...t, folderTemplates: next } }, immediate);
+  const change = (i: number, patch: Partial<FolderTemplate>) => update(rules.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  return (
+    <>
+      <Row
+        label="Folder templates"
+        description={<>A new note created in a folder starts from its template; the deepest folder wins. An empty folder means every folder.</>}
+        error={errors.folderTemplates}
+      >
+        <button type="button" className="button" disabled={disabled || rules.length >= 100} onClick={() => update([...rules, { folder: '', template: '' }], true)}>
+          Add folder template
+        </button>
+      </Row>
+      {rules.length > 0 && (
+        <ul className="folder-templates">
+          {rules.map((r, i) => (
+            <li key={i} className="folder-template">
+              <TextSetting label={`Folder of folder template ${i + 1}`} value={r.folder} disabled={disabled} placeholder="Every folder" trim onChange={(v) => change(i, { folder: v })} />
+              <TextSetting label={`Template of folder template ${i + 1}`} value={r.template} disabled={disabled} placeholder="Templates/Meeting.md" trim onChange={(v) => change(i, { template: v })} />
+              <button type="button" className="icon-button" aria-label={`Remove folder template ${i + 1}`} title="Remove" disabled={disabled} onClick={() => update(rules.filter((_, j) => j !== i), true)}>
+                <Trash2 size={16} aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }
@@ -648,6 +698,16 @@ function DeviceSection() {
       </Row>
       <Row label="Load remote images" description="Off: images from other sites show a placeholder until tapped.">
         <Toggle label="Load remote images" checked={prefs.loadRemoteImages} onChange={(loadRemoteImages) => prefs.update({ loadRemoteImages })} />
+      </Row>
+      <Row
+        label="Vim key bindings"
+        description={
+          vimAvailable()
+            ? 'Vim keys in the editor. :w saves, :q leaves the editor; the app’s hotkeys keep working. The mode shows in the status bar.'
+            : 'Needs a keyboard with a mouse or trackpad; not used on a touch screen.'
+        }
+      >
+        <Toggle label="Vim key bindings" checked={prefs.vimMode && vimAvailable()} disabled={!vimAvailable()} onChange={(vimMode) => prefs.update({ vimMode })} />
       </Row>
       <Row label="Keep recent notes for offline reading" description={<OfflineCopiesInfo enabled={prefs.offlineNotes} />}>
         <Toggle label="Keep recent notes for offline reading" checked={prefs.offlineNotes} onChange={(offlineNotes) => setOfflineCopies(offlineNotes)} />
