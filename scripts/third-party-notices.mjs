@@ -8,7 +8,13 @@
 // clipper/package-lock.json (dev-only packages and type definitions never reach the bundles).
 // Backend: the compile and runtime dependencies Maven resolves
 // for backend/pom.xml, with licences read from their POMs in the local Maven repository (following
-// parent POMs). Needs Node 24 and the backend's Maven wrapper; uses no npm packages.
+// parent POMs).
+//
+// Packages that are in a lockfile but never reach a bundle because the bundler aliases them to a stub
+// are listed in NOT_BUNDLED below, with the alias that replaces them; add one there whenever a
+// vite.config.ts (or clipper build) alias stubs a package out, and check with a production build that
+// none of its code is left (for elkjs: no "org.eclipse.elk" in frontend/dist/assets).
+// Needs Node 24 and the backend's Maven wrapper; uses no npm packages.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -49,6 +55,15 @@ function licenceFromFile(packageDir) {
   return undefined;
 }
 
+/** Lockfile packages stubbed out by a bundler alias, per project folder: never shipped, so not listed. */
+const NOT_BUNDLED = {
+  frontend: {
+    // Mermaid's optional ELK layout (EPL-2.0): vite.config.ts aliases elkjs/lib/elk.bundled.js to src/render/rich/elkStub.ts.
+    elkjs: 'aliased to src/render/rich/elkStub.ts in frontend/vite.config.ts',
+  },
+  clipper: {},
+};
+
 function npmPackages(dir) {
   const lock = JSON.parse(readFileSync(join(root, dir, 'package-lock.json'), 'utf8'));
   const byName = new Map();
@@ -56,6 +71,7 @@ function npmPackages(dir) {
     if (!key.startsWith('node_modules/') || entry.dev || entry.devOptional || entry.link) continue;
     const name = entry.name ?? key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
     if (name.startsWith('@types/')) continue; // type definitions only, no code in the bundle
+    if (NOT_BUNDLED[dir]?.[name]) continue; // stubbed out by a bundler alias, never shipped
     const manifestPath = join(root, dir, key, 'package.json');
     const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
     const licence = entry.license ?? declaredLicence(manifest) ?? licenceFromFile(join(root, dir, key)) ?? 'UNKNOWN';
