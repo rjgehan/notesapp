@@ -320,6 +320,27 @@ stateDiagram-v2
 \`\`\`
 `;
 
+const BUDGET = `# Budget
+
+| Item      | Cost        |
+|-----------|-------------|
+| Rent      | 1450        |
+| Utilities | 210         |
+| Internet  | 65          |
+| **Total** | =SUM(B2:B4) |
+
+^budget
+%% formats: B=currency %%
+
+A year of rent: \`=budget!B2*12\`; everything: \`=budget!B5*12\`; an error: \`=1/0\`.
+
+| Share | Of total |
+|---|---|
+| Rent | =budget!B2/budget!B5 |
+
+%% formats: B=percent %%
+`;
+
 const DATA_JSON = `{
   "name": "notesapp",
   "kind": "text file",
@@ -361,6 +382,7 @@ export function seedFiles(): SeedFile[] {
     { path: 'Ideas/Plan B.md', content: PLAN_B, age: 90 },
     { path: 'Rich Markdown.md', content: RICH, age: 10 },
     { path: 'Ideas/Formulas.md', content: FORMULAS, age: 95 },
+    { path: 'Ideas/Budget.md', content: BUDGET, age: 96 },
     { path: 'Reading/Book list.md', content: BOOKS, age: 60 * 24 * 3 },
     { path: 'Imported/Windows note.md', content: WINDOWS_NOTE, age: 60 * 24 * 10 },
     { path: 'Templates/Daily note.md', content: DAILY_TEMPLATE, age: 60 * 24 * 30 },

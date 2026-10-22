@@ -17,6 +17,7 @@ import { parsedPast, topLevel, wholeLines } from '../topLevel';
 
 export { historyEditor, isTableCell, refreshTables, tableCellFormatters, tableCellSetup, type TableCellFormatter, type TableGridData } from './facets';
 export type { TableBlock } from './grid';
+export { redrawTableDisplays } from './grid';
 export { cellLanguage, type CellDisplay } from './render';
 
 interface Tables {

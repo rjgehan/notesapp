@@ -51,7 +51,7 @@ DESIGN.md has the details.
 |---|---|---|---|---|
 | 1 | Nightly and off-site backups *(declined for v1; recommended first after v1)* | H | S | |
 | 10 | **Live Preview editing: no visible Markdown, tables as a grid** *(your pick, 2026-10-17)* | H | L | 3 helps |
-| 39 | **Formulas in notes: spreadsheet math in tables and text** *(new)* | H | M | 10a; item 6's engine decision |
+| 39 | **Formulas in notes: spreadsheet math in tables and text** *(new; built 2026-10-21, `feat/formulas`)* | H | M | 10a; item 6's engine decision |
 | 40 | **Scripts in notes: blocks that run and show their result** *(new)* | H | L | 10; 39 for formula functions |
 | 2 | Mirror the vault's git history to a private GitHub repo | M | S | |
 | 3 | Rich Markdown pack: callouts, code highlighting, math, Mermaid *(declined for v1; **built 2026-10-21**)* | H | M | |
@@ -181,7 +181,9 @@ Known leftovers, low severity, left for later:
 - **10b:** inline images and embeds, the frontmatter block, footnotes and comments; the reading view becomes "lock editing".
 - **10c:** iPhone polish, and a performance pass on long notes (a 10,000-line test note).
 
-### 39. Formulas in notes: spreadsheet math in tables and text *(new, 2026-10-17)*
+### 39. Formulas in notes: spreadsheet math in tables and text *(new, 2026-10-17; built 2026-10-21, `feat/formulas`)*
+
+**Built** (39a and 39b, DESIGN §6.38): formulas in table cells with a formula bar, inline formulas, named tables (`^budget`), per-column formats in a `%% formats: B=currency C=percent %%` line, and `formulas: false`. Tables without an id are `Table1`, `Table2`, … Numbers show in the sheets' Automatic format, with thousands separators from five digits on. Formulas compute in the note's own Live Preview and locked view; embedded notes show them as typed.
 
 **One line:** Excel- and Google-Sheets-style formulas inside ordinary notes. A table cell containing `=SUM(B2:B5)` shows its result, and inline `` `=1450*12` `` shows `17,400`. The file keeps the formula you typed.
 

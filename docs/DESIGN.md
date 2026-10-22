@@ -1813,6 +1813,7 @@ frontend/src/
 │   │                         registerEventHandler; builtins.ts registers every v1 view, panel and command through them
 ├── calendar/               ROADMAP item 14 (§6.32): model.ts, repeats.ts, prefs.ts, api.ts, useCalendarData.ts,
 │                             routes.ts, actions.ts, register.ts, ui/ (the /x/calendar page and the Calendar panel)
+├── formulas/                 ROADMAP item 39 (§6.38): model.ts (pure), engine.ts (lazy chunk, HyperFormula), load.ts
 ├── flashcards/               ROADMAP item 34 (§6.34): parse.ts, ids.ts, reviews.ts, schedule.ts (ts-fsrs), deck.ts,
 │                             session.ts, stats.ts, store.ts (records, outbox), register.ts, ui/ (the /x/flashcards page)
 ├── habits/                   ROADMAP item 35 (§6.35): model.ts, progress.ts, frontmatterEdit.ts, write.ts, actions.ts,
@@ -2224,7 +2225,7 @@ The model records the table's **style**: `padded` (every row has every cell and 
 
 **Insertions from outside the editor.** A template or an attachment inserted while a cell is open goes after the table, never into its text (`DocumentSession.insertionRange`).
 
-**Formulas later (ROADMAP 39).** The `tableCellFormatters` facet takes functions that, given a table's contents (`rows[0]` is the header) and alignments, return each cell's display instead of its Markdown (`{text, className?, title?}`), or null. The grid renders a display in a `cm-lp-cell-value` span; editing the cell shows its text (the formula). Formatters run when a table renders; dispatching `refreshTables` redraws every table (for an engine that has finished loading). Columns are A, B, … in the cells' labels.
+**Formulas (ROADMAP 39, §6.38).** The `tableCellFormatters` facet takes functions that, given a table's contents (`rows[0]` is the header), alignments, start (`from`) and the note's state, return each cell's display instead of its Markdown (`{text, className?, title?}`), or null. The grid renders a display in a `cm-lp-cell-value` span; editing the cell shows its text (the formula), and the display of the cell being edited shows in the grid's **formula bar** (`cm-lp-formula-bar`: the cell's name, `B5`, and its result, updated as you type). Formatters run when a table renders; dispatching `refreshTables` redraws every table (for an engine that has finished loading), and `redrawTableDisplays(view)` redraws only the displays (an edit of another table changed a result). Columns are A, B, … in the cells' labels.
 
 **Inserting a table.** "Insert table" (the palette, and the phone toolbar's table button) inserts an empty table with a header row and two columns and rows (`newTableText`, padded), on the caret's line when it is blank or after it, with the blank lines that keep it apart from the text around it, and opens its first cell (in source mode the caret goes into it). In a table cell it only says it cannot. On the phone, the toolbar shows Previous and Next cell in a cell, and hides the tools that insert whole lines.
 
@@ -3720,6 +3721,27 @@ The target's text comes from its open session when there is one, else from the f
 **Backlinks.** Mentions that link to a block show a `^id` chip, and above them **Linked blocks** lists each block of the note that other notes link to, with its current text and the number of links; a click scrolls to the block.
 
 **Compatibility.** Ids round-trip byte for byte (the editor shows them as written; nothing reformats them), new ids use Obsidian's shape, and the report (§6.29) no longer lists block references, only links to blocks that are missing.
+
+### 6.38 Formulas in notes (ROADMAP item 39)
+
+Spreadsheet math in ordinary notes, with item 6's engine (HyperFormula under GPL-3.0, §6.21), so a function behaves the same in a note table and in a `.sheet` file. The file always holds exactly what was typed: results are computed from the text each time it changes, and are never written back (search finds the formula text).
+
+**Tables.** Every top-level Markdown table (a Live Preview grid, §6.6.1) is a sheet: columns A, B, …; the header is row 1, so the first data row is row 2. A cell whose text starts with `=` (not `==`, which is a highlight) is a formula: `=B2*C2`, `=SUM(B2:B5)`, `=AVERAGE(B:B)`, `=IF(C3>100, "over", "ok")`. Other cells go to the engine as a spreadsheet reads typed text, after their wrapping Markdown (`**1450**`) and thousands separators (`1,450`) are removed: numbers, `10%`, `$5`, dates, `TRUE`, text. Live Preview and locked notes show the result in the cell (`cm-formula-value`, the formula on hover); clicking the cell edits the formula, and the grid's formula bar shows the cell's name and its result, recalculated as you type. Errors show the usual codes in the error colour (`#DIV/0!`, `#REF!`, `#NAME?`, `#VALUE!`, `#CYCLE!`, `#ERROR!` for a formula that cannot be read), with the engine's message (or a short explanation) on hover. An array result (`=SEQUENCE(3)`) spills into the empty cells below and beside it. Source mode shows the text as typed.
+
+**Inline.** Inline code that starts with `=` is a formula: `` `=1450*12` `` shows `17,400` while the selection is elsewhere (a click shows the code, as inline math does); a locked note always shows the result. Obsidian shows it as code, so the file reads sensibly there. An inline expression the engine cannot read, or a Dataview inline query (`` `= this.file.name` ``: a name with a dot), stays as code. Bare cell references in an inline formula have no table to refer to; it names one (below).
+
+**Named tables and formats (39b).** A table named with an Obsidian block id, a `^budget` line under it (after a blank line, since a line right under a table is one of its rows; the same line `[[Note#^budget]]` links to, §6.37), is the sheet `budget` everywhere in the note: `` `=budget!B5` ``, `` `=SUM(budget!B2:B4)*12` ``, or a cell of another table. Tables without an id are `Table1`, `Table2`, … in note order (a name an id already took is skipped); these names change when tables are added above, so named tables are the reliable way. A comment line `%% formats: B=currency C=percent D=#,##0.0 %%` under the table (after the blank line, before or after the id line) gives columns a number format: a preset name (`number`, `integer`, `decimal`, `percent`, `currency`, `currencyRounded`, `financial`, `scientific`, `date`, `dateUs`, `dateLong`, `time`, `datetime`, `duration`) or a format code of the sheets (§6.21.8). It applies to the column's numbers, typed or computed (the header aside). Obsidian hides the comment. Without a format a result shows in the format of its type (a date as `yyyy-mm-dd`, a percentage, a currency amount) or in the sheets' Automatic format with thousands separators from five digits on (`1725`, `17,400`).
+
+**Off switch.** `formulas: false` (or `no`, `off`) in a note's frontmatter turns its formulas off: cells and code that start with `=` show as typed.
+
+**Implementation** (`formulas/`, `editor/livePreview/formulas.ts`).
+
+- `formulas/model.ts` (pure): what counts as a formula, the engine input of a cell, the id and formats lines, sheet names, the off switch and number display.
+- `formulas/engine.ts` is a **lazy chunk** (`formulas/load.ts`; HyperFormula is shared with the sheets' chunk). It loads the first time a note with a formula (or a formats line) shows; notes without formulas never load it. `computeNote(model)` builds one HyperFormula instance (item 6's `engineConfig()`) with one sheet per table and a hidden `_inline` sheet; inline formulas become cells of `_inline` as they are first shown, so their result type (date, percent) is known too. `evaluate()` gives raw values to scripts (item 40b, §6.39).
+- `formulaField` (a state field) keeps the note's tables as the engine sees them: their cells (from the grid's own table model), block ids and formats. Tables an edit did not touch are reused, so typing in a long note slices no table; the model, and with it its `version`, changes only when a table's text, id or formats change, or the frontmatter switch does. Results are computed once per model (a `WeakMap`), on first use.
+- The `tableCellFormatters` entry shows results only in tables that hold a formula or a formats line; plain tables keep their Markdown rendering. When the version changes, every grid of the note redraws its displays (`redrawTableDisplays`), so a table that reads another one updates when that one is edited.
+- A view plugin decorates the visible inline formulas (replace widgets, `cm-formula-inline`), and requests the engine when a formula is visible; when it has loaded, the note's tables and inline formulas redraw.
+- Formulas compute in the note's own editor (Live Preview and locked). Embedded notes and rendered blocks (§6.7) show formulas as typed.
 
 ---
 
