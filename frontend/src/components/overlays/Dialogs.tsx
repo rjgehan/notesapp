@@ -1,6 +1,6 @@
-// PromptDialog, ConfirmDialog and the choice dialog, rendered from the dialog stack (eager).
+// PromptDialog, ConfirmDialog, the choice dialog and the fields dialog, rendered from the dialog stack (eager).
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { useDialogs, type ChoiceRequest, type ConfirmRequest, type PromptRequest } from '../../state/dialogs';
+import { useDialogs, type ChoiceRequest, type ConfirmRequest, type FieldsRequest, type PromptRequest } from '../../state/dialogs';
 import { Modal } from './Modal';
 
 function PromptDialog({ request }: { request: PromptRequest }) {
@@ -132,6 +132,71 @@ function ChoiceDialog({ request }: { request: ChoiceRequest }) {
   );
 }
 
+/**
+ * Several answers in one form (a template's questions): stacked fields, so the phone keyboard's
+ * Next moves down them and Done (Enter in the last one) answers. Answers may be empty.
+ */
+function FieldsDialog({ request }: { request: FieldsRequest }) {
+  const [values, setValues] = useState(() => request.fields.map((f) => f.value));
+  const inputs = useRef<(HTMLInputElement | null)[]>([]);
+
+  useLayoutEffect(() => {
+    const first = inputs.current[0];
+    if (!first) return;
+    first.focus();
+    first.select();
+  }, [request]);
+
+  const last = request.fields.length - 1;
+  return (
+    <Modal label={request.title} onClose={() => request.resolve(null)}>
+      <form
+        className="dialog"
+        onSubmit={(e) => {
+          e.preventDefault();
+          request.resolve(values);
+        }}
+      >
+        <h2 className="dialog-title">{request.title}</h2>
+        {request.fields.map((field, i) => (
+          <label key={i} className="field">
+            <span className="field-label">{field.label}</span>
+            <input
+              ref={(el) => {
+                inputs.current[i] = el;
+              }}
+              className="text-input"
+              value={values[i]}
+              onChange={(e) => {
+                const next = [...values];
+                next[i] = e.target.value;
+                setValues(next);
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing || i === last) return;
+                // Enter (the keyboard's Next) moves on to the next question.
+                e.preventDefault();
+                inputs.current[i + 1]?.focus();
+              }}
+              autoComplete="off"
+              autoCapitalize="sentences"
+              enterKeyHint={i === last ? 'done' : 'next'}
+            />
+          </label>
+        ))}
+        <div className="dialog-actions">
+          <button type="button" className="button" onClick={() => request.resolve(null)}>
+            Cancel
+          </button>
+          <button type="submit" className="button button-primary">
+            {request.confirmLabel ?? 'OK'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Dialogs() {
   const stack = useDialogs((s) => s.stack);
   return (
@@ -141,6 +206,8 @@ export function Dialogs() {
           <PromptDialog key={d.id} request={d} />
         ) : d.kind === 'confirm' ? (
           <ConfirmDialog key={d.id} request={d} />
+        ) : d.kind === 'fields' ? (
+          <FieldsDialog key={d.id} request={d} />
         ) : (
           <ChoiceDialog key={d.id} request={d} />
         ),

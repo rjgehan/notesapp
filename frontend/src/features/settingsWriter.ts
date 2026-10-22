@@ -83,11 +83,8 @@ export class SettingsWriter {
     this.clearTimer();
     if (!this.deps.valid(next)) return;
     if (immediate) void this.write(next);
-    else
-      this.timer = setTimeout(() => {
-        this.timer = null;
-        void this.flush();
-      }, WRITE_DEBOUNCE_MS);
+    // The timer stays set until flush() runs: flush() writes only an edit that is still waiting.
+    else this.timer = setTimeout(() => void this.flush(), WRITE_DEBOUNCE_MS);
   }
 
   /** Writes a debounced edit now (leaving Settings, hiding the page); resolves when settled. */

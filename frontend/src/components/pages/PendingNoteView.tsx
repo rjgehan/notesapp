@@ -57,7 +57,12 @@ export function PendingNoteView({ pending }: { pending: PendingNote }) {
               }}
               onSelect={(e) => updatePendingSelection(pending.id, e.currentTarget.selectionStart, e.currentTarget.selectionEnd)}
               onKeyDown={onKeyDown}
-              onBlur={commit}
+              onBlur={(e) => {
+                // A template's questions (a dialog over this view) take the focus for a moment and
+                // give it back here when they close: the title is still being typed.
+                if (e.relatedTarget instanceof Element && e.relatedTarget.closest('[role="dialog"]')) return;
+                commit();
+              }}
             />
           </h1>
           {error && (

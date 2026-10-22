@@ -396,6 +396,36 @@
   background: rgba(224, 172, 0, 0.5);
 }
 
+/* ---------- vim mode (DESIGN §6.36) ---------- */
+
+/* The block cursor of normal and visual mode, in the accent colour rather than vim's pink. */
+.note-editor .cm-editor .cm-fat-cursor {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.note-editor .cm-editor:not(.cm-focused) .cm-fat-cursor {
+  background: none;
+  outline: 1px solid var(--interactive-accent);
+}
+
+/* The ex command line (`:w`) and vim's `/` search prompt. */
+.cm-editor .cm-panels.cm-panels-bottom {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.cm-editor .cm-vim-panel {
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.cm-editor .cm-vim-panel input {
+  flex: 1;
+  color: var(--text-normal);
+  font: inherit;
+}
+
 /* Plain text files use a monospace face. */
 .text-view .note-editor .cm-editor,
 .text-view .note-editor .cm-editor .cm-scroller {
@@ -409,4 +439,544 @@
   font-style: italic;
   font-size: 0.9em;
   padding-inline: 2px;
+}
+
+/* ---------- Live Preview (DESIGN §6.6.1) ---------- */
+
+/* Links show as their text. Wikilinks are underlined on hover, web links always, as in the
+   reading view; unresolved links keep v1's faded, dashed look (.cm-unresolved). */
+.cm-live-preview .cm-lp-link {
+  text-decoration-line: none;
+}
+
+.cm-live-preview .cm-lp-link:hover {
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
+}
+
+.cm-live-preview .cm-lp-url,
+.cm-live-preview .cm-lp-url .cm-url,
+.cm-live-preview .cm-lp-link .cm-link {
+  color: var(--link);
+}
+
+.cm-live-preview .cm-lp-url,
+.cm-live-preview .cm-lp-url .cm-url {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent);
+}
+
+.cm-live-preview .cm-unresolved .cm-lp-link .cm-link {
+  color: var(--link-unresolved);
+}
+
+.cm-live-preview .cm-lp-subpath {
+  color: var(--text-faint);
+}
+
+/* A locked note follows links and tags on a plain click. */
+.cm-lp-locked .cm-lp-link,
+.cm-lp-locked .cm-hashtag {
+  cursor: pointer;
+}
+
+/* Bullets and task boxes fill the list's indent; wrapped lines hang under the text. */
+.cm-lp-bullet,
+.cm-lp-task-box {
+  display: inline-block;
+  box-sizing: border-box;
+  padding-right: 0.45em;
+  text-align: right;
+  text-indent: 0;
+  white-space: nowrap;
+}
+
+.cm-lp-bullet-dot {
+  color: var(--text-faint);
+}
+
+.cm-lp-task-box {
+  cursor: pointer;
+}
+
+.cm-lp-task-box .cm-lp-checkbox {
+  pointer-events: none;
+}
+
+.note-editor .cm-editor .cm-line.cm-lp-indent {
+  padding-left: var(--lp-indent) !important;
+  text-indent: calc(-1 * var(--lp-indent));
+}
+
+.note-editor .cm-editor .cm-line.cm-lp-indent.cm-quote-line {
+  padding-left: calc(14px + var(--lp-indent)) !important;
+}
+
+.cm-live-preview .cm-lp-task-done {
+  color: var(--text-muted);
+}
+
+.cm-live-preview .cm-lp-list-number,
+.cm-live-preview .cm-lp-list-number .cm-formatting {
+  color: var(--text-muted);
+}
+
+.cm-lp-rule {
+  display: inline-block;
+  width: 100%;
+  height: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  vertical-align: middle;
+}
+
+@media (pointer: coarse) {
+  .cm-lp-checkbox {
+    width: 1.2em;
+    height: 1.2em;
+  }
+}
+
+/* A locked note reads like the reading view: no active-line band where the caret was. */
+.note-editor .cm-editor.cm-lp-locked .cm-activeLine {
+  background: transparent;
+}
+
+/* ---------- formatting (DESIGN §6.6.1) ---------- */
+
+/* Formats switched on at the cursor, for the text typed next: a faint mark after the caret. */
+.cm-pending-format {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 1px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--background-modifier-hover);
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  font-size: 0.7em;
+  line-height: 1.3;
+  vertical-align: 0.15em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cm-pending-strong {
+  font-weight: 700;
+}
+
+.cm-pending-emphasis {
+  font-style: italic;
+}
+
+.cm-pending-strikethrough {
+  text-decoration: line-through;
+}
+
+.cm-pending-highlight {
+  background: var(--text-highlight-bg);
+}
+
+.cm-pending-code {
+  font-family: var(--font-mono);
+}
+
+/* The toolbar over selected text (desktop). */
+.cm-editor .cm-tooltip.cm-format-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  overflow: visible;
+}
+
+.cm-editor .cm-tooltip.cm-format-toolbar[hidden] {
+  display: none;
+}
+
+.cm-format-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.cm-format-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.cm-format-button[aria-pressed='true'] {
+  background: var(--background-modifier-active-hover);
+  color: var(--interactive-accent);
+}
+
+/* ---------- tables as grids (DESIGN §6.6.1) ---------- */
+
+/* The reading view's table look. The scroller scrolls a wide table sideways, and leaves room on
+   the table's top and left edges for the row and column grips. */
+.cm-lp-table {
+  position: relative;
+  /* As wide as the note, never wider: a wide table scrolls inside, rather than widening every line. */
+  width: 0;
+  min-width: 100%;
+  margin: 0.4em 0;
+  white-space: normal;
+  /* Words stay whole (the editor breaks long ones anywhere); a cell grows to its longest word instead. */
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.cm-lp-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 10px 0 2px 10px;
+  margin: -10px 0 -2px -10px;
+}
+
+.cm-lp-table table {
+  border-collapse: collapse;
+}
+
+.cm-lp-cell {
+  position: relative;
+  min-width: 3em;
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  vertical-align: top;
+  text-align: left;
+}
+
+th.cm-lp-cell {
+  background: var(--background-secondary);
+  font-weight: 600;
+}
+
+/* An empty cell keeps the height of a line. */
+.cm-lp-cell-content:empty::before {
+  content: '\200b';
+}
+
+.cm-lp-table.is-editable .cm-lp-cell {
+  cursor: text;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.cm-lp-cell.is-editing:focus-within {
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+.cm-lp-embed-source {
+  color: var(--text-muted);
+}
+
+/* The editor of a cell being edited blends into the cell. */
+.note-editor .cm-lp-cell .cm-editor {
+  background: transparent;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+.note-editor .cm-lp-cell .cm-editor .cm-scroller {
+  line-height: inherit;
+}
+
+.note-editor .cm-lp-cell .cm-editor .cm-content,
+.note-editor .cm-lp-cell .cm-editor .cm-line {
+  padding: 0;
+}
+
+/* Row and column grips: drag to reorder, click for the row's or column's menu. They show for the
+   row and column under the mouse, and for the cell being edited. */
+.cm-lp-grip {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary-alt);
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity 120ms ease;
+}
+
+.cm-lp-grip::before {
+  content: '';
+  width: 6px;
+  height: 10px;
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.3px);
+  background-size: 3px 3.33px;
+}
+
+.cm-lp-grip-row {
+  top: 50%;
+  left: 0;
+  width: 14px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+}
+
+.cm-lp-grip-column {
+  top: 0;
+  left: 50%;
+  width: 22px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+}
+
+.cm-lp-grip-column::before {
+  width: 10px;
+  height: 6px;
+  background-size: 3.33px 3px;
+}
+
+.cm-lp-table.is-editable tr:hover > .cm-lp-cell > .cm-lp-grip-row,
+.cm-lp-table.is-editable tr:has(> .cm-lp-cell.is-editing) > .cm-lp-cell > .cm-lp-grip-row,
+.cm-lp-table.is-editable th.is-column-hover > .cm-lp-grip-column,
+.cm-lp-table.is-editable th.is-column-active > .cm-lp-grip-column {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cm-lp-grip:hover {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.cm-lp-table.is-dragging,
+.cm-lp-table.is-dragging * {
+  cursor: grabbing;
+}
+
+/* Where a dragged row or column goes. */
+.cm-lp-table-drop {
+  position: absolute;
+  z-index: 3;
+  border-radius: 1px;
+  background: var(--interactive-accent);
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .cm-lp-grip-row {
+    width: 18px;
+    height: 30px;
+  }
+
+  .cm-lp-grip-column {
+    width: 30px;
+    height: 18px;
+  }
+
+  /* A 44 px target around the grip. */
+  .cm-lp-grip::after {
+    content: '';
+    position: absolute;
+    inset: -13px;
+  }
+}
+
+/* ---------- images, embeds, footnotes, comments, code fences, properties (ROADMAP 10b) ---------- */
+
+/* An embed shows as the reading of the note shows it (reading.css, through .markdown-rendered).
+   Images flow with the text; media, PDFs and notes take the line's width. */
+.cm-lp-embed {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  white-space: normal;
+}
+
+.cm-lp-embed.markdown-rendered {
+  contain: none;
+}
+
+.cm-lp-embed-note,
+.cm-lp-embed-pdf,
+.cm-lp-embed-video,
+.cm-lp-embed-audio,
+.cm-lp-embed-text,
+.cm-lp-embed-other {
+  /* Other files embed through their view (a task list, a spreadsheet, a canvas, a drawing). */
+  width: 100%;
+}
+
+.cm-lp-embed img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-s);
+  vertical-align: bottom;
+}
+
+.cm-lp-embed .internal-embed {
+  margin: 0.25em 0;
+}
+
+.cm-lp-remote-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px dashed var(--background-modifier-border-hover);
+  border-radius: var(--radius-m);
+  color: var(--text-muted);
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.cm-lp-remote-image::before {
+  content: 'Load remote image: ';
+  color: var(--text-faint);
+}
+
+/* A footnote's number; its text shows on hover or a tap. */
+.cm-lp-footnote {
+  padding: 0 1px;
+  color: var(--link);
+  font-size: 0.75em;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.cm-lp-footnote.is-missing {
+  color: var(--text-faint);
+}
+
+.cm-lp-footnote-label {
+  margin-right: 0.35em;
+  color: var(--text-muted);
+}
+
+.cm-editor .cm-tooltip.cm-lp-footnote-tooltip,
+.cm-editor .cm-tooltip .cm-lp-footnote-tooltip {
+  max-width: min(28em, 90vw);
+  padding: 6px 10px;
+  font-size: 0.9em;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cm-lp-footnote-tooltip.is-missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* A code block's hidden fences are slim lines; the opening one shows the language. */
+.note-editor .cm-editor .cm-line.cm-lp-fence-line {
+  font-size: 0.7em;
+  line-height: 1.6;
+}
+
+.cm-lp-fence {
+  float: right;
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  user-select: none;
+}
+
+/* The properties block (the frontmatter) and hidden comment blocks. */
+.cm-lp-properties {
+  padding-top: 2px;
+  font-family: var(--font-interface);
+  white-space: normal;
+}
+
+.cm-lp-properties .properties {
+  margin-bottom: 12px;
+}
+
+.cm-lp-hidden-comment {
+  height: 0;
+  overflow: hidden;
+}
+
+/* Widgets are not text: a long press on the phone never selects inside them (ROADMAP 10c). */
+.cm-lp-footnote,
+.cm-lp-footnote-label,
+.cm-lp-fence,
+.cm-lp-bullet,
+.cm-lp-task-box,
+.cm-lp-remote-image {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@media (pointer: coarse) {
+  /* A footnote's number is small; its tap target is not. */
+  .cm-lp-footnote {
+    position: relative;
+    padding: 0 3px;
+  }
+
+  .cm-lp-footnote::after {
+    content: '';
+    position: absolute;
+    inset: -14px -8px;
+  }
+
+  .cm-lp-remote-image {
+    min-height: 44px;
+  }
+
+  .cm-lp-properties .properties-heading {
+    min-height: 44px;
+  }
+
+  .cm-lp-properties .properties-edit {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ---------- callouts, math and Mermaid (ROADMAP items 3 and 10) ---------- */
+
+/* A rendered rich block: the reading look (reading.css and rich.css, through .markdown-rendered),
+   in the flow of the note's lines. */
+.cm-lp-rich {
+  padding: 2px 0;
+  white-space: normal;
+  cursor: text;
+}
+
+.cm-lp-rich.markdown-rendered {
+  contain: none;
+}
+
+.cm-lp-rich > :first-child {
+  margin-top: 0;
+}
+
+.cm-lp-rich > :last-child {
+  margin-bottom: 0;
+}
+
+.cm-lp-locked .cm-lp-rich {
+  cursor: auto;
+}
+
+/* Inline math: typeset in the line; display math (`$$x$$` in a paragraph) on a line of its own. */
+.cm-lp-math {
+  white-space: normal;
+}
+
+.cm-lp-math.is-display {
+  display: block;
+  margin: 6px 0;
+  text-align: center;
 }

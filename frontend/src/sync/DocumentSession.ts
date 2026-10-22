@@ -4,13 +4,14 @@
 // The live content is CodeMirror's Text inside the session's EditorState (LF-only). Strings are
 // produced only for saves and drafts. `baseText` is the content at `version`, kept for merges.
 import { history } from '@codemirror/commands';
-import { EditorState, Transaction, type ChangeSpec, type Extension, type StateEffect } from '@codemirror/state';
+import { EditorState, Transaction, type Annotation, type ChangeSpec, type Extension, type StateEffect } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { errorMessage, isProblem, isStorageProblem, isTransient, isVersionConflict, type ApiError } from '../api/client';
 import type { Endpoints } from '../api/endpoints';
 import type { FileEntry, TextFile, Version, WriteResult } from '../api/types';
 import { markdownNoteLanguage } from '../editor/language';
-import { remoteChanges, remoteTransaction, sessionEdit, waitForComposition } from '../editor/remote';
+import { tableBlocks } from '../editor/livePreview/table';
+import { isComposing, remoteChanges, remoteTransaction, sessionEdit, textReplace, waitForComposition } from '../editor/remote';
 import { trackedRange, trackedRangesField, trackRange, untrackRange } from '../editor/tracked';
 import { addUpload, endUpload, pendingUploads, uploadsField } from '../editor/uploads';
 import { detectEol, fromLf, toLf, type Eol } from '../features/eol';
@@ -334,7 +335,22 @@ export class DocumentSession {
     const state = this.editorState;
     if (!this.selectionKnown) return { from: state.doc.length, to: state.doc.length };
     const { from, to } = state.selection.main;
+    // In Live Preview the selection rests on a table's open cell: a template or an attachment goes
+    // after the table, never into its text (the table's edge rules keep it apart).
+    const table = tableBlocks(state).find((t) => (from > t.from && from < t.to) || (to > t.from && to < t.to));
+    if (table) return { from: table.to, to: table.to };
     return { from, to };
+  }
+
+  /**
+   * Puts the caret at `anchor` without editing or focusing (a new note's `{{cursor}}`, DESIGN
+   * §6.12): an editor mounted later starts there, a mounted one moves there.
+   */
+  select(anchor: number): void {
+    const spec = { selection: { anchor: Math.min(anchor, this.editorState.doc.length) } };
+    if (this.view) this.view.dispatch(spec);
+    else this.state = this.state.update(spec).state;
+    this.selectionKnown = true;
   }
 
   /** Reconfigured state for a new editor mount (keeps doc, selection and undo history). */
@@ -358,11 +374,11 @@ export class DocumentSession {
    */
   applyEdit(
     changes: ChangeSpec,
-    opts: { selection?: { anchor: number; head?: number }; userEvent?: string; effects?: StateEffect<unknown>[] } = {},
+    opts: { selection?: { anchor: number; head?: number }; userEvent?: string; effects?: StateEffect<unknown>[]; annotations?: Annotation<unknown>[] } = {},
   ): void {
     if (!this.isEditable()) return;
     this.settleSerializer();
-    const spec = { changes, selection: opts.selection, effects: opts.effects, userEvent: opts.userEvent ?? 'input', scrollIntoView: !!opts.selection };
+    const spec = { changes, selection: opts.selection, effects: opts.effects, annotations: opts.annotations, userEvent: opts.userEvent ?? 'input', scrollIntoView: !!opts.selection };
     // An ordinary undoable edit: a view with its own model applies it as one undo step.
     this.replacedUndoable = true;
     this.remoteChanges++;
@@ -382,7 +398,7 @@ export class DocumentSession {
   setText(text: string): void {
     if (!this.isEditable()) return;
     this.settleSerializer();
-    this.applyEdit(remoteChanges(this.editorState.doc.toString(), text));
+    this.applyEdit(remoteChanges(this.editorState.doc.toString(), text), { annotations: [textReplace.of(true)] });
   }
 
   /**
@@ -500,7 +516,7 @@ export class DocumentSession {
    */
   private async replaceRemote(text: string, seq: number): Promise<'applied' | 'edited' | 'superseded'> {
     const view = this.view;
-    if (view && view.composing) {
+    if (view && isComposing(view)) {
       const before = this.changes;
       await waitForComposition(view);
       if (this.disposed || seq !== this.reconcileSeq) return 'superseded';
@@ -537,7 +553,7 @@ export class DocumentSession {
   }
 
   private replaceBuffer(text: string, undoable: boolean): void {
-    const annotations = [sessionEdit.of(true), Transaction.userEvent.of('input.replace')];
+    const annotations = [sessionEdit.of(true), textReplace.of(true), Transaction.userEvent.of('input.replace')];
     if (!undoable) annotations.push(Transaction.addToHistory.of(false));
     const spec = { changes: remoteChanges(this.editorState.doc.toString(), text), annotations };
     if (this.view) this.view.dispatch(spec);

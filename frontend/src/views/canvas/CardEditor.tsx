@@ -8,10 +8,12 @@ import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder, tooltips } from '@codemirror/view';
 import { useLayoutEffect, useRef } from 'react';
 import { currentSettings, currentTree, fetchNoteMeta, fetchTags } from '../../api/hooks';
+import { openContextMenu } from '../../components/overlays/openContextMenu';
 import { clearActiveEditor, setActiveEditor } from '../../editor/activeEditor';
 import { headingSource, tagSource, wikilinkSource } from '../../editor/completion';
 import { noteContext, type NoteContext } from '../../editor/context';
-import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, toggleItalic } from '../../editor/editorCommands';
+import { followLinkAtCursor, toggleCheckbox } from '../../editor/editorCommands';
+import { formatting, toggleBold, toggleItalic, toggleLink } from '../../editor/formatting';
 import { lineClassPlugin, obsidianHighlight } from '../../editor/highlight';
 import { markdownNoteLanguage } from '../../editor/language';
 import { pasteAndDrop } from '../../editor/pasteAndDrop';
@@ -69,6 +71,10 @@ export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur 
         });
       },
       linkTo: (path) => linkTo(path, canvasPath),
+      showMenu: openContextMenu,
+      // A card is styled source: no Live Preview widgets to draw.
+      renderEmbed: () => () => {},
+      renderProperties: () => () => {},
     };
     const view: EditorView = new EditorView({
       parent,
@@ -85,6 +91,7 @@ export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur 
           // Pasted or dropped images become attachments of the canvas, embedded in the card.
           pasteAndDrop,
           closeBrackets(),
+          formatting(),
           autocompletion({ override: [wikilinkSource, headingSource, tagSource], icons: false }),
           // Completions draw on the page, unscaled and unclipped by the card.
           tooltips({ parent: document.body }),
@@ -103,7 +110,7 @@ export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur 
             { key: 'Mod-l', run: toggleCheckbox, preventDefault: true },
             { key: 'Mod-b', run: toggleBold, preventDefault: true },
             { key: 'Mod-i', run: toggleItalic, preventDefault: true },
-            { key: 'Mod-k', run: insertMarkdownLink, preventDefault: true },
+            { key: 'Mod-k', run: toggleLink, preventDefault: true },
           ]),
           keymap.of([...closeBracketsKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
           EditorView.updateListener.of((u) => {

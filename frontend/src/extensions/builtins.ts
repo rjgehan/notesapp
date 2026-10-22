@@ -41,7 +41,9 @@ import { confirmDelete, promptNewFolder } from '../components/explorer/rowAction
 import { activeEditor } from '../editor/activeEditor';
 import { insertWikilink } from '../editor/completion';
 import { headingsFromState } from '../editor/outline';
-import { followLinkAtCursor, insertMarkdownLink, toggleBold, toggleCheckbox, toggleItalic } from '../editor/editorCommands';
+import { followLinkAtCursor, toggleCheckbox } from '../editor/editorCommands';
+import { setHeading, toggleBold, toggleBulletList, toggleHeading, toggleHighlight, toggleInlineCode, toggleItalic, toggleLink, toggleNumberedList, toggleQuote, toggleStrikethrough } from '../editor/formatting';
+import { historyEditor, insertTable } from '../editor/livePreview/table';
 import { pickAndInsertAttachments } from '../features/attachments';
 import { currentBookmarks, isFileBookmarked, promptNewGroup, toggleFileBookmark, toggleSearchBookmark } from '../features/bookmarkStore';
 import { findSearchBookmarks } from '../features/bookmarks';
@@ -53,7 +55,7 @@ import { toastError } from '../features/errors';
 import { copyLink, createNote, downloadFile, nameWithExtension, newNoteFolder, renameEntry, validateNewName } from '../features/fileOps';
 import { navigateTo, openSearch } from '../features/navigation';
 import { mirrorConfigured, pushMirrorNow } from '../features/mirror';
-import { toggleNoteMode } from '../features/noteMode';
+import { toggleNoteMode, toggleSourceMode } from '../features/noteMode';
 import { basenameOf, folderOf } from '../features/paths';
 import { promptText } from '../state/dialogs';
 import { toggleTheme } from '../state/prefs';
@@ -91,8 +93,8 @@ function editorCommand(id: string, name: string, run: (view: NonNullable<ReturnT
       if (view) {
         run(view);
         // Back to the text from the palette or toolbar, unless the command moved the focus into
-        // the editor itself (the find panel's search field).
-        if (!view.dom.contains(document.activeElement)) view.focus();
+        // the editor itself (the find panel's search field, which a table cell's is the note's).
+        if (!historyEditor(view).dom.contains(document.activeElement)) view.focus();
       }
     },
   });
@@ -148,7 +150,7 @@ export function registerBuiltins(): void {
     match: (e) => (e.path.toLowerCase().endsWith('.md') ? 3 : 0),
     icon: FileText,
     textual: true,
-    modes: ['edit', 'read'],
+    modes: ['live', 'source', 'locked'],
     load: () => import('../views/markdown/MarkdownView'),
     loadEmbed: () => import('../render/NoteEmbed'),
     create: { label: 'note', extension: 'md', initialContent: () => '' },
@@ -251,7 +253,10 @@ export function registerBuiltins(): void {
   });
 
   // ---------- editor ----------
-  registerCommand({ id: 'editor.toggleMode', name: 'Toggle reading/editing view', hotkey: 'Mod-e', run: toggleNoteMode, when: (c) => c.activePath !== null && isMarkdownViewPath(c.activePath) });
+  const onNote = (c: { activePath: string | null }) => c.activePath !== null && isMarkdownViewPath(c.activePath);
+  // Mod-E outside the note's text; in the text it is inline code, and in a locked note it unlocks (DESIGN §6.6.1).
+  registerCommand({ id: 'editor.toggleMode', name: 'Toggle lock editing', hotkey: 'Mod-e', run: toggleNoteMode, when: onNote });
+  registerCommand({ id: 'editor.toggleSource', name: 'Toggle source mode', run: toggleSourceMode, when: onNote });
   registerCommand({
     id: 'editor.save',
     name: 'Save now',
@@ -266,9 +271,19 @@ export function registerBuiltins(): void {
   editorCommand('editor.toggleCheckbox', 'Toggle checklist status', toggleCheckbox, 'Mod-l');
   editorCommand('editor.bold', 'Toggle bold', toggleBold, 'Mod-b');
   editorCommand('editor.italic', 'Toggle italic', toggleItalic, 'Mod-i');
-  editorCommand('editor.insertLink', 'Insert Markdown link', insertMarkdownLink, 'Mod-k');
+  editorCommand('editor.strikethrough', 'Toggle strikethrough', toggleStrikethrough, 'Mod-Shift-x');
+  editorCommand('editor.highlight', 'Toggle highlight', toggleHighlight, 'Mod-Shift-h');
+  editorCommand('editor.inlineCode', 'Toggle inline code', toggleInlineCode, 'Mod-e');
+  editorCommand('editor.insertLink', 'Insert or remove link', toggleLink, 'Mod-k');
+  for (let level = 1; level <= 6; level++) editorCommand(`editor.heading${level}`, `Toggle heading ${level}`, toggleHeading(level));
+  editorCommand('editor.headingNone', 'Remove heading', (v) => setHeading(v, 0));
+  editorCommand('editor.bulletList', 'Toggle bulleted list', toggleBulletList);
+  editorCommand('editor.numberedList', 'Toggle numbered list', toggleNumberedList);
+  editorCommand('editor.quote', 'Toggle quote', toggleQuote);
   editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
-  editorCommand('editor.find', 'Find/replace in current note', openSearchPanel, 'Mod-f');
+  editorCommand('editor.insertTable', 'Insert table', insertTable);
+  // In a table cell, find searches the note.
+  editorCommand('editor.find', 'Find/replace in current note', (v) => openSearchPanel(historyEditor(v)), 'Mod-f');
   // Voice notes (ROADMAP item 33, DESIGN §6.30): recorded into the open note at its cursor.
   registerCommand({
     id: 'voice.record',

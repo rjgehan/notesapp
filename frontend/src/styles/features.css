@@ -1163,6 +1163,9 @@ mark.match {
   right: auto;
   z-index: 90;
   max-width: calc(100vw - 16px);
+  /* A long menu (a table cell's) scrolls rather than leaving the screen. */
+  max-height: calc(var(--vvh, 100dvh) - 16px);
+  overflow-y: auto;
 }
 
 .menu-separator {
@@ -2139,4 +2142,37 @@ mark.match {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/* ---------- folder templates (Settings › Templates, ROADMAP item 30) ---------- */
+
+.folder-templates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-template {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 599px) {
+  .folder-template {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .folder-template > :nth-child(2) {
+    grid-column: 1;
+  }
+
+  .folder-template > :nth-child(3) {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+  }
 }

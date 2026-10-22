@@ -1,10 +1,11 @@
 // Explorer row menu items (DESIGN §6.15): new note/folder here and the views' create items,
 // rename, move, delete, copy link, file history and download.
-import { Copy, Download, FilePlus, FolderInput, FolderPlus, History, Pencil, Star, StarOff, Trash } from 'lucide-react';
+import { Copy, Download, FilePlus, FolderInput, FolderPlus, History, LayoutTemplate, Pencil, Star, StarOff, Trash } from 'lucide-react';
 import type { FileEntry } from '../../api/types';
 import { findFolderBookmarks } from '../../features/bookmarks';
 import { currentBookmarks, isFileBookmarked, toggleFileBookmark, toggleFolderBookmark } from '../../features/bookmarkStore';
 import { copyLink, createFolder, createNote, deleteEntry, downloadFile, validateNewName } from '../../features/fileOps';
+import { newNoteFromTemplateIn } from '../../features/folderTemplates';
 import { activePath, openPath } from '../../features/navigation';
 import { displayName, folderOf } from '../../features/paths';
 import { confirmAction, promptText } from '../../state/dialogs';
@@ -61,6 +62,7 @@ export function rowMenuItems(row: RowTarget, startRename: () => void): MenuEntry
     }));
   const items: MenuEntry[] = [
     ...creates,
+    { id: 'new-from-template', label: 'New note from template here', icon: <LayoutTemplate size={16} />, run: () => newNoteFromTemplateIn(folder) },
     { id: 'new-folder', label: 'New folder here', icon: <FolderPlus size={16} />, run: () => void promptNewFolder(folder) },
     'separator',
     { id: 'rename', label: 'Rename', icon: <Pencil size={16} />, run: startRename },

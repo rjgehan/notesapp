@@ -217,6 +217,11 @@ body.is-resizing {
   cursor: default;
 }
 
+/* A toggle that is on (lock editing, source mode). */
+.icon-button[aria-pressed='true'] {
+  color: var(--interactive-accent);
+}
+
 /* ---------- sidebars and panels ---------- */
 
 .sidebar {
@@ -1161,4 +1166,11 @@ body.is-resizing {
     transition: none;
     animation: none;
   }
+}
+
+/* Vim mode (DESIGN §6.36): NORMAL, INSERT, VISUAL… */
+.status-vim {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--text-normal);
 }

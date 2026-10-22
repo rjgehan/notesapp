@@ -38,7 +38,7 @@ NotesApp is a self-hosted, single-user notes web app modelled closely on Obsidia
 - Tabs and split panes.
 - Rich Markdown: Mermaid, math, callouts, code syntax highlighting in reading view. (`==highlight==` and `%%comments%%` are core Obsidian syntax and are in v1, §6.7.) *Built after v1 as ROADMAP item 3: §6.7.1.*
 - Nightly or offsite backups. Git history inside the volume plus the manual backup of §7.9 are the only safety nets in v1 (see goal 2). Built since as ROADMAP item 1 (§7.10).
-- Obsidian-style Live Preview (WYSIWYG) editing. v1 uses styled source mode plus a separate reading view.
+- Obsidian-style Live Preview (WYSIWYG) editing. v1 uses styled source mode plus a separate reading view. (Built as ROADMAP item 10: §6.6.1; the reading view is now locked Live Preview, §6.7.)
 - Multiple users, permissions, app-level login. The tailnet is the auth boundary.
 - Plugins, Canvas, Dataview-style queries, publishing.
 
@@ -1120,10 +1120,12 @@ Obsidian's date formats are moment.js tokens, and "today" must be in the *user's
 **Placeholder grammar.** This is binding and is implemented in `frontend/src/features/templates.ts`.
 
 ```
-placeholder := "{{" WS* name ( ":" format )? WS* "}}"
-name        := "title" | "date" | "time"                 (case-insensitive)
+placeholder := "{{" WS* ( name ( ":" format )? | "cursor" | "prompt:" question ( "|" default )? ) WS* "}}"
+name        := "title" | "date" | "time"                 (case-insensitive, as are "cursor" and "prompt")
 format      := any chars except "}"                      (a moment.js format string, rendered with dayjs)
-regex       := /\{\{\s*(title|date|time)(?::([^}]*))?\s*\}\}/gi
+question    := any chars except "}" and "|", not blank   (trimmed)
+default     := any chars except "}"                      (trimmed)
+regex       := /\{\{\s*(?:(title|date|time)(?::([^}]*))?|(cursor)|prompt:([^}|]*)(?:\|([^}]*))?)\s*\}\}/gi
 ```
 
 | Placeholder | Renders to |
@@ -1132,7 +1134,11 @@ regex       := /\{\{\s*(title|date|time)(?::([^}]*))?\s*\}\}/gi
 | `{{date}}` | `now` formatted with `settings.templates.dateFormat` (default `YYYY-MM-DD`) |
 | `{{time}}` | `now` formatted with `timeFormat` (default `HH:mm`) |
 | `{{date:FMT}}` / `{{time:FMT}}` | `now` formatted with `FMT` |
+| `{{cursor}}` | Nothing; the first one marks where the caret goes (ROADMAP item 30) |
+| `{{prompt:Question}}` / `{{prompt:Question\|default}}` | The answer the user gave to `Question` (§6.12), or `default` (or nothing) when nobody answers |
 | Any other `{{...}}` | Left untouched |
+
+The first three are Obsidian's core Templates plugin and render exactly as before; `cursor` and `prompt` are this app's (there are no JavaScript templates). Rendering is one pass over the LF text, so an answer or a title that contains `{{…}}` is never rendered again. The server renders the same grammar for a capture that creates the daily note (API.md §8.5), where prompts take their defaults and `{{cursor}}` is removed.
 
 The date token mapping table (moment, dayjs, and java.time for future server-side use) is in §6.12.
 
@@ -1166,16 +1172,19 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 | `templates` | `folder` | `Templates` |
 | | `dateFormat` | `YYYY-MM-DD` |
 | | `timeFormat` | `HH:mm` |
+| | `folderTemplates` | `[]` (a list of `{folder, template}`; optional in the file, ROADMAP item 30) |
 | `editor` | `defaultMode` | `edit` |
 | | `readableLineLength` | `true` |
-| | `strictLineBreaks` | `false` (as in Obsidian, a single newline renders as a line break in reading view) |
+| | `strictLineBreaks` | `false` (as in Obsidian, a single newline renders as a line break; since ROADMAP 10b this affects embedded notes, the rich blocks of Live Preview (§6.6.1) and rich paste only, §6.7) |
 | `ai` (§5.25; optional in the file and in requests, see API.md §5) | `enabled` | `false`: nothing is sent to Anthropic until it is on |
 | | `model` | `claude-sonnet-5-5` (also `claude-opus-5-5`, `claude-haiku-5-5`) |
 | | `excludedPaths` | `["Private"]` (never sent; `files.excludedPaths` never are either) |
 | | `maxContextChars` | `60000` (4,000 to 400,000) |
 | | `monthlyBudgetUsd` | `5` |
 
-**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on) and `loadRemoteImages` (default on). They are edited under Settings, "This device". Other per-device state also stays in `localStorage`: command keys (`notesapp:hotkeys`, Settings, "Hotkeys", §6.25), recent files (`notesapp:recentFiles`) and collapsed bookmark groups (§6.23).
+**Per-device preferences** live in `localStorage` (`notesapp:prefs`), not in the vault, because they differ between the phone and the PC: the theme (`dark`, `light` or `system`), `spellcheck` (default on), `autocorrect` (default on), `loadRemoteImages` (default on), `offlineNotes` (default on, §6.26), `vimMode` (default off, §6.36) and `syntaxVisibility` (`hide-all`, the default, or `reveal-at-cursor`: how Live Preview shows Markdown markup, §6.6.1). They are edited under Settings, "This device". Other per-device state also stays in `localStorage`: command keys (`notesapp:hotkeys`, Settings, "Hotkeys", §6.25), recent files (`notesapp:recentFiles`) and collapsed bookmark groups (§6.23).
+
+`editor.defaultMode` keeps its two values: `edit` now opens notes in Live Preview, `read` locked (the reading view, §6.6.1). No enum value was added, so the settings `schemaVersion` is unchanged.
 
 ### 5.13 Identity
 
@@ -1756,6 +1765,7 @@ These versions were verified on 2026-10-16. The lockfile pins them.
 | UI state | `zustand` 5.0.15 |
 | Editor | CodeMirror 6: state 6.7.6, view 6.43.14, commands, language, lang-markdown 6.5.2, language-data, lang-yaml, autocomplete, search, merge 6.12.2; `@lezer/markdown` 1.8.0, `@lezer/highlight`, `@lezer/common` |
 | Reading view | markdown-it 15.0.3 (bundled types), `@mdit/plugin-tasklist` 1.1.3, `@mdit/plugin-footnote` 1.1.2, `@mdit/plugin-mark` (same @mdit release line; exact version pinned at scaffold), dompurify 3.4.17. Rich Markdown (ROADMAP item 3, §6.7.1), pinned exactly: `@mdit/plugin-tex` 1.1.2 (math parsing only), katex 0.19.0, mermaid 12.2.0 |
+| Rich paste (ROADMAP 10) | turndown 7.2.4 (MIT) and `@joplin/turndown-plugin-gfm` 1.0.68 (MIT; the maintained fork of turndown's own GFM plugin, whose last release is from 2018), pinned exactly, in a lazy chunk (§6.6.1); `@types/turndown` 5.0.6 (dev) |
 | Utilities | dayjs 1.11.23 (+ plugins), fuzzysort 4.0.2 (always `threshold: 0`), `yaml` 2.9.1 for client-side frontmatter merge |
 | Flashcards (ROADMAP item 34) | `ts-fsrs` 5.4.2 (MIT, no dependencies), pinned exactly, in the flashcards page's lazy chunk (§6.34) |
 | Drawings (ROADMAP item 5) | `@excalidraw/excalidraw` 0.18.1 (MIT; peer React 17–19; a lazy chunk with self-hosted fonts, §6.8.1), `lz-string` 1.5.0 (MIT) for Obsidian Excalidraw's compressed-json blocks. Both pinned exactly. |
@@ -1764,7 +1774,7 @@ These versions were verified on 2026-10-16. The lockfile pins them.
 | Tests | Vitest 5.0.5, jsdom 30.1.3, Testing Library (react 16.3.3, dom 10.4.2, user-event 14.6.8, jest-dom 7.0.1), `fake-indexeddb` (dev only; version pinned at scaffold) for the drafts store |
 | Lint | ESLint 10.13 flat config generated by `npm create vite@latest frontend -- --template react-ts --eslint` (typescript-eslint 8.71.2, react-hooks 7.1.1, react-refresh 0.5.7) |
 
-The `package.json` dependency set is exactly the research list plus `"yaml": "^2.9.1"`, `@mdit/plugin-mark` and (dev) `fake-indexeddb`. Drawings (ROADMAP item 5) added `@excalidraw/excalidraw` and `lz-string`, and spreadsheets (item 6) `hyperformula` and `@glideapps/glide-data-grid` (§6.21), pinned exactly. The graph view (item 16, §6.28) added `d3-force` 3.0.0 (ISC; with `d3-dispatch`, `d3-quadtree` and `d3-timer` 3.0.1, ISC) and (dev) `@types/d3-force` 3.0.10 (MIT). `package.json` declares `"license": "GPL-3.0-only"`. No virtualization, DOM-morphing or IndexedDB wrapper library is added; the small amounts of code they would replace are written by hand (§6.7, §6.9, §6.15). The scripts are `dev`, `build` (`tsc -b && vite build`), `lint` (`eslint .`), `test` (`vitest run`) and `preview`.
+The `package.json` dependency set is exactly the research list plus `"yaml": "^2.9.1"`, `@mdit/plugin-mark` and (dev) `fake-indexeddb`. Drawings (ROADMAP item 5) added `@excalidraw/excalidraw` and `lz-string`, and spreadsheets (item 6) `hyperformula` and `@glideapps/glide-data-grid` (§6.21), pinned exactly. The graph view (item 16, §6.28) added `d3-force` 3.0.0 (ISC; with `d3-dispatch`, `d3-quadtree` and `d3-timer` 3.0.1, ISC) and (dev) `@types/d3-force` 3.0.10 (MIT). Rich paste (item 10) added turndown and its GFM plugin, and (dev) `@types/turndown`. `package.json` declares `"license": "GPL-3.0-only"`. No virtualization, DOM-morphing or IndexedDB wrapper library is added; the small amounts of code they would replace are written by hand (§6.7, §6.9, §6.15). The scripts are `dev`, `build` (`tsc -b && vite build`), `lint` (`eslint .`), `test` (`vitest run`) and `preview`.
 
 **Lockfile.** `package-lock.json` is generated from a clean tree (delete `node_modules` and any lockfile, then `npm install`). Vite 8's Rolldown and Oxc are native binaries installed through optional per-platform packages, and npm can otherwise keep only the platform packages of the machine that wrote the lockfile (npm/cli#4828). CI asserts that the Linux binding is present (§7.5).
 
@@ -1811,7 +1821,7 @@ frontend/src/
 ├── sw/                       the service worker: core.ts (pure decisions), sw.ts (built to dist/sw.js by vite-plugin-sw.ts)
 ├── state/
 │   ├── ui.ts                 zustand: sidebars, active panel tabs, overlays, drawer, sheet, widths, desktop search query
-│   ├── prefs.ts              per-device preferences (theme, spellcheck, autocorrect, loadRemoteImages) in localStorage
+│   ├── prefs.ts              per-device preferences (theme, spellcheck, autocorrect, loadRemoteImages, syntaxVisibility) in localStorage
 │   ├── buildCheck.ts         compares X-Notes-Build / hello.buildSha with import.meta.env.VITE_BUILD_SHA (§6.18)
 │   └── clientId.ts           per-page-load id (crypto.randomUUID, getRandomValues fallback)
 ├── extensions/               EXTENSION POINTS (§6.8): registerView, registerPage, registerPanel, registerCommand,
@@ -1829,7 +1839,7 @@ frontend/src/
 │   │                         pdfLib.ts (loads PDF.js), controller.ts, pinch.ts, thumbnails.ts, prefs.ts, PdfView.tsx and
 │   │                         PdfEmbed.tsx (lazy), pdfjs-viewer.css (PDF.js's layer rules), pdf.css
 │   ├── FileView.tsx          route target: picks descriptor, lazy-loads it, error boundary
-│   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, mode toggle, save status), PropertiesTable.tsx
+│   ├── markdown/             MarkdownView.tsx, NoteHeader.tsx (inline title, source and lock toggles, save status), PropertiesTable.tsx
 │   ├── ImageView.tsx, MediaView.tsx, TextView.tsx, UnsupportedView.tsx
 │   ├── sheet/                register.ts (the descriptor, main bundle); SheetView, SheetEditor, SheetGrid, FormulaBar,
 │   │                         SheetTabs, SheetDialogs, ChartsPane, importExport, gridModel, theme, useSheetDocument
@@ -1840,9 +1850,14 @@ frontend/src/
 │   ├── completion.ts         [[ / [[Note# / [[# / # completion sources
 │   ├── editorSetup.ts        noteExtensions(): the full extension list (§6.6)
 │   ├── editorCommands.ts     toggle checkbox, bold, italic, insert link, follow link
+│   ├── vimMode.ts            vim's compartment, the editor command keys facet, the mode store (§6.36)
+│   ├── vim.ts                vim mode's lazy chunk: @replit/codemirror-vim, ex commands, key order (§6.36)
 │   ├── smartPunctuation.ts   input filter that undoes iOS smart quotes and dashes in frontmatter and code
 │   ├── unresolved.ts         decoration for links the client resolver cannot resolve
 │   ├── outline.ts            headings from the live Lezer tree (Outline panel, [[# completion)
+│   ├── livePreview/          Live Preview (§6.6.1): model.ts (markup from the Lezer tree), decorations.ts, widgets.ts,
+│   │                         index.ts (the extension: view plugin, atomic ranges, cursor and deletion rules, link clicks),
+│   │                         table/ (tables as grids: model.ts, render.ts, grid.ts, facets.ts, index.ts)
 │   ├── NoteEditor.tsx        React host for an EditorView
 │   ├── historyDiff.ts        unifiedMergeView for history and conflict compare (lazy)
 │   ├── remote.ts             applyRemoteText() (minimal diff, composition-safe)
@@ -1851,7 +1866,9 @@ frontend/src/
 │   ├── render.ts             markdown-it pipeline (§6.7)
 │   ├── rich/                 rich Markdown pack (§6.7.1): callouts, math, Mermaid, code; index.ts is the public API
 │   ├── patch.ts              per-block keyed DOM patching (keeps embeds alive across re-renders)
-│   ├── ReadingView.tsx       delegated click/change handlers
+│   ├── interaction.ts        clicks in rendered Markdown (links, tags, remote-image placeholders)
+│   ├── liveEmbeds.tsx        Live Preview's embeds and properties block (NoteContext.renderEmbed, renderProperties)
+│   ├── liveRich.ts           Live Preview's callouts, `$$` math, Mermaid and inline math (NoteContext.renderMarkdown, renderMath)
 │   └── embeds.tsx            media elements; everything else through the view's loadEmbed (notes, drawings, PDFs, sheets, canvases)
 ├── sheets/                   .sheet files (§6.21): a1.ts, format.ts (parse, serialize), merge.ts (3-way merge),
 │                             engine.ts (HyperFormula Workbook, lazy chunk), loadEngine.ts, refs.ts (moving formulas),
@@ -1922,13 +1939,14 @@ There is no `['resolve']` query: link resolution runs on the client over the tre
 
 - sidebar open flags and widths (persisted to localStorage);
 - the active left tab (`files | search | tags`) and right tab (`backlinks | outline | history`);
+- the mode chosen per file in this page load (`noteModes`, §6.6.1), re-keyed on moves;
 - the desktop search panel's query (desktop search never changes the route, §6.4);
 - overlay flags (switcher, palette, prompt, confirm, template picker);
 - the mobile drawer and sheet state;
 - the SSE connection status and the `caughtUp` flag;
 - the global save summary.
 
-Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `state/prefs.ts` (§5.12).
+Per-device preferences (theme, spellcheck, autocorrect, remote images, syntax visibility) live in `state/prefs.ts` (§5.12).
 
 **`DocumentSession`** (one per open text file, outside React, in a ref-counted registry) holds the editing state. Its state machine is in §6.10. Views use `useTextDocument(path)`.
 
@@ -1979,7 +1997,7 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | Route | View |
 |---|---|
 | `/` | `HomePage`. If `dailyNotes.openOnStartup`, open today's note. Otherwise open the last-opened path (`localStorage notesapp:lastPath`) if it still exists, then `Welcome.md`, then an empty state with "New note" and "Today". |
-| `/n/<path>` | `FileView`. The registry picks the view. `#<heading text>` scrolls to the heading. `?line=N` scrolls to 0-based line `N` (a search hit), flashes it, and highlights the terms of `&q=` (words, phrases and regular expressions). For a PDF, `?page=N` opens the viewer at that page. `?mode=read` forces the reading view. |
+| `/n/<path>` | `FileView`. The registry picks the view. `#<heading text>` scrolls to the heading. `?line=N` scrolls to 0-based line `N` (a search hit), flashes it, and highlights the terms of `&q=` (words, phrases and regular expressions). For a PDF, `?page=N` opens the viewer at that page. `?mode=read` forces the reading view (a locked note). The other modes (Live Preview, source, locked) are chosen per note, §6.6.1. |
 | `/search?q=…` | Search page, **phones only**. On desktop the search panel keeps its query in zustand and never changes the route, so typing in it never navigates away from the open note. |
 | `/trash` | Trash page |
 | `/settings`, `/settings/<section>` | Settings page (lazy) |
@@ -2018,15 +2036,16 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
     ├ <LeftSidebar>           tabs: <FileExplorer/> | <SearchPanel/> | <BookmarksPanel/> | <TagsPanel/> | <RecentPanel/> + registered left panels
     │                         (phone: inside <Drawer>, whose footer holds Settings, Trash and the theme toggle)
     ├ <Workspace>
-    │   ├ <TopBar/>           phone/tablet: ☰, title (+ connection dot), switcher/search button, mode toggle, ⋯ menu
+    │   ├ <TopBar/>           phone/tablet: ☰, title (+ connection dot), switcher/search button, lock toggle, ⋯ menu
+    │   │                     (⋯ has Source mode / Live Preview for notes)
     │   └ <WorkspaceScroll>   THE scroll container: the title and properties scroll away with the text, as in Obsidian
     │       ├ <ConflictBanner/>  (sticky; only in conflict/deleted states)
     │       └ <Routes> → <FileView path> | registered pages
     │             └ registry view, e.g. <MarkdownView>
-    │                  ├ <NoteHeader>  <InlineTitle/> (edit = rename) · <SaveStatus/> · mode toggle · ⋯
+    │                  ├ <NoteHeader>  <InlineTitle/> (edit = rename) · <SaveStatus/> · source toggle · lock toggle
     │                  │               (phone: only <InlineTitle/>; the TopBar already has the rest)
     │                  ├ <PropertiesTable/> (reading mode, if frontmatter)
-    │                  └ <NoteEditor/> (CodeMirror sized to its content) | <ReadingView/>
+    │                  └ <NoteEditor/> (CodeMirror sized to its content: Live Preview, source or locked; locked is the reading view)
     ├ <RightSidebar>          tabs: <BacklinksPanel/> | <OutlinePanel/> | <HistoryPanel/> (lazy) + registered right panels
     │                         (Ask, §6.21)
     │                         (phone: <BottomSheet>)
@@ -2047,16 +2066,18 @@ Per-device preferences (theme, spellcheck, autocorrect, remote images) live in `
 | 4 | `search({top: true})` | In-note find and replace panel (`Mod-F`) |
 | 5 | `EditorView.lineWrapping`, `placeholder('Start writing…')` | |
 | 6 | `yamlFrontmatter({content: markdown({base: markdownLanguage, codeLanguages: languages, extensions: [ObsidianSyntax, MathSyntax], completeHTMLTags: false})})` | GFM, frontmatter, lazily loaded fence grammars, and the WikiLink, Embed, Hashtag, Highlight (`==x==`) and Comment (`%%x%%`) nodes. The tag and wikilink rules use the shared patterns of `features/syntax.ts` (API.md §15.6), including `\|` as the alias separator. `MathSyntax` (`editor/mathSyntax.ts`, ROADMAP item 3) adds InlineMath (`$x$`, and `$$x$$` inside a paragraph) and BlockMath (`$$` blocks) with the reading view's delimiter rules, so `$5 and $10` stays text and nothing inside math parses as a link, tag or emphasis. |
-| 7 | `syntaxHighlighting(obsidianHighlight)` + `lineClassPlugin` | Styled source mode: heading sizes, faint `#`/`**`/backtick marks, code-block and quote backgrounds, a highlight background for `==x==`, faint `%%comments%%`, math in a monospace accent colour with faint `$` marks, and a bold callout title line (`> [!type]`). Code tokens use `features/codeTokens.ts`, which the reading view's highlighter shares (§6.7.1), so fenced code looks the same in both modes. Nothing is hidden. |
+| 7 | `syntaxHighlighting(obsidianHighlight)` + `lineClassPlugin` | Styled source mode: heading sizes, faint `#`/`**`/backtick marks, code-block and quote backgrounds, a highlight background for `==x==`, faint `%%comments%%`, math in a monospace accent colour with faint `$` marks, and a bold callout title line (`> [!type]`). Code tokens use `features/codeTokens.ts`, which the reading view's highlighter shares (§6.7.1), so fenced code looks the same in both modes. Nothing is hidden. Live Preview builds on the same styling. |
+| 7a | `livePreview(config)`, in Live Preview and locked mode only | Hides or replaces the markup (§6.6.1). Source mode leaves it out, so source mode is exactly item 7. |
 | 8 | `autocompletion({override: [wikilinkSource, headingSource, tagSource], icons: false})` | **`[[`** gives notes and aliases, pre-ranked with fuzzysort, with `filter: false` and **no `validFor`**: CodeMirror honours `validFor` only when it filters itself, so with both set the list froze after the first keystroke. The source re-runs on every keystroke and returns at most 50 options. The inserted text is `linkText(P, source, settings.newLinkFormat, style)` (§5.5.7), so two notes with the same name get a path-qualified link. With `useWikilinks: false`, the typed `[[query` is replaced by a Markdown link `[display](encodedPath)`. **`[[#`** and **`[[ThisNote#`** give headings from the open note's live Lezer tree; **`[[Other#`** uses `['meta', path]`. **`#`** gives tags. Completions use a custom `apply` that swallows the auto-inserted `]]`. |
 | 9 | `clickNavigation(nav)` + `unresolvedLinks` | `Mod`+click follows a link or tag (Shift adds nothing in v1, because there are no panes). A `ViewPlugin` marks wikilinks and internal Markdown links that the client resolver cannot resolve with `cm-unresolved` (faded), as Obsidian does. |
-| 10 | `pasteAndDrop(uploader, notePath)` | Image or PDF paste and drop, inserted at the **current selection** (which CodeMirror keeps after blur). While a file uploads, an "Uploading name…" **widget** marks its place: a position in the editor state, never document text, so autosave, drafts and other devices never see a placeholder and a tab killed mid-upload leaves nothing in the note. `AttachmentResult.markdown` (already in the configured link style) is inserted at the widget's mapped position, in the files' order, or the widget is removed on failure. Uploads in flight count as unsaved work (the `beforeunload` prompt, the new-build reload). Uploads send an `Idempotency-Key`. Internal explorer drag (`application/x-notesapp-path`) inserts a link built with `linkText`. |
+| 10 | `pasteAndDrop(uploader, notePath)` | Image or PDF paste and drop, inserted at the **current selection** (which CodeMirror keeps after blur). While a file uploads, an "Uploading name…" **widget** marks its place: a position in the editor state, never document text, so autosave, drafts and other devices never see a placeholder and a tab killed mid-upload leaves nothing in the note. `AttachmentResult.markdown` (already in the configured link style) is inserted at the widget's mapped position, in the files' order, or the widget is removed on failure. Uploads in flight count as unsaved work (the `beforeunload` prompt, the new-build reload). Uploads send an `Idempotency-Key`. Internal explorer drag (`application/x-notesapp-path`) inserts a link built with `linkText`. Pasted rich text (HTML) becomes Markdown, and `Mod-Shift-V` pastes plain text (§6.6.1). |
 | 11 | `EditorView.contentAttributes` | `spellcheck` and `autocorrect` from the per-device preferences (§5.12), `autocapitalize=sentences`, `enterkeyhint=enter` |
 | 12 | `smartPunctuationGuard` | An input transaction filter for iOS Smart Punctuation, which WebKit reportedly ties to `spellcheck` (to be confirmed on the device, smoke item 22). Inside frontmatter, fenced or inline code, and for `--`/`---` at the start of a line, it reverts the substitutions: `—` back to `--`, curly double quotes to `"`, curly single quotes to `'`. Otherwise iOS would silently break frontmatter delimiters, YAML strings and `"[[Link]]"` property values. |
 | 13 | `EditorView.scrollMargins` + `cursorScrollMargin` | Keeps the caret clear of the sticky banner and the toolbar |
-| 14 | `EditorState.readOnly` / `EditorView.editable` | For `lossy` files |
-| 15 | Keymap, highest first | `Prec.highest`: `Mod-Alt-ArrowLeft` / `Mod-Alt-ArrowRight` (navigate back and forward; CodeMirror's `defaultKeymap` binds `Alt-ArrowLeft/Right` to syntax-wise cursor moves outside macOS). Then the app keymap (`Mod-s` flush, `Mod-Enter` follow, `Mod-l` toggle checkbox, `Mod-b`, `Mod-i`, `Mod-k`), then `closeBracketsKeymap`, `completionKeymap`, `searchKeymap`, `historyKeymap`, `defaultKeymap`, `indentWithTab` (`Esc` then `Tab` leaves the editor, §6.14) |
+| 14 | `EditorState.readOnly` / `EditorView.editable` | For `lossy` files, and for locked Live Preview |
+| 15 | Keymap, highest first | `Prec.highest`: `Mod-Alt-ArrowLeft` / `Mod-Alt-ArrowRight` (navigate back and forward; CodeMirror's `defaultKeymap` binds `Alt-ArrowLeft/Right` to syntax-wise cursor moves outside macOS). Then the app keymap (`Mod-s` flush, `Mod-Enter` follow, `Mod-l` toggle checkbox, and the formatting toggles of §6.6.1: `Mod-b`, `Mod-i`, `Mod-k`, `Mod-Shift-x`, `Mod-Shift-h`, `Mod-e`), then `closeBracketsKeymap`, `completionKeymap`, `searchKeymap`, `historyKeymap`, `defaultKeymap`, `indentWithTab` (`Esc` then `Tab` leaves the editor, §6.14). The app's command keys are also the `editorCommandKeys` facet, which vim mode runs before its own keys, and each steps aside when this device gave its command another key (§6.25); `Mod-e` is two of them, `editor.inlineCode` while editing and `editor.toggleMode` in a locked note |
 | 16 | `EditorView.updateListener` | Calls `session.markDirty()` on `docChanged` when the transaction is not annotated `Transaction.remote` |
+| 17 | `vimCompartment` (`editor/vimMode.ts`) | Empty, or vim mode when this device turned it on (§6.36): a lazy chunk at `Prec.highest` |
 
 The document is always **LF-only**; there is no `lineSeparator` facet. CRLF files are converted at the session boundary (§6.9), because CodeMirror counts a line break as one position whatever the separator, and `Text.toString()` always joins with `\n`.
 
@@ -2075,9 +2096,205 @@ The document is always **LF-only**; there is no `lineSeparator` facet. CRLF file
 
 **Server offsets in CRLF files.** Offsets from the server (backlink mentions, `NoteMeta.links`, search lines) count `\r\n` as two code units. For a session with `eol: 'crlf'`, `features/eol.ts` maps a server offset to a document offset by subtracting the number of `\r\n` pairs before it. A lone `\r` is one position on both sides and needs no mapping.
 
+### 6.6.1 Live Preview (ROADMAP 10)
+
+Notes render as you type, in the one editor. Live Preview is a set of CodeMirror decorations over the editor of §6.6, so the editor's text stays the file, byte for byte: drafts, autosave, conflicts, history, completion, search and remote updates work unchanged, and decorations never change the document. Item 10 is built, in three steps: **10a** (modes, inline rendering and the cursor rules; tables as a grid; typing shortcuts, formatting and rich paste), **10b** (images and embeds, footnotes, comments, the properties block and code fences; `locked` becomes the reading view, §6.7) and **10c** (the phone's taps and selection handles, and a 10,000-line note that stays responsive), then a review of the whole item, whose fixes are folded into the rules below.
+
+**Modes.** `features/noteMode.ts` resolves the open file's mode (`ViewMode`, `state/ui.ts`):
+
+| Mode | What shows |
+|---|---|
+| `live` | Live Preview, editable. The default for every note: `settings.editor.defaultMode: edit` means Live Preview. |
+| `source` | The styled source mode of §6.6, unchanged (the Live Preview extension is simply not installed). |
+| `locked` | Live Preview, read-only: `EditorState.readOnly` and `EditorView.editable` are off, the content is focusable (`tabindex=0`) for keyboard reading, nothing is revealed, and links follow on a plain click. Checkboxes still toggle. **This is the reading view** (since 10b): there is one look everywhere. `settings.editor.defaultMode: read` ("Locked (reading)" in Settings) and `?mode=read` open a note locked. |
+
+- The mode is chosen **per file for the page load** (`useUi.noteModes`), so switching one note to source leaves the others in Live Preview. A choice equal to the default is forgotten. Moves re-key the choices (`rekeyNoteModes`, from `onEntryMoved`, for files and folders). A note this tab has just created (`editingNew`) opens in the editor even when its mode or the default would not, keeping a choice of source mode.
+- **Toggle lock editing** (`editor.toggleMode`) locks a note being edited and unlocks it into Live Preview. Its hotkey is **Mod-E** everywhere except in a note's editable text, where Mod-E toggles inline code (below); in a locked note, Mod-E unlocks. **Toggle source mode** (`editor.toggleSource`) switches Live Preview and source (a locked note opens in source). The v1 "Toggle reading view" command and menu item are gone. Desktop: the note header has a source toggle and a lock toggle (`aria-pressed`). Phone and tablet: the TopBar has the lock toggle, and ⋯ has "Source mode" / "Live Preview". The lock toggle's tooltip names Mod-E only for unlocking.
+- The editor remounts on a mode change, as in v1: the `EditorState` lives in the session, so undo survives, and the scroll position maps through the source line at the top of the workspace. A mode switch reconfigures the note's state, so every state field that depends on the mode (the table grids, the blocks below) recomputes on a new configuration: a locked note's tables are never left editable.
+- **Registry.** `FileViewProps.mode` and `FileViewDescriptor.modes` use `ViewMode` (`edit`, `read`, `live`, `source`, `locked`). The `markdown` view declares `['live', 'source', 'locked']`; other views keep `edit` and `read`. `viewModeFor(mode, modes)` maps a mode onto a view that lacks it (an editing mode to `edit` or `live`, `locked` to `read` and `read` to `locked`, else the first mode).
+
+**Syntax visibility** is the per-device preference `syntaxVisibility` (§5.12, Settings, "This device"):
+
+- `hide-all` (default): markup stays hidden even under the cursor; the cursor rules below make editing work without seeing it.
+- `reveal-at-cursor` (Typora style): while the editor has focus, the markup of every element touching a selection shows (headings and quotes: their line; list markers: the marker; inline elements: the whole element).
+- In both, the markup of an element shows when a selection **end** lies inside its hidden markup (a search match in a link's URL, a command's caret), and while autocompletion is open, the inline element at the cursor shows (the `[[` link being typed). Elements without visible text (`[[]]`, `[](url)`, reference links) are never hidden.
+
+**How it is built** (`editor/livePreview/`, wired by `NoteEditor`'s `preview` prop through `EditorHooks.livePreview`):
+
+- `model.ts` walks the Lezer tree of §6.6 (#6) over the requested ranges and returns **elements**: the element's range, its visible text, a reveal range, line classes, and **pieces**, the markup to replace. Each piece is hidden or a widget and has a role for the cursor rules: `prefix` (block markup at a line start), `open`, `close` (formatting that typing continues), `close-link` (links and inline code, which typing does not extend), `inner` and `block`. Embeds, images, footnote references, inline comments and code fences are elements of their own (below). HTML, comment blocks, frontmatter and tables are skipped (they are block widgets from state), except for the `>` markers of the lines a skipped block spans inside a quote (a quoted table or code block), which hide like any quote's. An element whose hidden markup would cross a line break (a Markdown link whose destination or title is on the next line) is not hidden: it shows as typed.
+- `decorations.ts` turns the elements of the **visible ranges** into replace, widget, mark and line decorations, plus the **atomic ranges**: prefix chains (from the line start when only blanks precede them), adjacent inline pieces merged into one run, and block widgets. `index.ts` holds the `ViewPlugin`, which rebuilds on document, viewport, selection, focus, tree, completion and configuration changes, and provides `EditorView.atomicRanges`, plus the transaction filters of the cursor and deletion rules. No replaced range crosses a line break, so a view plugin may provide them. Line classes (code blocks, quotes) are computed for the visible lines only.
+- `widgets.ts`: bullets (`•`, `◦`, `▪` by depth), task checkboxes, horizontal rules, the " > " of a heading link, footnote numbers and a fence's language.
+- `embeds.ts` (images and embeds), `footnotes.ts` (numbers and tooltips), `blocks.ts` (the properties block and hidden comment blocks), `topLevel.ts` (the shared walk over the note's top-level blocks), `pointer.ts` (whether a selection came from a click or a tap).
+- `table/`: tables as grids (below). `livePreview(config)` is `liveBlocks()` and `tables()`, then `livePreviewInline(config)` (the inline and line rendering, which a table cell's editor reuses), the footnote tooltips and, while editable, the typing shortcuts.
+
+**What renders:**
+
+| Element | Live Preview |
+|---|---|
+| ATX headings | Sized as in source mode; the `#`s (and a closing sequence) hidden. `#` without a space after it is not hidden (a line-start `#tag` is typed through it). Setext underlines stay visible. |
+| `**bold**`, `*italic*`, `~~strike~~`, `==highlight==`, `` `code` `` | Styled; the markers hidden |
+| `[[Note]]`, `[[Note\|alias]]`, `[[Note#Heading]]`, `[[#Heading]]` | The target, the alias, "Note > Heading", "Heading", as in the reading view; unresolved links stay dimmed (`cm-unresolved`) |
+| `[text](url)`, `<url>`, bare URLs | The text or address, as a link |
+| `- `, `* `, `+ ` bullets | A bullet widget that also replaces the indentation (`(depth + 1) × 1.6em`, the reading view's indent); wrapped lines hang under the text (`cm-lp-indent`) |
+| `- [ ]` and `- [x]` tasks | A checkbox widget in place of the bullet and the box; done tasks are muted |
+| Numbered items, numbered tasks | The number stays text (muted); a task box after it becomes a checkbox |
+| `>` quotes | The `>` (and one space) hidden; the quote bar is source mode's `cm-quote-line` |
+| `---`, `***`, `___` | A horizontal rule widget |
+| GFM tables at the top level | An editable grid (below); in quotes and lists, text |
+| `![[file]]`, `![alt](file)` | The file, as the reading of a note always showed it: an image (`\|300`, `\|300x200`), audio, video, a PDF, a note one level deep, a file chip (below) |
+| Frontmatter | The properties block, with an edit button (below) |
+| `%%comment%%`, `%%` blocks | Hidden in hide-all and locked mode; dimmed in reveal-at-cursor mode (blocks: shown) |
+| `[^label]`, `^[inline]` | A superscript number; hover or tap shows the text. A definition's label shows as its number. |
+| Fenced code | Highlighted as in source mode (lazily loaded grammars); the fences hidden and the language shown while no selection touches the block |
+
+**Cursor and editing rules** (hide-all; in reveal-at-cursor the element at the cursor shows its markup, so plain editing applies):
+
+- **Atomic markup.** Arrow keys step over hidden markup, stopping once at each edge of an inline run: from inside `**bold|**`, → leaves the formatting (`**bold**|`), and ← from after it enters it. This stop is how you step into or out of formatting from the keyboard.
+- **Block prefixes.** A cursor never rests in front of a line's hidden prefix (a transaction filter moves it to where the text starts), so typing never breaks a heading, bullet, task or quote. ArrowLeft (or a word left) where the text starts goes to the end of the line before. Enter where a heading's text starts opens a line above it and keeps the heading.
+- **Clicks** at the edge of hidden inline markup land where a word processor puts the caret: in front of opening markers (typing stays outside), **inside closing formatting markers** (typing at the end of bold text continues in bold), and **after** the closing markers of links and code (typing after a link does not extend it). Between a link and bold text, the caret lands between them.
+- **Backspace and Delete** next to hidden markup delete the letter beyond it, never a marker (also Ctrl/Alt-Backspace and -Delete, by word). After Backspace at the end of formatting the caret stays inside it; after a link it stays after the link. With nothing before the markup on its line, Backspace acts where the text starts (the Markdown keymap removes list or quote markup, or the line joins the one before). Delete at the end of a non-empty line joins the next line's text without its hidden block markup.
+- **No empty formatting.** A deletion (`delete.*` user events) that removes all the text of bold, italic, strikethrough, highlight, code or a link also removes its markers, innermost first, in the same transaction (one undo step), so `**b**` never becomes `****`, which Markdown reads as a rule.
+- **Deleting next to atoms.** Backspace or Delete over hidden markup next to an embed or a footnote deletes it whole; a word deletion (Ctrl/Alt-Backspace) stops at hidden markup instead of deleting markers; Backspace at the very start of the note does nothing; undo gives the caret back where it was.
+- Typed Markdown still closes as typed: these rules apply to selection changes and deletions, never to text input, so typing `**b** c` gives exactly that.
+
+**Links and checkboxes.**
+
+- Rendered links (`cm-lp-link`) and tags follow on a **tap** (the last `pointerdown` was touch; the tap's `mousedown` is consumed so the caret and the keyboard stay put), on a plain click in a **locked** note (not when the click ends a text selection), or on **Mod-click** while editing; a plain click while editing places the caret, to edit the link's text. `followLink()` (`editorCommands.ts`) is shared with Mod-click on raw text and `Mod-Enter`.
+- External links open with `window.open(url, '_blank', 'noopener,noreferrer')`, and only for the schemes the reading view's sanitizer keeps (`http`, `https`, `ftp`, `mailto`, `tel`, `callto`, `sms`, `xmpp`, `matrix`, `//host`): a `javascript:` link in a note never runs.
+- A **checkbox** tap (the whole box, indent included, is the target) changes only the character between its brackets (`[ ]` → `[x]`, `[x]` or `[X]` → `[ ]`) as a normal edit (`input.toggle`), so it autosaves. The position is read from the widget at tap time, from the current document, so no stale-line check is needed. Boxes are disabled while the session cannot be written (lossy or read-only files).
+- In a locked note the editing commands do nothing: the formatting toggles, `toggleCheckbox`, the line, link and rule commands and `insertWikilink` check `state.readOnly` (palette and toolbar run them on the active editor), and the mobile toolbar already hides on read-only editors.
+
+#### Embeds, footnotes, comments, properties and code (10b)
+
+**Images and embeds** (`embeds.ts`). `![[file]]` and `![alt](file)` show the file as the reading of a note always did (§6.7 #5): images with `|300` and `|300x200` sizes (a box reserved until the image is known), audio, video, PDFs, notes one level deep and file chips. The editor reaches the app's embed code through `NoteContext.renderEmbed` (`render/liveEmbeds.tsx`, which builds the same elements with DOM calls and hydrates them with `render/embeds.tsx`), so its modules import no React, and nothing is built from the note's text as HTML. Web images load, or wait for a click when the per-device "Load remote images" is off; only `http(s)`, `//host` and `data:` images show, other schemes stay text. Embeds of missing files, of the note itself and of block references show as links (they follow on a click in a locked note). An embed is one atomic widget: the cursor steps over it, Backspace after it deletes it whole, and revealed, its source shows with the file still after it. An edit elsewhere redraws no embed; an image or a transcluded note that changes height makes the editor measure again; the widget's teardown removes what the renderer mounted. Images also show in a table cell (being edited or not); other embeds and footnotes show as typed there.
+
+**Footnotes** (`footnotes.ts`, and the grammar in `obsidianSyntax.ts`). The grammar reads `[^label]` references, `^[inline]` footnotes and `[^label]: text` definitions (with indented continuation lines) as the markdown-it plugin does, outside code and frontmatter. A reference shows as a superscript number in the plugin's order (the first reference of each label that has a definition; one without shows "?"); hovering it, or tapping it, shows its text in a tooltip, rendered as inline Markdown with working links (`renderCell`, the table cells' renderer). Moving the cursor, an edit or Escape closes a tooltip pinned by a tap. The numbers and texts live in a state field (below).
+
+**Comments.** Inline `%%comments%%` hide in hide-all and locked mode and show dimmed in reveal-at-cursor mode; Backspace next to one deletes the letter beyond it. Comment blocks (`%%` lines, which now also interrupt a paragraph, as in markdown-it) hide as block widgets from state (`blocks.ts`), in hide-all and locked mode. An unclosed comment stays text while editing, so typing `%%` never hides the rest of the note; a comment closed by typing stays shown until the caret leaves it, and a search match inside one shows it. Only top-level comment blocks hide.
+
+**Properties.** The frontmatter shows as the properties block (the reading view's table, collapsible, `render/liveEmbeds.tsx` `renderLiveProperties`), in Live Preview and locked mode, never in source mode. Its edit button, or `ArrowUp` (or `ArrowLeft`) from the line under it, shows the YAML as text with the caret at its end; leaving the YAML shows the block again. Locked, it has no edit button. Typing a new frontmatter keeps it as text until the caret leaves it; empty properties get a line to type on, and properties that end the note a line under them. The block draws again when the note moves (its links resolve from the new place).
+
+**Callouts, math and diagrams** (ROADMAP item 3 in Live Preview, `editor/livePreview/rich.ts`). A top-level callout (a blockquote whose first line is `> [!type]`), a `$$` math block and a ```` ```mermaid ```` block show rendered by the reading pipeline (`NoteContext.renderMarkdown`, `render/liveRich.ts`: markdown-it with the rich pack, then `hydrateEmbeds` and `hydrateRich`, §6.7.1), so they look exactly as the v1 reading view showed them, links, tags, embeds and folds included. `$x$` and `$$x$$` inside a paragraph show typeset (`NoteContext.renderMath`, KaTeX). In a locked note they always show rendered, and a task checkbox in a callout toggles its `[ ]` in the note (`input.toggle`) unless the note cannot be written. While editing, a block or formula shows as text while a selection touches it (its edges included), and a click on a rendered block (not on a link, a checkbox or a fold) puts the caret where its text starts. Editors without the app (a canvas card, tests) leave them as text. Other code blocks need nothing here: the editor highlights fenced code itself with the reading view's tokens (`features/codeTokens.ts`). A search hit inside a rendered block of a locked note scrolls to the block but cannot highlight its terms (they are in rendered HTML, not in the editor's text).
+
+**Code fences.** A fenced code block keeps source mode's highlighting; its fence lines hide, and its language shows as a widget, while no selection touches the block. A deletion never joins a line to a hidden fence: the caret goes into the code block, whose fences then show.
+
+**The caret around blocks.** The properties block and hidden comment blocks are block widgets over whole lines (they hide line breaks), with the same rules as tables: the caret never rests in or against a block (a move that lands there goes past it, the way it was heading; a click next to the properties puts the caret under them), typing where the caret should not be puts the text on a line of its own, never inside the block, and Backspace or Delete never joins a line to a block. An empty line next to a block is deleted from its other side, the caret staying outside the block. Backspace or Delete over hidden markup never joins a line to a hidden block, a table or a hidden fence.
+
+#### Long notes (10c)
+
+Decorations were always computed for the visible ranges; what grew with the note were the **state fields** that scan it. With a 10,000-line note of everything Live Preview renders (`perf.test.ts`):
+
+- **One walk over the top level.** Tables and comment blocks come from one walk over the top level of the Lezer tree per tree (`topLevel.ts`, a tree cursor, no node objects), shared by both fields. Only the last block the parse reached is checked for a parse that stopped inside it (`parsedPast`).
+- **Known blocks stay known.** A table or comment block that an edit did not touch is recognized again by its node: no slicing of its text, no reading of its lines. When none changed, the decorations and atomic ranges map through the edit instead of being built again with new widgets.
+- **Footnotes** live in a state field whose numbers and text ranges map through an edit that leaves the "shape" of its lines alone (footnote syntax, backticks, fences, indentation), so typing in a footnote shows at once; only an edit that changes the shape reads the note's footnotes again.
+- **Line classes** and the quote markers of a skipped block are computed for the visible lines only.
+- **Formatting a whole note** (Select All, then `Mod-B`) indexes elements and selected pieces by line, and a command whose selection reaches past the parse first parses to its end (up to 2 s; slower, a toast asks to try again), so unparsed lines are never read as plain text.
+
+In jsdom a keystroke costs about what styled source mode does (2–5 ms with the parse caught up); in Chromium about 4.5 ms for the state and 2.5 ms for the view, anywhere in the note. The test compares Live Preview with source mode on the same note at its start, middle and end, and counts that a keystroke reads no table, comment block or footnote again.
+
+#### The phone (10c)
+
+- **Taps.** iOS moves the native caret after the touch has ended, often later than CodeMirror's 50 ms window, so a tap arrives as a plain `select`, not `select.pointer`. `pointer.ts` records the end of each touch, and a selection change shortly after it counts as the tap's, so the click rules above (where the caret lands at hidden markup) apply to taps.
+- **Selection handles.** A selection end that a drag or the phone's handles put inside hidden markup goes to the markup's edge away from the other end, so the selection takes the markup in and it stays hidden (a revealed `**` would move the text under the finger).
+- **Widgets are not text**: a long press never selects inside a footnote number, a fence's language, a bullet or a task box (`user-select: none`).
+- **Touch targets**: a footnote's number, the properties' heading and edit button, and a remote image's placeholder are 44 px on touch screens, as are the table grips.
+
+#### Tables as grids
+
+Every GFM table at the note's top level shows as a grid in `live` and `locked` mode; source mode shows the raw table. Tables inside quotes, lists and callouts stay text (with their `>` markers hidden). The code is in `editor/livePreview/table/`.
+
+**Where the grids come from** (`index.ts`). Block decorations must come from editor state, so a `StateField` walks the top level of the Lezer tree for `Table` nodes whose parent is the Markdown `Document`, and replaces each table's lines (from the start of its first line) with a block `TableWidget`. A table shows only once the parse has reached the line after it (`syntaxTreeAvailable`), so a table cut short by an unfinished background parse is never shown, or edited, with rows missing. After an edit, the incremental parse often has not caught up yet (in a note of a few thousand lines it never has, within the transaction): until it has, a table keeps its place, mapped through the edit, while its text still reads as a table, so a grid never blinks out and the cell being edited stays open. Each table's lines are an atomic range. The field recomputes on document, tree and refresh changes; widgets compare by text, so an edit elsewhere redraws nothing.
+
+**The model** (`model.ts`, pure). `parseTable(text)` splits each line at its unescaped pipes exactly as Lezer's `parseRow` does (an escaped character, `\|` or `\ `, is text; a pipe before all text or after it is an outer pipe), and keeps everything as written: each cell's text and the whitespace before and after it, each row's indentation, outer pipes and trailing whitespace. So `serializeTable(parseTable(t))` is `t`, byte for byte, for every table. A cell's **content** is its raw Markdown with `\|` unescaped (GFM's rule); `escapeCell` puts a backslash before a pipe that an even number of backslashes precede, so a pipe typed in a cell stays inside it and a typed `\|` stays an escaped pipe. A short row reads as empty cells; cells past the header's count are kept but not shown, as GFM ignores them.
+
+The model records the table's **style**: `padded` (every row has every cell and outer pipes, there are no tabs, and the pipes line up by display width, with East Asian wide characters and emoji as two columns, through `Intl.Segmenter`), the margin (the fewest spaces between a pipe and text), whether a padded delimiter row fills its cells with dashes (`|:---|`) or pads them (`| :-- |`), and for each column where its padding goes (after, before or around the text). The edits (`setCell`, `insertRow`, `deleteRow`, `moveRow`, `insertColumn`, `deleteColumn`, `moveColumn`, `setAlign`; immutable) write in that style:
+
+- A padded table pads the edited column again to its widest cell (at least `---`), with the column's justification and the delimiter row's style; the other columns keep their width.
+- A compact table changes only the rows it must. An edited cell keeps its spacing, and the spacing after its text gives or takes the change in width, so a cell that lined up still does while it fits. New cells and rows take the header's outer pipes and the table's margin; a moved column moves the cells' texts and leaves the spacing where it is.
+- The delimiter row keeps its alignment markers and dash counts; an alignment change rewrites only its cell.
+- Every rewritten row stays a row of the table: an outer pipe is added where a blank edge cell, or text that could start another block at the line start (`#`, `>`, `-`, `+`, `*`, `1.`, a fence, HTML), would change how the line parses; every row keeps a pipe; a cell ending in an odd number of backslashes gets a space before the next pipe.
+
+**The check before every write.** `isSerializationOf(model, text)` parses the new text with the model's parser and with Lezer: every line must split into exactly the model's cells (segment for segment), and Lezer must read all of it as one table. An edit that fails is refused with a toast, nothing is written, and the cell shows the note's text again. The tests run a corpus of tables (padded, compact, without outer pipes, ragged, escaped pipes, pipes in code, Unicode, indented, wide) through a byte-for-byte round trip and against Lezer's cells, every operation, and 150 seeded random sequences of edits whose text must always read back as the expected grid.
+
+**The grid** (`grid.ts`, `render.ts`). A `TableGrid` draws a `<table>` in a horizontal scroller: the grid is never wider than the note, and a wide table scrolls inside it (words stay whole). The header row is `<th>`; each column's `text-align` comes from its delimiter. A cell's content is rendered from its own Lezer parse (`cellLanguage`: the note's inline Markdown and Obsidian syntax, without blocks) into DOM built with `createElement` and `textContent` only, with the editor's classes (`cm-strong`, `cm-inline-code`, `cm-lp-link`, `cm-unresolved`, …), so a cell looks the same shown and being edited. `<br>` breaks a line; images show (10b); other HTML, embeds and footnotes show as typed. The grid's element is `contenteditable=false`, the widget ignores every event (the grid handles them), `updateDOM` redraws only the cells whose content changed, and `coordsAt` maps a position in the table's text to its cell, so the note's scrolling (undo, search) goes to the right cell.
+
+**Editing a cell.** A click or a tap opens the cell in a small **nested CodeMirror editor**, with the caret where you clicked. Its setup comes from the note's (`tableCellSetup`, built in `editorSetup.ts`): the cell language, Live Preview of inline content (`livePreviewInline`, the step-1 extension without tables), completion, the formatting keys and the spellcheck settings. Its text is the cell's content, on one line (a pasted line break becomes a space). Every change to it is written through at once: the grid applies `setCell` to the model of the table's current text and dispatches the minimal changes (`@codemirror/merge` `diff`) to the note as **one transaction**, annotated `tableEdit` with the grid's id and carrying the cell's `userEvent`, so typing in a cell groups into undo steps as typing anywhere does; a change of rows, columns or alignment, or deleting the table, is an undo step of its own. Only that table's text changes. The cell's editor keeps no history: `Mod-Z`, `Mod-Y`/`Mod-Shift-Z` and the toolbar's Undo and Redo work on the note's (`historyEditor`). While a cell is open the note's selection rests on it, so undo scrolls back to the table; when the note's text takes the focus back, the cell closes and the note's caret leaves the table's text. The cell's editor is the active editor (palette, toolbar), counts as the note's for compositions (`remote.ts` `addNestedEditor`: a remote update waits for an IME composition in a cell as it does in the note), and leaving the table for another part of the app saves, as leaving the note does.
+
+**Keys.** In a cell: `Tab` and `Shift-Tab` go to the next and previous cell (selecting its text), and `Tab` in the last cell adds a row; `Enter` and `Shift-Enter` go to the cell below and above, and `Enter` in the last row adds a row; an arrow key at the edge of a cell's text goes to the next cell, and out of the table at its edge; `Esc` goes back to the note, on the line after the table; `Shift-F10` or the menu key opens the cell's menu; `Mod-F` opens the note's find panel. `[[#` completes the note's headings. From the note: `ArrowDown` and `ArrowUp` into a table open the cell under the caret; `ArrowRight` at the end of the line before it and `ArrowLeft` at the start of the line after it open its first and last cell.
+
+**Rows and columns.** Each row has a grip on its left edge and each column one on its top edge, shown on hover and for the cell being edited (with a 44 px target on touch screens). Dragging a grip moves the row or column, with a line where it will go; a click on a grip opens the row's or the column's menu; a right-click, or a long-press (500 ms) on the phone, on a cell opens the cell's menu: insert a row above or below, move the row up or down, delete it; insert a column left or right, move it left or right, delete it; align the column left, center or right, or not at all; delete the table. The header row stays first (it cannot be moved or deleted), and a table keeps at least one column. An open cell stays open where its content goes. The menus are the app's `ContextMenu`, opened through `NoteContext.showMenu` (`components/overlays/openContextMenu.tsx` mounts it in a root of its own), so the editor modules import no React.
+
+**The note's caret around a table.** A line of text right under a table is one of its rows (GFM), and text joined to a table's first line breaks the table. So, in an editable note:
+
+- the caret never rests inside a table's text: a move that lands there goes to the line before or after it, the way it was heading (a click: to the nearer side);
+- text typed at the end of a table gets a blank line before it, and text typed at its start a line break after it; an edit that would make the line under a table one of its rows (typing on the empty line under it, deleting the blank line between it and a paragraph, turning the heading under it into text; Lezer decides on a three-line table) gets a line break that keeps the line apart, in the same transaction;
+- `Backspace` at the start of the line under a table and `Delete` at the end of the line above it (also by word) go into the table instead of joining the lines; an empty last line, or an empty line not separating a paragraph from the table, is deleted as usual; no deletion next to a table removes it whole, though it is atomic;
+- a caret against a table that ends or starts the note cannot be typed at in the browser, so leaving such a table, or moving the caret past it, first adds an empty line there.
+
+**Another device's edit while a cell is open.** A session applies a remote change only when it has no unsaved edits (otherwise it is a conflict, §6.10), so this is another device's saved change to a clean note. Before the grid redraws, it maps the open cell's span (between its pipes) through the change, its start forward and its end backward; either one deleted means the cell is gone. A minimal diff may put a new row's text just inside the cell's start, so if the span no longer fits one cell, the cell holding its end, or the one whose content still equals the editor's, is the cell. The editor moves with its cell (a row added above), shows another's change to the cell's text as a minimal change that keeps the caret, and closes when its row or column was deleted. Undo, redo and Take theirs reach an open cell the same way. A row or column change under the open cell (an undo, a drag) opens the cell that is there now, so typing never writes one cell's text over another, and a menu opened before another device changed the table does nothing. Take theirs, its undo and other whole-text replacements (`textReplace`) pass the edge rules of tables and blocks untouched, so they never change the text on the way.
+
+**Insertions from outside the editor.** A template or an attachment inserted while a cell is open goes after the table, never into its text (`DocumentSession.insertionRange`).
+
+**Formulas later (ROADMAP 39).** The `tableCellFormatters` facet takes functions that, given a table's contents (`rows[0]` is the header) and alignments, return each cell's display instead of its Markdown (`{text, className?, title?}`), or null. The grid renders a display in a `cm-lp-cell-value` span; editing the cell shows its text (the formula). Formatters run when a table renders; dispatching `refreshTables` redraws every table (for an engine that has finished loading). Columns are A, B, … in the cells' labels.
+
+**Inserting a table.** "Insert table" (the palette, and the phone toolbar's table button) inserts an empty table with a header row and two columns and rows (`newTableText`, padded), on the caret's line when it is blank or after it, with the blank lines that keep it apart from the text around it, and opens its first cell (in source mode the caret goes into it). In a table cell it only says it cannot. On the phone, the toolbar shows Previous and Next cell in a cell, and hides the tools that insert whole lines.
+
+#### Typing shortcuts, formatting and rich paste
+
+Nothing here needs Markdown typed by hand, and everything writes ordinary Markdown into the text, so the file stays what Obsidian would write. The code is `editor/livePreview/inputRules.ts`, `editor/formatting.ts`, `editor/livePreview/formatToolbar.ts`, `editor/pasteAndDrop.ts` and `features/htmlToMarkdown.ts`.
+
+**Typing shortcuts** (`inputRules()`, editable Live Preview only; source mode and table cells keep what is typed):
+
+| Typed at the start of a line | Becomes |
+|---|---|
+| `# ` to `###### `, `- `, `* `, `1. `, `> ` | Already that Markdown; Live Preview shows the heading, bullet, number or quote bar as soon as the space is typed, and the cursor rules keep the cursor after the hidden markup |
+| `[] `, `[ ] `, `[x] ` (also after a list marker or quote) | A task, `- [ ] ` (`- [x] `) |
+| `---` then `Enter`, under a paragraph | A rule: a blank line goes before it, as `---` right under text would make that text a heading (setext). On a note's first line `---` starts properties, as in Obsidian, so Enter is left alone there. |
+| ```` ``` ```` (or `~~~`, with a language) then `Enter` | The block is closed: the closing fence goes in and the cursor on the line between, with the prefix of a quote or list item. A fence that already has its closing fence keeps it: the text after the line is parsed without it, and if the closing fence then opens a block of its own, it belongs to this block; if it closes another block (this fence was typed above existing code), a new closing fence is added. |
+| A `\|` header line then `Enter` | A table: the header padded, a delimiter row and one empty row, kept apart from the text around it by blank lines; the empty row's first cell opens. The new text must read as one table (Lezer) or Enter is left alone. |
+| `[[` | The note list, as in every mode (#8) |
+
+The task shortcut is an input handler: it lets the typed space go in first, then rewrites the line start in a transaction of its own with `isolateHistory: 'full'`, so one `Mod-Z` gives back exactly what was typed and typing after it is an undo step of its own. The `Enter` shortcuts are one transaction each, so one `Mod-Z` gives back the line as it was before `Enter`. While IME composition is in progress, nothing converts. If an undo takes a table away while one of its cells is open, the note takes the focus back.
+
+**Formatting toggles** (`formatting.ts`, in Live Preview and source mode, and in a table cell's editor):
+
+| Format | Keys | Markdown |
+|---|---|---|
+| Bold, italic | `Mod-B`, `Mod-I` | `**x**`, `*x*` |
+| Strikethrough, highlight | `Mod-Shift-X`, `Mod-Shift-H` | `~~x~~`, `==x==` |
+| Inline code | `Mod-E` (in the text; in a locked note it unlocks) | `` `x` ``, with more backticks (and spaces) when the text holds backticks |
+| Link | `Mod-K` | `[text](url)` |
+
+The toggles read the formatting that is there from the Live Preview model (`collectElements`), so they see what the editor shows:
+
+- **On a selection**, line by line (the text after a line's block markup; each cell of a table in source mode; never code blocks, frontmatter, comments or HTML blocks), trimmed of blanks at the ends. If all the selected text has the format, it comes off: a format selected only in part is split (`**ab[cd]ef**` → `**ab**cd**ef**`; underscores are rewritten as asterisks, which may close inside a word), and taking it off part of a nested element takes it off all of that element. Otherwise all of it gets the format: it merges with the same format it overlaps or touches (`a [b **c** d]` → `**a b c d**`), takes in code, wikilinks and addresses it cuts into whole (their text is literal or a link target), and splits where it crosses the edge of other formatting or a link's text, so the Markdown stays nested (`*one [two* three]` → `*one **two*** **three**`). New inline code removes the formatting inside it, which code would show as literal characters. The selected text stays selected, inside the new markers.
+- **At the cursor**: at the end of formatted text the cursor steps out after the closing markers, so typing goes on unformatted (and at its start, in front of it); inside formatted text the format comes off; inside a word (or inside code, a wikilink or an address) the word gets the format. Elsewhere the format is **pending**: nothing is written, a faint mark after the cursor (`cm-pending-format`: **B**, *I*, ~~S~~, H, `</>`) shows the formats switched on, and the next typed text arrives inside their markers with the cursor before the closing ones, so it goes on formatted until the key is pressed again. Blanks typed first move the pending formats along; moving the cursor or any other edit forgets them (a remote change maps them). A toggle that is never used therefore leaves nothing behind: an empty `~~~~` on its own line would open a code block that runs to the end of the note, and `====` under a line would make it a heading. Without the pending-format field (a plain editor) the empty markers are written.
+- **Links** (`toggleLink`): in a link, `Mod-K` takes the link off and keeps its text (a wikilink's alias, or its target as the reading view shows it, `Note > Heading`). A selected web address, or the address at the cursor, becomes `[](address)` with the cursor on the text to type; other selected text or the word at the cursor becomes `[text]()` with the cursor where the address goes; elsewhere `[]()`. A link without an address shows as typed until it has one.
+- **Left alone:** rules, setext underlines, link reference definitions and footnote labels are never formatted, and tags, embeds, footnotes and comments are never cut into (they are taken in whole, like code). A format whose markers share a run with an enclosing element's (bold in italic, `***ab cd ef***`) comes off all of the element, as split markers would pair up differently; each piece of split inline code gets the backticks its own text needs; `Mod-K` makes `www.x` a link to `https://www.x` (without it, it would read as a note), and taking `[[Note|]]` off keeps "Note"; a selection that ends at a line start (a triple click) leaves that line alone; a marker character at an edge of text typed with a format pending is escaped (`=` with highlight pending would write `=====`).
+- Each toggle is one transaction (`input.format`), so one undo step.
+
+**Line commands** (palette, and the toolbars): "Toggle heading 1" to "Toggle heading 6" and "Remove heading" (a heading replaces a list marker; quotes are kept), "Toggle bulleted list", "Toggle numbered list" (continuing a numbered list just above) and "Toggle quote" (blank lines inside become `>`), on every line of the selection, skipping blank lines when others are selected and the lines of code blocks, tables and frontmatter (quotes skip only frontmatter). The phone toolbar's heading button cycles text, heading 1, 2, 3, text. Checklists keep `Mod-L` (`toggleCheckbox`).
+
+**The selection toolbar** (`formatToolbar()`, editable Live Preview on a desktop; not on touch screens, which have the keyboard toolbar and the system's selection menu): a CodeMirror tooltip above a non-empty single selection, shown once the mouse button is up (a drag selection does not make it flicker), and hidden while the editor does not have the focus. Bold, italic, strikethrough, highlight, inline code, link and heading (a menu of Normal text and Heading 1–6 through `NoteContext.showMenu`; not in a table cell). Buttons show with `aria-pressed` whether all the selection has the format; their tooltips give the keys. Their `mousedown` is prevented, so the selection and the focus stay. The icons are Lucide's (ISC) drawn with DOM calls, so the editor modules stay free of React.
+
+**The phone toolbar** (§6.16) gains bold, italic, heading, bulleted list and link next to the checkbox and table buttons; in a table cell the line tools (heading, list, checkbox, table, rule, image, indent) are hidden.
+
+**Rich paste.** A paste whose HTML carries formatting the plain text lacks (bold, italic, struck or highlighted text, code, links, headings, lists, tables, quotes, rules, images, or Google Docs' styled spans) is converted to Markdown; anything else, every paste right after `Mod-Shift-V`, and every paste into code (a fenced or indented code block, inside inline code's backticks) or into the frontmatter's YAML is CodeMirror's plain-text paste. A code editor's copy (a monospace `white-space: pre` block of coloured spans, VS Code and JetBrains) is pasted as its text. Images in the clipboard keep the attachment upload of §6.6 #10, unless the HTML has text: Word and Excel put a picture of the copied text on the clipboard as well, and the text wins. The conversion (`htmlToMarkdown`, a lazy chunk that the editor starts loading when it first gets the focus, so it is there by the first paste; a paste before that waits for it):
+
+1. **Sanitize, then parse inert.** DOMPurify (scripts, styles, forms, frames, SVG, media and `javascript:` links go), then `DOMParser`, whose document runs nothing and loads nothing.
+2. **Smooth out the sources.** Google Docs' `<b style="font-weight:normal" id="docs-internal-guid-…">` wrapper is unwrapped, and styled spans become `<strong>`, `<em>`, `<del>` and `<code>` (bold is not added inside headings); its checklists (`li[role=checkbox][aria-checked]`) become task items; an item's only paragraph is unwrapped, so lists stay tight; flat lists with `aria-level` and Word's list paragraphs (`mso-list: l0 level2`, one list per list id, bullets or numbers from the hidden marker) become nested lists. Images whose source is not a web address (`data:` URIs, Word's `file:///…/clip_image001.png`) are dropped, keeping their alt text; nothing is ever fetched. Tables are rebuilt with their first row as the header (Google Docs, Word and spreadsheets write no `<th>`), every row as wide as the widest, and blocks inside cells as lines (`<br>`). Spans are unwrapped (they mean nothing in Markdown), and **runs in the same format next to each other merge** (Google Docs and Word write a span per run): `**ab**`, not `**a****b**`, which Markdown reads as one bold run with four asterisks in it; a run whose formats include its neighbour's nests that format outermost, so italic then bold italic gives `*a**b***`. Non-breaking spaces become spaces.
+3. **turndown** with ATX headings, `-` bullets, `*`/`**`, fenced code and inline links, and the GFM plugin's strikethrough (`~~`), task items and tables (pipes in cells escaped, alignment kept); list items written `- ` and `1. ` with continuation lines indented to the text; `<mark>` → `==x==`; links copied from the reading view (`a.internal-link[data-href]`) back to `[[note]]` or `[[note|text]]` (a Markdown link with `useWikilinks: false`, or when the target or text holds brackets, `|`, `<`, `>` or a line break, which a wikilink cannot) and tags to `#tag` (text in a tag's place that is not a tag is escaped like any text, so no markup gets in). **Code blocks** (`<pre>`, with or without `<code>`, and GitHub's `div.highlight-source-*`) keep every line as it is, blank lines and trailing spaces included, take the language from `language-*`, `lang-*` or the highlight class, read `<br>` as a line break, and get a fence longer than any backtick run in the code. Line breaks are written as a soft break (`  ` with strict line breaks). Its escaping is replaced by a lighter one that escapes only what would read as Markdown: `*` next to text, `_` at a word's edge, `~~`, `==`, `%%`, backticks, `[[`, `](`, `![`, HTML-like `<`, entities, and block markup at a line start; `snake_case`, `5 * 3` and `a == b` stay as they are, as escapes show in Live Preview. In a link's text **every bracket is escaped** (a Wikipedia citation `[1]` would otherwise give `[[1]](…)`, a note link, and a lone `]` would end the link), and a `!` right before a link or note link is escaped (it would make an image or an embed). Private-use characters carry these marks through turndown (`[`/`]` in a link's text, the start of each link, the end of each code line); any in the pasted text are dropped first.
+4. **Tidy**: no runs of blank lines, no trailing blanks (code blocks keep theirs).
+
+The Markdown replaces the selection as one undo step (`input.paste`). Pasted inside a line, a heading, list, quote, table, rule or code block starts on a line of its own; a table, code block or rule right under a paragraph gets a blank line (the paragraph would otherwise take a table or code block in, and a `---` would make it a setext heading); and a table, list or rule that ends the paste does not take in the rest of the line. A paste that fails to convert, or converts to nothing, inserts the plain text.
+
 ### 6.7 Reading view
 
-The pipeline is `render/render.ts` from the research, verified:
+**Since ROADMAP 10b the reading view is locked Live Preview** (§6.6.1): the note's own editor, read-only, so a note reads exactly as it edits. `settings.editor.defaultMode: read` and `?mode=read` open a note locked; links follow on a plain click, checkboxes toggle as a normal edit (`input.toggle`, so it autosaves), the frontmatter shows as the properties block, and a search hit (`?line=`, `?q=`) scrolls to its line, flashes it and highlights the query's terms (`searchHighlight`). The v1 `ReadingView` component (with its `scroll.ts` and `searchHits.ts`) is gone; the scroll position maps between modes through the source line at the top of the workspace (`noteMode.ts` `setTopLineProbe`).
+
+**What still uses markdown-it:** embedded notes, and Live Preview's callouts, `$$` math and Mermaid blocks (§6.6.1, "Callouts, math and diagrams"). A transcluded note (`![[Note]]`, `![[Note#Heading]]`, `render/NoteEmbed.tsx`, shown in Live Preview and locked mode alike) renders its text through the pipeline below and patches it in with `render/patch.ts`. Everything else (images, media, PDFs, file chips, the properties table, remote-image placeholders) is the same DOM built by `render/embeds.tsx` and `render/liveEmbeds.tsx`, and clicks in it go through `render/interaction.ts`. So **`settings.editor.strictLineBreaks` now affects only embedded notes** (item 2 below) and how rich paste writes a line break (§6.6.1): a note itself always shows its lines as typed. Settings says so.
+
+The pipeline, `render/render.ts` from the research, verified (items 6 to 8 describe the v1 reading view; for an embedded note, links and tags follow through `interaction.ts`, its checkboxes do not toggle, and it is patched per block as in item 8):
 
 1. Strip frontmatter. `lineOffset` is the number of frontmatter lines; it is passed in `env` so `data-line` values match the source. The input is the session's LF text.
 2. `md = MarkdownIt({html: true, linkify: true, breaks: !settings.editor.strictLineBreaks})`. Obsidian shows a single newline as a line break unless "Strict line breaks" is turned on, so notes written in Obsidian keep their line structure. Plugins: `.use(obsidianPlugin)` (wikilinks with `\|`, embeds, hashtags with the shared character class, never inside a link's label), `.use(obsidianComments)` (drops `%%…%%`, inline and in its multi-line block form), `.use(richMarkdown)` (callouts, math, Mermaid and highlighted-code placeholders, §6.7.1), `.use(mark)` (`==x==` becomes `<mark>`), `.use(tasklist, {disabled: false, label: false})`, `.use(footnote)` and `.use(sourceLinePlugin)`.
@@ -2099,7 +2316,7 @@ The pipeline is `render/render.ts` from the research, verified:
    - A click on `a.tag` opens tag search.
    - External links open in a new tab with `rel="noopener noreferrer"`, added by a DOMPurify hook.
    - **Checkboxes.** A `change` on `input.task-list-item-checkbox` calls `toggleTaskAtLine(text, data-line)` and then `session.applyEdit()`; that is a normal edit, so it autosaves. The task pattern is `^(\s*(?:>\s?)*\s*(?:[-+*]|\d+[.)])\s+\[)`, so tasks inside blockquotes and callouts (`> - [ ]`) work too. Each checkbox carries `data-hash`, a hash of its source line as rendered; a toggle is applied only if the session's line still has that hash, otherwise the view re-renders and the tap is ignored (the line moved during the 150 ms render lag). Checkboxes are disabled unless the session is `clean` or `dirty`. Each gets an `aria-label` from its list item's text.
-7. **Properties.** If frontmatter exists, a collapsible read-only "Properties" table is shown above the content. Editing properties uses source mode in v1.
+7. **Properties.** If frontmatter exists, a collapsible read-only "Properties" table is shown above the content. Editing properties used source mode in v1; Live Preview's properties block (§6.6.1) has an edit button that shows the YAML.
 8. **Updating without replacing.** The view re-renders on mode switch and on content changes, debounced by 150 ms, but it never replaces its whole DOM, which would reload PDFs, stop playing media and collapse images while they decode.
    - A change that only flips `[ ]` and `[x]` updates the checkbox's `checked` state and skips rendering.
    - Otherwise `render/patch.ts` renders into a detached fragment and patches the container **per top-level block**, keyed by the block's HTML with `data-line` attributes and task-checkbox state (`checked`, `data-hash`) excluded; the key is stored when the block is inserted, so later changes to the live DOM (hydrated math and diagrams, an opened callout) never change it. Unchanged blocks keep their DOM nodes, including embedded images, iframes, media, transclusions, rendered math and diagrams, and only get their `data-line` and checkbox states updated, so ticking a task inside an opened callout neither closes it nor re-renders anything. No DOM-morphing library is needed.
@@ -2121,7 +2338,9 @@ Built in `render/rich/`, styled by `styles/rich.css`. Both load with the reading
 
 **Placeholders and patching.** The HTML never depends on which lazy modules are loaded, so a block's patch key is the same on every render, and `hydrateRich` marks what it hydrated (a `WeakSet`): an edit elsewhere never re-renders a diagram or formula. When a block is re-inserted because it changed, hydration uses the already-loaded modules synchronously (KaTeX, loaded grammars, Mermaid's per-theme SVG cache), so it appears without a flash. The placeholder attributes `data-math`, `data-mermaid` and `data-lang` are app-reserved like the embed attributes: the sanitizer strips them from raw HTML, so a note cannot forge a placeholder.
 
-**API for other renderers** (`render/rich/index.ts`; Live Preview, ROADMAP item 10, is the intended user). Each function fills the element it is given, produces the reading view's markup and classes, and never parses note text as HTML:
+**In Live Preview** (ROADMAP item 10, §6.6.1): callouts, `$$` blocks and Mermaid blocks render through this pipeline block by block (`render/liveRich.ts`), and inline math through `renderMath`; highlighted code is the editor's own.
+
+**API for other renderers** (`render/rich/index.ts`; Live Preview, ROADMAP item 10, uses `renderMath` and `hydrateRich`). Each function fills the element it is given, produces the reading view's markup and classes, and never parses note text as HTML:
 
 ```ts
 parseCalloutHeader(line: string): CalloutHeader | null          // '[!faq]- Why?' → {type:'faq', kind:'question', fold:'-', title:'Why?', metadata:null}
@@ -2140,7 +2359,8 @@ preloadRich({math?, mermaid?, code?}): void
 
 ```ts
 // views/registry.ts (re-exported from extensions/)
-export interface FileViewProps  { path: string; entry: FileEntry; mode: 'edit' | 'read' }
+export type ViewMode = 'edit' | 'read' | 'live' | 'source' | 'locked';  // notes: live | source | locked | read (§6.6.1)
+export interface FileViewProps  { path: string; entry: FileEntry; mode: ViewMode }
 export interface EmbedProps     { path: string; entry: FileEntry; subpath?: string; display?: string;
                                   width?: number; height?: number;  // from |W or |WxH (added with item 5)
                                   sourcePath: string; depth: number }
@@ -2149,7 +2369,7 @@ export interface FileViewDescriptor {
   match(entry: FileEntry): number;              // 0 = no match; highest wins. Convention: length of the matched suffix (".excalidraw.md" beats ".md")
   icon: LucideIcon;
   textual: boolean;                             // true → content via DocumentSession over GET/PUT /api/files (versioned, autosave, conflicts, live sync)
-  modes: Array<'edit' | 'read'>;                // which toggles the header shows
+  modes: ViewMode[];                            // which toggles the header shows; another mode maps to the nearest (viewModeFor)
   load(): Promise<{ default: ComponentType<FileViewProps> }>;            // lazy chunk
   loadEmbed?(): Promise<{ default: ComponentType<EmbedProps> }>;         // for ![[file]] in reading view
   create?: { label: string; extension: string; initialContent(): string }; // adds "New <label>" to explorer menu + palette
@@ -2185,11 +2405,15 @@ All v1 views, panels (Files, Search, Bookmarks, Tags, Recent files, Backlinks, O
 - `Command.globalHotkey`: the always-global hotkeys were a fixed set (`Mod-O`, `Mod-P`, ...). A capture command such as quick add is most useful in the middle of writing, so a command can now ask for its hotkey to fire inside the editor and text fields too; it must not be a key the editor binds.
 - *Tracked ranges* (`editor/tracked.ts`, `DocumentSession.trackRange` and `takeRange`), with phase 4b: work outside the editor that comes back to a note later (Convert checkbox to task creates a task, then replaces its line) needs the line's place after the edits made meanwhile, local or from another device. A tracked range is a `StateField` like the pending uploads (§6.6 #10), mapped through every transaction and configured both in the session's own state and in the editor's, so it survives remounts; it is editor state, never text, so nothing of it is saved. Text inserted at an edge stays outside the range, so a whole line still starts and ends a line after lines are added around it, and a caller that checks this notices typing at its start or end.
 
+ROADMAP 10 widened the view mode from `'edit' | 'read'` to `ViewMode`, so the `markdown` view can declare its Live Preview, source and locked modes (§6.6.1). Views that declare only `edit` and `read` are unaffected: `FileView` maps the chosen mode onto a view's own modes with `viewModeFor`.
+
+The table grid of ROADMAP 10 (§6.6.1) added three smaller hooks. **Editor:** the `tableCellFormatters` facet and the `refreshTables` effect, through which ROADMAP 39 shows a formula's result in a table cell. **`NoteContext.showMenu`**, so editor extensions open the app's context menu without importing React. **`remote.ts`** `addNestedEditor`: an editor nested in the note's (a table cell's) counts as the note's for IME compositions, which remote updates wait for.
+
 **v1 registrations.**
 
 | id | match | textual | Notes |
 |---|---|---|---|
-| `markdown` | `.md` (3) | yes | Editor and reading view |
+| `markdown` | `.md` (3) | yes | Live Preview, source and locked editor, and the reading view (§6.6.1) |
 | `text` | other `kind:"text"` (2) | yes | Plain CodeMirror editor (JSON language for `.json`) with the same autosave and conflict handling |
 | `image` | `kind:"image"` (2) | no | Zoomable `<img>` |
 | `pdf` | `kind:"pdf"` (2) | no | PDF.js since ROADMAP item 32 (§6.8.3); v1 had an `<iframe>` plus an "Open in new tab" link |
@@ -2528,21 +2752,28 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 1. `name = dayjs().format(settings.dailyNotes.format)`. A `/` in the result creates subfolders.
 2. `path = join(folder, name + '.md')`.
 3. If the tree has the path (case-insensitive), open it.
-4. Otherwise render the template, if one is configured, with `title` set to the last segment of `name`.
-5. `POST /api/files {path, content, onConflict:"fail"}`. Both 201 and 409 lead to opening the note.
+4. Otherwise render the template, if one is configured, with `title` set to the last segment of `name`, after asking its questions (cancelling creates nothing).
+5. `POST /api/files {path, content, onConflict:"fail"}`. Both 201 and 409 lead to opening the note; a note it created opens with the caret at the template's `{{cursor}}`.
 
 **Insert template** (palette, ribbon, mobile ⋯):
 
 1. A picker over `GET /api/templates` (fuzzy).
-2. Fetch the template content and render the placeholders (§5.11), with `title` set to the current note's basename.
+2. Fetch the template content, ask its questions (below; cancelling inserts nothing) and render the placeholders (§5.11), with `title` set to the current note's basename.
 3. **Frontmatter merge** with the `yaml` Document API, which keeps comments and formatting:
    - template keys missing from the note are appended;
    - when both values are lists, the result is their union in note order then template order, compared case-insensitively for `tags`, `aliases` and `cssclasses`;
    - otherwise the note's scalar wins.
 4. The body is inserted at the `EditorState`'s **selection**, which CodeMirror keeps after blur. On the phone, Template is reached through ⋯, which always blurs the editor, so this is what puts the template where the cursor was, as in Obsidian. In reading mode it goes to the last selection from edit mode, or at the end if the note was never edited in this page load.
-5. All of this is **one** CodeMirror transaction, so it is a single undo step.
+5. All of this is **one** CodeMirror transaction, so it is a single undo step. The caret ends at the template's first `{{cursor}}` in the body, otherwise after the inserted body.
 
-**New note from template** creates `Untitled.md` in the default new-note location (with `onConflict:"rename"` and an `Idempotency-Key`) using the rendered template, then focuses the inline title with the same optimistic flow as New note (§6.15). The template is read once and rendered at one fixed time: with the title `Untitled` for the create, then again with the note's final name (the server's free name, or the title the user commits), whose differing lines (`{{title}}`) replace the first render's as one ordinary edit.
+**New note from template** creates `Untitled.md` in the default new-note location (with `onConflict:"rename"` and an `Idempotency-Key`) using the rendered template, then focuses the inline title with the same optimistic flow as New note (§6.15). The template is read once and rendered at one fixed time: with the title `Untitled` for the create, then again with the note's final name (the server's free name, or the title the user commits), whose differing lines (`{{title}}`) replace the first render's as one ordinary edit. It is in every folder's explorer menu too (**New note from template here**), which creates the note in that folder.
+
+**Templates v2** (ROADMAP item 30, 2026-10-21; `features/templates.ts`, `features/folderTemplates.ts`):
+
+- **Questions.** A template's `{{prompt:Question|default}}` placeholders are asked in **one dialog** (`promptFields`, the dialog stack's "fields" kind) titled with the template's name: one labelled field per distinct question, in order, pre-filled with its default, the first one focused and selected. On the phone the keyboard's **Next** moves to the next field and **Done** (Enter in the last) answers; answers may be empty. **Cancel** (or Esc) inserts or creates nothing: a new note's pending view goes away and no file is created. The answers and "now" are fixed once, so the second render of a new note (its final title) uses the same answers.
+- **Caret.** `{{cursor}}` marks where the caret goes. Insert template selects it in the same transaction. A new note (from a template, a folder template, or today's daily note) gets it through `DocumentSession.select` once the note is loaded, only if its text is still exactly the rendered template (nothing typed yet); the `{{title}}` retitle edit then maps it like any selection. Focus stays where the new-note flow puts it (the inline title), and Enter there continues at the caret. CodeMirror is configured without multiple selections, so a second `{{cursor}}` is only removed (no tab stops).
+- **Folder templates.** Settings › Templates › **Folder templates** lists `{folder, template}` rows (add, edit, remove; an empty folder means every folder, an empty template is an unused row; one row per folder, at most 100). A note the app creates in a folder (New note, a view's "New note here", the quick switcher's create, a link to a missing note) starts from the template of the **deepest** rule whose folder contains it, with its questions and caret as above. Notes created inside the templates folder get none, and so do explicit choices: New note from template, today's daily note (its own template) and other views' files (drawings, spreadsheets). A folder template that does not exist shows a toast and the note starts empty.
+- **Compatibility.** Obsidian's core `{{title}}`, `{{date[:FMT]}}` and `{{time[:FMT]}}` render exactly as before. Templates are rendered on LF text, so a template saved with CRLF line breaks creates notes with LF ones. There are no JavaScript templates.
 
 **Date tokens.** These are rendered by dayjs with the plugins `advancedFormat`, `customParseFormat`, `weekOfYear`, `isoWeek`, `weekYear` and `localizedFormat`, registered once in `features/dates.ts`. The examples are for Fri 2026-10-16 14:03:09 in locale `en`. The java.time column is for future server-side use only (roadmap item 7, capture to the daily note); note that Java's `YYYY` and `DD` mean something else.
 
@@ -2600,12 +2831,17 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 | `file.reveal` | Reveal current file in explorer | |
 | `file.copyLink` | Copy link to current file | |
 | `file.download` | Download current file | |
-| `editor.toggleMode` | Toggle reading/editing view | `Mod-E` |
+| `editor.toggleMode` | Toggle lock editing (a locked note is the reading view) | `Mod-E` outside the note's text, and in a locked note |
+| `editor.toggleSource` | Toggle source mode | |
 | `editor.save` | Save now | `Mod-S` |
 | `editor.followLink` | Follow link under cursor | `Mod-Enter` |
 | `editor.toggleCheckbox` | Toggle checklist status | `Mod-L` |
 | `editor.bold` / `editor.italic` | Toggle bold / italic | `Mod-B` / `Mod-I` |
-| `editor.insertLink` | Insert Markdown link | `Mod-K` |
+| `editor.strikethrough` / `editor.highlight` | Toggle strikethrough / highlight | `Mod-Shift-X` / `Mod-Shift-H` |
+| `editor.inlineCode` | Toggle inline code | `Mod-E` in the note's text |
+| `editor.insertLink` | Insert or remove link | `Mod-K` |
+| `editor.heading1` … `editor.heading6`, `editor.headingNone` | Toggle heading 1 … 6, Remove heading | |
+| `editor.bulletList` / `editor.numberedList` / `editor.quote` | Toggle bulleted list / numbered list / quote | |
 | `editor.insertWikilink` | Insert internal link | |
 | `editor.insertAttachment` | Insert attachment… | |
 | `editor.find` | Find/replace in current note | `Mod-F` |
@@ -2635,7 +2871,7 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 |---|---|
 | Global | The command hotkeys above. `Esc` closes the topmost overlay or the drawer. `Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,` and `Mod-Alt-←/→` work even while the editor has focus, and so do commands registered with `globalHotkey` (quick add, `Mod-Alt-T`, §6.22), and every key chosen under Settings, "Hotkeys" (§6.25). Off Apple platforms AltGr arrives as Ctrl+Alt: in a text field, a key that types a character with it (AltGr+T is ț in Romanian) types that character rather than running a hotkey. |
 | Task list page | `Enter` or `Space` on a task opens its inline editor (`Esc` or Done closes it); `Alt-↑/↓` move it among its siblings; `Alt-→` makes it a subtask of the task above, `Alt-←` moves it out of its parent (§6.22) |
-| Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`. **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. |
+| Editor | CodeMirror defaults: undo `Mod-Z`; redo `Mod-Shift-Z` or `Mod-Y`; indent `Tab`; outdent `Shift-Tab`; find `Mod-F`; next and previous match `Mod-G` / `Mod-Shift-G`; completion `Ctrl-Space`; accept with `Enter`. Plus `Mod-B/I/K/L/E/S/Enter`, `Mod-Shift-X/H` (§6.6.1; `Mod-E` is inline code in the text and unlocks a locked note) and `Mod-Shift-V` (paste as plain text). In Live Preview the typing shortcuts of §6.6.1 apply; `Backspace`, `Delete` (and by word), `ArrowLeft` and `Enter` follow its cursor rules, and the arrow keys open a table's cells. In a table cell: `Tab`/`Shift-Tab` next and previous cell (a new row after the last), `Enter`/`Shift-Enter` the cell below and above, arrows across cell edges, `Esc` back to the note, `Shift-F10` the cell's menu (§6.6.1). **`Esc` then `Tab`** moves focus out of the editor (CodeMirror's tab escape, needed because `Tab` indents); a one-time hint says so the first time the editor gets keyboard focus. With **Vim key bindings** on (Settings › This device, §6.36): vim's keys, with the app's keys above taking precedence, in Live Preview and in source mode; `:w` saves, `:q` leaves the editor. |
 | Explorer (focused) | `↑/↓` move; `←/→` collapse and expand; `Enter` opens; `F2` renames; `Delete` deletes (with confirmation); `Mod-Alt-N` creates a new note in the focused folder |
 | Quick switcher / palette | `↑/↓`, `Enter`, `Shift-Enter` (create), `Esc` |
 | Conflict banner | Buttons reachable with `Tab`; `Esc` dismisses Compare |
@@ -2668,12 +2904,12 @@ The version view of §6.11 also gains **Compare with**: in the History panel it 
 **iOS and touch specifics:**
 
 - **Viewport.** The shell is pinned to the visual viewport through `--vvh` and `--vv-top`, set by `installViewportVars` (research sketch). **`WorkspaceScroll` is the only scroller**, on every breakpoint: CodeMirror sizes to its content (`.cm-editor {height: auto}`, `.cm-scroller {overflow: visible}`), which CM6 supports, still virtualizing against the scroll parent. The inline title and properties therefore scroll away with the text instead of staying pinned above it, which matters when the keyboard leaves only 350–400 px. `html, body {overflow: hidden; overscroll-behavior: none}` turns off the page bounce and pull-to-refresh; ⋯ has a **Reload** item instead.
-- **Keyboard open.** `mobileViewport.ts` sets a `keyboard-open` flag when `visualViewport.height < 0.75 × innerHeight`. While it is set, the TopBar collapses (it slides away and returns when the keyboard closes), leaving the space to the text and the toolbar. On phones, `NoteHeader` shows only the inline title, because the TopBar already has the save status, the mode toggle and ⋯.
+- **Keyboard open.** `mobileViewport.ts` sets a `keyboard-open` flag when `visualViewport.height < 0.75 × innerHeight`. While it is set, the TopBar collapses (it slides away and returns when the keyboard closes), leaving the space to the text and the toolbar. On phones, `NoteHeader` shows only the inline title, because the TopBar already has the save status, the lock toggle and ⋯ (with Source mode and Reading view).
 - **Safe areas.** `env(safe-area-inset-*)` padding on the TopBar, the drawer, the sheet and the toolbar, and `padding-inline: max(16px, env(safe-area-inset-left), env(safe-area-inset-right))` on the editor content and the reading view, so text never runs under the notch or Dynamic Island in landscape.
 - **MobileToolbar.** The last grid row, so it sits right above the keyboard, on `(pointer: coarse)`.
   - It is **always mounted**; a CSS class shows it from a debounced (150 ms) "editor focused or toolbar in use" state. Unmounting it on blur would remove a button before its click is delivered.
   - Every button has `tabIndex={-1}` and `onPointerDown={e => e.preventDefault()}`, so tapping it never moves focus: the editor keeps focus, the keyboard stays open, and the button dispatches straight to the `EditorView`.
-  - Buttons: `[[ ]]`, `#`, checkbox, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, **Record voice note** (§6.30; it puts the keyboard away for the recording panel), and hide keyboard (`blur`).
+  - Buttons: `[[ ]]`, `#`, bold, italic, heading (each tap: text, heading 1, 2, 3, text), bulleted list, checkbox, link, table, backtick, `---`, outdent, indent, undo, redo, **Follow link**, **Command palette**, image, **Record voice note** (§6.30; it puts the keyboard away for the recording panel), and hide keyboard (`blur`) (§6.6.1). In a table cell, Previous and Next cell replace the tools that change whole lines.
   - The image button triggers the **app-level** hidden `<input type=file accept="image/*" multiple>` hosted by `AppShell`. The selection to insert at is remembered before the picker opens, because opening the picker blurs the editor; an input inside the toolbar would be lost with its `change` event.
 - **Typography and targets.** Editor and input font size is at least **16 px**, so iOS does not zoom on focus. Every tap target is at least **44×44 px**. `touch-action: manipulation` removes the tap delay.
 - **No hover-only UI.** Tree rows open their menu with long-press or `⋯` (§6.15).
@@ -3385,6 +3621,22 @@ The code is in `frontend/src/habits/`: `model.ts` (habits from notes, schedules)
 
 **Live sync.** Habits and check-ins are notes, so other devices' changes arrive as `file.*` and `entry.moved` events; the page's query is refetched half a second after a note event (not for attachments), only while a page or the panel is open.
 
+### 6.36 Vim mode (ROADMAP item 36)
+
+Vim keys in the note editor and the plain-text editor, from `@replit/codemirror-vim` 6.4.0 (MIT; it pulls in `@replit/codemirror-vim-core` 0.1.0, MIT), as Obsidian's "Vim key bindings" option.
+
+- **Setting.** Settings › This device › **Vim key bindings**, the per-device preference `vimMode` (`notesapp:prefs`, §5.12), **off by default**. It applies only where the primary pointer is fine (a mouse or a trackpad): with `(pointer: coarse)` (phones, tablets) the row is disabled with the reason and the editor never loads vim, because normal mode would swallow what the on-screen keyboard types. Turning it on or off remounts the open editor, as spell check does.
+- **Lazy chunk.** `editor/vimMode.ts` (in the main bundle) holds a `Compartment` that every editor includes (`common()` in `editorSetup.ts`), empty unless vim is on and loaded. The first editor that mounts with vim on imports `editor/vim.ts` (the library and the app's glue: 122 kB, 39 kB gzip; the service worker precaches it with the other lazy chunks, §6.26) and reconfigures the compartment; later editors get vim at creation. Without the preference the chunk is never requested. The editor starts each mount in normal mode, as in Obsidian.
+- **Key order.** The vim extension is `Prec.highest([appKeysFirst, vim(), modeIndicator])`, so it sees keys before CodeMirror's keymaps (the library's requirement):
+  1. The global handler (§6.25) runs first anyway, in the window's capture phase: the always-global keys (`Mod-O`, `Mod-P`, `Mod-Shift-F`, `Mod-,`, back and forward), `globalHotkey` commands (quick add) and every key chosen on this device work in every vim mode. On Windows and Linux this means `Ctrl-O` opens the switcher rather than vim's jump back, as in Obsidian.
+  2. `appKeysFirst` runs the editor's command keys, declared once as the `editorCommandKeys` facet (`Mod-S`, `Mod-Enter`, `Mod-L`, `Mod-B`, `Mod-I`, `Mod-K`, `Mod-E`, `Mod-F`; the text editor has `Mod-S` and `Mod-F`), so bold, find or reading view keep their keys over vim's `Ctrl-B`, `Ctrl-F`, `Ctrl-E`, `Ctrl-I` there. A command given another key under Settings › Hotkeys steps aside (`ifDefault`), and its old key then goes to vim: removing Find's key gives `Ctrl-F` back to vim's page down. On Apple platforms `Mod` is Cmd, so nothing overlaps.
+  3. Vim. Normal-mode keys have no `Mod` or `Alt`, so they can never be an app hotkey (`eventSpec` returns null for them).
+  4. CodeMirror's keymaps, for what vim leaves (completion's `Enter` and arrows in insert mode, undo on `Mod-Z`, …).
+- **Escape.** `appKeysFirst` also closes the completion list on `Esc` (vim then leaves insert mode) and re-arms CodeMirror's tab escape, which vim's handling of `Esc` would otherwise skip, so `Esc` then `Tab` still moves focus out of the editor (§6.14).
+- **Ex commands** (`Vim.defineEx`, global, each finding its editor through the adapter): `:w` runs the editor's `editor.save` binding (the session flushes now), `:q` leaves the editor (there are no tabs or panes to close, and the note autosaves, so `:q!` discards nothing), `:wq` and `:x` save and leave. The other built-in ex commands (`:s`, `:sort`, `:noh`, `:map`, …) work as in the library. The `:` and `/` prompts are a bottom panel (`.cm-vim-panel`) styled like the search panel.
+- **Mode indicator.** A plugin listens to `vim-mode-change` and publishes `NORMAL`, `INSERT`, `VISUAL`, `VISUAL LINE`, `VISUAL BLOCK` or `REPLACE` to a tiny store (`useVimMode`) that the desktop status bar shows (§6.5); the editor that last had focus wins, and the item disappears with the editor. Narrower windows have no status bar: there the block cursor (normal and visual mode, in the accent colour) against the bar cursor (insert mode) shows the mode.
+- **Where it applies.** `NoteEditor` hosts (Markdown notes and plain-text files). Small editors are plain fields and stay unaffected: the inline title, properties, the task editor, spreadsheet cells, the capture box. An editor built elsewhere with its own `EditorView` (a canvas card on its own branch) gets no vim because it does not include the compartment; a one-line editor whose `Esc` closes it would fight vim's `Esc`.
+
 ---
 
 ## 7. Infrastructure
@@ -4013,7 +4265,7 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 
 - `features/syntax.ts`, `obsidianSyntax` and the markdown-it rules: the API.md §15.6 vectors (tags with emoji and `’`, `#1984`, `a#b`, `#a/b/`, a tag in a heading, no tag inside link text; wikilink bodies with `\|`, an empty target, an empty body, nested `#`), plus the research's verified parse cases.
 - `completion`: the apply behaviour with `closeBrackets`, aliases, no completion in code; **typing further re-ranks the list** (no frozen `validFor` list); picking one of two same-named notes inserts a path-qualified link; with `useWikilinks: false` a Markdown link is inserted; `[[#` lists the open note's headings from the Lezer tree.
-- `render.ts`: wikilinks, aliases, headings with `data-heading`, unresolved class on the first render, image sizes and `v=` URLs, sanitization (script and `onerror` removed; `style`, `form` and `button` forbidden; `position: fixed` stripped), `data-line` with `lineOffset`, footnotes, `breaks` on by default and off with `strictLineBreaks`, `==mark==`, `%%comments%%` hidden (inline and block). `toggleTaskAtLine`, including `> - [ ]` and a stale `data-hash`. `patch.ts`: an `<img>` node survives a re-render of an unrelated paragraph, and a checkbox-only change does not re-render.
+- `render.ts` (markdown-it, now for embedded notes, §6.7): wikilinks, aliases, headings with `data-heading`, unresolved class on the first render, image sizes and `v=` URLs, sanitization (script and `onerror` removed; `style`, `form` and `button` forbidden; `position: fixed` stripped), `data-line` with `lineOffset`, footnotes, `breaks` on by default and off with `strictLineBreaks`, `==mark==`, `%%comments%%` hidden (inline and block). `toggleTaskAtLine`, including `> - [ ]` and a stale `data-hash`. `patch.ts`: an `<img>` node survives a re-render of an unrelated paragraph, and a checkbox-only change does not re-render.
 - `api/types.test.ts`: `types.ts` is a verbatim copy of API.md §17 (the test reads `docs/API.md`, which `vite.config.ts` allows for tests only), and the task event names.
 - `features/links.ts`: the API.md §15.1 vectors through the client `resolve()` and `createPath()`, the §15.3 vectors and `encodeMdPath`. `eol.ts`: CRLF detection (all, none, mixed), round trip, offset mapping. `paths.ts`: route encoding and decoding round trip, including `%`, `#`, `?` and Unicode; `joinPath('', x) === x`.
 - `templates.ts`: every placeholder form, unknown placeholders untouched, frontmatter merge rules, insertion at the stored selection after blur. `daily.ts`: formats with `/` subfolders, strict parsing, previous and next.
@@ -4021,6 +4273,9 @@ Chosen: **stop the app for the local snapshot only.** `docker stop -t 45` sends 
 - `sheets/`: the `.sheet` parser's refusals and repairs, the stable layout, the cell-level merge, the HyperFormula `Workbook` (formulas, references, named ranges, errors, spills, engine changes, undo and redo, remote replace), number formats, typed input, charts, CSV and Excel conversion, embeds without the engine, and the spreadsheet view with Glide replaced by a stand-in; details in §6.21.6.
 - `drafts.ts` (with `fake-indexeddb`): write, restore, re-key, ownership by live tabs over a mocked `BroadcastChannel`, the quota-failure warning.
 - `applyEvents`: each event's cache patch, including `removeQueries(['file', …])` and the own-mutation invalidations. `events.ts`: `lastEventId` tracking; **an idle stream that receives only pings for 2 minutes stays Live and never reconnects**; `onerror` with `readyState` `CLOSED` recreates the stream with backoff; the `replayed` countdown sets `caughtUp`; resync buffering drops buffered events with `seq` at or below the tree's `eventId`; a `buildSha` mismatch reloads when all sessions are clean and shows the banner when one is dirty.
+- Live Preview (`editor/livePreview/`): what renders and what stays as typed (a link over a line break shows as typed), the cursor and deletion rules (`deletion.test.ts`: never joining a line to a hidden block, a table or a hidden fence; embeds and footnotes deleted whole; word deletions stopping at hidden markup), the modes (`noteMode`: `defaultMode: read` and `?mode=read` open a note locked; locking makes the tables read-only). Tables: the model's byte-for-byte round trip over a corpus of tables and its cells against Lezer's, every edit operation in compact and padded styles, the check that refuses a corrupt edit, 150 seeded random edit sequences; the grid in an editor: rendering, typing through to the note (only that table changes), one undo step per change, the keys, the menus, dragging a grip, another device's edit while a cell is open (and a row change under the open cell), the caret rules around a table, inserting a table, `insertionRange` while a cell is open. **10b** (`blocks.test.ts`, `embeds.test.ts`): the properties block (source mode never; the edit button and ArrowUp into the YAML; typing next to it; a typed frontmatter stays text until the caret leaves; locked without the button), hidden comment blocks (hide-all, locked, reveal-at-cursor; unclosed stays text; the caret goes past; a search match shows it), embeds through a fake renderer (missing files, the note itself and block references as links; remote images; nothing built as HTML; no redraw on an edit elsewhere; teardown; atomic), footnote numbering as markdown-it's, through edits, and the tooltip, code fences, images in table cells. **10c**: `perf.test.ts` on a 10,000-line note (a keystroke at its start, middle and end against styled source mode on the same note; no table, comment block or footnote read again; opening, moving and jumping), `pointer.test.ts` (a tap lands where a click does; a handle dragged into hidden markup stops at its edge).
+- Rich Markdown in Live Preview (`render/liveRich.test.tsx`, integration through the real renderers): a locked note renders a callout (with its link), inline and block math (KaTeX), a Mermaid placeholder and a spreadsheet embed through its view's `loadEmbed`, without changing the text; a callout's task toggles only its box, and not in a read-only note; while editing, a block and a formula show as text while the caret is in them, and a click on a block puts the caret in it; source mode and plain editors show text. `editorSetup.test.ts`: `Mod-E` is inline code while editing and unlocks a locked note, each half following its own command's key. `vim.test.ts`: vim keys, and the app's formatting keys before them, in Live Preview and in source mode.
+- Rich paste: `htmlToMarkdown` (a web page, Google Docs with its wrapper, styled spans and checklists, Word's list paragraphs, tables without a header row, sanitizing, `data:` and local images, malformed HTML, the light escaping; brackets in a link's text, merged format runs, escaped tag and note link text, code blocks kept whole, a `!` before a link) and `pasteAndDrop` (one undo step, source mode, plain text and `Mod-Shift-V`, a code editor's copy, a picture against the text of a Word copy, blocks kept apart from the text around them, a rule under a paragraph, plain text into code and the properties). Each paste bug fixed after review has a test that fails without its fix.
 - Components: `ConflictBanner` actions (including `flushHistory` on Keep mine, Save merged and Recreate, and the `503 history-unavailable` message), `QuickSwitcher` (fuzzy, create row, `Shift-Enter`), `FileExplorer` keyboard navigation and virtualization, `MobileToolbar` buttons that do not take focus.
 - Graph view (ROADMAP item 16): the query grammar on names, paths, aliases and tags; views with tags, attachments, unresolved links, orphans, folder and tag filters, the local graph by depth and direction; first-match color groups; options from storage and from Obsidian's `graph.json`; the force layout keeping positions by id and holding a dragged node; the runner's generations; renderer geometry (zoom around a point, fit, hit test) and batched drawing; the page and panel with their filters, groups, depth and the refresh after a tree change. The compatibility page (item 24): summary, settings rows, Apply with `baseVersion`, the conflict path, graph settings for this device, findings opening their line.
 - Canvas (ROADMAP item 25): `format.ts` writes Obsidian, pretty-printed and one-line files back byte for byte, an edit rewrites only its lines and keeps unknown fields, new files use Obsidian's layout; `merge.ts` follows every rule of §6.8.2 and keeps untouched lines; `ops.ts` (moves, group contents, deletion with edges, groups, copy and paste with new ids, stacking); the controller against a real `DocumentSession` (each operation autosaves, undo restores the exact bytes, typing is one step, remote updates are adopted, a conflict is merged and saved automatically, a real conflict is left to the banner and Take theirs, broken files, move following); the pointer state machine with synthetic pointer events (select, drag with snapping and group contents, selection box, touch pan, pinch, long press, double taps, link taps, resize, connect); the view and the embed in jsdom.
@@ -4042,7 +4297,7 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 2. Create a note, type, and watch the status go from Unsaved to Saving to Saved. Reload: the text is still there.
 3. Type `[[` and pick a note, `[[Note#` and pick a heading, then `#` and pick a tag.
 4. `Mod`+click a link, or use **Follow** on the iPhone. An unresolved link creates its note.
-5. Toggle the reading view: links, embeds, image sizes and checkboxes work, toggling a checkbox saves, and images and a playing video are not reloaded by the toggle. A note written in Obsidian with single line breaks keeps them; `==highlight==` and `%%comment%%` render as in Obsidian.
+5. Lock a note (the reading view, §6.7): links follow on a click, embeds and image sizes show, toggling a checkbox saves, and a playing video keeps playing while you type elsewhere in the note. `?mode=read` and "Default mode: Locked (reading)" open notes locked. A note embedded with `![[Note]]` that was written in Obsidian with single line breaks keeps them (strict line breaks off); `==highlight==` and `%%comment%%` render as in Obsidian.
 6. Paste a screenshot (rgpc) and insert a photo (iPhone toolbar, with the cursor in the middle of a note): it lands in `Attachments/`, is inserted at the cursor, and renders.
 7. Rename a linked note through Move to…: the dialog previews the count, the referencing notes update, and the toast shows the count. Undo moves it back and the links resolve again.
 8. Drag a note into a folder (desktop) and use Move to… (phone).
@@ -4074,6 +4329,11 @@ Run this manually on `rgpc` (Chrome) and `iphone` (Safari) after integration and
 34. Canvas (ROADMAP item 25): open a board made in Obsidian, look around and close it: `git status` shows no change. Add, connect, colour, group, resize and delete cards; edit a card with `[[` completion; undo and redo. On the iPhone: pinch, pan, double-tap a card and type (the keyboard opens), long-press for the menu. Move one card on each device at the same time: both moves survive without a banner. `![[Board.canvas]]` shows the preview, search finds a card, and the note on a file node lists the canvas among its backlinks.
 35. PDFs (item 32): a 300-page PDF opens on the iPhone at once and scrolls smoothly to the end; pinch zooms around the fingers and the pages sharpen when the fingers rest, without Safari zooming the page; text can be selected and copied; find shows "n of m" and the keyboard opens with the tap; thumbnails jump to their page; `[[file.pdf#page=5]]` opens page 5; `![[file.pdf#page=3]]` shows page 3 in the note; a scanned PDF (JPEG 2000 or JBIG2) renders; dark pages invert in the dark theme and the moon turns them off; the console shows no CSP violations.
 36. Voice notes (item 33): on the iPhone, the toolbar's microphone asks for the microphone once, records with the screen on, and **Done** embeds `Recording <date>.m4a` at the cursor, even after typing elsewhere meanwhile; it plays inline in the reading view and on the PC; a PC recording (`.webm` or `.m4a`) plays on the iPhone. With the whisper service set up, *Transcribing…* turns into a quote under the embed within about the recording's length, and search finds its words; with the service stopped, the toast's Retry works once it is back. Lock the phone mid-recording: what was recorded is saved.
+37. Live Preview (§6.6.1), both devices and both syntax-visibility settings: headings, formatting, links, bullets, tasks, quotes and rules render without markup. Click (or tap) at the end of bold text and type: the text is bold. Backspace at the end of bold text and after a link deletes a letter. Type right after a link: the link does not grow. Tap a checkbox: only `[ ]`/`[x]` changes in the file. Tap a link on the iPhone, Mod-click it on rgpc, click it in a locked note: it opens. The lock button locks and unlocks (and Mod-E unlocks a locked note); the source toggle shows the unchanged Markdown. iPhone (10c): a tap at the end of bold text puts the caret where a click does, and typing continues bold; dragging a selection handle onto hidden markup never shows the markup or makes the text jump; a long press on a bullet, a task box, a footnote number or a fence's language selects nothing inside it; footnote numbers and the properties' buttons are easy to hit.
+38. Tables (§6.6.1), both devices: a table shows as a grid with its header and alignment; click or tap a cell and type, `Tab` through the cells (the last one adds a row), `Enter` down, `Esc` out; type `|` in a cell. The file changes only in that table, padded tables stay padded, and Undo takes back one change at a time. Drag a row's grip and a column's grip (desktop), use the cell menu (right-click; long-press on the iPhone), insert a table from the toolbar, and type on the line under a table: the text stays out of it. Edit a cell on the iPhone while rgpc changes the same table: the open cell follows. A wide table scrolls sideways on the iPhone; the rest of the note does not.
+39. Never typing syntax (§6.6.1), both devices: type `# `, `- `, `1. `, `> `, `[] `: each becomes its block at once, and one Undo after `[] ` gives back `[] `. Type `---` then Enter under a paragraph: a rule. Type ```` ``` ```` then Enter: a closed code block. Type `| Name | Date |` then Enter: a table with its first empty cell open. `Mod-B` with nothing selected, then type: the text is bold and the file has `**text**`; `Mod-B` again and type: plain. Select text (rgpc): the toolbar appears above it once the mouse is up; each button toggles. iPhone: the keyboard toolbar's bold, italic, heading, list, checkbox, table and link buttons work without closing the keyboard. Paste from a web page, a Google Doc (headings, bold, a nested list, a checklist, a table) and Word: Markdown comes in; `Mod-Shift-V`: plain text; a screenshot: an attachment; a VS Code selection: its text. Paste a Wikipedia paragraph with citations: each `[1]` stays a link (not a note link). Paste a Google Doc line whose bold spans several runs: one bold run, no `****`. Paste a GitHub code block with blank lines: they stay. Paste rich text inside a code block: plain text. Paste a rule (`<hr>`) on the line under a paragraph: the paragraph stays a paragraph.
+40. Embeds, footnotes, comments, properties and code (§6.6.1, 10b), both devices: `![[image.png|300]]`, a PDF, an audio file and `![[Other note]]` show in Live Preview and locked; with "Load remote images" off, a web image waits for a click. Backspace after an embed deletes it whole. A footnote reference shows its number; hovering (rgpc) or tapping (iPhone) shows its text with working links. `%%hidden%%` and a `%%` block disappear (dimmed or shown in reveal-at-cursor mode); typing `%%` never hides the rest of the note. The frontmatter shows as properties; the edit button (or ArrowUp from the line under it) shows the YAML, and leaving it shows the block. A code block's fences hide until the caret goes into it. Typing next to any of these blocks never lands inside them, and Backspace never joins a line to them.
+41. A long note (10c), rgpc and iPhone: open a 10,000-line note (headings, lists, tables, footnotes, code), type at its start, middle and end, and scroll and jump with the outline: no lag. Select All, then `Mod-B`: done within a couple of seconds, and the code blocks are untouched; Undo takes it back in one step.
 
 ---
 

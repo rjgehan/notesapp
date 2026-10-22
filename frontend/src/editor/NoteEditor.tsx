@@ -4,21 +4,27 @@ import { StateEffect, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { currentSettings, currentTree, fetchNoteMeta, fetchTags, useTree } from '../api/hooks';
+import { openContextMenu } from '../components/overlays/openContextMenu';
 import { insertAttachments } from '../features/attachments';
 import { linkTo } from '../features/fileOps';
 import { wantsNoteFocus } from '../features/focus';
 import { openLink, openTag } from '../features/navigation';
 import { recentPaths } from '../features/recent';
+import { renderLiveEmbed, renderLiveProperties } from '../render/liveEmbeds';
+import { renderLiveMarkdown, renderLiveMath } from '../render/liveRich';
 import { usePrefs } from '../state/prefs';
 import type { DocumentSession } from '../sync/DocumentSession';
 import { clearActiveEditor, setActiveEditor } from './activeEditor';
 import { vaultChanged, type NoteContext } from './context';
 import { noteExtensions, type EditorHooks } from './editorSetup';
 import { maybeShowTabEscapeHint } from './tabEscapeHint';
+import { attachVim, vimWanted } from './vimMode';
 
 export interface NoteEditorProps {
   session: DocumentSession;
   readOnly: boolean;
+  /** Live Preview (DESIGN §6.6.1): `live` edits the rendered note, `locked` shows it read-only; absent is styled source mode. */
+  preview?: 'live' | 'locked';
   /** Builds the extension list; defaults to the Markdown note editor. */
   extensions?(ctx: NoteContext, hooks: EditorHooks): Extension[];
   onToggleMode(): void;
@@ -27,11 +33,14 @@ export interface NoteEditorProps {
   autoFocus?: boolean;
 }
 
-export function NoteEditor({ session, readOnly, extensions = noteExtensions, onToggleMode, onView, autoFocus }: NoteEditorProps) {
+export function NoteEditor({ session, readOnly, preview, extensions = noteExtensions, onToggleMode, onView, autoFocus }: NoteEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const spellcheck = usePrefs((s) => s.spellcheck);
   const autocorrect = usePrefs((s) => s.autocorrect);
+  const vim = vimWanted(usePrefs((s) => s.vimMode));
+  const syntaxVisibility = usePrefs((s) => s.syntaxVisibility);
+  const loadRemoteImages = usePrefs((s) => s.loadRemoteImages);
   const tree = useTree().data;
   const callbacks = useRef({ onToggleMode, onView });
 
@@ -55,6 +64,11 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
       toggleMode: () => callbacks.current.onToggleMode(),
       insertFiles: (files, range, pasted) => void insertAttachments(session, files, range, pasted),
       linkTo: (path) => linkTo(path, session.path),
+      showMenu: openContextMenu,
+      renderEmbed: (el, embed) => renderLiveEmbed(el, embed, session.path),
+      renderProperties: (el, yaml, onEdit) => renderLiveProperties(el, yaml, onEdit, session.path),
+      renderMarkdown: (el, block) => renderLiveMarkdown(el, block, session.path),
+      renderMath: renderLiveMath,
     };
     const hooks: EditorHooks = {
       onLocalChange: () => session.markDirty(),
@@ -62,10 +76,14 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
       readOnly,
       spellcheck,
       autocorrect,
+      vim,
+      livePreview: preview ? { visibility: syntaxVisibility, locked: preview === 'locked', checkboxes: !readOnly, remoteImages: loadRemoteImages } : null,
     };
     const state = session.prepareState((st) => st.update({ effects: StateEffect.reconfigure.of(extensions(ctx, hooks)) }).state);
     const v = new EditorView({ state, parent });
     view.current = v;
+    // The first vim editor loads its chunk, then switches it on.
+    attachVim(v, vim);
     session.attach(v);
     setActiveEditor(v);
     const onFocus = () => {
@@ -84,7 +102,7 @@ export function NoteEditor({ session, readOnly, extensions = noteExtensions, onT
     };
     // `autoFocus` only matters at mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, readOnly, spellcheck, autocorrect, extensions]);
+  }, [session, readOnly, preview, syntaxVisibility, loadRemoteImages, spellcheck, autocorrect, vim, extensions]);
 
   // Link decorations re-resolve when the vault changes.
   useEffect(() => {

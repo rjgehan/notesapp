@@ -9,7 +9,7 @@ import { findFileIgnoreCase } from '../api/vaultTree';
 import { ConflictBanner } from '../components/ConflictBanner';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { OrphanDraftNotice } from '../components/OrphanDrafts';
-import { useNoteMode } from '../features/noteMode';
+import { useNoteMode, viewModeFor } from '../features/noteMode';
 import { noteRoute, pathFromLocation } from '../features/paths';
 import { recordOpened } from '../features/recent';
 import { documents, moveMap } from '../sync/instance';
@@ -88,7 +88,7 @@ export function FileView() {
 
   const descriptor = viewFor(entry);
   const View = lazyView(descriptor);
-  const viewMode = descriptor.modes.includes(mode) ? mode : (descriptor.modes[0] ?? 'read');
+  const viewMode = viewModeFor(mode, descriptor.modes);
   return (
     <ErrorBoundary key={viewKey} label="view">
       {descriptor.textual && <DocumentBanner path={entry.path} merge={descriptor.merge} />}

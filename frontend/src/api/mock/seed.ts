@@ -1,4 +1,4 @@
-// Demo vault for the dev mock. It exercises every feature the reading view and editor support.
+// Demo vault for the dev mock. It exercises every feature Live Preview and the editor support.
 import { bigBoard, CANVAS_NOTE, PROJECT_BOARD } from './canvasSeed';
 
 const WELCOME = `---
@@ -22,7 +22,7 @@ Type \`[[\` in edit mode to link a note, \`[[Note#\` for its headings and \`#\` 
 ## Formatting
 
 Single line breaks
-are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is hidden%% in reading view.
+are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is hidden%% in Live Preview.
 
 > [!note] Quotes render as blockquotes.
 > - [ ] A task inside a quote
@@ -30,12 +30,13 @@ are kept, as in Obsidian. ==Highlighted text== stands out, and %%this comment is
 ### Tasks
 
 - [x] Open the welcome note
-- [ ] Toggle a checkbox in reading view
-- [ ] Switch modes with Mod-E
+- [ ] Toggle a checkbox, also in a locked note
+- [ ] Lock editing with the lock button
 
 | Feature | Shortcut |
 | --- | --- |
-| Toggle reading view | \`Mod-E\` |
+| Bold | \`Mod-B\` |
+| Inline code | \`Mod-E\` |
 | Save now | \`Mod-S\` |
 | Follow link | \`Mod-Enter\` |
 
@@ -153,8 +154,8 @@ tags: [meeting]
 ---
 ## Meeting {{date:dddd, MMMM Do YYYY}}
 
-- Attendees:
-- Notes:
+- Attendees: {{prompt:Who is attending?}}
+- Notes: {{cursor}}
 `;
 
 const WINDOWS_NOTE = '# Imported from Windows\r\n\r\nThis note uses CRLF line endings.\r\n\r\n- [ ] Toggle me: the file stays CRLF\r\n';

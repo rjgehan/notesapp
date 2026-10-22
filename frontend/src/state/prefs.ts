@@ -2,6 +2,8 @@
 import { create } from 'zustand';
 
 export type ThemePref = 'dark' | 'light' | 'system';
+/** Markdown markup in Live Preview (DESIGN §6.6.1): always hidden, or shown for the element at the cursor. */
+export type SyntaxVisibility = 'hide-all' | 'reveal-at-cursor';
 
 export interface Prefs {
   theme: ThemePref;
@@ -10,11 +12,14 @@ export interface Prefs {
   loadRemoteImages: boolean;
   /** Keep copies of recently opened notes, the tree and note images for offline reading (DESIGN §6.26). */
   offlineNotes: boolean;
+  /** Vim keys in the note and text editors (DESIGN §6.36); used only with a mouse or trackpad. */
+  vimMode: boolean;
+  syntaxVisibility: SyntaxVisibility;
 }
 
 export const PREFS_KEY = 'notesapp:prefs';
 
-export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true };
+export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true, vimMode: false, syntaxVisibility: 'hide-all' };
 
 function load(): Prefs {
   try {
@@ -27,6 +32,8 @@ function load(): Prefs {
       autocorrect: typeof parsed.autocorrect === 'boolean' ? parsed.autocorrect : true,
       loadRemoteImages: typeof parsed.loadRemoteImages === 'boolean' ? parsed.loadRemoteImages : true,
       offlineNotes: typeof parsed.offlineNotes === 'boolean' ? parsed.offlineNotes : true,
+      vimMode: parsed.vimMode === true,
+      syntaxVisibility: parsed.syntaxVisibility === 'reveal-at-cursor' ? 'reveal-at-cursor' : 'hide-all',
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -41,9 +48,9 @@ export const usePrefs = create<PrefsState>()((set, get) => ({
   ...load(),
   update(patch) {
     set(patch);
-    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes } = get();
+    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility } = get();
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility }));
     } catch {
       // Private mode or quota: the preference still applies to this page load.
     }

@@ -168,6 +168,8 @@ public class ObsidianSettings implements SettingsSeed {
 
 		private String timeFormat;
 
+		private final List<TemplatesSettings.FolderTemplate> folderTemplates;
+
 		private EditorMode defaultMode;
 
 		private boolean readableLineLength;
@@ -200,6 +202,7 @@ public class ObsidianSettings implements SettingsSeed {
 			this.templatesFolder = t.folder();
 			this.dateFormat = t.dateFormat();
 			this.timeFormat = t.timeFormat();
+			this.folderTemplates = t.folderTemplates();
 			EditorSettings e = current.editor();
 			this.defaultMode = e.defaultMode();
 			this.readableLineLength = e.readableLineLength();
@@ -214,7 +217,8 @@ public class ObsidianSettings implements SettingsSeed {
 							this.attachmentLocation, this.attachmentFolder, this.attachmentSubfolder,
 							this.autoUpdateLinks, this.excludedPaths),
 					new DailyNotesSettings(this.dailyFormat, this.dailyFolder, this.dailyTemplate, this.openOnStartup),
-					new TemplatesSettings(this.templatesFolder, this.dateFormat, this.timeFormat),
+					new TemplatesSettings(this.templatesFolder, this.dateFormat, this.timeFormat,
+							this.folderTemplates),
 					new EditorSettings(this.defaultMode, this.readableLineLength, this.strictLineBreaks), this.ai,
 					this.reminders);
 		}

@@ -200,7 +200,9 @@
   margin-top: 0.3em;
 }
 
-.markdown-rendered .task-list-item-checkbox {
+/* The checkbox look is shared with Live Preview's task boxes (editor.css). */
+.markdown-rendered .task-list-item-checkbox,
+.cm-lp-checkbox {
   appearance: none;
   -webkit-appearance: none;
   width: 1.05em;
@@ -215,12 +217,14 @@
   transition: background 120ms ease;
 }
 
-.markdown-rendered .task-list-item-checkbox:checked {
+.markdown-rendered .task-list-item-checkbox:checked,
+.cm-lp-checkbox:checked {
   background: var(--interactive-accent);
   border-color: var(--interactive-accent);
 }
 
-.markdown-rendered .task-list-item-checkbox:checked::after {
+.markdown-rendered .task-list-item-checkbox:checked::after,
+.cm-lp-checkbox:checked::after {
   content: '';
   width: 0.32em;
   height: 0.58em;
@@ -229,7 +233,8 @@
   transform: translateY(-0.06em) rotate(45deg);
 }
 
-.markdown-rendered .task-list-item-checkbox:disabled {
+.markdown-rendered .task-list-item-checkbox:disabled,
+.cm-lp-checkbox:disabled {
   cursor: default;
   opacity: 0.6;
 }
@@ -496,4 +501,26 @@
 .properties-error {
   color: var(--text-error);
   font-size: var(--font-ui-small);
+}
+
+.properties-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.properties-header .properties-heading {
+  margin-bottom: 0;
+}
+
+.properties-edit {
+  width: 26px;
+  height: 26px;
+  color: var(--text-faint);
+}
+
+.properties-header + .properties-list,
+.properties-header + .properties-error,
+.properties-header + .property-empty {
+  margin-top: 6px;
 }

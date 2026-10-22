@@ -17,7 +17,12 @@ import org.jspecify.annotations.Nullable;
  */
 public final class CaptureText {
 
-	private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{\\s*(title|date|time)(?::([^}]*))?\\s*\\}\\}",
+	/**
+	 * The placeholders of DESIGN §5.11: {@code title}, {@code date} and {@code time} with an optional format, then
+	 * {@code cursor} and {@code prompt:Question|default} (ROADMAP item 30).
+	 */
+	private static final Pattern PLACEHOLDER = Pattern.compile(
+			"\\{\\{\\s*(?:(title|date|time)(?::([^}]*))?|(cursor)|prompt:([^}|]*)(?:\\|([^}]*))?)\\s*\\}\\}",
 			Pattern.CASE_INSENSITIVE);
 
 	private CaptureText() {
@@ -78,19 +83,29 @@ public final class CaptureText {
 		return "[" + label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]") + "](" + destination + ")";
 	}
 
-	/** Renders {@code {{title}}}, {@code {{date}}}, {@code {{time}}} and their {@code :FORMAT} forms (DESIGN §5.11). */
+	/**
+	 * Renders {@code {{title}}}, {@code {{date}}}, {@code {{time}}} and their {@code :FORMAT} forms (DESIGN §5.11).
+	 * Nobody is there to answer: {@code {{prompt:Question|default}}} renders its default (or nothing) and
+	 * {@code {{cursor}}} is removed.
+	 */
 	public static String renderTemplate(String template, String title, ZonedDateTime now, TemplatesSettings settings) {
 		Matcher m = PLACEHOLDER.matcher(template);
 		StringBuilder out = new StringBuilder();
 		while (m.find()) {
-			String name = m.group(1).toLowerCase(Locale.ROOT);
 			String value;
-			if (name.equals("title")) {
+			if (m.group(3) != null) {
+				value = "";
+			}
+			else if (m.group(4) != null) {
+				// An empty question is not a prompt: it stays as written, like any unknown placeholder.
+				value = m.group(4).isBlank() ? m.group() : (m.group(5) != null) ? m.group(5).strip() : "";
+			}
+			else if (m.group(1).toLowerCase(Locale.ROOT).equals("title")) {
 				value = title;
 			}
 			else {
 				String format = (m.group(2) != null) ? m.group(2)
-						: name.equals("date") ? settings.dateFormat() : settings.timeFormat();
+						: m.group(1).equalsIgnoreCase("date") ? settings.dateFormat() : settings.timeFormat();
 				value = MomentFormat.format(format, now);
 			}
 			m.appendReplacement(out, Matcher.quoteReplacement(value));

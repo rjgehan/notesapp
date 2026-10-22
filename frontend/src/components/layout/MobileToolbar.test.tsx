@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setActiveEditor } from '../../editor/activeEditor';
 import { noteContext, type NoteContext } from '../../editor/context';
+import { tableCellHost } from '../../editor/livePreview/table/facets';
 import { useUi } from '../../state/ui';
 import { MobileToolbar } from './MobileToolbar';
 import { registerBuiltins } from '../../extensions/builtins';
@@ -85,6 +86,40 @@ describe('MobileToolbar', () => {
     expect(view.state.selection.main.head).toBe(view.state.doc.length - 2);
   });
 
+  it('has the formatting tools: bold, italic, heading, list, checkbox, link and table, with 44 px targets', () => {
+    view = mountEditor('Some text');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    view.dispatch({ selection: { anchor: 0, head: 4 } });
+    fireEvent.click(button('Bold'));
+    expect(view.state.doc.toString()).toBe('**Some** text');
+    fireEvent.click(button('Italic'));
+    expect(view.state.doc.toString()).toBe('***Some*** text');
+    fireEvent.click(button('Heading'));
+    expect(view.state.doc.toString()).toBe('# ***Some*** text');
+    fireEvent.click(button('Heading'));
+    expect(view.state.doc.toString()).toBe('## ***Some*** text');
+    fireEvent.click(button('Bulleted list'));
+    expect(view.state.doc.toString()).toBe('- ***Some*** text');
+    view.dispatch({ selection: { anchor: view.state.doc.length - 4, head: view.state.doc.length } });
+    fireEvent.click(button('Link'));
+    expect(view.state.doc.toString()).toBe('- ***Some*** [text]()');
+    for (const name of ['Toggle checklist', 'Insert table']) expect(button(name)).toBeInTheDocument();
+    for (const b of screen.getAllByRole('button', { hidden: true })) expect(b).toHaveClass('mobile-toolbar-button');
+  });
+
+  it('keeps the inline formatting tools in a table cell, without the line tools', () => {
+    const note = mountEditor('note');
+    const ctx = { path: () => 'Note.md' } as unknown as NoteContext;
+    view = new EditorView({ state: EditorState.create({ doc: 'cell', extensions: [noteContext.of(ctx), tableCellHost.of(note)] }), parent: document.body });
+    setActiveEditor(view);
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    for (const name of ['Bold', 'Italic', 'Link', 'Inline code']) expect(button(name)).toBeInTheDocument();
+    for (const name of ['Heading', 'Bulleted list']) expect(screen.queryByRole('button', { name, hidden: true })).toBeNull();
+    note.destroy();
+  });
+
   it('opens the command palette and hides the keyboard', () => {
     view = mountEditor('x');
     render(<MobileToolbar />);
@@ -104,6 +139,33 @@ describe('MobileToolbar', () => {
     expect(toolbar()).toHaveClass('is-visible');
     act(() => vi.advanceTimersByTime(200));
     expect(toolbar()).not.toHaveClass('is-visible');
+  });
+
+  it('offers Previous and Next cell in a table cell, and undoes in its note', () => {
+    const note = mountEditor('note');
+    note.dispatch({ changes: { from: 4, insert: '!' } });
+    const ctx = { path: () => 'Note.md' } as unknown as NoteContext;
+    view = new EditorView({ state: EditorState.create({ doc: 'cell', extensions: [noteContext.of(ctx), tableCellHost.of(note)] }), parent: document.body });
+    setActiveEditor(view);
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    expect(button('Previous cell')).toBeInTheDocument();
+    expect(button('Next cell')).toBeInTheDocument();
+    for (const name of ['Toggle checklist', 'Horizontal rule', 'Insert table', 'Insert image', 'Indent']) {
+      expect(screen.queryByRole('button', { name, hidden: true })).toBeNull();
+    }
+    fireEvent.click(button('Undo'));
+    expect(note.state.doc.toString()).toBe('note');
+    note.destroy();
+  });
+
+  it('inserts a table from the toolbar', () => {
+    view = mountEditor('');
+    render(<MobileToolbar />);
+    act(() => view.focus());
+    expect(screen.queryByRole('button', { name: 'Previous cell', hidden: true })).toBeNull();
+    fireEvent.click(button('Insert table'));
+    expect(view.state.doc.toString()).toBe(['|     |     |', '| --- | --- |', '|     |     |', '|     |     |'].join('\n'));
   });
 
   it('offers only the generic tools in a plain-text editor', () => {
