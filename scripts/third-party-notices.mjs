@@ -10,7 +10,7 @@
 // for backend/pom.xml, with licences read from their POMs in the local Maven repository (following
 // parent POMs). Needs Node 24 and the backend's Maven wrapper; uses no npm packages.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,26 @@ function sourceUrl(pkg) {
   return url;
 }
 
+/** `license` as a string or `{ type }`, or the old `licenses: [{ type }]` array (fuzzy declares it so). */
+function declaredLicence(manifest) {
+  const one = (l) => (typeof l === 'string' ? l : l?.type);
+  if (manifest.license) return one(manifest.license);
+  if (Array.isArray(manifest.licenses) && manifest.licenses.length) return manifest.licenses.map(one).filter(Boolean).join(' OR ');
+  return undefined;
+}
+
+/** For a package that declares no licence (khroma), the licence file it ships, when it is one of the common texts. */
+function licenceFromFile(packageDir) {
+  if (!existsSync(packageDir)) return undefined;
+  const file = readdirSync(packageDir).find((f) => /^(licen[cs]e|copying)([-.].*)?$/i.test(f));
+  if (!file) return undefined;
+  const text = readFileSync(join(packageDir, file), 'utf8').slice(0, 2000);
+  if (/Permission is hereby granted, free of charge/.test(text)) return 'MIT';
+  if (/Permission to use, copy, modify, and\/or distribute this software for any/.test(text)) return 'ISC';
+  if (/Apache License[\s\S]*Version 2\.0/.test(text)) return 'Apache-2.0';
+  return undefined;
+}
+
 function npmPackages(dir) {
   const lock = JSON.parse(readFileSync(join(root, dir, 'package-lock.json'), 'utf8'));
   const byName = new Map();
@@ -38,7 +58,7 @@ function npmPackages(dir) {
     if (name.startsWith('@types/')) continue; // type definitions only, no code in the bundle
     const manifestPath = join(root, dir, key, 'package.json');
     const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
-    const licence = entry.license ?? manifest.license ?? 'UNKNOWN';
+    const licence = entry.license ?? declaredLicence(manifest) ?? licenceFromFile(join(root, dir, key)) ?? 'UNKNOWN';
     const known = byName.get(name);
     if (known) known.licences.add(licence);
     else byName.set(name, { name, licences: new Set([licence]), url: sourceUrl(manifest) });
