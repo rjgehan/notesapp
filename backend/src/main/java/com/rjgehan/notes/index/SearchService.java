@@ -63,10 +63,42 @@ public class SearchService {
 		if (!order.equals("relevance") && !order.equals("mtime")) {
 			throw NotesException.badRequest("sort must be relevance or mtime");
 		}
+		long started = System.nanoTime();
+		VaultIndex.SearchOutcome outcome = evaluate(query, prefix, fuzzy, order.equals("mtime"));
+		List<SearchHit> results = new ArrayList<>();
+		for (VaultIndex.SearchHit hit : outcome.hits().subList(0, Math.min(limit, outcome.hits().size()))) {
+			NoteRecord note = hit.note();
+			String basename = PathNames.basenameOf(PathNames.nameOf(note.path()));
+			SnippetBuilder.Snippets snippets = SnippetBuilder.build(basename, note.searchText(), note.parse(),
+					outcome.patterns(), outcome.regexes(), outcome.budget(), hit.kind() == FileKind.PDF);
+			results.add(new SearchHit(note.path(), basename, hit.kind(), Math.round(hit.score() * 100) / 100.0,
+					hit.mtime(), snippets.titleRanges(), snippets.matches(), snippets.moreMatches()));
+		}
+		List<SearchCorrection> corrections = outcome.corrections()
+			.stream()
+			.map((c) -> new SearchCorrection(c.term(), c.replacements()))
+			.toList();
+		long tookMs = (System.nanoTime() - started) / 1_000_000;
+		return new SearchResponse(query, outcome.hits().size(), tookMs, results, corrections);
+	}
+
+	/**
+	 * Every note and document matching {@code query} (not only a page of them), in order of relevance: the
+	 * {@code q} filter of {@code GET /api/notes/query} (API.md §40.1). Excluded paths never match.
+	 */
+	public List<String> matchingPaths(String query) {
+		VaultIndex.SearchOutcome outcome = evaluate(query, false, false, false);
+		List<String> paths = new ArrayList<>(outcome.hits().size());
+		for (VaultIndex.SearchHit hit : outcome.hits()) {
+			paths.add(hit.note().path());
+		}
+		return paths;
+	}
+
+	private VaultIndex.SearchOutcome evaluate(String query, boolean prefix, boolean fuzzy, boolean byMtime) {
 		if (query.length() > SearchQueryParser.MAX_LENGTH) {
 			throw invalidQuery("The query is longer than " + SearchQueryParser.MAX_LENGTH + " characters");
 		}
-		long started = System.nanoTime();
 		SearchQuery parsed = SearchQueryParser.parse(query);
 		List<SearchQuery.Leaf> leaves = parsed.leaves();
 		if (leaves.size() > SearchQueryParser.MAX_CLAUSES) {
@@ -75,7 +107,7 @@ public class SearchService {
 		boolean costly = parsed.readsText();
 		FilesSettings files = this.settings.current().files();
 		VaultIndex.SearchOptions options = new VaultIndex.SearchOptions(prefix, fuzzy, files::isExcluded,
-				order.equals("mtime"), this.timeout);
+				byMtime, this.timeout);
 		VaultIndex.SearchOutcome outcome;
 		if (costly) {
 			acquire();
@@ -97,21 +129,7 @@ public class SearchService {
 				this.expensive.release();
 			}
 		}
-		List<SearchHit> results = new ArrayList<>();
-		for (VaultIndex.SearchHit hit : outcome.hits().subList(0, Math.min(limit, outcome.hits().size()))) {
-			NoteRecord note = hit.note();
-			String basename = PathNames.basenameOf(PathNames.nameOf(note.path()));
-			SnippetBuilder.Snippets snippets = SnippetBuilder.build(basename, note.searchText(), note.parse(),
-					outcome.patterns(), outcome.regexes(), outcome.budget(), hit.kind() == FileKind.PDF);
-			results.add(new SearchHit(note.path(), basename, hit.kind(), Math.round(hit.score() * 100) / 100.0,
-					hit.mtime(), snippets.titleRanges(), snippets.matches(), snippets.moreMatches()));
-		}
-		List<SearchCorrection> corrections = outcome.corrections()
-			.stream()
-			.map((c) -> new SearchCorrection(c.term(), c.replacements()))
-			.toList();
-		long tookMs = (System.nanoTime() - started) / 1_000_000;
-		return new SearchResponse(query, outcome.hits().size(), tookMs, results, corrections);
+		return outcome;
 	}
 
 	private void acquire() {

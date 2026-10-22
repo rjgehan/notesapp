@@ -43,6 +43,16 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 			+ "font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; "
 			+ "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'";
 
+	/**
+	 * The script sandbox's worker (ROADMAP item 40, DESIGN §6.39), as the frontend build names it. A worker's policy
+	 * comes from its own script's response: this one may compile WebAssembly (QuickJS) and load its own chunks, and
+	 * nothing else. It cannot fetch, open sockets or start workers, whatever runs in it.
+	 */
+	static final String SCRIPT_SANDBOX_PREFIX = "/assets/scriptSandbox.worker-";
+
+	static final String SCRIPT_SANDBOX_POLICY = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; "
+			+ "connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'";
+
 	private static final Set<String> OVERRIDABLE = Set.of("content-security-policy", "x-frame-options",
 			"cache-control", "cross-origin-resource-policy", "x-content-type-options");
 
@@ -76,7 +86,14 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		else if (path.equals(MANIFEST)) {
 			response.setHeader(HttpHeaders.CACHE_CONTROL, "no-cache");
 		}
+		else if (isScriptSandbox(path)) {
+			response.setHeader("Content-Security-Policy", SCRIPT_SANDBOX_POLICY);
+		}
 		chain.doFilter(request, new OverridingHeadersResponse(response));
+	}
+
+	static boolean isScriptSandbox(String path) {
+		return path.startsWith(SCRIPT_SANDBOX_PREFIX) && path.endsWith(".js") && path.indexOf('/', 1 + "/assets".length) < 0;
 	}
 
 	/** The raw-file endpoints and the event stream set their own {@code Cache-Control}. */

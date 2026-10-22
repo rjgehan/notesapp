@@ -288,6 +288,19 @@ class SecurityIntegrationTest {
 	}
 
 	@Test
+	void theScriptSandboxWorkerGetsAPolicyWithoutNetworkAccess() {
+		// ROADMAP item 40: scripts run in QuickJS in this worker; its policy, from its own response, lets it compile
+		// WebAssembly and nothing else (no fetch, sockets or workers). Other scripts keep the app's policy.
+		Reply sandbox = this.api.get("/assets/scriptSandbox.worker-test.js");
+		assertThat(sandbox.status()).isEqualTo(200);
+		assertThat(sandbox.header("Content-Type")).startsWith("text/javascript");
+		assertThat(sandbox.header("Content-Security-Policy")).isEqualTo(
+				"default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'none'; "
+						+ "base-uri 'none'; form-action 'none'");
+		assertThat(this.api.get("/assets/app-test.js").header("Content-Security-Policy")).isEqualTo(APP_CSP);
+	}
+
+	@Test
 	void unknownRoutesAreProblemJson() {
 		Reply api = this.api.get("/api/nope");
 		assertThat(api.problem(404)).isEqualTo("not-found");

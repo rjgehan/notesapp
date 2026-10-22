@@ -2745,6 +2745,30 @@ export interface DatedNotesResponse {
   properties: string[];         // the properties read, ['date'] by default
   notes: DatedNote[];           // by day, then path; a note once per day
 }
+
+// ---------- Scripts in notes (API.md §40, ROADMAP items 40 and 17) ----------
+export interface NoteTask {
+  line: number;                 // 0-based line in the note
+  status: string;               // the character between the brackets: ' ', 'x', '/', …
+  done: boolean;                // status is x or X
+  text: string;
+}
+export interface QueriedNote {
+  path: VaultPath;
+  title: string;                // the basename
+  aliases: string[];
+  tags: string[];               // distinct, without '#', in order of first appearance
+  frontmatter: Record<string, unknown> | null;
+  mtime: IsoInstant;
+  size: number;
+  links: VaultPath[];           // where the note's links and embeds resolve, distinct
+  tasks: NoteTask[] | null;     // with tasks=true; null otherwise
+}
+export interface NotesQueryResponse {
+  notes: QueriedNote[];         // in path order, at most limit
+  total: number;                // every match
+  truncated: boolean;           // total > notes.length
+}
 ```
 
 ---

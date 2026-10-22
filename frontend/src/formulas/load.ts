@@ -37,6 +37,15 @@ export function loadFormulaEngine(then?: () => void): void {
   loading.catch(() => {});
 }
 
+/** The engine, loading it if needed (scripts' `fn` and `formula`, ROADMAP 40b). */
+export function formulaEngine(): Promise<FormulaEngine> {
+  if (loaded) return Promise.resolve(loaded);
+  return new Promise((resolve, reject) => {
+    loadFormulaEngine(() => resolve(loaded!));
+    loading?.catch(reject);
+  });
+}
+
 /** Stops waiting (an editor that went away before the engine loaded). */
 export function cancelFormulaWait(then: () => void): void {
   waiting.delete(then);
