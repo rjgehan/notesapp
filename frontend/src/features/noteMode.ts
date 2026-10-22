@@ -12,6 +12,7 @@ import { useUi, type ViewMode } from '../state/ui';
 import { lastInputWasKeyboard, requestNoteFocus } from './focus';
 import { activePath, navigateTo } from './navigation';
 import { pathFromLocation } from './paths';
+import { appPathname } from '../state/vault';
 
 /** `?mode=read` (a link from search, say): a note shows locked, another file its reading mode (`viewModeFor`). */
 function forcedMode(search: string): ViewMode | null {
@@ -102,7 +103,7 @@ export function setNoteMode(mode: ViewMode): void {
   if (params.has('mode')) {
     params.delete('mode');
     const search = params.toString();
-    navigateTo(window.location.pathname + (search ? '?' + search : '') + window.location.hash, { replace: true });
+    navigateTo(appPathname() + (search ? '?' + search : '') + window.location.hash, { replace: true });
   }
 }
 

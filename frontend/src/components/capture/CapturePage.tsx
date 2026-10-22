@@ -12,6 +12,7 @@ import { navigateTo, openPath } from '../../features/navigation';
 import { displayName } from '../../features/paths';
 import { forgetShared, readShared } from '../../features/sharedItems';
 import { CaptureForm } from './CaptureForm';
+import { appTitle } from '../../state/vault';
 import '../../styles/capture.css';
 
 interface Prefill {
@@ -50,7 +51,7 @@ export function CapturePage() {
   }, [location.search]);
 
   useEffect(() => {
-    document.title = 'Quick capture · Notes';
+    document.title = appTitle('Quick capture');
   }, []);
 
   const finish = (outcome: CaptureOutcome, input: CaptureInput) => {

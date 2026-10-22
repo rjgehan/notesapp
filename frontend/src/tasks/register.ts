@@ -14,6 +14,7 @@ import { installTaskSync } from './sync';
 import { TaskOverlays } from './ui/TaskOverlays';
 import { localToday } from './dates';
 import { openQuickAdd, type QuickAddContext } from './ui/state';
+import { appPathname } from '../state/vault';
 import './tasks.css';
 
 let registered = false;
@@ -23,7 +24,7 @@ export const QUICK_ADD_HOTKEY = 'Mod-Alt-t';
 
 /** Quick add from a task page starts in its context: the list of a list page, today on Today. */
 function pageContext(): QuickAddContext {
-  const path = window.location.pathname;
+  const path = appPathname();
   const m = /^\/x\/tasks\/list\/([^/]+)$/.exec(path);
   if (m) return { listId: decodeURIComponent(m[1]) };
   return path === '/x/tasks/today' ? { due: localToday() } : {};

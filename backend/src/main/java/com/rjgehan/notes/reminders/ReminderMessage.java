@@ -18,6 +18,12 @@ public record ReminderMessage(String key, String kind, @Nullable String taskId, 
 		String body, String url) {
 
 	/** ntfy with "title only": the task's title, and a body that names nothing from the vault. */
+	/** The same message opening {@code prefix + url}: an extra vault's reminders open that vault (DESIGN §5.39). */
+	ReminderMessage withUrlPrefix(String prefix) {
+		return prefix.isEmpty() ? this
+				: new ReminderMessage(this.key, this.kind, this.taskId, this.at, this.title, this.body, prefix + this.url);
+	}
+
 	ReminderMessage titleOnly() {
 		String generic = switch (this.kind) {
 			case "daily" -> "Daily note";

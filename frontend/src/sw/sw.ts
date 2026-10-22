@@ -33,6 +33,7 @@ import {
   staleShellCaches,
 } from './core';
 import { actionRequest, OPEN_MESSAGE, reminderNotification, safeAppPath, type ReminderNotificationData } from './push';
+import { vaultFromPathname } from './vaultPath';
 
 declare const self: ServiceWorkerGlobalScope;
 declare const __SW_BUILD__: string;
@@ -234,7 +235,10 @@ self.addEventListener('push', (event) => {
 
 async function openReminder(url: string): Promise<void> {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  const tab = windows.find((c) => new URL(c.url).origin === self.location.origin);
+  // A tab of the reminder's own vault first (DESIGN §6.44); another tab loads that vault.
+  const ours = windows.filter((c) => new URL(c.url).origin === self.location.origin);
+  const vault = vaultFromPathname(url);
+  const tab = ours.find((c) => vaultFromPathname(new URL(c.url).pathname) === vault) ?? ours[0];
   if (tab) {
     await tab.focus().catch(() => undefined);
     tab.postMessage({ type: OPEN_MESSAGE, url });

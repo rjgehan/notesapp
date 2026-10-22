@@ -8,6 +8,7 @@ import { ApiError, isStorageProblem, isTransient } from '../api/client';
 import type { FlashcardCard, FlashcardCardState, FlashcardReview, FlashcardsChangedEvent, FlashcardsResponse, FlashcardWriteResult } from '../api/types';
 import { flashcardApi } from './api';
 import { formatReview, parseReview, reviewsOf, stateIsCurrent } from './reviews';
+import { vaultKey } from '../state/vault';
 
 export const flashcardKeys = {
   all: ['flashcards'] as const,
@@ -222,7 +223,7 @@ const STORAGE_KEY = 'notesapp:flashcards:outbox';
 
 function loadOps(): OutboxOp[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(vaultKey(STORAGE_KEY));
     const ops: unknown = raw ? JSON.parse(raw) : [];
     return Array.isArray(ops) ? (ops as OutboxOp[]).filter((op) => op && (op.kind === 'review' || op.kind === 'undo')) : [];
   } catch {
@@ -232,8 +233,8 @@ function loadOps(): OutboxOp[] {
 
 function saveOps(ops: OutboxOp[]): void {
   try {
-    if (ops.length) localStorage.setItem(STORAGE_KEY, JSON.stringify(ops));
-    else localStorage.removeItem(STORAGE_KEY);
+    if (ops.length) localStorage.setItem(vaultKey(STORAGE_KEY), JSON.stringify(ops));
+    else localStorage.removeItem(vaultKey(STORAGE_KEY));
   } catch {
     // Storage full or blocked: the answers stay in memory and are sent while the page lives.
   }

@@ -9,6 +9,7 @@ import { queryKeys } from '../api/queryKeys';
 import type { TreeResponse, WriteResult } from '../api/types';
 import { displayName } from '../features/paths';
 import { toast } from '../state/toasts';
+import { vaultKey } from '../state/vault';
 import { useUi } from '../state/ui';
 import type { DocumentRegistry } from '../sync/documents';
 import type { DraftStore } from '../sync/drafts';
@@ -133,7 +134,7 @@ async function replayDrafts(deps: OfflineSyncDeps): Promise<void> {
       onSaved: deps.onSaved,
     });
   // One tab at a time replays (two would only repeat idempotent saves, but toast twice).
-  const report = typeof navigator !== 'undefined' && navigator.locks ? await navigator.locks.request('notesapp-draft-replay', replay) : await replay();
+  const report = typeof navigator !== 'undefined' && navigator.locks ? await navigator.locks.request(vaultKey('notesapp-draft-replay'), replay) : await replay();
   useOffline.getState().setReview(report.review);
   if (report.synced.length > 0) {
     toast(report.synced.length === 1 ? `Synced your offline edits to ${displayName(report.synced[0])}` : `Synced your offline edits to ${report.synced.length} notes`);

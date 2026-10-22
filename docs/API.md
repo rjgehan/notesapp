@@ -198,6 +198,9 @@ Every error response is RFC 9457 `application/problem+json` with an extra `code`
 | `block-not-found` | 409 | Block not found | §37: the line a block id was to go on is no longer in the note, or is no longer unique | `line` |
 | `funnel-request` | 403 | Not available through Funnel | The request carries `Tailscale-Funnel-Request`: it came from the internet through Tailscale Funnel. Every path, health included (§26) | |
 | `publishing-off` | 409 | Public publishing is off | §26.2: `NOTES_PUBLISH_ENABLED` is not `true` on the server | |
+| `vault-not-found` | 404 | No such vault | §41: a `/api/v/<name>/` request for a name this server does not serve | `vault` |
+| `vault-unavailable` | 503 | Vault not available | §41: the vault's context is starting (`reason: "starting"`, with `Retry-After: 2`) or could not be started (`reason: "failed"`) | `vault`, `reason` |
+| `vaults-off` | 409 | Creating vaults is off | §41.2: `NOTES_VAULTS_DIR` is empty or `NOTES_VAULTS_ALLOW_CREATE=false` | |
 
 ```ts
 export interface FieldError { field: string; message: string }   // e.g. {"field":"settings.files.newNoteFolder","message":"invalid path"}
@@ -1907,7 +1910,8 @@ export type ErrorCode =
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
   | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
-  | 'block-not-found' | 'funnel-request' | 'publishing-off';
+  | 'block-not-found' | 'funnel-request' | 'publishing-off'
+  | 'vault-not-found' | 'vault-unavailable' | 'vaults-off';
 
 export interface FieldError { field: string; message: string }
 
@@ -2809,6 +2813,19 @@ export interface ReminderDueEvent {
   sentAt: IsoInstant;
 }
 
+// ---------- Vaults (API.md §41, ROADMAP item 37) ----------
+// Server-wide: GET and POST /api/vaults are never prefixed. Every other endpoint of an extra vault
+// is its default-vault path with /api replaced by /api/v/<name>.
+export type VaultState = 'starting' | 'ready' | 'failed';
+export interface VaultInfo {
+  name: string;                 // 1-32 of a-z 0-9 -, starting and ending with a letter or digit
+  isDefault: boolean;           // the vault at NOTES_VAULT_DIR, served unprefixed; listed first
+  state: VaultState;            // starting: requests get 503 vault-unavailable until ready
+  url: string;                  // where its app opens: '/' or '/v/<name>/'
+}
+export interface VaultsResponse { vaults: VaultInfo[]; canCreate: boolean }
+export interface CreateVaultRequest { name: string }   // 201 VaultInfo (state 'starting')
+
 // ---------- Public publishing (API.md §26, ROADMAP item 26) ----------
 export type PublishedNoteState = 'current' | 'changed' | 'source-missing' | 'snapshot-missing';
 export interface PublishedNote {
@@ -2950,6 +2967,8 @@ export interface NotesQueryResponse {
 | GET | `/api/publish` | | 200 `PublishResponse` | 26.1 |
 | POST | `/api/publish` | `PublishRequest` | 200 `PublishedNote` | 26.2 |
 | DELETE | `/api/publish?path=` | | 204 | 26.3 |
+| GET | `/api/vaults` | | 200 `VaultsResponse` | 38.1 |
+| POST | `/api/vaults` | `CreateVaultRequest` | 201 `VaultInfo` | 38.2 |
 | POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
 | POST | `/api/notes/block-id` | `BlockIdRequest` | 200 `BlockIdResult` | 37 |
 | GET | `/api/notes/query?path=&tag=&folder=&prop=&linksTo=&q=&tasks=&limit=` | | 200 `NotesQueryResponse` | 40.1 |
@@ -2982,7 +3001,7 @@ export interface NotesQueryResponse {
 | POST | `/api/properties/rename` | `PropertyRenameRequest` | 200 `PropertyRenameResult` | 38.4 |
 | GET | `/actuator/health`, `/livez`, `/readyz` | | 200 / 503 | 6.3 |
 
-**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions), `/capture` (quick capture, DESIGN §6.27) and `/clip` (the web clipper's hand-over page, DESIGN §6.27.1). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
+**SPA routes** are served `index.html` by the server: `/`, `/n/**`, `/search`, `/trash`, `/settings`, `/settings/**`, `/x/**` (pages registered by extensions), `/capture` (quick capture, DESIGN §6.27), `/clip` (the web clipper's hand-over page, DESIGN §6.27.1) and `/v/<name>/**` (an extra vault's app, §41). Static bundles are served from `/assets/**`; root files such as `/theme-boot.js` and `/favicon.svg` are served with `no-cache`.
 
 **Web clipper** (DESIGN §6.27.1): `/clip` is the only response sent with `Cross-Origin-Opener-Policy: unsafe-none` (every other one has `same-origin`), so the bookmarklet's window can post to it. `/clipper/clipper.js`, `/clipper/shortcut.js` and `/clipper/bookmarklet.js` are the clipper build's scripts (`no-cache`); a server built without the clipper answers them `404`.
 
@@ -3022,6 +3041,7 @@ export interface NotesQueryResponse {
 | `BlockIdRequest`, `BlockIdResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]` |
 | `NotesQueryResponse`, `QueriedNote`, `NoteTask` | Same | `QueriedNote.frontmatter` is a `@Nullable Map<String, @Nullable Object>`, `tasks` a `@Nullable List<NoteTask>` |
 | `TranscriptionStatus`, `TranscriptionResult` | Same; the request is `TranscribeRequest(String path)` | |
+| `VaultsResponse`, `VaultInfo`, `CreateVaultRequest` | Same | `VaultInfo.state` is the registry's enum written in lower case; `CreateVaultRequest.name` is `@Nullable` (missing: `400 invalid-name`) |
 | `PublishResponse`, `PublishedNote`, `PublishRequest` | Same | `PublishedNote.state` is the enum `PublishedNoteState` (`current`, `changed`, `source-missing`, `snapshot-missing`); every `PublishRequest` component is `@Nullable` |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
 | `Problem` / `VersionConflictProblem` / `TaskConflictProblem` | Not records: Spring `ProblemDetail` with properties added by `NotesException` / `VersionConflictException` | |
@@ -3860,3 +3880,31 @@ default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; wo
 ```
 
 It may compile WebAssembly (QuickJS, inlined in the worker: it fetches nothing) and nothing else: no `fetch`, sockets or workers, whatever runs in it.
+
+## 41. Multiple vaults (ROADMAP item 37)
+
+One server can serve several independent vaults (DESIGN §5.39). The **default vault** is the one at `NOTES_VAULT_DIR`; every endpoint of this document is its endpoint, unchanged. An **extra vault** has exactly the same API under a prefix: **`/api/v/<name>/...`** is the extra vault's `/api/...` (for example `GET /api/v/work/tree`, `PUT /api/v/work/files?path=…`, `GET /api/v/work/events?clientId=…`). The default vault also answers under its own name (`/api/v/main/...`). Each vault has its own versions, event ids, idempotency keys, trash ids, task ids and commit ids: nothing returned by one vault means anything to another.
+
+- **Names.** 1 to 32 lowercase letters, digits and dashes, starting and ending with a letter or digit. Only the literal prefix is routed: a percent-encoded, upper-case or `;`-parameterized name, or a path with a `.` or `..` segment, is not a vault path and gets `404`.
+- **Errors.** `404 vault-not-found` (`vault`) for a name the server does not serve; `503 vault-unavailable` (`vault`, `reason`: `starting` with `Retry-After: 2`, or `failed`). Admission, CSRF and size rules (§2, §3) apply to prefixed requests exactly as to unprefixed ones. A problem's `instance` is the path within the vault (`/api/tree`).
+- **Server-wide endpoints** are only unprefixed: `GET` and `POST /api/vaults` (`/api/v/<name>/vaults` is `404`). Every other endpoint exists in every vault; in an extra vault, `GET /api/publish` reports `enabled: false` and `POST /api/publish` answers `409 publishing-off`, and `POST /api/mirror/push` has no mirror (§6.4), since publishing and the mirror belong to the default vault. `/api/status/details` and `/api/alerts/test` report the server's alerts and backups from any vault. Push subscriptions (§28) are server-wide: subscribing from any vault subscribes the device for every vault's reminders.
+- **The app** of an extra vault is served at `/v/<name>/` and `/v/<name>/**` (the same `index.html`, §18).
+
+### 41.1 `GET /api/vaults`
+
+`200 VaultsResponse`: `{"vaults": [{"name": "main", "isDefault": true, "state": "ready", "url": "/"}, {"name": "work", "isDefault": false, "state": "ready", "url": "/v/work/"}], "canCreate": true}`. The default vault comes first, then the extra vaults by name. `state` is `starting` until the vault's context is ready (a few seconds after a start or a creation), `ready`, or `failed` (see the server log, `VAULT_START_FAILED`). `canCreate` is false when `NOTES_VAULTS_DIR` is empty or `NOTES_VAULTS_ALLOW_CREATE=false`.
+
+### 41.2 `POST /api/vaults`
+
+Request `CreateVaultRequest`: `{"name": "work"}`. Creates the empty folder `<NOTES_VAULTS_DIR>/<name>` and starts the vault; its first start creates `.notesapp`, the git repository and `Welcome.md`, as a first install does.
+
+`201 VaultInfo` with `state: "starting"`; poll §41.1 until it is `ready`.
+
+| Errors |
+|---|
+| `400 invalid-name` (`path`: the name): not a valid vault name, or missing |
+| `400 bad-request`: the server already has `NOTES_VAULTS_MAX` vaults (20 by default, the default vault included) |
+| `409 already-exists` (`path`, `existingPath`): the default vault's name, a vault the server serves, or a folder of that name already in `NOTES_VAULTS_DIR` (restart the server to serve it) |
+| `409 vaults-off` |
+
+There is no rename or delete endpoint: stop the server and rename or remove the folder (DEPLOY.md *Multiple vaults*).

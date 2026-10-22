@@ -14,6 +14,7 @@ import { navigateTo } from '../navigation';
 import { folderOf, isNotePath } from '../paths';
 import { useUi } from '../../state/ui';
 import { summarize } from './run';
+import { appPathname } from '../../state/vault';
 
 export const AI_PAGE_ROUTE = '/x/ask';
 
@@ -22,10 +23,10 @@ export function openAiView(): void {
   if (currentBreakpoint() === 'phone') {
     useUi.getState().setDrawerOpen(false);
     useUi.getState().setSheetOpen(false);
-    if (window.location.pathname !== AI_PAGE_ROUTE) navigateTo(AI_PAGE_ROUTE);
+    if (appPathname() !== AI_PAGE_ROUTE) navigateTo(AI_PAGE_ROUTE);
     return;
   }
-  if (window.location.pathname === AI_PAGE_ROUTE) return;
+  if (appPathname() === AI_PAGE_ROUTE) return;
   showPanel('right', 'ai');
 }
 

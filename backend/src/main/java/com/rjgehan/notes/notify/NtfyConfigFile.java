@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 import com.rjgehan.notes.config.NotesProperties;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -40,6 +41,7 @@ import org.springframework.stereotype.Component;
  * encrypts it.
  */
 @Component
+@ServerWide
 public class NtfyConfigFile {
 
 	public static final String FILE_NAME = "ntfy.json";

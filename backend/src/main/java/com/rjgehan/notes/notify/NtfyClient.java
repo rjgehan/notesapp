@@ -8,6 +8,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 
+import com.rjgehan.notes.vaults.ServerWide;
+
 import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Component;
  * the mirror's push, and it is made only when {@code ntfy.json} configures a server.
  */
 @Component
+@ServerWide
 public class NtfyClient {
 
 	private static final Duration TIMEOUT = Duration.ofSeconds(15);

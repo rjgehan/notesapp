@@ -24,6 +24,7 @@ import { TemplatePicker } from '../overlays/TemplatePicker';
 import { Toasts } from '../overlays/Toasts';
 import { VoiceRecorderPanel } from '../overlays/VoiceRecorderPanel';
 import { TabSwitcher } from '../../workspace/TabSwitcher';
+import { VaultSwitcher } from '../vaults/VaultSwitcher';
 import { Overlay } from './Drawer';
 import { PanelTabs } from './Panels';
 import { Resizer } from './Resizer';
@@ -208,6 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {!phone && <Ribbon />}
       {showLeft && (
         <nav className="sidebar sidebar-left" aria-label="Sidebar">
+          <VaultSwitcher />
           {left}
           <Resizer side="left" width={ui.leftWidth} min={LEFT_WIDTH.min} max={LEFT_WIDTH.max} onResize={ui.setLeftWidth} />
         </nav>
@@ -230,6 +232,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {!desktop && (
         <>
           <Overlay open={ui.drawerOpen} onClose={closeDrawer} side="left" label="Sidebar" footer={phone ? <DrawerFooter /> : undefined}>
+            <VaultSwitcher />
             {phone && <DrawerActions />}
             {left}
           </Overlay>

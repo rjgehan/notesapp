@@ -10,6 +10,8 @@ import java.security.interfaces.ECPrivateKey;
 import java.time.Duration;
 import java.time.Instant;
 
+import com.rjgehan.notes.vaults.ServerWide;
+
 import org.jspecify.annotations.Nullable;
 
 import org.springframework.stereotype.Component;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Component;
  * (the subscription expired or was revoked, so it is dropped), anything else an error.
  */
 @Component
+@ServerWide
 public class WebPushSender {
 
 	private static final Duration TIMEOUT = Duration.ofSeconds(15);

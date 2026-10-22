@@ -5,6 +5,7 @@ import java.util.function.Function;
 
 import com.rjgehan.notes.api.dto.AotCacheState;
 import com.rjgehan.notes.api.dto.StatusDetails;
+import com.rjgehan.notes.vaults.ServerWide;
 import com.sun.management.HotSpotDiagnosticMXBean;
 import org.jspecify.annotations.Nullable;
 
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component;
  * cannot use runs without any archive.
  */
 @Component
+@ServerWide
 public class RuntimeInfo {
 
 	private final AotCacheState aotCache;

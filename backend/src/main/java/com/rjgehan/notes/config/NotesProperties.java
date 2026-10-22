@@ -8,6 +8,8 @@ import java.util.Map;
 
 import jakarta.validation.constraints.NotNull;
 
+import org.jspecify.annotations.Nullable;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.util.unit.DataSize;
@@ -36,6 +38,7 @@ public record NotesProperties(
 		@DefaultValue Tasks tasks,
 		@DefaultValue Search search,
 		@DefaultValue Publish publish,
+		@DefaultValue Vaults vaults,
 		@DefaultValue({ "md", "markdown", "txt", "json", "canvas", "excalidraw", "sheet", "tasks", "csv", "tsv", "yaml",
 				"yml", "mdenc" }) List<String> textExtensions,
 		@DefaultValue("true") boolean welcomeNote,
@@ -195,6 +198,38 @@ public record NotesProperties(
 			@DefaultValue("/data/publish") Path dir,
 			@DefaultValue("") String baseUrl,
 			@DefaultValue("25MB") DataSize maxAssetSize) {
+	}
+
+	/**
+	 * Multiple vaults (DESIGN §5.39, ROADMAP item 37). The vault at {@code notes.vault-dir} is the default vault, named
+	 * {@code defaultName}, and keeps its unprefixed URLs. Every folder directly under {@code dir} whose name is a valid
+	 * vault name is one more vault, served under {@code /v/<name>/} and {@code /api/v/<name>/} by an application
+	 * context of its own. An empty {@code dir} turns extra vaults off; {@code allowCreate} lets the app create new vault
+	 * folders there, at most {@code max} vaults in all. {@code current} is set by the server for each extra vault's own
+	 * context and is never configured.
+	 */
+	public record Vaults(
+			@DefaultValue("/data/vaults") String dir,
+			@DefaultValue("main") String defaultName,
+			@DefaultValue("true") boolean allowCreate,
+			@DefaultValue("20") int max,
+			@DefaultValue("") String current) {
+
+		/** The folder of the extra vaults, or null when they are off. */
+		public @Nullable Path dirPath() {
+			return this.dir.isBlank() ? null : Path.of(this.dir);
+		}
+
+		/** The name of the vault this context serves. */
+		public String currentName() {
+			return this.current.isBlank() ? this.defaultName : this.current;
+		}
+
+		/** True in the default vault's context (the main application). */
+		public boolean isDefault() {
+			return this.current.isBlank() || this.current.equals(this.defaultName);
+		}
+
 	}
 
 	public record TailscaleWatchdog(

@@ -8,6 +8,7 @@ import { renameRecent } from '../features/recent';
 import { setUnsavedProbe } from '../state/buildCheck';
 import { clientId } from '../state/clientId';
 import { toast } from '../state/toasts';
+import { vaultKey } from '../state/vault';
 import { useUi } from '../state/ui';
 import { viewFor } from '../views/registry';
 import { DocumentRegistry } from './documents';
@@ -31,7 +32,7 @@ class UnavailableDraftStore implements DraftStore {
   prune = () => this.fail();
 }
 
-export const draftStore: DraftStore = typeof indexedDB === 'undefined' ? new UnavailableDraftStore() : new IdbDraftStore();
+export const draftStore: DraftStore = typeof indexedDB === 'undefined' ? new UnavailableDraftStore() : new IdbDraftStore(indexedDB, vaultKey('notesapp'));
 
 export const moveMap = new MoveMap();
 // Files this tab creates (own WriteResults) end the moves recorded away from their paths.

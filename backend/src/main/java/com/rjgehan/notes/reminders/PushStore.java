@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 
 import com.rjgehan.notes.config.NotesProperties;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -47,6 +48,7 @@ import org.springframework.stereotype.Component;
  * </pre>
  */
 @Component
+@ServerWide
 public class PushStore {
 
 	public static final String FILE_NAME = "push.json";

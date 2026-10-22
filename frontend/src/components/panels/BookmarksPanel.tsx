@@ -40,13 +40,14 @@ import { viewFor } from '../../views/registry';
 import { ContextMenu, type MenuEntry } from '../overlays/ContextMenu';
 import { bookmarkTarget, describeBookmark, dropPlace, groupKey, isMissing, openBookmark, removeGroup, renameBookmark, visibleRows } from './bookmarkRows';
 import { useRowMenu } from './useRowMenu';
+import { vaultKey } from '../../state/vault';
 
 const BOOKMARK_DRAG_TYPE = 'application/x-notesapp-bookmark';
 const COLLAPSED_KEY = 'notesapp:bookmarkGroupsCollapsed';
 
 function readCollapsed(): Set<string> {
   try {
-    const list: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
+    const list: unknown = JSON.parse(localStorage.getItem(vaultKey(COLLAPSED_KEY)) ?? '[]');
     return new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []);
   } catch {
     return new Set();
@@ -59,7 +60,7 @@ function useCollapsedGroups(): [ReadonlySet<string>, (key: string, collapsed: bo
   const save = (next: Set<string>) => {
     setCollapsed(next);
     try {
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      localStorage.setItem(vaultKey(COLLAPSED_KEY), JSON.stringify([...next]));
     } catch {
       // A per-device convenience only.
     }

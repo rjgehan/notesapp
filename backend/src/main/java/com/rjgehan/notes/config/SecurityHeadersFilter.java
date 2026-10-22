@@ -10,6 +10,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpServletResponseWrapper;
 
+import com.rjgehan.notes.vaults.ServerWide;
+
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
@@ -22,7 +24,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * policy): later writes of the same header replace the default instead of adding a second value.
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@ServerWide
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 public class SecurityHeadersFilter extends OncePerRequestFilter {
 
 	public static final String BUILD_HEADER = "X-Notes-Build";
@@ -78,7 +81,7 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 		response.setHeader("Referrer-Policy", "no-referrer");
 		response.setHeader("X-Frame-Options", "DENY");
 		String path = RequestPaths.of(request);
-		response.setHeader("Cross-Origin-Opener-Policy", path.equals(CLIP_PAGE) ? "unsafe-none" : "same-origin");
+		response.setHeader("Cross-Origin-Opener-Policy", isClipPage(path) ? "unsafe-none" : "same-origin");
 		response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
 		response.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), payment=()");
 		response.setHeader(BUILD_HEADER, this.buildSha);
@@ -98,6 +101,12 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 			response.setHeader("Content-Security-Policy", SCRIPT_SANDBOX_POLICY);
 		}
 		chain.doFilter(request, new OverridingHeadersResponse(response));
+	}
+
+	/** The clipper page, of the default vault or of an extra one ({@code /v/<name>/clip}, DESIGN §5.39). */
+	static boolean isClipPage(String path) {
+		return path.equals(CLIP_PAGE) || (path.startsWith("/v/") && path.endsWith(CLIP_PAGE)
+				&& path.indexOf('/', 3) == path.length() - CLIP_PAGE.length());
 	}
 
 	static boolean isScriptSandbox(String path) {

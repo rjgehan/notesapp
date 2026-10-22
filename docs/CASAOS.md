@@ -183,6 +183,10 @@ Publish a note with the globe in its header, **Publish to the web** in the ⋯ m
 
 To turn it off: `sudo tailscale funnel --https=10000 off` (the internet loses access at once), then set `NOTES_PUBLISH_ENABLED` to `false` and remove the 18096 port. Unpublish notes in Settings › Publishing to delete their snapshots.
 
+### Multiple vaults
+
+Settings › Vaults › **New vault** creates a separate vault (for example `work`), with its own notes, search, history, trash, settings, bookmarks, tasks and reminders, at `https://homeserver.<tailnet>.ts.net:8443/v/work/` (the same `tailscale serve` covers it; nothing changes in CasaOS). Its folder is `/DATA/AppData/notesapp/data/vaults/work`, created by the app as uid 1000; a folder you make yourself must be owned by uid 1000 too (`sudo install -d -o 1000 -g 1000 /DATA/AppData/notesapp/data/vaults/work`, then restart the app). A vault switcher appears at the top of the sidebar (the drawer on the iPhone) once there are two vaults. Your existing vault, its address and the home-screen app do not change. Publishing, the GitHub mirror, the share sheet and the web clipper stay with the existing vault. To rename or delete a vault: stop the app in CasaOS, rename or remove its folder with the **Files** app, start the app. To stop the app from creating vaults, add `NOTES_VAULTS_ALLOW_CREATE` = `false` to the `notes` container's environment. DEPLOY.md *Multiple vaults* has the details.
+
 ### Nightly backups
 
 A second CasaOS app, [`deploy/casaos-backup-compose.yml`](../deploy/casaos-backup-compose.yml), takes encrypted [restic](https://restic.net) snapshots of the vault, its history (and, with the advanced layout, the Tailscale identity) every night, to a second disk and optionally to Backblaze B2 or Amazon S3 (DEPLOY.md *Backups* explains the design: NotesApp is stopped for the seconds the local snapshot takes). It adds two containers:

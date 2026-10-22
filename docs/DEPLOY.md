@@ -295,6 +295,7 @@ Then from your devices:
 | Deploy files | `~/notesapp/deploy` (a git checkout; update with `git pull`) |
 | Secrets | `~/notesapp/deploy/.env` (mode 600), `~/notesapp/deploy/secrets/` (backup password, off-site keys, the mirror token and the Anthropic API key, mode 600), `/srv/notes/data/secrets/claude-token` (Ask your vault, uid 1000, mode 600), `/srv/notes/data/secrets/ntfy.json` (app alerts and reminders, uid 1000, mode 600), `/srv/notes/data/secrets/push.json` (the reminders' Web Push key and devices, created by the app) and `/etc/watchtower/config.json` (root, mode 600) |
 | Vault: notes, attachments, `.git`, `.trash`, `.notesapp` | `/srv/notes/data/vault` (volume `notes-data`, mounted at `/data`) |
+| Extra vaults (if any) | `/srv/notes/data/vaults/<name>`, each laid out like the vault |
 | Tailscale identity and certificates | volume `tailscale-state` |
 | Backups | `/mnt/backup/notes-restic` (local restic repository, second disk) and the off-site bucket; run state in volume `notes_backup-state` |
 | Status page | `https://notes.<tailnet>.ts.net/x/status` (*Status* in the ribbon or the phone drawer) |
@@ -921,6 +922,17 @@ sudo chown -R 1000:1000 /srv/notes/data/vault
 docker compose start notes
 ```
 
+### Multiple vaults
+
+Off until you make a second vault; the default vault and its addresses never change (DESIGN §5.39, ROADMAP item 37).
+
+- **Create** one in the app: Settings › Vaults › New vault (lowercase letters, digits and dashes). It is the folder `/srv/notes/data/vaults/<name>` and opens at `https://notes.<tailnet>.ts.net/v/<name>/`, with its own search, links, history (its own `.git`), trash, settings, bookmarks, tasks and reminders. The switcher at the top of the sidebar (the drawer on a phone) appears once there are two vaults. Or create the folder yourself, as uid 1000, and restart: `sudo install -d -o 1000 -g 1000 /srv/notes/data/vaults/work && docker compose restart notes`. Copying an existing Obsidian vault into that folder imports it, as for the default vault.
+- **Each extra vault** starts about a second after the app is ready and uses memory for its own index; keep a handful. The server caps them at 20 (`NOTES_VAULTS_MAX`).
+- **What stays with the default vault**: public publishing, the GitHub mirror, the iPhone share sheet, the web clipper and the desktop app's capture window. An extra vault's Settings › Quick capture shows URLs that capture into it.
+- **Shared by all vaults**: push notification devices (subscribe once), ntfy, app alerts, the AI provider and its monthly spend, and the nightly backups, which already cover the whole `notes-data` volume, so every vault (to restore one, restore `notes-data` into an empty folder as in *Restore* and swap in its `vaults/<name>`).
+- **Rename or delete** a vault: stop the app (`docker compose stop notes`), rename or move away `/srv/notes/data/vaults/<name>`, start it again. Renaming changes its address (`/v/<new>/`); open tabs and the phone's offline copies of the old name are not carried over, so sync first.
+- **Turn creation off** with `NOTES_VAULTS_ALLOW_CREATE=false` in the `notes` service's environment; `NOTES_VAULTS_DIR=` (empty) turns extra vaults off altogether (their folders stay untouched).
+
 ### Editing the vault over SSH
 
 Edit as uid 1000. Open notes update live, and an `External changes` commit appears in history about 30 s later:
@@ -1009,6 +1021,10 @@ Check, in order: `NOTES_PUBLISH_ENABLED=true` reached the container (`docker com
 ### Changes made over SSH appear late
 
 `/api/status` shows `watcher.mode: polling` and the log has `WATCHER_DEGRADED`: the inotify limit was reached, so changes are picked up by the 5-minute rescan only. Raise the limit as in step 2 (go higher if needed, for example `1048576`), then `docker compose restart notes`.
+
+### A vault says "Vault not available" (`503 vault-unavailable`)
+
+Right after a start or a creation, an extra vault needs a moment; the app retries by itself. If it stays, the log has `VAULT_START_FAILED` with the reason (often a folder not owned by uid 1000: `sudo chown -R 1000:1000 /srv/notes/data/vaults`). A folder whose name is not a valid vault name is skipped with a warning naming it.
 
 ### Saves fail with `permission-denied`
 

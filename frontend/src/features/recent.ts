@@ -3,6 +3,7 @@
 // list follows renames and moves, and drops files deleted through the app. Other tabs of this
 // browser see changes through the `storage` event.
 import { useSyncExternalStore } from 'react';
+import { vaultKey } from '../state/vault';
 
 export interface RecentEntry {
   path: string;
@@ -43,13 +44,13 @@ function parse(text: string | null): RecentEntry[] {
 function read(): RecentEntry[] {
   let text: string | null = null;
   try {
-    text = localStorage.getItem(KEY);
+    text = localStorage.getItem(vaultKey(KEY));
     if (text === null) {
-      const legacy = localStorage.getItem(LEGACY_KEY);
+      const legacy = localStorage.getItem(vaultKey(LEGACY_KEY));
       if (legacy !== null) {
         text = JSON.stringify(parse(legacy));
-        localStorage.setItem(KEY, text);
-        localStorage.removeItem(LEGACY_KEY);
+        localStorage.setItem(vaultKey(KEY), text);
+        localStorage.removeItem(vaultKey(LEGACY_KEY));
       }
     }
   } catch {
@@ -68,7 +69,7 @@ function write(list: RecentEntry[]): void {
   cache = next;
   raw = text;
   try {
-    localStorage.setItem(KEY, text);
+    localStorage.setItem(vaultKey(KEY), text);
   } catch {
     // Private mode: kept in memory for this page only.
   }
@@ -105,7 +106,7 @@ export function useRecentEntries(): RecentEntry[] {
 export function recordOpened(path: string, now = Date.now()): void {
   write([{ path, at: now }, ...read().filter((e) => e.path !== path)]);
   try {
-    localStorage.setItem(LAST_PATH_KEY, path);
+    localStorage.setItem(vaultKey(LAST_PATH_KEY), path);
   } catch {
     // ignore
   }
@@ -113,7 +114,7 @@ export function recordOpened(path: string, now = Date.now()): void {
 
 export function lastOpenedPath(): string | null {
   try {
-    return localStorage.getItem(LAST_PATH_KEY);
+    return localStorage.getItem(vaultKey(LAST_PATH_KEY));
   } catch {
     return null;
   }
@@ -137,7 +138,7 @@ export function renameRecent(from: string, to: string): void {
   }
   if (lastOpenedPath() === from) {
     try {
-      localStorage.setItem(LAST_PATH_KEY, to);
+      localStorage.setItem(vaultKey(LAST_PATH_KEY), to);
     } catch {
       // ignore
     }

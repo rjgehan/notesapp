@@ -1,0 +1,98 @@
+/* Multiple vaults (ROADMAP item 37, DESIGN §6.44): the switcher and Settings › Vaults. */
+
+.vault-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.vault-select {
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vault-select:hover,
+.vault-select:focus-visible {
+  border-color: var(--background-modifier-border);
+  background: var(--background-modifier-hover);
+}
+
+.vault-select option {
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.is-phone .vault-select,
+.is-tablet .vault-select {
+  min-height: var(--tap-target);
+}
+
+.vaults-explain {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+
+.vault-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.vault-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.vault-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vault-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-s);
+  background: var(--tag-bg);
+  color: var(--tag-fg);
+  font-size: var(--font-ui-smaller);
+}
+
+.vault-tag-current {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.vault-create-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* The panels below the switcher take the rest of the sidebar instead of its whole height. */
+.vault-switcher ~ .panel-tabs {
+  flex: 1;
+  height: auto;
+}

@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.rjgehan.notes.config.NotesProperties;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
  * {@code tailscale*} interface or an address in {@code 100.64.0.0/10}.
  */
 @Component
+@ServerWide
 public class TailscaleInterfaceCheck {
 
 	private static final Logger logger = LoggerFactory.getLogger(TailscaleInterfaceCheck.class);

@@ -2,6 +2,7 @@
 // [path, clientId], plus `discarded` for local text the user threw away (kept 7 days).
 // localStorage is not used: it is synchronous and its quota would silently disable drafts.
 import type { Eol } from '../features/eol';
+import { vaultKey } from '../state/vault';
 
 export interface DraftRecord {
   path: string;
@@ -248,7 +249,7 @@ export class TabCoordinator {
   constructor(clientId: string, ownsPath: (path: string) => boolean, channel?: ChannelLike | null) {
     this.clientId = clientId;
     this.ownsPath = ownsPath;
-    this.channel = channel !== undefined ? channel : typeof BroadcastChannel === 'function' ? new BroadcastChannel('notesapp') : null;
+    this.channel = channel !== undefined ? channel : typeof BroadcastChannel === 'function' ? new BroadcastChannel(vaultKey('notesapp')) : null;
     this.channel?.addEventListener('message', (ev) => this.onMessage(ev.data as TabMessage));
   }
 

@@ -3,6 +3,7 @@
 import { reportServerBuild } from '../state/buildCheck';
 import { clientId } from '../state/clientId';
 import { noteServerAnswer, noteTransientFailure } from '../state/connection';
+import { apiUrl } from '../state/vault';
 import type { ErrorCode, Problem, VersionConflictProblem } from './types';
 
 /** A problem+json response (API.md §3). Branch on `problem.code`, never on `detail`. */
@@ -93,7 +94,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
 
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetch(apiUrl(url), {
       method: opts.method ?? 'GET',
       headers,
       body,

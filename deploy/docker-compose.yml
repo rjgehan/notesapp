@@ -73,6 +73,8 @@ services:
       # once tailscale/serve.json also has the Funnel entry (serve.funnel.json.example). Snapshots: /data/publish.
       NOTES_PUBLISH_ENABLED: ${NOTES_PUBLISH_ENABLED:-false}
       NOTES_PUBLISH_BASE_URL: ${NOTES_PUBLISH_BASE_URL:-}     # https://notes.<tailnet>.ts.net:8443, for copied links
+      # Multiple vaults (DEPLOY.md "Multiple vaults"): folders under /data/vaults, created from Settings › Vaults.
+      NOTES_VAULTS_ALLOW_CREATE: ${NOTES_VAULTS_ALLOW_CREATE:-true}
     secrets: [mirror_token, anthropic_key]
     volumes:
       - notes-data:/data

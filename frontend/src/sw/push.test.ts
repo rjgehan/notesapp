@@ -27,5 +27,9 @@ describe('reminder notifications in the service worker', () => {
     expect(actionRequest('done', data)).toEqual({ url: '/api/reminders/done', body: { taskId: 't1', at: '2026-10-16T12:05' } });
     expect(actionRequest('', data)).toBeNull();
     expect(actionRequest('done', { url: '/', taskId: null, at: null })).toBeNull();
+    // A reminder of an extra vault (ROADMAP item 37) acts on that vault's API.
+    const work = { url: '/v/work/x/tasks/today?task=t1', taskId: 't1', at: '2026-10-16T12:05' };
+    expect(actionRequest('done', work)?.url).toBe('/api/v/work/reminders/done');
+    expect(actionRequest('snooze', work)?.url).toBe('/api/v/work/reminders/snooze');
   });
 });

@@ -1,6 +1,7 @@
 // One typed function per endpoint (API.md §18). `api` is the HTTP implementation unless the
 // dev-only in-memory mock replaced it at startup (VITE_MOCK_API=1).
 import { apiFetch, query } from './client';
+import { apiUrl } from '../state/vault';
 import type {
   AlertTestResult,
   AttachmentResult,
@@ -17,6 +18,7 @@ import type {
   CommitResult,
   CompatReport,
   CreateFileRequest,
+  CreateVaultRequest,
   DeletedFilesResponse,
   FileEntry,
   FolderResult,
@@ -55,6 +57,8 @@ import type {
   TrashEntry,
   TranscriptionResult,
   TranscriptionStatus,
+  VaultInfo,
+  VaultsResponse,
   TrashListResponse,
   TreeResponse,
   WriteResult,
@@ -157,6 +161,10 @@ export interface Endpoints {
   publishNote(req: PublishRequest): Promise<PublishedNote>;
   /** Unpublishes a note: its public page is gone at once (API.md §26.3). */
   unpublishNote(path: string): Promise<void>;
+  /** The server's vaults (API.md §41.1); server-wide, never prefixed. */
+  listVaults(): Promise<VaultsResponse>;
+  /** Creates an empty vault and starts it (API.md §41.2). */
+  createVault(req: CreateVaultRequest): Promise<VaultInfo>;
   getTranscriptionStatus(): Promise<TranscriptionStatus>;
   /** The transcript of a recording in the vault (API.md §23.2); it can take minutes. */
   transcribe(path: string): Promise<TranscriptionResult>;
@@ -238,20 +246,22 @@ export const httpEndpoints: Endpoints = {
   getPublish: () => apiFetch('/api/publish'),
   publishNote: (req) => apiFetch('/api/publish', { method: 'POST', json: req }),
   unpublishNote: (path) => apiFetch('/api/publish' + query(p(path)), { method: 'DELETE' }),
+  listVaults: () => apiFetch('/api/vaults'),
+  createVault: (req) => apiFetch('/api/vaults', { method: 'POST', json: req }),
   getTranscriptionStatus: () => apiFetch('/api/transcription'),
   transcribe: (path) => apiFetch('/api/transcriptions', { method: 'POST', json: { path } }),
   rawUrl: (entry, opts) =>
-    '/api/files/raw?path=' +
+    apiUrl('/api/files/raw?path=') +
     encodeURIComponent(entry.path) +
     '&v=' +
     entry.size +
     '-' +
     Date.parse(entry.mtime) +
     (opts?.download ? '&download=true' : ''),
-  trashRawUrl: (id) => `/api/trash/${encodeURIComponent(id)}/raw`,
-  historyRawUrl: (path, commit) => '/api/history/raw' + query({ path, commit }),
+  trashRawUrl: (id) => apiUrl(`/api/trash/${encodeURIComponent(id)}/raw`),
+  historyRawUrl: (path, commit) => apiUrl('/api/history/raw' + query({ path, commit })),
   openEvents: (clientId, lastEventId) =>
-    new EventSource('/api/events' + query({ clientId, lastEventId: lastEventId ?? undefined })) as EventSourceLike,
+    new EventSource(apiUrl('/api/events' + query({ clientId, lastEventId: lastEventId ?? undefined }))) as EventSourceLike,
 };
 
 /** The active implementation. Swapped for the in-memory mock before the app renders (dev only). */

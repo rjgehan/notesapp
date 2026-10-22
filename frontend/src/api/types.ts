@@ -25,7 +25,8 @@ export type ErrorCode =
   | 'busy' | 'history-unavailable' | 'insufficient-storage'
   | 'not-audio' | 'transcription-off' | 'transcription-failed'
   | 'ai-unavailable' | 'ai-excluded' | 'ai-budget-exceeded'
-  | 'block-not-found' | 'funnel-request' | 'publishing-off';
+  | 'block-not-found' | 'funnel-request' | 'publishing-off'
+  | 'vault-not-found' | 'vault-unavailable' | 'vaults-off';
 
 export interface FieldError { field: string; message: string }
 
@@ -926,6 +927,19 @@ export interface ReminderDueEvent {
   url: string;                    // an app path, such as '/x/tasks/today?task=<id>'
   sentAt: IsoInstant;
 }
+
+// ---------- Vaults (API.md §41, ROADMAP item 37) ----------
+// Server-wide: GET and POST /api/vaults are never prefixed. Every other endpoint of an extra vault
+// is its default-vault path with /api replaced by /api/v/<name>.
+export type VaultState = 'starting' | 'ready' | 'failed';
+export interface VaultInfo {
+  name: string;                 // 1-32 of a-z 0-9 -, starting and ending with a letter or digit
+  isDefault: boolean;           // the vault at NOTES_VAULT_DIR, served unprefixed; listed first
+  state: VaultState;            // starting: requests get 503 vault-unavailable until ready
+  url: string;                  // where its app opens: '/' or '/v/<name>/'
+}
+export interface VaultsResponse { vaults: VaultInfo[]; canCreate: boolean }
+export interface CreateVaultRequest { name: string }   // 201 VaultInfo (state 'starting')
 
 // ---------- Public publishing (API.md §26, ROADMAP item 26) ----------
 export type PublishedNoteState = 'current' | 'changed' | 'source-missing' | 'snapshot-missing';

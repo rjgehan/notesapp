@@ -52,6 +52,13 @@ describe('service worker routing', () => {
     expect(isSpaRoute('/n/x.md')).toBe(true);
     expect(isSpaRoute('/n')).toBe(false);
     expect(isSpaRoute('/api/tree')).toBe(false);
+    // An extra vault's app (ROADMAP item 37).
+    expect(isSpaRoute('/v/work')).toBe(true);
+    expect(isSpaRoute('/v/work/')).toBe(true);
+    expect(isSpaRoute('/v/work/n/x.md')).toBe(true);
+    expect(isSpaRoute('/v/work/clip')).toBe(false);
+    expect(isSpaRoute('/v/Work/n/x.md')).toBe(false);
+    expect(classify(req('/api/v/work/files/raw?path=a.png&v=12-34', { destination: 'image' }), ORIGIN, PRECACHED)).toBe('media');
   });
 
   it('serves the shell when a navigation gets a gateway or startup error', () => {

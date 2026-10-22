@@ -48,7 +48,12 @@ public final class SseRecorder implements AutoCloseable {
 
 	/** Connects as {@code clientId}, resuming after {@code lastEventId} when it is not null. */
 	public static SseRecorder open(int port, String clientId, @Nullable String lastEventId) {
-		String uri = "http://localhost:" + port + "/api/events?clientId=" + Api.enc(clientId)
+		return open(port, "/api", clientId, lastEventId);
+	}
+
+	/** Connects to the event stream under {@code apiPrefix}, such as {@code /api/v/work} for an extra vault. */
+	public static SseRecorder open(int port, String apiPrefix, String clientId, @Nullable String lastEventId) {
+		String uri = "http://localhost:" + port + apiPrefix + "/events?clientId=" + Api.enc(clientId)
 				+ ((lastEventId != null) ? "&lastEventId=" + Api.enc(lastEventId) : "");
 		HttpRequest request = HttpRequest.newBuilder(URI.create(uri)).header("Accept", "text/event-stream").build();
 		try {

@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 
 import com.rjgehan.notes.api.error.ErrorCode;
 import com.rjgehan.notes.api.error.NotesException;
+import com.rjgehan.notes.vaults.ServerWide;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -19,14 +20,17 @@ import org.springframework.web.bind.annotation.PostMapping;
 /**
  * Serves the single-page app's {@code index.html} (never cached) for its client routes, including pages registered by
  * extensions under {@code /x/**}, the quick-capture page {@code /capture} and the web clipper's {@code /clip} (API.md
- * §18).
+ * §18). An extra vault's app lives under {@code /v/<name>/} (DESIGN §5.39); the app itself finds out whether that vault
+ * exists.
  */
 @Controller
+@ServerWide
 public class SpaController {
 
 	private final Resource index = new ClassPathResource("static/index.html");
 
-	@GetMapping({ "/", "/n/**", "/search", "/trash", "/settings", "/settings/**", "/x/**", "/capture", "/clip" })
+	@GetMapping({ "/", "/n/**", "/search", "/trash", "/settings", "/settings/**", "/x/**", "/capture", "/clip",
+			"/v/{vault:[a-z0-9-]{1,32}}/**" })
 	ResponseEntity<Resource> index() {
 		if (!this.index.exists()) {
 			throw new NotesException(ErrorCode.NOT_FOUND, "The web app is not built into this server");

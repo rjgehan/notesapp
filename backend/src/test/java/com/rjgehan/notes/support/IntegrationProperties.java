@@ -29,6 +29,8 @@ public final class IntegrationProperties {
 		// No ntfy.json and no backup status, whatever this machine has under /data (ROADMAP item 38).
 		properties.put("notes.secrets-dir", "target/no-secrets");
 		properties.put("notes.backup.status-file", "target/no-backup-state/status.json");
+		// No extra vaults unless a test creates its own vaults folder (ROADMAP item 37).
+		properties.put("notes.vaults.dir", "target/no-vaults");
 		return properties;
 	}
 
