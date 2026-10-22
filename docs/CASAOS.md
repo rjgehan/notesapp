@@ -1,6 +1,6 @@
 # Installing NotesApp on CasaOS
 
-This is the short path for a CasaOS server: one compose file pasted into the CasaOS UI, no `.env` and no SSH required. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); everything it says about Tailscale, Watchtower and the app applies here too. The optional extras at the end (app alerts, the GitHub mirror, voice note transcription, nightly backups) are off until you set them up; most need a shell on the server, over SSH or in CasaOS's terminal, and a fresh install needs none of them.
+This is the short path for a CasaOS server: one compose file pasted into the CasaOS UI, no `.env` and no SSH required. [DEPLOY.md](DEPLOY.md) is the full runbook (plain Docker Compose, backups, rollback, troubleshooting); everything it says about Tailscale, Watchtower and the app applies here too. The optional extras at the end (app alerts, the GitHub mirror, voice note transcription, Ask your vault with Claude, nightly backups) are off until you set them up; most need a shell on the server, over SSH or in CasaOS's terminal, and a fresh install needs none of them.
 
 The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs three containers:
 
@@ -10,7 +10,7 @@ The file is [`deploy/casaos-compose.yml`](../deploy/casaos-compose.yml). It runs
 | `notesapp` | The app. It shares the Tailscale container's network, so it has **no LAN port** and is reachable only over the tailnet |
 | `notesapp-watchtower` | Checks GHCR every 5 minutes and restarts `notesapp` when a new image is pushed to `main` |
 
-Data lives in `/DATA/AppData/notesapp/`: `data/vault` holds your notes, and `tailscale/` holds the node identity and certificates (never delete it). `data/secrets/` (the alert and mirror settings), `whisper/` (the transcription model) and `backup/` appear only if you set up the extras below.
+Data lives in `/DATA/AppData/notesapp/`: `data/vault` holds your notes, and `tailscale/` holds the node identity and certificates (never delete it). `data/secrets/` (the alert and mirror settings, the Claude token or Anthropic API key), `whisper/` (the transcription model) and `backup/` appear only if you set up the extras below.
 
 ## 1. One-time Tailscale setup (admin console)
 
@@ -27,8 +27,8 @@ Tagged machines don't expire, so the key is used once; after the first start you
 
 Pushes from the private repo create a **private** package, and CasaOS cannot log in to GHCR from the UI. Pick one:
 
-- **Recommended: make the package public.** It only contains the app, never your notes. GitHub → your profile → **Packages → notesapp → Package settings → Change visibility → Public**. Nothing else to configure.
-- **Keep it private.** Create a classic GitHub token with only `read:packages` and no expiry, then on the server run `docker login ghcr.io -u rjgehan` once (paste the token as the password). Also uncomment `REPO_USER` / `REPO_PASS` in the `watchtower` service so updates can be pulled.
+- **Make the package public** (simplest) only if you build it without Claude Code (`CLAUDE_CODE_VERSION=none`, *Ask your vault*): it then contains only the app, never your notes. GitHub → your profile → **Packages → notesapp → Package settings → Change visibility → Public**. Nothing else to configure.
+- **Recommended: keep it private.** The image contains the Claude Code CLI for *Ask your vault*, which is Anthropic's proprietary software and must not be published. Create a classic GitHub token with only `read:packages` and no expiry, then on the server run `docker login ghcr.io -u rjgehan` once (paste the token as the password). Also uncomment `REPO_USER` / `REPO_PASS` in the `watchtower` service so updates can be pulled.
 
 ## 3. Install
 
@@ -95,6 +95,25 @@ sudo -u '#1000' sh -c 'umask 077 && cat > /DATA/AppData/notesapp/data/secrets/mi
 ```
 
 Then set `NOTES_MIRROR_URL` to `https://github.com/<you>/<repo>.git` in the app's settings (above) and save. Use the HTTPS URL: an SSH URL (`git@github.com:…`) or one with the token in it is refused, and the status bar and status page say *Mirror is off: …*. Run **Push history to the mirror now** from the command palette and check **Settings › About › Mirror**. To rotate the token, replace the file's content: it is read before every push. To turn the mirror off, empty `NOTES_MIRROR_URL`.
+
+### Ask your vault (Claude)
+
+Questions about your notes with answers that cite them, summaries of a note, a folder, a selection or this week's daily notes, and suggested links, tags and tasks, written by Claude (DEPLOY.md *Ask your vault* has the details). By default it runs **Claude Code with your Claude subscription** (Pro or Max): the image contains the Claude Code CLI, and the server runs it for each question with every tool switched off, so Claude sees only the notes NotesApp hands it. **When you use it, your question and the text of the notes it needs are sent to Anthropic**; notes in excluded folders (`Private` by default) never are. Usage counts against your plan's usage limits like your own Claude use, and is for your personal use under your plan's terms. It stays off until you add a token **and** switch it on in Settings.
+
+1. **A token.** On any computer where Claude Code is logged in to your Claude account (`claude` once, then `/login`), run `claude setup-token`. It prints a long-lived token (`sk-ant-oat01-…`) for your subscription.
+2. **Save it on the server:**
+   ```sh
+   sudo -u '#1000' sh -c 'umask 077 && cat > /DATA/AppData/notesapp/data/secrets/claude-token'
+   # paste the token, press Enter, then Ctrl-D
+   ```
+   No restart and no compose change: the app reads `/data/secrets/claude-token` and notices a new token by itself.
+3. **Switch it on.** **Settings › Ask and summaries**: turn on **Use Claude**, keep **Provider** on *Claude Code*, check **Never send** and the model; the status there says *Ready* and *Token found in claude-token*. Ask in the **Ask** panel (the sparkles tab of the right sidebar) or, on the iPhone, **Ask your vault** in the drawer.
+
+The **monthly budget** ($5 by default) caps the API value of your usage that Claude Code reports, as a guard against using up your plan; nothing is charged per question. To rotate the token, run `claude setup-token` again and replace the file's content; to stop, switch **Use Claude** off and delete the file.
+
+**Keep the GHCR package private** (section 2's second option) once the image contains Claude Code: Claude Code is Anthropic's proprietary software, and a public image would hand it out to anyone. If your package is public, either make it private, or build the image with `--build-arg CLAUDE_CODE_VERSION=none` (DEPLOY.md *Ask your vault* explains mounting the CLI instead).
+
+With an Anthropic API key instead (billed per token): put the key in `/DATA/AppData/notesapp/data/secrets/anthropic-key` the same way and choose **Provider: Anthropic API**.
 
 ### Large files
 
@@ -190,6 +209,7 @@ Use `offsite` instead of `local` when the second disk is gone. Check the result 
 | `502 Bad Gateway` after a Tailscale restart | The app reconnects on its own within a minute; if not, restart the CasaOS app. |
 | `notesapp` keeps restarting, log says `notes.git.large-file-threshold (…) is below the largest text size limit` | Set `NOTES_GIT_LARGE_FILE_THRESHOLD` to `0` or at least `5MB` (*Large files*). |
 | *Mirror is off: …* in the status bar | `NOTES_MIRROR_URL` is not a plain `https://github.com/<you>/<repo>.git` URL (*GitHub mirror*). Other mirror messages: DEPLOY.md Part 3. |
+| The *Ask* panel says *no Claude Code token* or *not readable* | `/DATA/AppData/notesapp/data/secrets/claude-token` is missing, empty or not owned by uid 1000 (*Ask your vault*). *Claude Code refused the token*: run `claude setup-token` again and replace the file. *usage limit is reached*: your plan's limit; wait for it to reset. Other messages: DEPLOY.md *"Ask your vault says it is unavailable"*. |
 | NotesApp Backup does not install: `bind source path does not exist` | The repository directory (step 1), `backup/scripts` or `backup/secrets` (step 2) is missing, or the second disk is not mounted. |
 | *NotesApp backup failed* | The status page's *Backups* card has restic's message; DEPLOY.md *"NotesApp backup failed"* explains each one. `not initialized`: run `init` (step 4). |
 | *NotesApp is down after the backup* | Restart NotesApp in CasaOS (or `docker start notesapp-tailscale notesapp`), then read its log. |

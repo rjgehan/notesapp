@@ -67,6 +67,7 @@ import { registerCanvasView } from '../views/canvas/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { registerPdfView } from '../views/pdf/register';
 import { startVoiceNote, transcribeAtCursor } from '../features/voice/voiceNotes';
+import { registerAi } from '../features/ai/register';
 import { isMarkdownViewPath, onViewsChanged, registeredViews, viewFor } from '../views/registry';
 import { registerSheetView } from '../views/sheet/register';
 import { registerCommand, registerPage, registerPanel, registerView } from './index';
@@ -407,6 +408,8 @@ export function registerBuiltins(): void {
   registerFlashcards();
   // The habit tracker (ROADMAP item 35, DESIGN §6.35).
   registerHabits();
+  // Ask your vault and summaries, powered by Claude (ROADMAP item 18, DESIGN §6.31).
+  registerAi();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

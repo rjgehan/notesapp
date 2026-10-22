@@ -32,6 +32,9 @@ const TABLE: Record<ErrorCode, [number, string]> = {
   'not-audio': [415, 'Not an audio or video file'],
   'transcription-off': [409, 'Transcription is off'],
   'transcription-failed': [503, 'Transcription failed'],
+  'ai-unavailable': [409, 'Ask and summaries are unavailable'],
+  'ai-excluded': [403, 'Excluded from Ask and summaries'],
+  'ai-budget-exceeded': [429, 'Monthly AI budget reached'],
 };
 
 /** Builds and throws the server's problem document for `code` (API.md §3). */

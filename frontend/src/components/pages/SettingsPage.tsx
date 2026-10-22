@@ -34,6 +34,8 @@ import { usePageTitle } from './usePageTitle';
 import { toastError } from '../../features/errors';
 import { SettingsWriter } from '../../features/settingsWriter';
 import { setTranscribeNewRecordings, useVoice } from '../../features/voice/voiceNotes';
+import { fetchAiStatus } from '../../features/ai/aiClient';
+import { AI_STATUS_KEY } from '../../features/ai/run';
 
 const SECTIONS = [
   { id: 'files', title: 'Files and links' },
@@ -42,6 +44,7 @@ const SECTIONS = [
   { id: 'editor', title: 'Editor' },
   { id: 'hotkeys', title: 'Hotkeys' },
   { id: 'capture', title: 'Quick capture' },
+  { id: 'ai', title: 'Ask and summaries' },
   { id: 'device', title: 'This device' },
   { id: 'about', title: 'About' },
 ] as const;
@@ -79,6 +82,13 @@ function validate(s: Settings): Record<string, string> {
   const paths = s.files.excludedPaths;
   if (paths.length > 100) add('excludedPaths', 'At most 100 paths');
   else add('excludedPaths', paths.map((p) => pathSafetyError(p)).find((e) => e) ?? null);
+  if (s.ai) {
+    const aiPaths = s.ai.excludedPaths;
+    if (aiPaths.length > 100) add('aiExcludedPaths', 'At most 100 paths');
+    else add('aiExcludedPaths', aiPaths.map((p) => pathSafetyError(p)).find((e) => e) ?? null);
+    if (!Number.isInteger(s.ai.maxContextChars) || s.ai.maxContextChars < 4000 || s.ai.maxContextChars > 400000) add('aiMaxContext', 'Use 4,000 to 400,000 characters');
+    if (!Number.isFinite(s.ai.monthlyBudgetUsd) || s.ai.monthlyBudgetUsd <= 0 || s.ai.monthlyBudgetUsd > 10000) add('aiBudget', 'Use an amount above $0 and at most $10,000');
+  }
   return errors;
 }
 
@@ -356,6 +366,119 @@ function EditorSection({ settings: s, set, disabled }: VaultSectionProps) {
       <Row label="Strict line breaks" description="Off (as in Obsidian): a single line break shows as a line break in reading view.">
         <Toggle label="Strict line breaks" checked={e.strictLineBreaks} disabled={disabled} onChange={(v) => editor({ strictLineBreaks: v })} />
       </Row>
+    </>
+  );
+}
+
+/** A number field that keeps what is typed and passes on the number (NaN while it is not one). */
+function NumberSetting({ value, onChange, disabled, label, step, min }: { value: number; onChange(v: number): void; disabled: boolean; label: string; step: number; min: number }) {
+  const [text, setText] = useState(String(value));
+  const [shown, setShown] = useState(value);
+  if (value !== shown) {
+    setShown(value);
+    if (Number(text) !== value) setText(String(value));
+  }
+  return (
+    <input
+      className="text-input setting-number"
+      type="number"
+      inputMode="decimal"
+      step={step}
+      min={min}
+      value={text}
+      disabled={disabled}
+      aria-label={label}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(e.target.value.trim() === '' ? Number.NaN : Number(e.target.value));
+      }}
+    />
+  );
+}
+
+const AI_PROVIDERS: Array<['claude-code' | 'api', string]> = [
+  ['claude-code', 'Claude Code (your Claude subscription)'],
+  ['api', 'Anthropic API (API key, billed per token)'],
+];
+
+const AI_MODELS: Array<[string, string]> = [
+  ['claude-sonnet-5-5', 'Claude Sonnet 5.5 (recommended)'],
+  ['claude-opus-5-5', 'Claude Opus 5.5 (best answers, twice the price)'],
+  ['claude-haiku-5-5', 'Claude Haiku 5.5 (fastest, cheapest)'],
+];
+
+function AiSection({ settings: s, set, disabled, errors }: VaultSectionProps) {
+  const a = s.ai ?? DEFAULT_SETTINGS.ai;
+  const ai = (patch: Partial<Settings['ai']>, immediate = true) => set({ ...s, ai: { ...a, ...patch } }, immediate);
+  const status = useQuery({ queryKey: AI_STATUS_KEY, queryFn: fetchAiStatus, staleTime: 10_000 });
+  const aiJson = JSON.stringify(s.ai ?? null);
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: AI_STATUS_KEY });
+  }, [aiJson]);
+  const st = status.data;
+  return (
+    <>
+      <div className="banner banner-info ai-privacy" role="note">
+        <Info size={14} aria-hidden />
+        <span>
+          Ask your vault, summaries and suggestions are written by Claude, Anthropic’s AI. When you use them, your question and the text of the notes it needs <strong>leave your tailnet</strong> for Anthropic, through Claude Code with your Claude subscription (the default; it counts against your plan’s usage limits) or through the Anthropic API (billed per token). Nothing is sent until you ask, and notes in the excluded folders below never are. Conversations stay on the device that had them.
+        </span>
+      </div>
+      <Row label="Use Claude" description="Off by default. The server also needs the provider’s credential: a Claude Code token or an Anthropic API key (CASAOS.md or DEPLOY.md, “Ask your vault”).">
+        <Toggle label="Use Claude for Ask and summaries" checked={a.enabled} disabled={disabled} onChange={(v) => ai({ enabled: v })} />
+      </Row>
+      <Row label="Provider" description="Claude Code runs on the server with your Claude Pro or Max subscription, for your personal use. The API needs a key and is billed per token.">
+        <Select label="Provider" value={a.provider ?? 'claude-code'} disabled={disabled} options={AI_PROVIDERS} onChange={(v) => ai({ provider: v })} />
+      </Row>
+      <Row label="Model" description="Sonnet answers well for everyday questions. Opus is slower and costs twice as much.">
+        <Select label="Model" value={a.model} disabled={disabled} options={AI_MODELS} onChange={(v) => ai({ model: v })} />
+      </Row>
+      <Row label="Never send" description="One folder or file path per line. These notes are never read for Claude; the excluded files of Files and links never are either." error={errors.aiExcludedPaths}>
+        <textarea
+          className="text-input"
+          rows={3}
+          aria-label="Folders never sent to Claude"
+          disabled={disabled}
+          defaultValue={a.excludedPaths.join('\n')}
+          onChange={(e) =>
+            ai(
+              {
+                excludedPaths: e.target.value
+                  .split('\n')
+                  .map((l) => l.trim().replace(/\/+$/, ''))
+                  .filter(Boolean),
+              },
+              false,
+            )
+          }
+        />
+      </Row>
+      <Row label="Context per request" description="The most characters of note text one request carries, earlier turns included (about 4 characters per token)." error={errors.aiMaxContext}>
+        <NumberSetting label="Context per request in characters" value={a.maxContextChars} step={1000} min={4000} disabled={disabled} onChange={(v) => ai({ maxContextChars: v }, false)} />
+      </Row>
+      <Row label="Monthly budget (USD)" description="Requests stop once this month’s estimated spend reaches it: what the API bills, or with Claude Code the API value of your usage (it counts against your plan, not your card)." error={errors.aiBudget}>
+        <NumberSetting label="Monthly budget in US dollars" value={a.monthlyBudgetUsd} step={1} min={0.5} disabled={disabled} onChange={(v) => ai({ monthlyBudgetUsd: v }, false)} />
+      </Row>
+      <dl className="about-list">
+        <div className="about-row">
+          <dt>Status</dt>
+          <dd>{st ? (st.state === 'ready' ? (st.fake ? 'Ready (fake answers: development server)' : 'Ready') : (st.reason ?? st.state)) : status.isError ? errorMessage(status.error) : 'Loading…'}</dd>
+        </div>
+        {st && (
+          <>
+            <div className="about-row">
+              <dt>{st.provider === 'api' ? 'API key' : 'Claude Code'}</dt>
+              <dd>{st.fake ? 'Not needed: this development server gives fake answers' : st.provider !== 'api' && !st.cliInstalled ? 'The Claude Code CLI is not installed on the server' : st.keyPresent ? `${st.provider === 'api' ? 'Key' : 'Token'} found in ${st.keyFile}` : `Missing: put one in the server’s ${st.keyFile} file (CASAOS.md or DEPLOY.md, “Ask your vault”)`}</dd>
+            </div>
+            <div className="about-row">
+              <dt>This month ({st.month})</dt>
+              <dd>
+                ${st.monthCostUsd.toFixed(2)} of ${st.monthlyBudgetUsd.toFixed(2)} · {st.monthRequests} {st.monthRequests === 1 ? 'request' : 'requests'} (estimated)
+              </dd>
+            </div>
+          </>
+        )}
+      </dl>
     </>
   );
 }
@@ -654,6 +777,7 @@ export default function SettingsPage() {
           {section === 'editor' && <EditorSection {...props} />}
           {section === 'hotkeys' && <HotkeysSection />}
           {section === 'capture' && <CaptureSettings />}
+          {section === 'ai' && <AiSection {...props} />}
           {section === 'device' && <DeviceSection />}
           {section === 'about' && <AboutSection />}
         </section>

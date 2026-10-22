@@ -7,6 +7,7 @@ import java.util.Locale;
 
 import com.rjgehan.notes.api.dto.CompatSetting;
 import com.rjgehan.notes.api.dto.CompatSetting.Status;
+import com.rjgehan.notes.settings.AiSettings;
 import com.rjgehan.notes.settings.AttachmentLocation;
 import com.rjgehan.notes.settings.DailyNotesSettings;
 import com.rjgehan.notes.settings.EditorMode;
@@ -172,6 +173,9 @@ public class ObsidianSettings implements SettingsSeed {
 
 		private boolean strictLineBreaks;
 
+		/** Not an Obsidian setting: kept as it is. */
+		private final AiSettings ai;
+
 		Builder(Settings current) {
 			this.current = current;
 			FilesSettings f = current.files();
@@ -197,6 +201,7 @@ public class ObsidianSettings implements SettingsSeed {
 			this.defaultMode = e.defaultMode();
 			this.readableLineLength = e.readableLineLength();
 			this.strictLineBreaks = e.strictLineBreaks();
+			this.ai = current.ai();
 		}
 
 		Settings build() {
@@ -206,7 +211,7 @@ public class ObsidianSettings implements SettingsSeed {
 							this.autoUpdateLinks, this.excludedPaths),
 					new DailyNotesSettings(this.dailyFormat, this.dailyFolder, this.dailyTemplate, this.openOnStartup),
 					new TemplatesSettings(this.templatesFolder, this.dateFormat, this.timeFormat),
-					new EditorSettings(this.defaultMode, this.readableLineLength, this.strictLineBreaks));
+					new EditorSettings(this.defaultMode, this.readableLineLength, this.strictLineBreaks), this.ai);
 		}
 
 		private void row(String source, JsonNode value, String setting, String current, String proposed,
