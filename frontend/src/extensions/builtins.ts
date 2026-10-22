@@ -1,6 +1,4 @@
 // Every v1 view, panel and command, registered through the public extension points (DESIGN §6.8).
-import { copyLineDown, moveLineDown, moveLineUp } from '@codemirror/commands';
-import { openSearchPanel } from '@codemirror/search';
 import {
   Activity,
   Bookmark,
@@ -40,19 +38,13 @@ import { showPanel, toggleSidebar } from '../components/layout/showPanel';
 import SearchPanel from '../components/panels/SearchPanel';
 import { confirmDelete, promptNewFolder } from '../components/explorer/rowActions';
 import { activeEditor } from '../editor/activeEditor';
-import { insertWikilink } from '../editor/completion';
-import { headingsFromState } from '../editor/outline';
-import { followLinkAtCursor, toggleCheckbox } from '../editor/editorCommands';
-import { setHeading, toggleBold, toggleBulletList, toggleHeading, toggleHighlight, toggleInlineCode, toggleItalic, toggleLink, toggleNumberedList, toggleQuote, toggleStrikethrough } from '../editor/formatting';
-import { foldAllHeadings, foldHeading, unfoldAllHeadings, unfoldHeading } from '../editor/headingFold';
-import { renumberList } from '../editor/listRenumber';
-import { historyEditor, insertTable } from '../editor/livePreview/table';
-import { openSlashMenu } from '../editor/slash';
+import { editorKit, loadEditorKit } from '../editor/kitHandle';
+import type { EditorKit } from '../editor/kit';
+import { historyEditor } from '../editor/livePreview/table/facets';
 import { registerAppSlashItems, registerEmbedSlashItems } from './slashItems';
 import { pickAndInsertAttachments } from '../features/attachments';
 import { currentBookmarks, isFileBookmarked, promptNewGroup, toggleFileBookmark, toggleSearchBookmark } from '../features/bookmarkStore';
 import { findSearchBookmarks } from '../features/bookmarks';
-import { promptRenameHeading } from '../features/headingRename';
 import { getCommand, setViewCommandSource } from '../features/commands';
 import { registerReminders } from '../features/reminders/register';
 import { isDailyNote, openAdjacentDailyNote, openTodaysDailyNote } from '../features/daily';
@@ -92,7 +84,19 @@ function goTo(route: string): void {
   navigateTo(route);
 }
 
-function editorCommand(id: string, name: string, run: (view: NonNullable<ReturnType<typeof activeEditor>>) => unknown, editorHotkey?: string) {
+type Editor = NonNullable<ReturnType<typeof activeEditor>>;
+
+/**
+ * A palette command on the open editor. Its code is in the editor's chunk (editor/kit.ts), which
+ * every editor loads: with an editor to run on, the kit is there and the command runs at once.
+ */
+function editorCommand(id: string, name: string, run: (kit: EditorKit, view: Editor) => unknown, editorHotkey?: string) {
+  const runOn = (kit: EditorKit, view: Editor) => {
+    run(kit, view);
+    // Back to the text from the palette or toolbar, unless the command moved the focus into
+    // the editor itself (the find panel's search field, which a table cell's is the note's).
+    if (!historyEditor(view).dom.contains(document.activeElement)) view.focus();
+  };
   registerCommand({
     id,
     name,
@@ -100,12 +104,10 @@ function editorCommand(id: string, name: string, run: (view: NonNullable<ReturnT
     when: () => activeEditor() !== null,
     run: () => {
       const view = activeEditor();
-      if (view) {
-        run(view);
-        // Back to the text from the palette or toolbar, unless the command moved the focus into
-        // the editor itself (the find panel's search field, which a table cell's is the note's).
-        if (!historyEditor(view).dom.contains(document.activeElement)) view.focus();
-      }
+      if (!view) return;
+      const kit = editorKit();
+      if (kit) runOn(kit, view);
+      else void loadEditorKit().then((k) => runOn(k, view));
     },
   });
 }
@@ -281,33 +283,33 @@ export function registerBuiltins(): void {
       if (s) void s.flush();
     },
   });
-  editorCommand('editor.followLink', 'Follow link under cursor', followLinkAtCursor, 'Mod-Enter');
-  editorCommand('editor.toggleCheckbox', 'Toggle checklist status', toggleCheckbox, 'Mod-l');
-  editorCommand('editor.bold', 'Toggle bold', toggleBold, 'Mod-b');
-  editorCommand('editor.italic', 'Toggle italic', toggleItalic, 'Mod-i');
-  editorCommand('editor.strikethrough', 'Toggle strikethrough', toggleStrikethrough, 'Mod-Shift-x');
-  editorCommand('editor.highlight', 'Toggle highlight', toggleHighlight, 'Mod-Shift-h');
-  editorCommand('editor.inlineCode', 'Toggle inline code', toggleInlineCode, 'Mod-e');
-  editorCommand('editor.insertLink', 'Insert or remove link', toggleLink, 'Mod-k');
-  for (let level = 1; level <= 6; level++) editorCommand(`editor.heading${level}`, `Toggle heading ${level}`, toggleHeading(level));
-  editorCommand('editor.headingNone', 'Remove heading', (v) => setHeading(v, 0));
-  editorCommand('editor.bulletList', 'Toggle bulleted list', toggleBulletList);
-  editorCommand('editor.numberedList', 'Toggle numbered list', toggleNumberedList);
-  editorCommand('editor.quote', 'Toggle quote', toggleQuote);
-  editorCommand('editor.insertWikilink', 'Insert internal link', insertWikilink);
-  editorCommand('editor.insertTable', 'Insert table', insertTable);
+  editorCommand('editor.followLink', 'Follow link under cursor', (k, v) => k.followLinkAtCursor(v), 'Mod-Enter');
+  editorCommand('editor.toggleCheckbox', 'Toggle checklist status', (k, v) => k.toggleCheckbox(v), 'Mod-l');
+  editorCommand('editor.bold', 'Toggle bold', (k, v) => k.toggleBold(v), 'Mod-b');
+  editorCommand('editor.italic', 'Toggle italic', (k, v) => k.toggleItalic(v), 'Mod-i');
+  editorCommand('editor.strikethrough', 'Toggle strikethrough', (k, v) => k.toggleStrikethrough(v), 'Mod-Shift-x');
+  editorCommand('editor.highlight', 'Toggle highlight', (k, v) => k.toggleHighlight(v), 'Mod-Shift-h');
+  editorCommand('editor.inlineCode', 'Toggle inline code', (k, v) => k.toggleInlineCode(v), 'Mod-e');
+  editorCommand('editor.insertLink', 'Insert or remove link', (k, v) => k.toggleLink(v), 'Mod-k');
+  for (let level = 1; level <= 6; level++) editorCommand(`editor.heading${level}`, `Toggle heading ${level}`, (k, v) => k.toggleHeading(level)(v));
+  editorCommand('editor.headingNone', 'Remove heading', (k, v) => k.setHeading(v, 0));
+  editorCommand('editor.bulletList', 'Toggle bulleted list', (k, v) => k.toggleBulletList(v));
+  editorCommand('editor.numberedList', 'Toggle numbered list', (k, v) => k.toggleNumberedList(v));
+  editorCommand('editor.quote', 'Toggle quote', (k, v) => k.toggleQuote(v));
+  editorCommand('editor.insertWikilink', 'Insert internal link', (k, v) => k.insertWikilink(v));
+  editorCommand('editor.insertTable', 'Insert table', (k, v) => k.insertTable(v));
   // Editor niceties (ROADMAP item 31, DESIGN §6.6.2).
-  editorCommand('editor.insertMenu', 'Insert… (the / menu)', openSlashMenu);
-  editorCommand('editor.renumberList', 'Renumber numbered list', renumberList);
-  editorCommand('editor.moveLineUp', 'Move line up', moveLineUp, 'Alt-ArrowUp');
-  editorCommand('editor.moveLineDown', 'Move line down', moveLineDown, 'Alt-ArrowDown');
-  editorCommand('editor.duplicateLine', 'Duplicate line', copyLineDown, 'Shift-Alt-ArrowDown');
-  editorCommand('editor.foldHeading', 'Fold heading', foldHeading, 'Mod-Shift-[');
-  editorCommand('editor.unfoldHeading', 'Unfold heading', unfoldHeading, 'Mod-Shift-]');
-  editorCommand('editor.foldAllHeadings', 'Fold all headings', foldAllHeadings);
-  editorCommand('editor.unfoldAll', 'Unfold all headings', unfoldAllHeadings);
+  editorCommand('editor.insertMenu', 'Insert… (the / menu)', (k, v) => k.openSlashMenu(v));
+  editorCommand('editor.renumberList', 'Renumber numbered list', (k, v) => k.renumberList(v));
+  editorCommand('editor.moveLineUp', 'Move line up', (k, v) => k.moveLineUp(v), 'Alt-ArrowUp');
+  editorCommand('editor.moveLineDown', 'Move line down', (k, v) => k.moveLineDown(v), 'Alt-ArrowDown');
+  editorCommand('editor.duplicateLine', 'Duplicate line', (k, v) => k.copyLineDown(v), 'Shift-Alt-ArrowDown');
+  editorCommand('editor.foldHeading', 'Fold heading', (k, v) => k.foldHeading(v), 'Mod-Shift-[');
+  editorCommand('editor.unfoldHeading', 'Unfold heading', (k, v) => k.unfoldHeading(v), 'Mod-Shift-]');
+  editorCommand('editor.foldAllHeadings', 'Fold all headings', (k, v) => k.foldAllHeadings(v));
+  editorCommand('editor.unfoldAll', 'Unfold all headings', (k, v) => k.unfoldAllHeadings(v));
   // In a table cell, find searches the note.
-  editorCommand('editor.find', 'Find/replace in current note', (v) => openSearchPanel(historyEditor(v)), 'Mod-f');
+  editorCommand('editor.find', 'Find/replace in current note', (k, v) => k.openSearchPanel(historyEditor(v)), 'Mod-f');
   // Voice notes (ROADMAP item 33, DESIGN §6.30): recorded into the open note at its cursor.
   registerCommand({
     id: 'voice.record',
@@ -370,11 +372,13 @@ export function registerBuiltins(): void {
     name: 'Bookmark heading at cursor',
     icon: BookmarkPlus,
     when: (c) => hasNote(c) && activeEditor() !== null,
-    run: (c) => {
+    run: async (c) => {
       const view = activeEditor();
       if (!view || !c.activePath) return;
       const line = view.state.doc.lineAt(view.state.selection.main.head).number - 1;
-      const heading = headingsFromState(view.state)
+      const kit = editorKit() ?? (await loadEditorKit());
+      const heading = kit
+        .headingsFromState(view.state)
         .filter((h) => h.line <= line)
         .pop();
       if (!heading || !heading.text) {
@@ -402,7 +406,11 @@ export function registerBuiltins(): void {
     when: (c) => hasNote(c) && activeEditor() !== null,
     run: (c) => {
       const view = activeEditor();
-      if (view && c.activePath) void promptRenameHeading(view, c.activePath);
+      if (!view || !c.activePath) return;
+      // The prompt takes the focus inside this gesture: the kit is loaded with the editor (DESIGN §6.13).
+      const kit = editorKit();
+      if (kit) void kit.promptRenameHeading(view, c.activePath);
+      else void loadEditorKit().then((k) => k.promptRenameHeading(view, c.activePath!));
     },
   });
   registerCommand({ id: 'bookmarks.newGroup', name: 'Create new bookmark group', run: () => promptNewGroup() });

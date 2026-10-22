@@ -1,6 +1,6 @@
 // Live Preview tables (DESIGN §6.6.1): what the grid shares with the note editor and with later
 // roadmap items, kept apart so the grid and the extension that places it import it without cycles.
-import { Annotation, Facet, StateEffect, type Extension } from '@codemirror/state';
+import { Annotation, Facet, StateEffect, type EditorState, type Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { CellDisplay } from './render';
 import type { Align } from './model';
@@ -55,4 +55,25 @@ export function historyEditor(view: EditorView): EditorView {
 /** Whether `view` is a table cell's editor. */
 export function isTableCell(view: EditorView): boolean {
   return view.state.facet(tableCellHost) !== null;
+}
+
+/** Where a table shows as a grid (grid.ts's TableBlock is one). */
+export interface TableRange {
+  from: number;
+  to: number;
+}
+
+let rangesOf: (state: EditorState) => readonly TableRange[] = () => [];
+
+/**
+ * The note's tables that show as grids, for code outside the editor (a session's insertion point).
+ * The tables extension (index.ts, in the editor's chunk) provides it when it loads; until then no
+ * state has grids.
+ */
+export function tableRanges(state: EditorState): readonly TableRange[] {
+  return rangesOf(state);
+}
+
+export function provideTableRanges(read: (state: EditorState) => readonly TableRange[]): void {
+  rangesOf = read;
 }

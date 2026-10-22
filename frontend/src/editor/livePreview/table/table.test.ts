@@ -12,7 +12,7 @@ import { activeEditor, setActiveEditor } from '../../activeEditor';
 import type { EditorMenuEntry, NoteContext } from '../../context';
 import { noteExtensions } from '../../editorSetup';
 import { markdownNoteLanguage } from '../../language';
-import { remoteTransaction } from '../../remote';
+import { remoteTransaction } from '../../remoteDiff';
 import type { LivePreviewConfig } from '../decorations';
 import { tableEdit } from './facets';
 import { gridOf, type TableGrid } from './grid';

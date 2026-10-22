@@ -1,9 +1,7 @@
-// Applies remote text as a minimal change set (DESIGN §6.6 "Remote updates"): annotated
-// Transaction.remote and kept out of undo history, so the cursor, scroll position and local undo
-// stack survive. While an IME or iOS autocorrect composition is active, the update waits for
-// compositionend (or at most 300 ms).
-import { diff } from '@codemirror/merge';
-import { Annotation, Transaction, type ChangeSpec, type EditorState, type TransactionSpec } from '@codemirror/state';
+// Remote updates (DESIGN §6.6 "Remote updates"): the annotations that tell edits apart, and the
+// wait for an IME or iOS autocorrect composition (compositionend, or at most 300 ms) before remote
+// text goes in. The change set itself is computed in remoteDiff.ts.
+import { Annotation, Transaction } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 
 /**
@@ -28,25 +26,6 @@ export const paneSync = Annotation.define<boolean>();
 /** True for a transaction that changes the document on behalf of the user. */
 export function isLocalEdit(tr: Transaction): boolean {
   return tr.docChanged && !tr.annotation(Transaction.remote) && !tr.annotation(sessionEdit) && !tr.annotation(paneSync);
-}
-
-export function remoteChanges(current: string, next: string): ChangeSpec[] {
-  return diff(current, next).map((c) => ({ from: c.fromA, to: c.toA, insert: next.slice(c.fromB, c.toB) }));
-}
-
-export function remoteTransaction(state: EditorState, next: string): TransactionSpec | null {
-  const current = state.doc.toString();
-  if (current === next) return null;
-  return {
-    changes: remoteChanges(current, next),
-    annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)],
-  };
-}
-
-/** Applies `next` (already LF-normalized) to a state without a view. */
-export function applyRemoteTextToState(state: EditorState, next: string): EditorState {
-  const spec = remoteTransaction(state, next);
-  return spec ? state.update(spec).state : state;
 }
 
 /**

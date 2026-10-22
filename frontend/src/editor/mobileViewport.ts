@@ -1,14 +1,11 @@
 // Pins the shell to the visual viewport (DESIGN §6.16): `--vvh` and `--vv-top` follow
 // visualViewport, `keyboard-open` is set while the on-screen keyboard takes a quarter of it, and
 // the caret of the focused editor is kept in view when the visible area shrinks.
-import { EditorView } from '@codemirror/view';
-import { activeEditor } from './activeEditor';
+import { editorKit } from './kitHandle';
 
-/** Scrolls the focused editor's caret back into view (keyboard opened, toolbar shown). */
-export function revealCaret(): void {
-  const view = activeEditor();
-  if (!view || !view.hasFocus) return;
-  view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: 'nearest', yMargin: 48 }) });
+/** Scrolls the focused editor's caret back into view: an editor is there only once its code (the kit) is. */
+function revealCaret(): void {
+  editorKit()?.revealCaret();
 }
 
 export function installViewportVars(): () => void {

@@ -16,6 +16,8 @@ import { renderLiveMarkdown, renderLiveMath } from '../render/liveRich';
 import { usePrefs } from '../state/prefs';
 import type { DocumentSession } from '../sync/DocumentSession';
 import { clearActiveEditor, setActiveEditor } from './activeEditor';
+// The palette's editor commands (extensions/builtins.ts) run from here once an editor exists.
+import './kit';
 import { vaultChanged, type NoteContext } from './context';
 import { noteExtensions, type EditorHooks } from './editorSetup';
 import { maybeShowTabEscapeHint } from './tabEscapeHint';

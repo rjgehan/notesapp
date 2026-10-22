@@ -6,6 +6,8 @@ import { registerBuiltins } from '../extensions/builtins';
 import { runCommand } from '../features/commands';
 import { clearActiveEditor, setActiveEditor } from './activeEditor';
 import { toggleCheckbox } from './editorCommands';
+// An editor is loaded: its commands are, too (kit.ts).
+import './kit';
 
 const views: EditorView[] = [];
 

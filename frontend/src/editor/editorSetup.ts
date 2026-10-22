@@ -29,6 +29,7 @@ import { unresolvedLinks } from './unresolved';
 import { encryptedSections } from './encryptedSections';
 import { trackedRangesField } from './tracked';
 import { uploadsField } from './uploads';
+import { uploadWidgets } from './uploadsView';
 import { editorCommandKeys, vimSlot, type CommandKey } from './vimMode';
 
 export interface EditorHooks {
@@ -77,6 +78,7 @@ function common(hooks: EditorHooks): Extension[] {
     // The session's pending attachment uploads and tracked ranges (the same field instances, so
     // they survive mounts).
     uploadsField,
+    uploadWidgets,
     trackedRangesField,
     isIOS ? [] : drawSelection(),
     highlightActiveLine(),

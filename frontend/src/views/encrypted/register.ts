@@ -4,7 +4,8 @@
 import { FileLock, KeyRound, Lock, LockOpen } from 'lucide-react';
 import { currentTree } from '../../api/hooks';
 import { activeEditor } from '../../editor/activeEditor';
-import { openSectionIn } from '../../editor/encryptedSections';
+import type { EditorKit } from '../../editor/kit';
+import { editorKit, loadEditorKit } from '../../editor/kitHandle';
 import { installAutoLock } from '../../features/encryption/autoLock';
 import { encryptSelection, insertSection } from '../../features/encryption/inline';
 import { isUnlocked, lock } from '../../features/encryption/keyring';
@@ -110,7 +111,14 @@ export function registerEncryption(): void {
     when: (c) => activeEditor() !== null && noteSession(c.activePath) !== null,
     run: () => {
       const view = activeEditor();
-      if (view && !openSectionIn(view, view.state.selection.main.head)) toast('There is no encrypted text at the cursor');
+      if (!view) return;
+      // With an editor, its code (the kit) is loaded: the dialog opens inside this gesture.
+      const open = (kit: EditorKit) => {
+        if (!kit.openSectionIn(view, view.state.selection.main.head)) toast('There is no encrypted text at the cursor');
+      };
+      const kit = editorKit();
+      if (kit) open(kit);
+      else void loadEditorKit().then(open);
     },
   });
 }
