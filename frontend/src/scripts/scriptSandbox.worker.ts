@@ -1,4 +1,4 @@
-// Scripts in notes (ROADMAP item 40, DESIGN §6.39): the sandbox worker. Scripts run in QuickJS
+// Scripts in notes (ROADMAP item 40, DESIGN §6.42): the sandbox worker. Scripts run in QuickJS
 // (sandbox.ts), which gives them nothing of this worker; the worker itself is locked down as a
 // second layer: its own CSP (SecurityHeadersFilter: no fetch, sockets or workers) and, before
 // anything runs, the network, storage and messaging globals removed. It talks only to the page

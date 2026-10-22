@@ -2919,6 +2919,7 @@ export interface NotesQueryResponse {
 | DELETE | `/api/publish?path=` | | 204 | 26.3 |
 | POST | `/api/notes/rename-heading` | `HeadingRenameRequest` | 200 `HeadingRenameResult` | 22 |
 | POST | `/api/notes/block-id` | `BlockIdRequest` | 200 `BlockIdResult` | 37 |
+| GET | `/api/notes/query?path=&tag=&folder=&prop=&linksTo=&q=&tasks=&limit=` | | 200 `NotesQueryResponse` | 40.1 |
 | GET | `/api/transcription` | | 200 `TranscriptionStatus` | 23.1 |
 | POST | `/api/transcriptions` | `TranscribeRequest` | 200 `TranscriptionResult` | 23.2 |
 | GET | `/api/flashcards` | | 200 `FlashcardsResponse` | 34.3 |
@@ -2981,6 +2982,7 @@ export interface NotesQueryResponse {
 | `BookmarksResponse`, `BookmarksUpdateRequest` | Same | `BookmarkItem` is not a record: items stay JSON objects (`ObjectNode`; `JsonNode` in the request), so fields from Obsidian or a newer build survive; `BookmarkCodec` checks the fields it knows (§21.2) |
 | `HeadingRenameRequest`, `HeadingRenameResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]`; `dryRun` defaults to false |
 | `BlockIdRequest`, `BlockIdResult` | Same | Every request field is `@Nullable` so a missing one is reported in `errors[]` |
+| `NotesQueryResponse`, `QueriedNote`, `NoteTask` | Same | `QueriedNote.frontmatter` is a `@Nullable Map<String, @Nullable Object>`, `tasks` a `@Nullable List<NoteTask>` |
 | `TranscriptionStatus`, `TranscriptionResult` | Same; the request is `TranscribeRequest(String path)` | |
 | `PublishResponse`, `PublishedNote`, `PublishRequest` | Same | `PublishedNote.state` is the enum `PublishedNoteState` (`current`, `changed`, `source-missing`, `snapshot-missing`); every `PublishRequest` component is `@Nullable` |
 | `HelloEvent`, `PingEvent`, `FileEvent`, `FileDeletedEvent`, `FolderEvent`, `FolderDeletedEvent`, `MovedEvent`, `TrashChangedEvent`, `HistoryCommittedEvent`, `SettingsChangedEvent`, `BookmarksChangedEvent`, `StatusChangedEvent`, `ResyncEvent`, `SavedSearchesChangedEvent` | Same names in `com.rjgehan.notes.events`, all implementing `sealed interface VaultEvent { @JsonIgnore String eventName(); @JsonIgnore default @Nullable String echoOrigin() { return null; } }` | `eventName()` returns the §16.4 string. Content events (`file.*`, `folder.*`, `entry.moved`, `settings.changed`) have a real `origin` record component, which is serialized, and override `echoOrigin()` to return it. Non-content events have no `origin` component, so they never serialize `"origin": null` into an event the TypeScript types declare without one. Neither interface method is serialized. `HelloEvent` and `PingEvent` are written by `EventHub` directly and never stored in the replay ring. |
@@ -3698,3 +3700,42 @@ The client read the note, found the block (DESIGN §6.37) and names the line its
 | `409 block-not-found` (`line`): the line is gone, or several lines read `lineText` |
 
 Events to other clients: `file.changed` when the note changed. An open note there with unsaved edits merges them or shows the conflict banner, as for any change from elsewhere (§16.5). The calling client gets no event; it applies `file` itself (DESIGN §6.37). The change is committed with the next batch, like a save.
+
+## 40. Scripts in notes and Dataview-style queries (ROADMAP items 40 and 17)
+
+```` ```script ```` blocks and ```` ```dataview ```` queries run **in the browser**, in a QuickJS sandbox inside a dedicated worker (DESIGN §6.42). The server's part is read-only: one endpoint that lists notes' metadata from the in-memory index, and a strict CSP for the sandbox worker's script. Nothing a script does can write to the vault.
+
+### 40.1 `GET /api/notes/query`
+
+The metadata of the notes matching every filter given (filters combine with AND; none: every note). Excluded paths (`settings.files.excludedPaths`) never match, and only notes (`kind: "note"`) do.
+
+| Parameter | |
+|---|---|
+| `path` | One note, by its exact vault path (a script's `note()`) |
+| `tag` (repeatable) | Notes with the tag, nested tags included (`project` matches `#project/alpha`); a leading `#` is ignored |
+| `folder` | Notes under the folder (recursively); empty or `/` is the whole vault |
+| `prop` (repeatable) | `name` (present and not empty), `name=value` or `name!=value` (a note without the property matches `!=`). Names compare ignoring case; values compare as text ignoring case, an element of a list property matches, and `[[Note]]` matches `Note` |
+| `linksTo` | Notes with a link or embed that resolves to this note (a vault path, or a link target resolved from the vault root) |
+| `q` | Notes the full-text search (§12.1's syntax) matches |
+| `tasks` | `true`: each note's Markdown checkbox tasks (outside code fences, at most 500 per note); otherwise `tasks` is `null` |
+| `limit` | 1–2000, default 500 |
+
+At most 10 `tag` and `prop` filters together, each (and `folder`, `linksTo`) at most 200 characters. Repeated parameters are read as sent (a value may hold a comma).
+
+`200 NotesQueryResponse`: `{"notes": [QueriedNote…], "total": 12, "truncated": false}`. `notes` are in path order, at most `limit`; `total` counts every match. A `QueriedNote`: `path`, `title` (the basename), `aliases`, `tags` (distinct, without `#`, in order of first appearance), `frontmatter` (the parsed YAML object, or `null`), `mtime`, `size`, `links` (the distinct vault paths its links and embeds resolve to), `tasks` (`NoteTask`: `line` 0-based, `status` the character between the brackets, `done` for `x` or `X`, `text`).
+
+| Errors |
+|---|
+| `400 bad-request`: `limit` out of range, too many or too long filters, an empty `tag`, a `prop` that is not `name`, `name=value` or `name!=value` |
+
+No events. The client reruns a script when a note it read changes (`file.*`, `entry.moved`, `folder.deleted`, `resync`, §16), debounced.
+
+### 40.2 The sandbox worker's CSP
+
+The frontend build names the worker `assets/scriptSandbox.worker-<hash>.js`. Its response (any path under `/assets/` that starts with `scriptSandbox.worker-` and ends with `.js`, with no further `/`) carries its own policy in place of the app's, since a dedicated worker's CSP comes from its script's response:
+
+```
+default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'
+```
+
+It may compile WebAssembly (QuickJS, inlined in the worker: it fetches nothing) and nothing else: no `fetch`, sockets or workers, whatever runs in it.

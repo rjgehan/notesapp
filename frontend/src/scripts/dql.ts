@@ -1,4 +1,4 @@
-// Dataview-style queries (ROADMAP item 17, DESIGN §6.39.4): the `query("…")` helper of scripts and
+// Dataview-style queries (ROADMAP item 17, DESIGN §6.42.4): the `query("…")` helper of scripts and
 // ```` ```dataview ```` blocks. A subset of the Dataview Query Language, parsed and evaluated here,
 // over the notes `GET /api/notes/query` returns (API.md §40.1): never `eval`, no code, data only.
 //

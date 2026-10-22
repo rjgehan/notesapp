@@ -1,4 +1,4 @@
-// Scripts in notes (ROADMAP items 40 and 17, DESIGN §6.39): the page's side of a script's API
+// Scripts in notes (ROADMAP items 40 and 17, DESIGN §6.42): the page's side of a script's API
 // calls. The sandbox asks by name with JSON arguments; every call is checked here (the arguments
 // come from the script) and answered with JSON data. Read-only: nothing here writes to the vault.
 // The paths a run read, and whether it asked for many notes, decide when it runs again.

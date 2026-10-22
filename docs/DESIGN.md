@@ -1236,6 +1236,7 @@ The date token mapping table (moment, dayjs, and java.time for future server-sid
 - Excalidraw drawings (ROADMAP item 5) needed no change: fonts are self-hosted and its worker is same-origin (§6.8.1).
 - **`'wasm-unsafe-eval'`** (added with ROADMAP item 32) lets the app compile WebAssembly: PDF.js's JPEG 2000, JBIG2 and ICC colour decoders and its PostScript-function compiler (§6.8.3), and Excalidraw's font subsetting. It allows no JavaScript `eval` or `new Function`; injected script still cannot run (`script-src 'self'`), and the WebAssembly the app compiles is fetched from `'self'` (`connect-src 'self'`). A worker's policy comes from its own script's response, which carries the same header. Without it PDF.js falls back to slower JavaScript decoders, which on a 300-page scan on the iPhone is the difference that matters.
 - **PDF.js** (§6.8.3) works under the rest of the policy as it is: its worker is a same-origin module script (`worker-src 'self'`, served as `text/javascript`, which `nosniff` requires); CMaps, standard fonts and decoders are fetched from `/assets/pdfjs-<version>/`; fonts embedded in a PDF become `FontFace`s from bytes (or `data:` URLs, `font-src data:`); the document's own JavaScript never runs (no scripting manager, and `quickjs-eval` is not shipped).
+- **The script sandbox worker** (ROADMAP item 40, §6.42.1) gets a policy of its own in place of the app's, on `/assets/scriptSandbox.worker-*.js` (a dedicated worker's CSP comes from its script's response): `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'`. QuickJS compiles there; nothing in it can fetch, open a socket or start a worker.
 
 **2. `FunnelRequestFilter`**: any request carrying `Tailscale-Funnel-Request` (it came through Tailscale Funnel) is refused with `403 funnel-request`, health endpoints included; only the separate publish server may be behind Funnel (§5.28).
 
@@ -1903,6 +1904,7 @@ frontend/src/
 ├── calendar/               ROADMAP item 14 (§6.32): model.ts, repeats.ts, prefs.ts, api.ts, useCalendarData.ts,
 │                             routes.ts, actions.ts, register.ts, ui/ (the /x/calendar page and the Calendar panel)
 ├── formulas/                 ROADMAP item 39 (§6.41): model.ts (pure), engine.ts (lazy chunk, HyperFormula), load.ts
+├── scripts/                  ROADMAP items 40 and 17 (§6.42): the QuickJS sandbox worker and its API, runner, dql.ts, noteScripts.ts (lazy)
 ├── flashcards/               ROADMAP item 34 (§6.34): parse.ts, ids.ts, reviews.ts, schedule.ts (ts-fsrs), deck.ts,
 │                             session.ts, stats.ts, store.ts (records, outbox), register.ts, ui/ (the /x/flashcards page)
 ├── habits/                   ROADMAP item 35 (§6.35): model.ts, progress.ts, frontmatterEdit.ts, write.ts, actions.ts,
@@ -3989,6 +3991,64 @@ Spreadsheet math in ordinary notes, with item 6's engine (HyperFormula under GPL
 - Formulas compute in the note's own editor (Live Preview and locked). Embedded notes and rendered blocks (§6.7) show formulas as typed.
 
 ---
+
+### 6.42 Scripts in notes and Dataview-style queries (ROADMAP items 40 and 17)
+
+A note can compute what it shows: a ```` ```script ```` block holds JavaScript that reads the vault (read-only) and shows Markdown, lists and tables; a ```` ```dataview ```` block holds a query in a subset of Dataview's query language (imported Obsidian vaults bring many). Both run **in the browser**, in a sandbox; the server only lists notes' metadata (API.md §40). The file always keeps exactly what was typed: output is never written to the note.
+
+#### 6.42.1 The sandbox
+
+Three layers, each enough on its own to keep a script away from the page, the network and the vault's write endpoints:
+
+1. **QuickJS** (`quickjs-emscripten`, MIT; the asyncify single-file variant, whose WebAssembly is inlined, so it fetches nothing). Every run gets a fresh runtime with no DOM, network, timers or storage. It gets the API prelude (`scripts/guest/prelude.js`) and two functions the prelude takes out of the global object before the script runs: `__host` (an API call, answered by the page with JSON) and `__emit` (one item of output, as JSON). Limits (`scripts/protocol.ts`): 250 ms of CPU (an interrupt handler; the time API calls wait for the page does not count), 32 MB of heap, 512 KB of stack, 200 API calls, 2000 output items and 512 KB of output.
+2. **A dedicated worker** (`scriptSandbox.worker.ts`), started once and reused, one run at a time. Before anything runs it removes `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `importScripts`, IndexedDB, caches, `BroadcastChannel` and the worker constructors from its global scope. A run that has not finished after 15 s of wall time (API calls included) gets the worker terminated; the next run starts a new one.
+3. **The worker's own CSP** (API.md §40.2, `SecurityHeadersFilter`, §5.14): `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'none'`. The build names the worker `assets/scriptSandbox.worker-<hash>.js`, which the filter's rule matches.
+
+The page (`runner.ts`, `host.ts`) checks every message from the worker (its type, its run, the output's shape: `checkItem`) and every API call's arguments (unknown calls and filters are refused). Nothing a script produces is HTML, code or a function on the page's side: output is data (`OutputItem`), which `output.ts` turns into **escaped Markdown** (text is backslash-escaped; only strings a script passes to `show()` are read as Markdown; links and embeds become wikilinks, which resolve inside the vault only). That Markdown renders through the reading pipeline (`NoteContext.renderMarkdown`: markdown-it, DOMPurify, the embeds) **with remote images off**, so raw HTML loses scripts, forms, inputs, `javascript:` links and CSS `url()`s, and `<img>` and media from other sites become placeholders, which are then **removed** (`stripRemote`, outside embedded notes). Nothing a script writes can make the browser load a URL, so what it read cannot leave in an image request. Links to other sites stay links (following one is the user's click).
+
+Without Worker support (unit tests) the runner runs the same sandbox on the page; QuickJS isolates the script there too.
+
+#### 6.42.2 The script API
+
+| | |
+|---|---|
+| `today()`, `now()`, `date("2026-10-22")` | Dates in the device's local wall time: `.year`, `.month`, `.day`, `.weekday`, `.format("dddd D MMMM")`, `.add(3, "days")`, `.daysUntil(d)`, `.isBefore(d)`, … |
+| `note("Title" or path)`, `thisNote()` | A note's metadata or null: `path`, `title`, `folder`, `tags`, `aliases`, `props` (frontmatter), `modified`, `size`, `links`, `.text()`, `.tasks()` |
+| `notes({tag, folder, prop, linksTo, search, limit})` | Notes from `GET /api/notes/query` (default limit 500); `prop` as `"status"`, `"status!=done"` or `{status: "open"}` |
+| `tasks({…, done})` | The checkbox tasks of the matching notes, each with its `note` |
+| `show(…values)` | Strings are Markdown; numbers, dates and booleans text; notes links; arrays lists; other objects JSON in a code block |
+| `list(items)`, `table(rows, columns)`, `embed(note)` | A list, a table (rows that are notes give their properties by column name; `title` links), an embed |
+| `fn.SUM(1, 2)`, `formula("=budget!B2*2")` | Item 39's spreadsheet functions (HyperFormula with the `.sheet` configuration). `formula()` sees this note's tables (§6.41), `fn` does not. An error code throws |
+| `query("TABLE … FROM …")` | A Dataview query's result (§6.42.4), to `show()` |
+
+An error stops the script; what it showed before stays, with the error and the script's **line** under it (from QuickJS's stack). A run records the notes it read by path (`reads.paths`) and, when it listed notes (`notes()`, `tasks()`, `query()`, or `note()` of a note that does not exist yet), is **broad**.
+
+#### 6.42.3 In the editor
+
+`topLevel.ts` recognises a top-level fenced block whose info string is `script` or `dataview` (not `dataviewjs`, which stays code) as a rich block kind, and `rich.ts` shows it as a `ScriptBlockWidget` (`editor/livePreview/scripts.ts`) under the callouts' rules: in a locked note always; while editing whenever the selection does not touch the block (with the caret in it, the code shows and is edited as any code block).
+
+- The widget shows the output only, with **↻** (run again) and **</>** at its top right (on hover; always on touch screens). **</>** puts the caret in the block while editing; in a locked note it shows the code under the output.
+- `NoteContext.runScript` (`scripts/noteScripts.ts`, a lazy chunk loaded by the first block) runs a block; a dataview block is the script `show(query("…"))`. The host answers from `GET /api/notes/query`, the open notes' current text (their `DocumentSession`) or else the file, the tree's link resolution, and the editor's formula engine (`formulaEngine()` and the note's `formulaResults`).
+- **Results are kept** per note, kind and code (up to 200, for the page's lifetime), so a block that scrolls out and back, or that the caret enters and leaves, does not run again. A result goes **stale** when a note it read changes: `scripts/register.ts` registers event handlers (§6.8) for `file.created`, `file.changed`, `file.deleted`, `entry.moved`, `folder.deleted` and `resync` and calls `invalidateScripts(paths)` (a folder or a resync: any note). A broad result, or one in the changed note itself (its tables feed `formula()`), is stale for any such change. Stale blocks that show run again **1 s** later (several changes, one run); others run when they next show. At **local midnight** every result goes stale (`today()`), and **↻** runs a block at once.
+- **Settings › This device › Scripts in notes** (`prefs.scripts`, per device): *Run as the note shows* (`auto`, the default), *Ask before running* (`ask`: the code and a **Run** button; a click is remembered for the block until the page reloads), *Off* (`off`: the blocks stay code).
+- The `/` menu (§6.6.2) offers **Script block** and **Dataview query**, which insert a small example with the caret on its first line.
+- Embedded notes, published notes and the other views show the blocks as code: scripts run only in the note's own editor.
+
+#### 6.42.4 Dataview-style queries (`scripts/dql.ts`)
+
+A parser and evaluator for a subset of the Dataview Query Language, over the notes the endpoint returns. It never uses `eval`: queries are data.
+
+```
+TABLE [WITHOUT ID] expr [AS "Name"], …  |  LIST [expr]  |  TASK
+[FROM #tag and "folder" and [[Note]]]
+[WHERE expr]  [SORT expr [ASC|DESC], …]  [LIMIT n]
+```
+
+FROM's sources become the endpoint's `tag`, `folder` and `linksTo` filters. Expressions: properties by name, `file.name`, `file.path`, `file.folder`, `file.link`, `file.mtime` (local time, shown as `2026-10-22 11:56`), `file.mday`, `file.tags`, `file.size`, `file.aliases`, `file.outlinks`, and in TASK queries `text`, `completed`, `status`, `line`; literals and `[[links]]`; `= != < <= > >= and or ! + - * /`; and `contains`, `date` (`"today"`, `"now"`, a date), `default`, `length`, `lower`, `upper`, `number`, `string`, `round`, `startswith`, `endswith`. GROUP BY, FLATTEN, CALENDAR, OR and `-` between sources are errors; ```` ```dataviewjs ```` and inline `= …` queries stay code. The compatibility report (§5.23) lists those, and reports the Dataview plugin as *partial*.
+
+#### 6.42.5 Tests
+
+`sandbox.test.ts` (the API, the limits, and escapes: the global object, `Function` and indirect `eval`, imports, prototype pollution towards the page, output and call floods, runaway loops, memory and recursion), `host.test.ts` (filters and arguments checked, `__proto__` keys, unknown calls), `output.test.ts` (escaping, wikilinks only), `dql.test.ts`, `noteScripts.test.ts` (a block end to end in the sandbox; which events make results stale), `register.test.ts` (the `/` items), `editor/livePreview/scripts.test.ts` (output, code at the caret, ↻ and </>, errors with lines, remote images removed, debounced reruns for relevant notes only, ask and off, dataview, formulas with the note's tables); backend `NotesQueryIntegrationTest`, `SecurityIntegrationTest` (the worker's CSP) and `CompatScannerTest`. Checked in a real browser against the production build served by the jar: the worker's file name matches the CSP rule, WebAssembly compiles under it, the worker loads no other file, reruns follow another device's save, and a script's remote images, CSS URLs, inputs, `<script>` and `javascript:` links leave no request and nothing to click.
 
 ## 7. Infrastructure
 

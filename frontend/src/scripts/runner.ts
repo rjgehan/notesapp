@@ -1,4 +1,4 @@
-// Scripts in notes (ROADMAP item 40, DESIGN §6.39): runs scripts in the sandbox worker, one at a
+// Scripts in notes (ROADMAP item 40, DESIGN §6.42): runs scripts in the sandbox worker, one at a
 // time, and answers their API calls on the page. The worker is a dedicated module worker; only it
 // can post to this page's handler, and every message is checked anyway: its type, the run it
 // belongs to, and the output's shape. A run that does not finish in time gets the worker

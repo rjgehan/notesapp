@@ -83,3 +83,23 @@ describe('script host (ROADMAP 40)', () => {
     expect(r.error?.message).toContain('Query: A query starts with TABLE, LIST or TASK');
   });
 });
+
+describe('script host: escapes (security re-test)', () => {
+  it('a __proto__ key in a call’s arguments pollutes nothing on the page', async () => {
+    const host = createHost(deps());
+    const reply = JSON.parse(await host.call('notes', '{"__proto__":{"polluted":1},"tag":"project"}'));
+    expect(reply.e).toContain('Unknown filter: __proto__');
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(JSON.parse(await host.call('__proto__', '{}')).e).toContain('Unknown API call');
+    expect(JSON.parse(await host.call('hasOwnProperty', '{}')).e).toContain('Unknown API call');
+  });
+
+  it('formula() cannot reach beyond one expression, and text() only notes the index has', async () => {
+    const seen: string[] = [];
+    const host = createHost(deps({ evaluate: async (e) => (seen.push(e), 1) }));
+    expect(JSON.parse(await host.call('formula', JSON.stringify('x'.repeat(9000)))).e).toContain('formula() takes');
+    expect(JSON.parse(await host.call('fn', '{"name":"SUM","args":[{"a":1}]}')).e).toContain('Formula arguments');
+    expect(JSON.parse(await host.call('text', '"/etc/passwd"')).e).toContain('No note');
+    expect(seen).toEqual([]);
+  });
+});

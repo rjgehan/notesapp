@@ -52,7 +52,7 @@ public class SecurityHeadersFilter extends OncePerRequestFilter {
 			+ "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'";
 
 	/**
-	 * The script sandbox's worker (ROADMAP item 40, DESIGN §6.39), as the frontend build names it. A worker's policy
+	 * The script sandbox's worker (ROADMAP item 40, DESIGN §6.42), as the frontend build names it. A worker's policy
 	 * comes from its own script's response: this one may compile WebAssembly (QuickJS) and load its own chunks, and
 	 * nothing else. It cannot fetch, open sockets or start workers, whatever runs in it.
 	 */

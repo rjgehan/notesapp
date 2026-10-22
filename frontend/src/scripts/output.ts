@@ -1,4 +1,4 @@
-// Scripts in notes (ROADMAP item 40, DESIGN §6.39): what a script showed, as Markdown for the app's
+// Scripts in notes (ROADMAP item 40, DESIGN §6.42): what a script showed, as Markdown for the app's
 // reading pipeline (markdown-it, DOMPurify, the embeds), which renders it like any block of a note.
 // Text is escaped, so only what a script passes as Markdown (`show("**x**")`) is read as Markdown;
 // links and embeds become wikilinks, which resolve inside the vault and nowhere else.

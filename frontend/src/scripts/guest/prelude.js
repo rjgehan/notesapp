@@ -1,4 +1,4 @@
-// Scripts in notes (ROADMAP item 40, DESIGN §6.39): the API a script sees, run inside the QuickJS
+// Scripts in notes (ROADMAP item 40, DESIGN §6.42): the API a script sees, run inside the QuickJS
 // sandbox before the script. It has no DOM, no network and no storage: only the two functions the
 // worker gives it, `__host` (an API call the page answers, which looks synchronous to the script)
 // and `__emit` (one item of output). Both are taken out of the global object before the script

@@ -1,4 +1,4 @@
-// Scripts in notes (ROADMAP item 40, DESIGN §6.39): what the page and the sandbox worker say to
+// Scripts in notes (ROADMAP item 40, DESIGN §6.42): what the page and the sandbox worker say to
 // each other, and what a script shows. Everything that crosses is plain JSON data; nothing the
 // script produces is ever HTML, code or a function on the page's side.
 

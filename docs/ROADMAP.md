@@ -223,7 +223,16 @@ renders as a grid whose last cell shows `1725`.
 - **39a:** formulas in table cells, and inline formulas that don't refer to tables.
 - **39b:** named tables and inline references to them; per-column number formats (currency, percent, decimals), stored in a `%%` comment line under the table so Obsidian ignores it.
 
-### 40. Scripts in notes: blocks that run and show their result *(new, 2026-10-17)*
+### 40. Scripts in notes: blocks that run and show their result *(new, 2026-10-17; built 2026-10-22, `feat/formulas`)*
+
+**Status:** 40a and 40b built (2026-10-22, with item 17); 40c (write actions) not built. Design in DESIGN §6.42, the endpoint in API.md §40. Checked in a real browser against the production build; not yet on a real iPhone. Deviations and additions:
+
+- The sandbox is three layers: QuickJS (the single-file asyncify build, WebAssembly inlined), a dedicated worker that drops its network and storage globals, and a CSP of its own on the worker's script (`connect-src 'none'`). Limits: 250 ms of CPU, 32 MB, 200 API calls, 2000 output items, 15 s of wall time (then the worker is replaced).
+- Output is escaped Markdown rendered with remote images off, and the remaining click-to-load placeholders are removed, so a script cannot send what it read to another site through an image.
+- Scripts run in Live Preview and locked notes (the reading view is locked Live Preview since item 10b); embedded and published notes show the code.
+- A per-device setting (Settings › This device › Scripts in notes): run, ask first, or off. The `/` menu inserts a script block or a Dataview query.
+- Results are kept per note and code for the page's lifetime, so scrolling and moving the caret do not rerun a block; reruns after a relevant change are debounced by 1 s.
+- `notes/query` also takes `path` and `tasks` (for `note()`, `tasks()` and TASK queries) and returns aliases, size and resolved links; `tasks()` is in the API.
 
 **One line:** a code block that runs and shows its output in place, for content that changes by itself. For example, "on Mondays, show my Monday notes", "list my `#project` notes that aren't done", or a countdown.
 
@@ -799,7 +808,9 @@ Stored in `.notesapp/bookmarks.json`, in a format compatible with Obsidian's `bo
 
 `GET /api/graph`, built from the existing `LinkGraph`, rendered with `force-graph` 1.52.0 (MIT, canvas).
 
-### 17. Dataview-style query blocks
+### 17. Dataview-style query blocks *(built 2026-10-22 with item 40)*
+
+**Status:** built (2026-10-22, `feat/formulas`), as the update below says, plus ```` ```dataview ```` blocks themselves, which run as `show(query(…))` scripts (DESIGN §6.42.4): TABLE (WITHOUT ID, AS), LIST, TASK, FROM tags, a folder and a link joined with AND, WHERE, SORT, LIMIT, and a dozen functions. Evaluated in the browser over `GET /api/notes/query`, not on the server. Not supported: GROUP BY, FLATTEN, CALENDAR, OR and `-` between sources, `dataviewjs` (a `script` block does the same in the sandbox), inline `= …` queries; the compatibility report lists queries that use them, and the Dataview plugin is reported partial.
 
 **One line:** ```` ```query ```` blocks such as `TABLE due, status FROM #project WHERE status != "done" SORT due`, evaluated on the server over frontmatter, file metadata and tasks, rendered live in the reading view.
 

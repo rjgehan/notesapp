@@ -1,4 +1,4 @@
-// Scripts in notes (ROADMAP item 40, DESIGN §6.39): one run of a script in QuickJS (compiled to
+// Scripts in notes (ROADMAP item 40, DESIGN §6.42): one run of a script in QuickJS (compiled to
 // WebAssembly, `quickjs-emscripten`, the asyncify build). The script sees only the prelude's API;
 // QuickJS has no DOM, no network, no timers and no storage of its own, and the host gives it
 // nothing else. A fresh runtime per run, with a memory cap, a stack cap, and a CPU budget enforced
