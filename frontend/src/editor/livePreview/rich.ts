@@ -13,6 +13,7 @@ import { EditorSelection, Facet, Prec, StateField, type EditorState, type Extens
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { noteContext, vaultChanged } from '../context';
 import { remeasureOnChange } from './embeds';
+import { canRunScripts, fencedCode, ScriptBlockWidget, type ScriptsMode } from './scripts';
 import { topLevel, wholeLines, type RichKind } from './topLevel';
 
 export interface RichConfig {
@@ -22,6 +23,8 @@ export interface RichConfig {
   remoteImages: boolean;
   /** Task checkboxes in rendered blocks can be toggled. */
   checkboxes: boolean;
+  /** Script and Dataview blocks (ROADMAP items 40 and 17): run as the note shows, on a click, or stay code. */
+  scripts?: ScriptsMode;
 }
 
 const richConfig = Facet.define<RichConfig, RichConfig>({
@@ -158,8 +161,16 @@ function decorate(state: EditorState, blocks: readonly RichBlock[]): DecorationS
   const reveal = editable(state);
   const path = note.path();
   const ranges: Range<Decoration>[] = [];
+  const scripts = config.scripts ?? 'auto';
   for (const b of blocks) {
     if (reveal && touches(state, b.from, b.to)) continue;
+    if (b.kind === 'script' || b.kind === 'dataview') {
+      // Off, or an editor without the app: the code shows, highlighted as any code block.
+      if (scripts === 'off' || !canRunScripts(note)) continue;
+      const widget = new ScriptBlockWidget(b.kind, fencedCode(state.sliceDoc(b.from, b.to)), path, scripts, config.locked);
+      ranges.push(Decoration.replace({ widget, block: true }).range(b.from, b.to));
+      continue;
+    }
     const widget = new RichBlockWidget(b.kind, state.sliceDoc(b.from, b.to), config, path);
     ranges.push(Decoration.replace({ widget, block: true }).range(b.from, b.to));
   }

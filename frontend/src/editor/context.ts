@@ -60,6 +60,30 @@ export interface NoteContext {
     noteText(path: string): Promise<string>;
     ensureBlockId(path: string, text: string, block: NoteBlock, wanted: string): Promise<string>;
   };
+  /**
+   * Scripts in notes (ROADMAP items 40 and 17, DESIGN §6.43): runs a ```` ```script ```` block (or a
+   * ```` ```dataview ```` query) of this note in the sandbox and returns what it showed, as
+   * Markdown for `renderMarkdown`. `evaluate` is the editor's side of `fn` and `formula()`. Absent:
+   * the blocks stay code.
+   */
+  runScript?(request: ScriptRequest): Promise<ScriptOutcome>;
+}
+
+/** A script block to run: its kind and code, and how formulas are evaluated with this note's tables. */
+export interface ScriptRequest {
+  kind: 'script' | 'dataview';
+  source: string;
+  /** Evaluates `=…` with item 39's engine; `note`: with this note's tables. Engine errors come back as `{error, message}`. */
+  evaluate(expression: string, note: boolean): Promise<unknown>;
+}
+
+export interface ScriptOutcome {
+  /** What the script showed, as Markdown (escaped, wikilinks only). */
+  markdown: string;
+  /** Its error, with the script's 1-based line when known. */
+  error: { message: string; line: number | null; kind: string } | null;
+  /** The notes it read (by path), and whether it listed notes (then any note's change may matter). */
+  reads: { paths: ReadonlySet<string>; broad: boolean };
 }
 
 /** Applies an edit of the frontmatter's YAML (a function of its current text) to the note; false when it could not. */

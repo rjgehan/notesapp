@@ -4,6 +4,8 @@ import { create } from 'zustand';
 export type ThemePref = 'dark' | 'light' | 'system';
 /** Markdown markup in Live Preview (DESIGN §6.6.1): always hidden, or shown for the element at the cursor. */
 export type SyntaxVisibility = 'hide-all' | 'reveal-at-cursor';
+/** Scripts in notes (DESIGN §6.43): run when a note shows, run on a click, or show as code. */
+export type ScriptsPref = 'auto' | 'ask' | 'off';
 
 export interface Prefs {
   theme: ThemePref;
@@ -19,13 +21,15 @@ export interface Prefs {
   encryptionLockMinutes: number;
   /** Lock encrypted notes as soon as the app is hidden (another tab or app, the phone locked). */
   encryptionLockOnHide: boolean;
+  /** Script and Dataview blocks (ROADMAP items 40 and 17): run in the sandbox as a note shows, on a click, or never. */
+  scripts: ScriptsPref;
 }
 
 export const ENCRYPTION_LOCK_CHOICES = [1, 5, 10, 30, 60] as const;
 
 export const PREFS_KEY = 'notesapp:prefs';
 
-export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true, vimMode: false, syntaxVisibility: 'hide-all', encryptionLockMinutes: 10, encryptionLockOnHide: false };
+export const DEFAULT_PREFS: Prefs = { theme: 'dark', spellcheck: true, autocorrect: true, loadRemoteImages: true, offlineNotes: true, vimMode: false, syntaxVisibility: 'hide-all', encryptionLockMinutes: 10, encryptionLockOnHide: false, scripts: 'auto' };
 
 function load(): Prefs {
   try {
@@ -42,6 +46,7 @@ function load(): Prefs {
       syntaxVisibility: parsed.syntaxVisibility === 'reveal-at-cursor' ? 'reveal-at-cursor' : 'hide-all',
       encryptionLockMinutes: (ENCRYPTION_LOCK_CHOICES as readonly number[]).includes(parsed.encryptionLockMinutes as number) ? (parsed.encryptionLockMinutes as number) : 10,
       encryptionLockOnHide: typeof parsed.encryptionLockOnHide === 'boolean' ? parsed.encryptionLockOnHide : false,
+      scripts: parsed.scripts === 'ask' || parsed.scripts === 'off' ? parsed.scripts : 'auto',
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -56,9 +61,9 @@ export const usePrefs = create<PrefsState>()((set, get) => ({
   ...load(),
   update(patch) {
     set(patch);
-    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility, encryptionLockMinutes, encryptionLockOnHide } = get();
+    const { theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility, encryptionLockMinutes, encryptionLockOnHide, scripts } = get();
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility, encryptionLockMinutes, encryptionLockOnHide }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ theme, spellcheck, autocorrect, loadRemoteImages, offlineNotes, vimMode, syntaxVisibility, encryptionLockMinutes, encryptionLockOnHide, scripts }));
     } catch {
       // Private mode or quota: the preference still applies to this page load.
     }

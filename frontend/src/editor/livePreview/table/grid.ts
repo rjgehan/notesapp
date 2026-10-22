@@ -114,6 +114,11 @@ export function gridAt(view: EditorView, from: number): TableGrid | null {
   return gridsOf(view).find((g) => g.from() === from) ?? null;
 }
 
+/** Redraws the cell displays of every grid of a note's editor (a formula's result changed, ROADMAP 39). */
+export function redrawTableDisplays(view: EditorView): void {
+  for (const grid of gridsOf(view)) grid.redrawDisplays();
+}
+
 /** The grid drawn for a widget element (tests). */
 export function gridOf(dom: Element | null): TableGrid | null {
   return dom instanceof HTMLElement ? (byDom.get(dom) ?? null) : null;
@@ -182,6 +187,8 @@ export class TableGrid {
   private widget: TableWidget;
   private readonly scroller: HTMLElement;
   private readonly indicator: HTMLElement;
+  /** The formula bar (ROADMAP 39): the edited cell's name and the result its formula gives. */
+  private readonly bar: HTMLElement;
   private cells: HTMLTableCellElement[][] = [];
   /** What each cell shows, so an update redraws only the cells that changed. */
   private shown: string[][] = [];
@@ -208,7 +215,10 @@ export class TableGrid {
     this.indicator = document.createElement('div');
     this.indicator.className = 'cm-lp-table-drop';
     this.indicator.hidden = true;
-    this.dom.append(this.scroller, this.indicator);
+    this.bar = document.createElement('div');
+    this.bar.className = 'cm-lp-formula-bar';
+    this.bar.hidden = true;
+    this.dom.append(this.bar, this.scroller, this.indicator);
     byDom.set(this.dom, this);
     let set = byView.get(view);
     if (!set) byView.set(view, (set = new Set()));
@@ -338,7 +348,7 @@ export class TableGrid {
     const m = this.model();
     const formats = this.view.state
       .facet(tableCellFormatters)
-      .map((f) => f({ rows, align: m.align }))
+      .map((f) => f({ rows, align: m.align, from: this.widget.block.from, state: this.view.state }))
       .filter((f) => f !== null);
     if (formats.length === 0) return null;
     return (row, column) => {
@@ -414,6 +424,7 @@ export class TableGrid {
           if (a.editor.dom.parentElement !== box) box.replaceChildren(a.editor.dom);
           cell.classList.add('is-editing');
           this.shown[r][c] = '\u0000';
+          this.showBar(r, c, display?.(r, c) ?? null);
           continue;
         }
         cell.classList.remove('is-editing');
@@ -426,8 +437,32 @@ export class TableGrid {
       }
     }
     for (let c = 0; c < m.columns; c++) this.cells[0][c].classList.toggle('is-column-active', a?.column === c);
+    if (!a) this.showBar(0, 0, null);
     // Moving an editor's element (a remote change moved its cell) loses the focus; give it back.
     if (a && focused && !a.editor.hasFocus) a.editor.focus();
+  }
+
+  /** The formula bar for the edited cell: its name (`B5`) and what it shows; hidden for a cell no formatter shows. */
+  private showBar(row: number, column: number, shown: CellDisplay | null): void {
+    if (!shown) {
+      if (!this.bar.hidden) {
+        this.bar.hidden = true;
+        this.bar.replaceChildren();
+      }
+      return;
+    }
+    const name = document.createElement('span');
+    name.className = 'cm-lp-formula-bar-name';
+    name.textContent = `${columnName(column)}${row + 1}`;
+    const value = renderDisplay(shown);
+    this.bar.replaceChildren(name, value);
+    this.bar.hidden = false;
+  }
+
+  /** Draws the cells' displays again: a formatter's results changed without this table's text changing. */
+  redrawDisplays(): void {
+    if (!this.dom.isConnected) return;
+    this.render();
   }
 
   private moveEditorTo(row: number, column: number): void {

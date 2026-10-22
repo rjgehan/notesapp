@@ -42,7 +42,10 @@ public final class CompatScanner {
 
 		// ---------- syntax ----------
 		DATAVIEW("dataview", Category.SYNTAX, Severity.WARNING, "Dataview queries",
-				"```dataview and ```dataviewjs blocks and inline `= …` queries show as code, not as results.", 40),
+				"```dataview queries run with a subset of the query language (TABLE, LIST and TASK with FROM, WHERE, SORT "
+						+ "and LIMIT). These show as code: ```dataviewjs blocks (a ```script block does the same), inline "
+						+ "`= …` queries, and queries with GROUP BY, FLATTEN, CALENDAR, or OR and - between sources.",
+				null),
 		TASKS_QUERY("tasks-query", Category.SYNTAX, Severity.WARNING, "Tasks plugin queries",
 				"```tasks blocks show as code. Checkboxes work, and Convert checkbox to task turns one into a structured task.",
 				null),
@@ -122,6 +125,14 @@ public final class CompatScanner {
 		.compile("<(iframe|script|style|form|button|textarea|select|object|embed)\\b", Pattern.CASE_INSENSITIVE);
 
 	private static final Pattern DATAVIEW_INLINE = Pattern.compile("`\\$?=[^`\\n]+`");
+
+	/**
+	 * What the ```dataview subset does not run (ROADMAP item 17, DESIGN §6.43): another query type (CALENDAR), GROUP
+	 * BY, FLATTEN, and OR or exclusions between FROM's sources.
+	 */
+	private static final Pattern DATAVIEW_UNSUPPORTED = Pattern.compile(
+			"\\A\\s*+(?!(?:table|list|task)\\b)\\S|\\bgroup\\s+by\\b|\\bflatten\\b|\\bfrom\\b[^\\n]*?(?:\\bor\\b|(?<![\\w.])-\\s*[#\"\\[])",
+			Pattern.CASE_INSENSITIVE);
 
 	private static final Set<String> PLUGIN_LANGUAGES = Set.of("chart", "button", "buttons", "timeline", "leaflet",
 			"tracker", "contributiongraph", "mindmap", "markmap", "kanban", "excalidraw", "meta-bind",
@@ -218,6 +229,9 @@ public final class CompatScanner {
 		char fenceChar = 0;
 		int fenceLength = 0;
 		boolean mathBlock = false;
+		// A ```dataview block being read: the line it starts on, and its query.
+		int dataviewLine = -1;
+		StringBuilder dataview = new StringBuilder();
 		for (int i = bodyStart; i < lines.length; i++) {
 			String line = lines[i].endsWith("\r") ? lines[i].substring(0, lines[i].length() - 1) : lines[i];
 			Matcher fence = FENCE.matcher(line);
@@ -225,13 +239,27 @@ public final class CompatScanner {
 				if (fence.find() && fence.group(1).charAt(0) == fenceChar && fence.group(1).length() >= fenceLength
 						&& fence.group(2).isEmpty()) {
 					fenceChar = 0;
+					if (dataviewLine >= 0) {
+						dataviewQuery(path, dataviewLine, lines[dataviewLine], dataview);
+						dataviewLine = -1;
+					}
+				}
+				else if (dataviewLine >= 0) {
+					dataview.append(line).append('\n');
 				}
 				continue;
 			}
 			if (fence.find()) {
 				fenceChar = fence.group(1).charAt(0);
 				fenceLength = fence.group(1).length();
-				fencedBlock(path, i, line, fence.group(2).toLowerCase(Locale.ROOT));
+				String language = fence.group(2).toLowerCase(Locale.ROOT);
+				if (language.equals("dataview")) {
+					dataviewLine = i;
+					dataview.setLength(0);
+				}
+				else {
+					fencedBlock(path, i, line, language);
+				}
 				continue;
 			}
 			String trimmed = line.strip();
@@ -262,6 +290,10 @@ public final class CompatScanner {
 				add(Rule.HTML_REMOVED, path, i, line);
 			}
 		}
+		if (dataviewLine >= 0) {
+			// An unclosed fence runs to the end of the note.
+			dataviewQuery(path, dataviewLine, lines[dataviewLine], dataview);
+		}
 	}
 
 	private void fencedBlock(String path, int line, String text, String language) {
@@ -269,11 +301,12 @@ public final class CompatScanner {
 			return;
 		}
 		switch (language) {
-			case "dataview", "dataviewjs" -> add(Rule.DATAVIEW, path, line, text);
+			// ```dataview blocks are read by dataviewQuery.
+			case "dataviewjs" -> add(Rule.DATAVIEW, path, line, text);
 			case "tasks" -> add(Rule.TASKS_QUERY, path, line, text);
 			case "query" -> add(Rule.SEARCH_QUERY, path, line, text);
-			// Mermaid and math blocks render (ROADMAP item 3).
-			case "mermaid", "math", "latex" -> {
+			// Mermaid and math blocks render (ROADMAP item 3); script blocks run (ROADMAP item 40).
+			case "mermaid", "math", "latex", "script" -> {
 			}
 			default -> {
 				if (language.startsWith("ad-") || PLUGIN_LANGUAGES.contains(language)) {
@@ -281,6 +314,17 @@ public final class CompatScanner {
 				}
 			}
 		}
+	}
+
+	/** A ```dataview block (ROADMAP item 17): a finding only when its query uses what the subset does not run. */
+	private void dataviewQuery(String path, int line, String opening, CharSequence query) {
+		if (dataviewUnsupported(query.toString())) {
+			add(Rule.DATAVIEW, path, line, opening + " " + query.toString().strip().replace('\n', ' '));
+		}
+	}
+
+	static boolean dataviewUnsupported(String query) {
+		return DATAVIEW_UNSUPPORTED.matcher(query).find();
 	}
 
 	/** {@code line} with every `code span` blanked, so code that shows such syntax is not reported. */
