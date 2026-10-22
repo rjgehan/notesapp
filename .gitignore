@@ -22,3 +22,6 @@ backend/target/
 
 # Build worktrees used while building the roadmap
 .wt/
+
+# The web clipper build (clipper/build.mjs)
+clipper/dist/

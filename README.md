@@ -33,6 +33,7 @@ A Spring Boot 4 backend (Java 21 bytecode, run on JDK 25) serves the REST and SS
 |---|---|
 | `backend/` | Spring Boot app (`com.rjgehan.notes`), Maven wrapper |
 | `frontend/` | React + TypeScript + Vite SPA |
+| `clipper/` | The web clipper: browser extension, bookmarklet and iOS Shortcut script ([docs/CLIPPER.md](docs/CLIPPER.md)) |
 | `deploy/` | `docker-compose.yml` (tailscale, notes, watchtower; optional backup sidecars), the backup scripts in `backup/`, the empty mirror-token placeholder in `mirror/`, Tailscale serve config, `.env.example`, and for CasaOS `casaos-compose.yml` plus the optional `casaos-backup-compose.yml` |
 | `.github/` | CI, image publishing, Dependabot |
 | `Dockerfile` | Three stages: frontend build, backend build (JDK 21), JDK 25 runtime with an AOT cache |
@@ -86,6 +87,7 @@ Rolling back, pausing updates, backups and everything else on the server side ar
 - [docs/API.md](docs/API.md): the REST and SSE contract between backend and frontend
 - [docs/DEPLOY.md](docs/DEPLOY.md): homeserver runbook (first deploy, operations, troubleshooting)
 - [docs/CASAOS.md](docs/CASAOS.md): installing on CasaOS by pasting one compose file, and its optional alerts, mirror and backups
+- [docs/CLIPPER.md](docs/CLIPPER.md): installing the web clipper (browser extension, bookmarklet, iPhone Shortcut)
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes after v1
 
 ## Licence

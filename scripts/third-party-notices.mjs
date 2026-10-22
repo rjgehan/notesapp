@@ -4,8 +4,9 @@
 //
 //   node scripts/third-party-notices.mjs
 //
-// Frontend: the production packages of frontend/package-lock.json (dev-only packages and type
-// definitions never reach the bundle). Backend: the compile and runtime dependencies Maven resolves
+// Frontend and web clipper: the production packages of frontend/package-lock.json and
+// clipper/package-lock.json (dev-only packages and type definitions never reach the bundles).
+// Backend: the compile and runtime dependencies Maven resolves
 // for backend/pom.xml, with licences read from their POMs in the local Maven repository (following
 // parent POMs). Needs Node 24 and the backend's Maven wrapper; uses no npm packages.
 import { spawnSync } from 'node:child_process';
@@ -28,14 +29,14 @@ function sourceUrl(pkg) {
   return url;
 }
 
-function frontendPackages() {
-  const lock = JSON.parse(readFileSync(join(root, 'frontend', 'package-lock.json'), 'utf8'));
+function npmPackages(dir) {
+  const lock = JSON.parse(readFileSync(join(root, dir, 'package-lock.json'), 'utf8'));
   const byName = new Map();
   for (const [key, entry] of Object.entries(lock.packages)) {
     if (!key.startsWith('node_modules/') || entry.dev || entry.devOptional || entry.link) continue;
     const name = entry.name ?? key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
     if (name.startsWith('@types/')) continue; // type definitions only, no code in the bundle
-    const manifestPath = join(root, 'frontend', key, 'package.json');
+    const manifestPath = join(root, dir, key, 'package.json');
     const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
     const licence = entry.license ?? manifest.license ?? 'UNKNOWN';
     const known = byName.get(name);
@@ -130,9 +131,10 @@ function backendArtifacts() {
 const cell = (s) => s.replace(/\|/g, '\\|');
 const row = (p) => `| ${cell(p.name)} | ${cell([...p.licences].join(' / ') || 'UNKNOWN')} | ${p.url ? `<${p.url}>` : ''} |`;
 
-const frontend = frontendPackages();
+const frontend = npmPackages('frontend');
+const clipper = npmPackages('clipper');
 const backend = backendArtifacts();
-const unknown = [...frontend, ...backend].filter((p) => p.licences.size === 0 || p.licences.has('UNKNOWN'));
+const unknown = [...frontend, ...clipper, ...backend].filter((p) => p.licences.size === 0 || p.licences.has('UNKNOWN'));
 
 writeFileSync(
   out,
@@ -141,12 +143,12 @@ writeFileSync(
 NotesApp is licensed under the GNU General Public License, version 3 only (\`GPL-3.0-only\`, see [LICENSE](LICENSE)).
 The NotesApp image ships the third-party software listed below, each under its own licence. Where an entry names several
 licences, they are the alternatives or the combination its project declares. Each package's full licence text is in its
-source distribution: \`frontend/node_modules/<package>/\` for the web app, and the \`META-INF\` folder of each jar inside
-the server's Spring Boot jar.
+source distribution: \`frontend/node_modules/<package>/\` for the web app, \`clipper/node_modules/<package>/\` for the web
+clipper, and the \`META-INF\` folder of each jar inside the server's Spring Boot jar.
 
 This file is generated; do not edit it by hand. After a dependency change, regenerate it from the repository root with
-\`node scripts/third-party-notices.mjs\` (it reads \`frontend/package-lock.json\` and resolves the backend's runtime
-dependencies with the Maven wrapper).
+\`node scripts/third-party-notices.mjs\` (it reads \`frontend/package-lock.json\` and \`clipper/package-lock.json\` and
+resolves the backend's runtime dependencies with the Maven wrapper).
 
 ## Web app (bundled by Vite)
 
@@ -156,6 +158,16 @@ Vitest, ESLint and so on) are not shipped.
 | Package | Licence | Source |
 |---|---|---|
 ${frontend.map(row).join('\n')}
+
+## Web clipper (bundled by esbuild)
+
+The production dependencies of \`clipper/package.json\`: the scripts the server serves under \`/clipper/\` and the browser
+extension built from the same sources (ROADMAP item 19). turndown's DOM for Node (\`@mixmark-io/domino\`) is left out of
+the browser bundles.
+
+| Package | Licence | Source |
+|---|---|---|
+${clipper.map(row).join('\n')}
 
 ## Server (in the Spring Boot jar)
 
@@ -172,7 +184,7 @@ own licences, which the base images document.
 `,
 );
 
-console.log(`Wrote ${out}: ${frontend.length} frontend packages, ${backend.length} backend artifacts.`);
+console.log(`Wrote ${out}: ${frontend.length} frontend packages, ${clipper.length} clipper packages, ${backend.length} backend artifacts.`);
 if (unknown.length > 0) {
   console.error(`No licence found for: ${unknown.map((p) => p.name).join(', ')}`);
   process.exitCode = 1;

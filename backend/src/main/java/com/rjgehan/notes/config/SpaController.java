@@ -18,14 +18,15 @@ import org.springframework.web.bind.annotation.PostMapping;
 
 /**
  * Serves the single-page app's {@code index.html} (never cached) for its client routes, including pages registered by
- * extensions under {@code /x/**} and the quick-capture page {@code /capture} (API.md §18).
+ * extensions under {@code /x/**}, the quick-capture page {@code /capture} and the web clipper's {@code /clip} (API.md
+ * §18).
  */
 @Controller
 public class SpaController {
 
 	private final Resource index = new ClassPathResource("static/index.html");
 
-	@GetMapping({ "/", "/n/**", "/search", "/trash", "/settings", "/settings/**", "/x/**", "/capture" })
+	@GetMapping({ "/", "/n/**", "/search", "/trash", "/settings", "/settings/**", "/x/**", "/capture", "/clip" })
 	ResponseEntity<Resource> index() {
 		if (!this.index.exists()) {
 			throw new NotesException(ErrorCode.NOT_FOUND, "The web app is not built into this server");

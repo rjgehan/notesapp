@@ -37,6 +37,9 @@ export function staleShellCaches(names: readonly string[], current: string): str
 /**
  * Client routes, exactly those the server answers with index.html (SpaController). Other
  * navigations (a raw file opened in a tab, `/api/…?download=true`) are never given the shell.
+ * Nor is the web clipper's `/clip` (DESIGN §6.27.1): the server sends it without
+ * Cross-Origin-Opener-Policy so the bookmarklet's page can post to it, and the cached shell
+ * carries the app's `same-origin` policy, which would cut that window off.
  */
 export function isSpaRoute(pathname: string): boolean {
   if (pathname === '/' || pathname === '/search' || pathname === '/trash' || pathname === '/settings' || pathname === '/capture') return true;

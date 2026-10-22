@@ -69,7 +69,7 @@ DESIGN.md has the details.
 | 16 | Graph view *(declined for v1)* | M | M | |
 | 17 | Dataview-style query blocks *(shrinks to a `query()` helper inside 40)* | M | S | 40; 13 helps |
 | 18 | Ask your vault and summaries, powered by Claude | H | M | |
-| 19 | Web clipper | M | M | 7 |
+| 19 | Web clipper *(built 2026-10-21, `feat/clipper`)* | M | M | 7 |
 | 20 | Block references and block embeds *(built 2026-10-21, `feat/block-refs`)* | M | M | |
 | 21 | Update `[[Note#Heading]]` links when a heading is renamed | M | S | |
 | 22 | Search upgrades: OR, regex, saved searches, PDF text | M | M | |
@@ -845,6 +845,8 @@ Results update through SSE.
 - Readability extraction: Mozilla Readability 0.6.0 (Apache-2.0) in the browser.
 - HTML to Markdown with turndown 7.2.4 (MIT).
 - The note is saved to `Clippings/` and rendered with the v1 reading-view sanitizer (no forms, no fixed positioning, optional click-to-load remote images).
+
+**Status: built 2026-10-21** on `feat/clipper` (DESIGN §6.27.1, API.md §2 and §18, install in [CLIPPER.md](CLIPPER.md)). A new top-level `clipper/` package (its own esbuild build and Vitest tests) with three clients over one core (Readability 0.6.0, turndown 7.2.4 with its GFM plugin, Obsidian Web Clipper's properties: `title`, `source`, `author`, `site`, `published`, `created`, `description`, `tags: [clippings]`): a **Manifest V3 extension** for Chrome, Edge and Firefox (toolbar popup, context menu, selection-only clips, optional image download as attachments, optional save without preview), a **bookmarklet** (Settings › Web clipper) and an **iOS Shortcut** for Safari's share sheet, whose script extracts on the phone and posts to `POST /api/files`. The bookmarklet and the extension never call the API: they hand the clip to the app's `/clip` page with `postMessage`, which saves it through the same-origin API, so the CSRF rules are unchanged and nothing needs configuring on the server. **No server-side fetch was needed**, so the guarded client above is not built. Images stay remote links except in the extension, which can download them (with the user's grant of all sites).
 
 ### 20. Block references and block embeds
 

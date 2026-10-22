@@ -2,6 +2,7 @@
 import { lazy, Suspense, useEffect, useRef, type ComponentType } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router';
 import { CapturePage } from './components/capture/CapturePage';
+import { ClipPage } from './components/clip/ClipPage';
 import { AppShell } from './components/layout/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HomePage } from './components/pages/HomePage';
@@ -60,6 +61,15 @@ export default function App() {
   const pending = usePendingNote((s) => s.pending);
   const { pathname } = useLocation();
   const pages = registeredPages().map((p) => ({ route: p.route, Page: pageComponent(p) }));
+  // The web clipper's hand-over page (DESIGN §6.27.1), outside the app shell.
+  if (pathname === '/clip') {
+    return (
+      <>
+        <NavigationBridge />
+        <ClipPage />
+      </>
+    );
+  }
   // Quick capture (DESIGN §6.27) is a page of its own, outside the app shell: the share target,
   // the home-screen shortcut and the desktop app's capture window open it.
   if (pathname === '/capture') {

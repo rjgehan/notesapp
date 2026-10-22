@@ -11,3 +11,4 @@ dev-vault
 backend/target
 frontend/dist
 frontend/coverage
+clipper/dist
