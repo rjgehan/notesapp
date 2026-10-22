@@ -7,7 +7,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { obsidianHighlight } from './highlight';
 import { markdownNoteLanguage } from './language';
-import { remoteChanges } from './remote';
+import { remoteChanges } from './remoteDiff';
 
 export interface DiffViewHandle {
   view: EditorView;

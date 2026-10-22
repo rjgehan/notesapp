@@ -10,7 +10,7 @@ import { Decoration, EditorView, keymap, ViewPlugin, type Command, type Decorati
 import { toast } from '../../../state/toasts';
 import { noteContext, vaultChanged } from '../../context';
 import { textReplace } from '../../remote';
-import { refreshTables, tableCellHost, tableEdit, tablesConfig, type TablesConfig } from './facets';
+import { provideTableRanges, refreshTables, tableCellHost, tableEdit, tablesConfig, type TablesConfig } from './facets';
 import { gridAt, gridsOf, TableWidget, type TableBlock } from './grid';
 import { newTableText, parseTable, rowCount, type TableModel } from './model';
 import { parsedPast, topLevel, wholeLines } from '../topLevel';
@@ -112,6 +112,8 @@ const tablesField = StateField.define<Tables>({
 export function tableBlocks(state: EditorState): readonly TableBlock[] {
   return state.field(tablesField, false)?.blocks ?? [];
 }
+
+provideTableRanges(tableBlocks);
 
 /** Whether `pos` is inside a table's text, where the note's caret never rests. */
 function insideTable(state: EditorState, pos: number): boolean {

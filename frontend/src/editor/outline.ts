@@ -2,15 +2,9 @@
 // completion and heading targets (`#Heading` routes, `[[Note#Heading]]`).
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
+import type { OutlineHeading } from './headingKeys';
 
-export interface OutlineHeading {
-  level: 1 | 2 | 3 | 4 | 5 | 6;
-  text: string;
-  /** 0-based line number. */
-  line: number;
-  /** Document offset of the heading line start. */
-  from: number;
-}
+export { findHeading, headingKey, type OutlineHeading } from './headingKeys';
 
 const HEADING = /^(?:ATXHeading|SetextHeading)([1-6])$/;
 
@@ -47,21 +41,4 @@ export function headingsFromState(state: EditorState, timeoutMs = 50): OutlineHe
     },
   });
   return out;
-}
-
-/** Normalizes heading text for target comparison: case-insensitive, whitespace collapsed. */
-export function headingKey(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-/**
- * Finds the heading addressed by a subpath (DESIGN §6.4): the last `#` segment, compared
- * case-insensitively with whitespace collapsed; the first match in document order wins.
- * `^blockid` subpaths address no heading in v1.
- */
-export function findHeading<T extends { text: string }>(headings: T[], subpath: string): T | null {
-  const last = subpath.split('#').pop() ?? '';
-  if (last === '' || last.startsWith('^')) return null;
-  const key = headingKey(last);
-  return headings.find((h) => headingKey(h.text) === key) ?? null;
 }

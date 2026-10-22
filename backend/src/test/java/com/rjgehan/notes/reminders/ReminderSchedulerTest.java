@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -212,6 +213,18 @@ class ReminderSchedulerTest {
 	}
 
 	@Test
+	void theServerZoneIsReportedAsAnIanaId() {
+		ReminderScheduler scheduler = scheduler();
+		// The test clock, like the server's, runs in UTC (ZoneOffset.UTC, whose id is "Z").
+		assertThat(scheduler.zoneReported()).isFalse();
+		assertThat(scheduler.zoneId().getId()).isEqualTo("UTC");
+		assertThat(ReminderScheduler.ianaZone(ZoneOffset.UTC).getId()).isEqualTo("UTC");
+		assertThat(ReminderScheduler.ianaZone(ZoneId.of("Z")).getId()).isEqualTo("UTC");
+		assertThat(ReminderScheduler.ianaZone(ZoneId.of("Europe/Berlin")).getId()).isEqualTo("Europe/Berlin");
+		assertThat(ReminderScheduler.ianaZone(ZoneOffset.ofHours(2)).getId()).isEqualTo("+02:00");
+	}
+
+	@Test
 	void localTimesAreReadInTheReportedZoneAndDstGapsMoveForward() {
 		ReminderScheduler scheduler = scheduler();
 		scheduler.setZone(ZoneId.of("Europe/Berlin"));
@@ -259,7 +272,7 @@ class ReminderSchedulerTest {
 		assertThat(this.completed).isEmpty();
 		assertThat(scheduler.done("t1", "2026-10-16T12:01", OWNER, "client-1")).isTrue();
 		assertThat(this.completed).singleElement().satisfies((request) -> {
-			assertThat(request.tz()).isEqualTo("Z");
+			assertThat(request.tz()).isEqualTo("UTC");
 			assertThat(request.base().get("due").asString()).isEqualTo("2026-10-16");
 			assertThat(request.base().get("start").isNull()).isTrue();
 		});

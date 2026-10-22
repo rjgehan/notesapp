@@ -11,7 +11,7 @@ import { noteContext } from './context';
 import { insertHorizontalRule, toggleCheckbox } from './editorCommands';
 import { setHeading, toggleBulletList, toggleLink, toggleNumberedList, toggleQuote } from './formatting';
 import { insertTable } from './livePreview/table';
-import type { SlashItem } from './slash';
+import type { SlashItem } from './slashRegistry';
 
 /**
  * Inserts a block of Markdown on the cursor's line when it is blank, or after it, with the blank

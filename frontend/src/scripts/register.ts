@@ -2,10 +2,12 @@
 // §6.8: event handlers that make the results of the scripts that read a changed note stale (the
 // showing ones run again, debounced: editor/livePreview/scripts.ts), and the `/` menu's
 // "Script block" and "Dataview query".
-import { invalidateScripts } from '../editor/livePreview/scripts';
-import { registerSlashItem } from '../editor/slash';
-import { insertBlock } from '../editor/slashItems';
+// Always loaded (extensions/builtins.ts), so it imports no editor code: the editor's chunk brings
+// the blocks' runs (invalidation reaches them through ./invalidation) and insertBlock (editor/kit.ts).
+import { editorKit } from '../editor/kitHandle';
+import { registerSlashItem } from '../editor/slashRegistry';
 import { registerEventHandler } from '../extensions';
+import { invalidateLoadedScripts } from './invalidation';
 
 /** The paths an event changed, or null when it may have changed any note (a folder, a resync). */
 export function changedPaths(name: string, data: unknown): string[] | null {
@@ -38,7 +40,7 @@ export function registerScripts(): void {
       const paths = changedPaths(name, data);
       // Only notes are read by scripts; another file's change matters only when it is unknown.
       if (paths && paths.every((p) => !p.toLowerCase().endsWith('.md'))) return;
-      invalidateScripts(paths);
+      invalidateLoadedScripts(paths);
     });
   }
   registerSlashItem({
@@ -48,7 +50,7 @@ export function registerScripts(): void {
     group: 'Block',
     scope: 'block',
     order: 29.5,
-    run: (v) => insertBlock(v, SCRIPT_TEMPLATE, '```script\n'.length),
+    run: (v) => void editorKit()?.insertBlock(v, SCRIPT_TEMPLATE, '```script\n'.length),
   });
   registerSlashItem({
     id: 'dataview',
@@ -57,6 +59,6 @@ export function registerScripts(): void {
     group: 'Block',
     scope: 'block',
     order: 29.6,
-    run: (v) => insertBlock(v, DATAVIEW_TEMPLATE, '```dataview\n'.length),
+    run: (v) => void editorKit()?.insertBlock(v, DATAVIEW_TEMPLATE, '```dataview\n'.length),
   });
 }

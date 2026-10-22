@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { slashItems } from '../editor/slash';
 import { destroyEditors, marked, noteEditor } from '../test/noteEditor';
 import { registerScripts } from './register';
+// Every editor loads the kit (editor/kit.ts); the items insert through it.
+import '../editor/kit';
 
 afterEach(() => destroyEditors());
 

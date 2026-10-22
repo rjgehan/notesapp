@@ -16,6 +16,7 @@ import { noteContext, type NoteContext, type ScriptOutcome } from '../context';
 import { formulaEngine } from '../../formulas/load';
 import { formulaResults } from './formulas';
 import { remeasureOnChange } from './embeds';
+import { provideScriptInvalidator } from '../../scripts/invalidation';
 
 export type ScriptKind = 'script' | 'dataview';
 /** The per-device preference: run as a note shows, run on a click, or show the code. */
@@ -132,6 +133,8 @@ export function invalidateScripts(paths: readonly string[] | null): void {
     if (run.listeners.size > 0 && (run.outcome !== null || run.running)) schedule(run);
   }
 }
+
+provideScriptInvalidator(invalidateScripts);
 
 /** Tests: forget every result. */
 export function resetScriptsForTests(): void {

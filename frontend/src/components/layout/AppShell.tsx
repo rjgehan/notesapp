@@ -4,7 +4,7 @@
 // workspace and status bar. Touch devices get the editing toolbar as the last grid row. The shell
 // also hosts the overlays, the app-level file input and the polite live region.
 import { CalendarDays, FilePlus, Inbox, Moon, RefreshCw, Settings, Sun, Trash, TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { setFilePicker } from '../../features/attachments';
 import { runCommand } from '../../features/commands';
 import { useFocusRequests } from '../../features/focus';
@@ -25,13 +25,15 @@ import { Toasts } from '../overlays/Toasts';
 import { VoiceRecorderPanel } from '../overlays/VoiceRecorderPanel';
 import { TabSwitcher } from '../../workspace/TabSwitcher';
 import { Overlay } from './Drawer';
-import { MobileToolbar } from './MobileToolbar';
 import { PanelTabs } from './Panels';
 import { Resizer } from './Resizer';
 import { Ribbon } from './Ribbon';
 import { StatusBar } from './StatusBar';
 import { TopBar } from './TopBar';
 import { useBreakpoint } from './useBreakpoint';
+
+// The editing toolbar works on an editor, so it comes with the editor's code, not the main chunk.
+const MobileToolbar = lazy(() => import('./MobileToolbar').then((m) => ({ default: m.MobileToolbar })));
 
 function Banners() {
   const newBuild = useUi((s) => s.newBuildAvailable);
@@ -222,7 +224,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         </aside>
       )}
       {desktop && <StatusBar />}
-      <MobileToolbar />
+      <Suspense fallback={null}>
+        <MobileToolbar />
+      </Suspense>
       {!desktop && (
         <>
           <Overlay open={ui.drawerOpen} onClose={closeDrawer} side="left" label="Sidebar" footer={phone ? <DrawerFooter /> : undefined}>

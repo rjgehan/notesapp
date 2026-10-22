@@ -11,6 +11,7 @@
 import { compressToBase64 } from 'lz-string';
 import { parseWikiBody } from '../../features/syntax';
 import { decompressFromBase64 } from './lzString';
+import { EXCALIDRAW_SOURCE } from './newDrawing';
 import { firstLink, shownFor } from './textLinks';
 
 export type DrawingFormat = 'excalidraw' | 'markdown';
@@ -113,7 +114,7 @@ export type ParseResult =
   | { ok: true; drawing: Drawing }
   | { ok: false; reason: 'not-a-drawing' | 'malformed'; message: string };
 
-export const EXCALIDRAW_SOURCE = 'https://github.com/rjgehan/notesapp';
+export { EXCALIDRAW_SOURCE, newDrawingContent } from './newDrawing';
 
 /** Excalidraw's export appState keys (`cleanAppStateForExport`): the ones a file carries. */
 export const EXPORTED_APP_STATE = ['gridSize', 'gridStep', 'gridModeEnabled', 'viewBackgroundColor'] as const;
@@ -126,19 +127,6 @@ export function drawingFormat(path: string): DrawingFormat {
 export function isDrawingPath(path: string): boolean {
   const lower = path.toLowerCase();
   return lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.md');
-}
-
-/** The content of a new `.excalidraw` file. */
-export function newDrawingContent(): string {
-  const scene: Scene = {
-    type: 'excalidraw',
-    version: 2,
-    source: EXCALIDRAW_SOURCE,
-    elements: [],
-    appState: { gridSize: 20, gridStep: 5, gridModeEnabled: false, viewBackgroundColor: '#ffffff' },
-    files: {},
-  };
-  return JSON.stringify(scene, null, 2);
 }
 
 // ---------- the scene JSON ----------

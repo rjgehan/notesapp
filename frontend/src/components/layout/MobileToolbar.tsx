@@ -41,7 +41,7 @@ import { noteContext } from '../../editor/context';
 import { followLinkAtCursor, insertHorizontalRule, insertTagSign, toggleCheckbox } from '../../editor/editorCommands';
 import { cycleHeading, toggleBold, toggleBulletList, toggleInlineCode, toggleItalic, toggleLink } from '../../editor/formatting';
 import { historyEditor, insertTable, isTableCell, moveToCell } from '../../editor/livePreview/table';
-import { revealCaret } from '../../editor/mobileViewport';
+import { revealCaret } from '../../editor/revealCaret';
 import { openSlashMenu } from '../../editor/slash';
 import { pickAndInsertImages } from '../../features/editorInsertions';
 import { startVoiceNote } from '../../features/voice/voiceNotes';
@@ -159,6 +159,8 @@ export function MobileToolbar() {
     const onFocusChange = () => update.current();
     document.addEventListener('focusin', onFocusChange);
     document.addEventListener('focusout', onFocusChange);
+    // The toolbar loads after the shell (a lazy chunk): an editor may have the focus already.
+    if (focusedEditor()) update.current();
     return () => {
       clearTimeout(timer);
       document.removeEventListener('focusin', onFocusChange);

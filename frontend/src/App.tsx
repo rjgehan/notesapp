@@ -1,14 +1,16 @@
 // The application shell and its workspace of panes and tabs (DESIGN §6.4, §6.40).
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { CapturePage } from './components/capture/CapturePage';
-import { ClipPage } from './components/clip/ClipPage';
 import { AppShell } from './components/layout/AppShell';
 import { setNavigator } from './features/navigation';
 import { navigateOverOverlays } from './features/overlayHistory';
 import { clearPendingNote } from './state/pendingNote';
 import { RouteSync } from './workspace/RouteSync';
 import { WorkspaceLayout } from './workspace/WorkspaceLayout';
+
+// The web clipper's page renders Markdown (markdown-it, DOMPurify, YAML): a chunk of its own.
+const ClipPage = lazy(() => import('./components/clip/ClipPage').then((m) => ({ default: m.ClipPage })));
 
 /**
  * Lets non-React code (links in the editor, sessions, commands) navigate through the router.
@@ -42,7 +44,9 @@ export default function App() {
     return (
       <>
         <NavigationBridge />
-        <ClipPage />
+        <Suspense fallback={null}>
+          <ClipPage />
+        </Suspense>
       </>
     );
   }

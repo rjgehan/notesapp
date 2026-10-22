@@ -2,6 +2,9 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { api } from '../api/endpoints';
+// In the app a session loads its CodeMirror parts with its file (a lazy chunk); in tests they are
+// here from the start, so a session's load takes no extra turn.
+import '../sync/sessionKit';
 
 afterEach(() => {
   cleanup();

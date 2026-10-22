@@ -62,3 +62,24 @@ export function historyEditor(view: EditorView): EditorView {
 export function isTableCell(view: EditorView): boolean {
   return view.state.facet(tableCellHost) !== null;
 }
+
+/** Where a table shows as a grid (grid.ts's TableBlock is one). */
+export interface TableRange {
+  from: number;
+  to: number;
+}
+
+let rangesOf: (state: EditorState) => readonly TableRange[] = () => [];
+
+/**
+ * The note's tables that show as grids, for code outside the editor (a session's insertion point).
+ * The tables extension (index.ts, in the editor's chunk) provides it when it loads; until then no
+ * state has grids.
+ */
+export function tableRanges(state: EditorState): readonly TableRange[] {
+  return rangesOf(state);
+}
+
+export function provideTableRanges(read: (state: EditorState) => readonly TableRange[]): void {
+  rangesOf = read;
+}

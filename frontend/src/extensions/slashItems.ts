@@ -4,8 +4,8 @@
 // editor/slashItems.ts.
 import type { EditorView } from '@codemirror/view';
 import { activeEditor } from '../editor/activeEditor';
-import { historyEditor } from '../editor/livePreview/table';
-import { registerSlashItem, type SlashItem } from '../editor/slash';
+import { historyEditor } from '../editor/livePreview/table/facets';
+import { registerSlashItem, type SlashItem } from '../editor/slashRegistry';
 import { getCommand, runCommand } from '../features/commands';
 import { createAndEmbed, noteSessionOf, pickAndInsertImages } from '../features/editorInsertions';
 import { activePath } from '../features/navigation';
