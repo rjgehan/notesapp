@@ -175,12 +175,14 @@ export default function KanbanBoard({ session, readOnly, onShowMarkdown }: Props
     setEditing(editingNow.current);
   };
 
-  function finishEdit() {
+  function finishEdit(refocus = false) {
     const e = editingNow.current;
     if (!e) return;
     editingNow.current = null;
     setEditing(null);
     const value = draft.current;
+    // Ended from the keyboard, the focus goes back to the card (its key follows its text).
+    if (refocus) requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-board-card^="${hashText(value.trim())}."]`)?.focus());
     if (value.trim() === e.original.trim()) return;
     write((b) => {
       const at = findCard(b, e.ref, e.original);
@@ -435,10 +437,10 @@ export default function KanbanBoard({ session, readOnly, onShowMarkdown }: Props
                   canvasPath={path}
                   className="kanban-card-editor"
                   onChange={(v) => (draft.current = v)}
-                  onEnter={finishEdit}
-                  onDone={finishEdit}
-                  onSave={finishEdit}
-                  onBlur={finishEdit}
+                  onEnter={() => finishEdit(true)}
+                  onDone={() => finishEdit(true)}
+                  onSave={() => finishEdit(true)}
+                  onBlur={() => finishEdit()}
                 />
               </div>
             ) : (
