@@ -65,7 +65,7 @@ DESIGN.md has the details.
 | 12 | Bookmarks (starred) and a recent-files pane | M | S | |
 | 13 | Properties editor (typed frontmatter UI) | M | M | |
 | 14 | Calendar view | M | M | 4 optional |
-| 15 | Kanban boards | M | M | 4 |
+| 15 | Kanban boards *(built 2026-10-21, `feat/kanban`)* | M | M | 4 |
 | 16 | Graph view *(declined for v1)* | M | M | |
 | 17 | Dataview-style query blocks *(shrinks to a `query()` helper inside 40)* | M | S | 40; 13 helps |
 | 18 | Ask your vault and summaries, powered by Claude | H | M | |
@@ -729,6 +729,13 @@ Stored in `.notesapp/bookmarks.json`, in a format compatible with Obsidian's `bo
 
 - The primary boards are views over task sections (item 4).
 - Optional: read and write the Obsidian Kanban plugin's Markdown format (`kanban-plugin: basic`) for interoperability.
+
+**Status:** built (wave 3, branch `feat/kanban`). Design in DESIGN §6.8.4. Task-section boards came with item 4; this item adds the optional part, as the boards of notes:
+
+- **Obsidian Kanban plugin boards.** A note with `kanban-plugin` in its frontmatter opens as a board (with **Open as Markdown** and back). Lanes are `##` headings (with `(N)` card limits and the `**Complete**` marker), cards are `- [ ]` items (several lines, `@{date}` and `@@{time}` chips, block ids kept), and the archive section is read and written. Files are written in the plugin's own layout, so a board the plugin wrote comes back byte for byte, and the `%% kanban:settings` block and the frontmatter are kept as they are.
+- **Editing.** Drag cards between and within lanes (touch: the handle; keyboard: Alt+arrows), edit a card in place with link and tag completion, add, duplicate, archive, restore and delete cards, add, rename, reorder, mark complete and delete lanes. Everything goes through the note's own document session (autosave, history, conflicts, live sync).
+- **Links.** Cards link and are backlinked as ordinary note text. The compatibility report (item 24) no longer lists Kanban boards; the plugin shows as partly supported.
+- **Deviations.** The generic board from item 4 is shared, not rewritten. A board with lines the plugin would drop on its next save (a paragraph between cards) opens read-only and names them, instead of losing them. Not built: the plugin's settings screens, date pickers, table and list views, and **New note from card**.
 
 ### 16. Graph view *(declined for v1)*
 

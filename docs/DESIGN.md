@@ -1586,7 +1586,7 @@ An existing Obsidian vault is imported by copying it into the vault directory be
 
 | Category | Findings |
 |---|---|
-| Syntax | Dataview (```` ```dataview ````, ```` ```dataviewjs ````, inline `` `= …` ``), Tasks queries, embedded searches (```` ```query ````), other plugin blocks (```` ```ad-… ````, ```` ```chart ```` …), Templater `<% … %>`, block references (`#^id`), `obsidian://` links, HTML the sanitizer removes, Kanban boards (`kanban-plugin` property) |
+| Syntax | Dataview (```` ```dataview ````, ```` ```dataviewjs ````, inline `` `= …` ``), Tasks queries, embedded searches (```` ```query ````), other plugin blocks (```` ```ad-… ````, ```` ```chart ```` …), Templater `<% … %>`, block references (`#^id`), `obsidian://` links, HTML the sanitizer removes |
 | Links | Embeds and attachment links that lead nowhere; links to missing headings (matched as the client does, §6.4) or missing `^block-ids`; links to notes that do not exist yet (informational: following them creates the note) |
 | Files | Names the index skips (`/api/status` `vault.skipped`), notes over the text limit, invalid UTF-8, frontmatter that does not parse, notes with `excalidraw-plugin` properties not named `.excalidraw.md` (which open as Markdown), canvases, bases |
 
@@ -1797,6 +1797,8 @@ frontend/src/
 │   │                         SheetTabs, SheetDialogs, ChartsPane, importExport, gridModel, theme, useSheetDocument
 │   │                         (lazy chunk, §6.21.5); SheetEmbed (loadEmbed, §6.21.7) and SheetChart (§6.21.9)
 │   ├── canvas/               JSON Canvas boards (§6.8.2): register.ts in the main bundle, the rest a lazy chunk
+│   ├── kanban/               Kanban boards (§6.8.4): detect.ts and register.ts in the main bundle; KanbanBoard, format, ops
+│   │                         (lazy chunk)
 ├── editor/
 │   ├── obsidianSyntax.ts     Lezer inline extension (WikiLink, Embed, Hashtag, Highlight ==x==, Comment %%x%%)
 │   ├── completion.ts         [[ / [[Note# / [[# / # completion sources
@@ -2366,6 +2368,33 @@ PDFs are rendered by PDF.js (`pdfjs-dist` 6.4.299, Apache-2.0) inside the app, s
 **Embeds** (`PdfEmbed.tsx`, through the reading view's `loadEmbed`, §6.7). `![[file.pdf]]`, `![[file.pdf#page=3]]`, `![[file.pdf#height=400]]` and both together (`#page=3&height=400`), as in Obsidian, show the same viewer in a box of the note: page width, scrolled to the page, 600 px high unless `#height=` or a `WxH` size says otherwise, capped at the screen's height. PDF.js loads only when the box comes within 600 px of the screen, so a note with many PDFs costs nothing until it is read. The header names the file and links to it at the page the embed shows (`a.internal-link`, so the reading view opens it). Embeds leave pinch to the page and remember no page.
 
 **Not built:** annotations and highlights (ROADMAP item 32 leaves them for later), printing from the app (the browser's viewer prints). The text of PDFs is searched on the server (§5.5.10); a hit opens the PDF at its page (`?page=N`, read like a link's `#page=N`).
+
+#### 6.8.4 Kanban boards (ROADMAP item 15)
+
+A Kanban board is a note in the [Obsidian Kanban plugin](https://github.com/mgmeyers/obsidian-kanban)'s Markdown format, so the same file is a board in Obsidian and here. Item 4's boards (a task list by section or status, §6.22) stay the boards for structured tasks; both use the same generic `Board` component (`tasks/board/Board.tsx`: columns, pointer and keyboard dragging, auto-scroll, drop line).
+
+**Recognition.** A note is a board when its frontmatter has a `kanban-plugin` property (the plugin's own test), read from the first 16 KB of the session's buffer (`views/kanban/detect.ts`, in the main bundle). It is not a view of its own: the descriptor registry matches on the file entry, which carries no frontmatter, so the Markdown view (§6.8) shows the board in place of the editor or the reading view, with the note header, inline title and conflict banner as for any note. As in Obsidian, a board opens as a board; **Open as Markdown** (on the board's toolbar and in the palette) shows the note's text in the usual edit and reading modes with a bar offering **Open as board**, remembered per path for the page load. The board, its format code and the editor are a lazy chunk (`views/kanban/KanbanBoard.tsx`).
+
+**Format** (`views/kanban/format.ts`, checked against the plugin's `src/parsers/formats/list.ts` and `common.ts`).
+
+- Each heading is a lane, written `## Title`; `## Title (N)` limits the lane to N cards (more turns its edge and count red). `**Complete**` right under the heading marks the lane: cards moved in are checked, cards moved out of it into an unmarked lane unchecked, as the plugin does.
+- Each list item is a card: `- [ ] text` (`*`, `+` and items without a checkbox are read too, and written as `- [ ]`). Indented lines (four spaces or a tab come off) belong to the card, so a card can hold several lines, sub-lists and embeds. `@{date}` and `@@{time}` (the plugin's default `date-trigger` and `time-trigger`, or those of the settings block) show as chips (an open card's past date in red), a ` ^block-id` is hidden but kept, and `@[[2026-10-21]]` stays a link to the daily note.
+- A heading `Archive` after a thematic break holds the archived cards.
+- The trailing `%% kanban:settings` block is kept byte for byte (its JSON is only read: `show-checkboxes`, `new-card-insertion-method`, the date and time triggers); so is everything before the first lane (the frontmatter, and any text there, which the plugin would drop), apart from its trailing blank lines.
+- Writing follows the plugin's `boardToMd` exactly (`## Title`, a blank line, the marker, the cards, three blank lines per lane; `***`, `## Archive` and the archived cards; two blank lines and the settings block), so a board the plugin wrote is written back byte for byte and an edit changes only the lines it touched. A file without a settings block gets none.
+- Lines the board cannot hold (a paragraph between cards, a stray thematic break) would be dropped by a rewrite, so the board then shows read-only with a note naming those lines and **Open as Markdown** to fix them.
+
+**Editing** (`ops.ts`, pure). The session's text is the only state: the view parses it on every change, and each edit re-parses the current text, applies the operation and calls `setText`, so autosave, drafts, history, conflicts, live sync and Take theirs work as for any note, and two devices' edits merge like any text. Cards are keyed by a hash of their text and its occurrence, so a card keeps its identity (focus, drag) when it moves.
+
+- **Cards**: drag by the handle (touch) or the card (mouse), Alt+arrow keys, or **Move to “Lane”** in the card's menu. A tap or click on a card's text (not on a link or tag) edits it in place with the canvas's card editor (§6.8.2: CodeMirror with `[[`, `[[Note#` and `#` completion, pasted images as attachments of the note), which mounts inside the tap so iOS opens the keyboard; Enter or Esc or a tap outside saves, Shift+Enter starts a new line. **Add card** under a lane (and its `+`) opens the same editor; Enter adds the card and opens the next one. New cards go to the end of the lane, or the top with the plugin's `new-card-insertion-method: prepend…`. The card's menu also has **Mark as done** (a checkbox shows on cards when the board's `show-checkboxes` is on), **Duplicate** (without the block id), **Archive** and **Delete**. An edit whose card was moved or changed on another device meanwhile finds it again by its text; if it is gone, the text is added as a new card.
+- **Lanes**: **Add lane** (toolbar, and after the last lane), and per lane **Rename…** (`Title (N)` sets the limit), **Move lane left/right**, **Mark cards here as done** (the `**Complete**` marker; on, it checks the lane's cards), **Archive all cards** and **Delete lane…** (confirmed when it has cards; the note's history keeps them).
+- **Archive**: the toolbar's **Archive (n)** lists the archived cards with **Restore** (to the end of the first lane) and **Delete**.
+
+**Links.** A board is a note: links and tags in cards are the note's own, so backlinks, unlinked mentions, the graph, search, tags and link rewriting on moves (§5.5) need nothing new, and a card's links open their note. `![[Board.md]]` embeds the note's Markdown as any note.
+
+**Phones.** The board scrolls sideways a lane at a time (the generic board's scroll snap); cards drag by their 44 px handle, so a swipe elsewhere scrolls; the ⋯ buttons are always visible and 44 px; the card editor uses 16 px text so Safari does not zoom.
+
+**Not built.** The plugin's settings screens (board and lane settings, date and time pickers, lane width, tag colours, "link date to daily note"), its table and list views, search within the board, **New note from card**, and undo on the board itself (the note's history restores any version).
 
 ### 6.9 Autosave policy
 

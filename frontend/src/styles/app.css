@@ -590,6 +590,36 @@ body.is-resizing {
   margin: 0 auto;
 }
 
+/* A Kanban board note (DESIGN §6.8.4): the board takes the full width; as Markdown, a bar offers the board. */
+.markdown-view.is-kanban {
+  max-width: none;
+}
+
+.kanban-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.kanban-switch .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+@media (pointer: coarse) {
+  .kanban-switch .button {
+    min-height: 44px;
+  }
+}
+
 .note-header-bar {
   position: sticky;
   top: 0;

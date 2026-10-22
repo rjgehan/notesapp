@@ -2,7 +2,7 @@
 // language, highlighting and `[[` / `#` completion, resolved from the canvas's own folder (as
 // Obsidian resolves links in canvas cards). Esc or a tap outside the card ends editing.
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, insertNewlineAndIndent } from '@codemirror/commands';
 import { syntaxHighlighting } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder, tooltips } from '@codemirror/view';
@@ -29,18 +29,22 @@ interface Props {
   onDone(): void;
   onSave(): void;
   onBlur(): void;
+  /** Enter ends editing through this (Shift+Enter starts a new line), as Kanban cards do. */
+  onEnter?(): void;
+  /** The host's class (default `canvas-card-editor`). */
+  className?: string;
 }
 
-export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur }: Props) {
+export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur, onEnter, className = 'canvas-card-editor' }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const spellcheck = usePrefs((s) => s.spellcheck);
   const autocorrect = usePrefs((s) => s.autocorrect);
-  const callbacks = useRef({ onChange, onDone, onSave, onBlur });
+  const callbacks = useRef({ onChange, onDone, onSave, onBlur, onEnter });
   const initial = useRef(text);
   const viewRef = useRef<EditorView | null>(null);
 
   useLayoutEffect(() => {
-    callbacks.current = { onChange, onDone, onSave, onBlur };
+    callbacks.current = { onChange, onDone, onSave, onBlur, onEnter };
   });
 
   useLayoutEffect(() => {
@@ -98,6 +102,8 @@ export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur 
           }),
           keymap.of([
             { key: 'Escape', run: () => (callbacks.current.onDone(), true) },
+            { key: 'Enter', run: () => (callbacks.current.onEnter ? (callbacks.current.onEnter(), true) : false) },
+            { key: 'Shift-Enter', run: (v) => (callbacks.current.onEnter ? insertNewlineAndIndent(v) : false) },
             { key: 'Mod-s', run: () => (callbacks.current.onSave(), true), preventDefault: true },
             { key: 'Mod-Enter', run: followLinkAtCursor },
             { key: 'Mod-l', run: toggleCheckbox, preventDefault: true },
@@ -128,5 +134,5 @@ export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur 
     };
   }, [canvasPath, spellcheck, autocorrect]);
 
-  return <div ref={host} className="canvas-card-editor" onPointerDown={(e) => e.stopPropagation()} />;
+  return <div ref={host} className={className} onPointerDown={(e) => e.stopPropagation()} />;
 }

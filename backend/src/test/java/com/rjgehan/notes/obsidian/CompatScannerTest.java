@@ -35,11 +35,12 @@ class CompatScannerTest {
 		assertThat(where(issues.get("tasks-query"))).containsExactly("Projects/Plan.md:19");
 		// Callouts, Mermaid and math render since ROADMAP item 3: no longer findings.
 		assertThat(issues).doesNotContainKeys("callouts", "mermaid", "math");
+		// Kanban boards open as boards since ROADMAP item 15.
+		assertThat(issues).doesNotContainKey("kanban");
 		// Templater in the template, not in Code.md's fence or code span.
 		assertThat(where(issues.get("templater"))).containsExactly("Templates/Daily.md:0");
 		assertThat(where(issues.get("obsidian-uris"))).containsExactly("Home.md:9");
 		assertThat(where(issues.get("html-removed"))).containsExactly("Home.md:20");
-		assertThat(where(issues.get("kanban"))).containsExactly("Board.md:0");
 		assertThat(where(issues.get("block-references"))).containsExactly("Home.md:7", "Home.md:7");
 		assertThat(issues.get("block-references").noteCount()).isEqualTo(1);
 		assertThat(issues.get("dataview").roadmapItem()).isEqualTo(40);

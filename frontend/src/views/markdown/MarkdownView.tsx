@@ -1,6 +1,9 @@
 // The `markdown` view (DESIGN §6.8): the note editor and the reading view over one DocumentSession.
+// A note in the Obsidian Kanban plugin's format shows as a board instead (DESIGN §6.8.4), or as
+// Markdown with a bar that offers the board.
 import { EditorView } from '@codemirror/view';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { LayoutDashboard } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
 import { useVaultSettings } from '../../api/hooks';
 import { useWorkspaceScroller } from '../../components/layout/workspaceScroller';
@@ -15,6 +18,7 @@ import { ReadingView } from '../../render/ReadingView';
 import { scrollToLine, topVisibleLine } from '../../render/scroll';
 import { flashBlock, highlightTermsIn } from '../../render/searchHits';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
+import { isKanbanText, KANBAN_PROBE_CHARS, setKanbanAsMarkdown, useKanbanAsMarkdown } from '../kanban/detect';
 import type { FileViewProps } from '../registry';
 import { NoteHeader } from './NoteHeader';
 import { useHeadingRenameOffers } from './useHeadingRenameOffers';
@@ -36,6 +40,8 @@ function scrollEditorToLine(view: EditorView, line: number): void {
 
 const NOT_RENAMEABLE = new Set(['loading', 'readonly', 'deleted']);
 
+const KanbanBoard = lazy(() => import('../kanban/KanbanBoard'));
+
 export default function MarkdownView({ path, mode }: FileViewProps) {
   const session = useDocumentSession(path);
   const snapshot = useSessionSnapshot(session);
@@ -51,6 +57,9 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
   const query = params.get('q') ?? '';
   const terms = useMemo(() => highlightTerms(query), [query]);
   const targetLine = useRef<number | null>(null);
+  // Only the note's start is read (its frontmatter), so typing in a long note stays cheap.
+  const kanban = useSyncExternalStore(session.subscribe, () => isKanbanText(session.editorState.doc.sliceString(0, KANBAN_PROBE_CHARS)));
+  const asMarkdown = useKanbanAsMarkdown(session.path);
 
   // Where the newly shown mode should scroll: the mode switch's line, else a search hit's line.
   // Child views schedule the scroll in an animation frame, after this has run.
@@ -138,17 +147,26 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
   }, [scrollRequest, ready, session, scrollToTarget]);
 
   const toggle = () => setNoteMode(mode === 'edit' ? 'read' : 'edit');
+  const board = ready && kanban && !asMarkdown;
 
   return (
-    <div className={`markdown-view${settings.editor.readableLineLength ? ' is-readable' : ''}`} data-mode={mode}>
+    <div className={`markdown-view${settings.editor.readableLineLength && !board ? ' is-readable' : ''}${board ? ' is-kanban' : ''}`} data-mode={board ? 'board' : mode}>
       <NoteHeader
         path={session.path}
         snapshot={snapshot}
         mode={mode}
-        modes={['edit', 'read']}
+        modes={board ? [] : ['edit', 'read']}
         onToggleMode={toggle}
         editable={!NOT_RENAMEABLE.has(snapshot.status) && !snapshot.lossy}
       />
+      {ready && kanban && asMarkdown && (
+        <div className="kanban-switch" role="note">
+          <span>This note is a Kanban board.</span>
+          <button type="button" className="button button-small" onClick={() => setKanbanAsMarkdown(session.path, false)}>
+            <LayoutDashboard size={14} aria-hidden /> Open as board
+          </button>
+        </div>
+      )}
       {snapshot.status === 'loading' ? (
         <div className="view-loading" aria-busy="true">
           <div className="skeleton-line" />
@@ -164,6 +182,16 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
             Try again
           </button>
         </div>
+      ) : board ? (
+        <Suspense
+          fallback={
+            <div className="view-loading" aria-busy="true">
+              <div className="skeleton-line" />
+            </div>
+          }
+        >
+          <KanbanBoard session={session} readOnly={snapshot.status === 'readonly' || snapshot.lossy} onShowMarkdown={() => setKanbanAsMarkdown(session.path, true)} />
+        </Suspense>
       ) : mode === 'edit' ? (
         <NoteEditor
           session={session}
