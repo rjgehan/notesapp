@@ -1,0 +1,570 @@
+/* The calendar page and panel (ROADMAP item 14, DESIGN §6.32). Theme tokens only (§6.17). */
+
+.page.cal-page {
+  max-width: 1120px;
+  container-type: inline-size;
+}
+
+.cal-header {
+  flex-wrap: wrap;
+}
+
+.cal-subtitle {
+  margin: 2px 0 0;
+  font-size: var(--font-ui-small);
+}
+
+.cal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cal-switch {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.cal-switch-button {
+  min-height: var(--tap-target);
+  padding: 4px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.cal-switch-button[aria-pressed='true'] {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.cal-nav {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.cal-options {
+  position: relative;
+}
+
+.cal-options > summary {
+  list-style: none;
+}
+
+.cal-options > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cal-options-body {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 240px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.cal-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.cal-option.is-check {
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---------- layout: the details beside the month when there is room ---------- */
+
+.cal-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px 24px;
+}
+
+@container (min-width: 900px) {
+  .cal-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start;
+  }
+
+  .cal-layout > .cal-day-details {
+    position: sticky;
+    top: 12px;
+    border-top: 0;
+  }
+}
+
+/* ---------- the month grid ---------- */
+
+.cal-grid-wrap {
+  container-type: inline-size;
+  overflow: hidden;
+  /* Vertical strokes scroll; sideways ones are swipes (useSwipe). */
+  touch-action: pan-y pinch-zoom;
+}
+
+.cal-grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.cal-grid th {
+  padding: 4px 0;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-weight: 500;
+  text-align: center;
+}
+
+.cal-grid abbr {
+  text-decoration: none;
+}
+
+.cal-grid .cal-weeknum-head,
+.cal-grid .cal-weeknum {
+  width: 26px;
+}
+
+.cal-grid .cal-weeknum {
+  padding-top: 8px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  vertical-align: top;
+}
+
+.cal-grid td {
+  padding: 1px;
+  vertical-align: top;
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.cal-day:hover {
+  background: var(--background-modifier-hover);
+}
+
+.cal-day:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.cal-day.is-outside {
+  color: var(--text-faint);
+}
+
+.cal-day.is-focused {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-active-hover);
+}
+
+.cal-day.is-current .cal-day-number {
+  font-weight: 700;
+}
+
+.cal-day-number {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  line-height: 24px;
+  text-align: center;
+}
+
+.cal-day.is-today .cal-day-number {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+.cal-day-marks {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  height: 6px;
+}
+
+.cal-note-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+
+.cal-task-dot {
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--text-muted);
+  border-radius: 50%;
+}
+
+.cal-day.is-overdue .cal-task-dot {
+  border-color: var(--text-error);
+}
+
+/* A note dated by a property: a small square, so it reads apart from the daily note's dot. */
+.cal-dated-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--interactive-accent);
+}
+
+/* A coming occurrence of a repeating task. */
+.cal-task-dot.is-repeat {
+  border-style: dashed;
+  border-color: var(--text-faint);
+}
+
+.cal-day-titles {
+  display: none;
+}
+
+/* Wide grids (the page on a tablet or a desktop) show task titles in the days. */
+@container (min-width: 560px) {
+  .cal-grid-wrap:not(.is-compact) .cal-grid td {
+    border-top: 1px solid var(--background-modifier-border);
+  }
+
+  .cal-grid-wrap:not(.is-compact) .cal-day {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    align-items: center;
+    justify-items: start;
+    min-height: 96px;
+    padding: 4px;
+    text-align: left;
+  }
+
+  .cal-grid-wrap:not(.is-compact) .cal-day-marks {
+    justify-self: end;
+    padding-right: 2px;
+  }
+
+  .cal-grid-wrap:not(.is-compact) .cal-task-dot {
+    display: none;
+  }
+
+  .cal-grid-wrap:not(.is-compact) .cal-day-titles {
+    display: flex;
+    grid-column: 1 / -1;
+    flex-direction: column;
+    gap: 2px;
+    align-self: start;
+    width: 100%;
+    min-width: 0;
+    margin-top: 2px;
+  }
+}
+
+.cal-day-title {
+  overflow: hidden;
+  padding: 1px 5px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-day-title.is-note {
+  background: transparent;
+  box-shadow: inset 2px 0 0 var(--interactive-accent);
+  color: var(--interactive-accent);
+}
+
+.cal-day-title.is-repeat {
+  background: transparent;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.cal-day-title.is-closed {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.cal-day.is-overdue .cal-day-title:not(.is-closed) {
+  color: var(--text-error);
+}
+
+.cal-day-more {
+  padding: 0 5px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* A new month slides in from the side it came from. */
+@keyframes cal-slide-next {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+@keyframes cal-slide-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+.cal-grid.slide-next {
+  animation: cal-slide-next 160ms ease-out;
+}
+
+.cal-grid.slide-prev {
+  animation: cal-slide-prev 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cal-grid.slide-next,
+  .cal-grid.slide-prev {
+    animation: none;
+  }
+}
+
+/* ---------- a day's details ---------- */
+
+.cal-day-details {
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.cal-day-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin: 0 0 10px;
+  color: var(--text-normal);
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.cal-panel .cal-day-heading {
+  font-size: var(--font-ui-small);
+}
+
+.cal-day-rel {
+  color: var(--interactive-accent);
+}
+
+.cal-day-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cal-note-button,
+.cal-add-task {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+}
+
+.cal-note-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-note-button:not(.has-note) {
+  color: var(--text-muted);
+}
+
+.cal-dated,
+.cal-repeats {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.cal-dated-link {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--interactive-accent);
+  font: inherit;
+  font-size: var(--font-ui-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cal-dated-link:hover {
+  background: var(--background-modifier-hover);
+}
+
+.cal-dated-name {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-dated-time {
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-repeats {
+  margin-top: 4px;
+}
+
+.cal-repeat {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 6px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  font-style: italic;
+}
+
+.cal-day-empty {
+  margin: 4px 0;
+  font-size: var(--font-ui-small);
+}
+
+.cal-week {
+  display: flex;
+  flex-direction: column;
+}
+
+.cal-week .cal-day-details.is-today {
+  border-top-color: var(--interactive-accent);
+}
+
+/* ---------- the panel ---------- */
+
+.cal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.cal-panel-header {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cal-panel-month {
+  min-height: var(--tap-target);
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cal-panel-month:hover {
+  background: var(--background-modifier-hover);
+}
+
+.cal-grid-wrap.is-compact .cal-day {
+  min-height: 36px;
+  padding: 2px 0;
+}
+
+.cal-grid-wrap.is-compact .cal-day-number {
+  font-size: var(--font-ui-smaller);
+}
+
+.cal-grid-wrap.is-compact .cal-weeknum {
+  padding-top: 6px;
+}
+
+/* ---------- phones and touch ---------- */
+
+@media (max-width: 767px) {
+  .cal-toolbar {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .cal-grid td {
+    padding: 0;
+  }
+
+  .cal-grid .cal-weeknum-head,
+  .cal-grid .cal-weeknum {
+    width: 22px;
+  }
+}
+
+@media (pointer: coarse) {
+  /* Every tap target is at least 44 × 44 px (DESIGN §6.16). */
+  .cal-day,
+  .cal-grid-wrap.is-compact .cal-day,
+  .cal-switch-button,
+  .cal-panel-month,
+  .cal-today {
+    min-height: 44px;
+  }
+
+  .cal-nav-button,
+  .cal-options > summary {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .cal-note-button,
+  .cal-add-task,
+  .cal-dated-link {
+    min-height: 44px;
+  }
+}

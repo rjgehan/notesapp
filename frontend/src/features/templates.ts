@@ -145,18 +145,21 @@ export async function insertTemplate(session: DocumentSession, templatePath: str
   if (insertion.frontmatterSkipped) toast("The note's properties are not valid YAML, so the template's properties were not merged", { kind: 'error' });
 }
 
-/** Renders a template file for a new note titled `title` (daily notes). */
-export async function renderTemplateFile(templatePath: string, title: string): Promise<string> {
-  return (await templateRenderer(templatePath))(title);
+/**
+ * Renders a template file for a new note titled `title` (daily notes). `now` is the moment its
+ * `{{date}}` and `{{time}}` stand for: the daily note of another day, created from the calendar,
+ * renders that day at the current time of day, as Obsidian does.
+ */
+export async function renderTemplateFile(templatePath: string, title: string, now: Dayjs = dayjs()): Promise<string> {
+  return (await templateRenderer(templatePath, now))(title);
 }
 
 /**
  * Reads a template file once and renders it for any title, at one fixed time: "New note from
  * template" renders it before the note has its name, and again once the name is known.
  */
-export async function templateRenderer(templatePath: string): Promise<(title: string) => string> {
+export async function templateRenderer(templatePath: string, now: Dayjs = dayjs()): Promise<(title: string) => string> {
   const settings = currentSettings();
   const { content } = await api.readFile(templatePath);
-  const now = dayjs();
   return (title) => renderTemplate(content, { title, now, settings: settings.templates });
 }

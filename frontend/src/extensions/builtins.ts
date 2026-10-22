@@ -63,6 +63,7 @@ import { eventStream } from '../sync/liveSync';
 import { registerTasks } from '../tasks/register';
 import { registerFlashcards } from '../flashcards/register';
 import { registerHabits } from '../habits/register';
+import { registerCalendar } from '../calendar/register';
 import { registerCanvasView } from '../views/canvas/register';
 import { registerDrawingViews } from '../views/excalidraw/register';
 import { registerPdfView } from '../views/pdf/register';
@@ -410,6 +411,8 @@ export function registerBuiltins(): void {
   registerHabits();
   // Ask your vault and summaries, powered by Claude (ROADMAP item 18, DESIGN §6.31).
   registerAi();
+  // The calendar: daily notes and tasks by day (ROADMAP item 14, DESIGN §6.32).
+  registerCalendar();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

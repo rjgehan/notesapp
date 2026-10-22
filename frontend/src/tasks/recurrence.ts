@@ -404,6 +404,42 @@ export function upcomingOccurrences(rrule: string, anchor: TaskDate | null, toda
   }
 }
 
+/** At most this many occurrences are read from a rule's start: a bound for daily rules started long ago. */
+const MAX_SCAN = 2000;
+
+/**
+ * The days of the occurrences after `anchor` (the task's date) that fall from `from` to `to`,
+ * honouring COUNT (occurrences left, this one included) and UNTIL: the calendar's projection of
+ * a repeating task (DESIGN §6.32). One pass over the rule; empty when it cannot be evaluated.
+ */
+export function occurrencesBetween(rrule: string, anchor: TaskDate, from: LocalDate, to: LocalDate): LocalDate[] {
+  let parts: Map<string, string>;
+  try {
+    parts = ruleParts(rrule);
+  } catch {
+    return [];
+  }
+  if (!FREQUENCIES.has(parts.get('FREQ') ?? '') || to < from || datePart(anchor) > to) return [];
+  const timed = anchor.length > 10;
+  const start = utcOf(anchor);
+  const left = parts.has('COUNT') ? Number(parts.get('COUNT')) - 1 : Infinity;
+  const until = parts.has('UNTIL') ? untilDate(parts.get('UNTIL')!) : null;
+  const end = new Date(utcOf(addDays(to, 1)).getTime() - 1);
+  try {
+    const rule = evaluator(parts, start, timed);
+    const all = rule.between(start, end, false, (_, i) => i < MAX_SCAN);
+    const out: LocalDate[] = [];
+    for (let i = 0; i < all.length && i < left; i++) {
+      const day = dateOf(all[i]);
+      if (until && day > until) break;
+      if (day >= from && out[out.length - 1] !== day) out.push(day);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 // ---------- presets ----------
 
 export interface RecurrencePreset {

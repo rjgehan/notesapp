@@ -3,6 +3,7 @@ import {
   defaultDraft,
   draftFromRule,
   nextOccurrence,
+  occurrencesBetween,
   recurrencePresets,
   recurrenceText,
   rollForward,
@@ -134,5 +135,29 @@ describe('the preview of the next occurrences', () => {
     expect(upcomingOccurrences('FREQ=DAILY;COUNT=2', '2026-10-15T09:00', '2026-10-01')).toEqual(['2026-10-16T09:00']);
     expect(upcomingOccurrences('FREQ=DAILY;UNTIL=20261016', null, '2026-10-15')).toEqual(['2026-10-16']);
     expect(upcomingOccurrences('garbage', null, '2026-10-15')).toEqual([]);
+  });
+});
+
+describe('occurrencesBetween (the calendar, ROADMAP item 14)', () => {
+  it('lists the days after the anchor within the range', () => {
+    expect(occurrencesBetween('FREQ=WEEKLY', '2026-10-23', '2026-10-01', '2026-11-08')).toEqual(['2026-10-30', '2026-11-06']);
+    expect(occurrencesBetween('FREQ=WEEKLY;BYDAY=MO,TH', '2026-10-19', '2026-10-20', '2026-10-27')).toEqual(['2026-10-22', '2026-10-26']);
+    expect(occurrencesBetween('FREQ=MONTHLY;BYMONTHDAY=-1', '2026-01-31', '2026-02-01', '2026-04-30')).toEqual(['2026-02-28', '2026-03-31', '2026-04-30']);
+  });
+
+  it('honours COUNT (occurrences left, this one included) and UNTIL', () => {
+    expect(occurrencesBetween('FREQ=DAILY;COUNT=3', '2026-10-21', '2026-10-01', '2026-10-31')).toEqual(['2026-10-22', '2026-10-23']);
+    expect(occurrencesBetween('FREQ=DAILY;UNTIL=20261024', '2026-10-21', '2026-10-01', '2026-10-31')).toEqual(['2026-10-22', '2026-10-23', '2026-10-24']);
+  });
+
+  it('reaches a far range from an old anchor, and gives timed rules their days', () => {
+    expect(occurrencesBetween('FREQ=DAILY', '2024-01-01', '2026-10-30', '2026-11-01')).toEqual(['2026-10-30', '2026-10-31', '2026-11-01']);
+    expect(occurrencesBetween('FREQ=DAILY;BYHOUR=9,18', '2026-10-21T09:00', '2026-10-21', '2026-10-22')).toEqual(['2026-10-21', '2026-10-22']);
+  });
+
+  it('is empty for an invalid rule or an anchor after the range', () => {
+    expect(occurrencesBetween('FREQ=SECONDLY', '2026-10-21', '2026-10-01', '2026-10-31')).toEqual([]);
+    expect(occurrencesBetween('nonsense', '2026-10-21', '2026-10-01', '2026-10-31')).toEqual([]);
+    expect(occurrencesBetween('FREQ=DAILY', '2026-12-01', '2026-10-01', '2026-10-31')).toEqual([]);
   });
 });
