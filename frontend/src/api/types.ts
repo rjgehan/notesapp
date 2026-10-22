@@ -255,7 +255,7 @@ export interface FolderResult { folder: FolderEntry; createdFolders: VaultPath[]
 export interface MoveRequest { from: VaultPath; to: VaultPath; updateLinks?: boolean; dryRun?: boolean }
 export interface MovedFile { from: VaultPath; to: VaultPath }
 export interface LinkUpdate { path: VaultPath; links: number; version: Version | null }
-export type FailedReason = 'not-utf8' | 'not-rewritable' | 'span-mismatch' | 'io-error';
+export type FailedReason = 'not-utf8' | 'not-rewritable' | 'span-mismatch' | 'io-error' | 'property-exists';
 export interface FailedUpdate { path: VaultPath; reason: FailedReason }
 export interface MoveResult {
   dryRun: boolean;
@@ -675,12 +675,13 @@ export interface VaultEventMap {
   'status.changed': StatusChangedEvent;
   'resync': ResyncEvent;
   'searches.changed': SavedSearchesChangedEvent;
+  'types.changed': PropertyTypesChangedEvent;
 }
 export type VaultEventName = keyof VaultEventMap;
 export const VAULT_EVENT_NAMES: readonly VaultEventName[] = [
   'hello', 'ping', 'file.created', 'file.changed', 'file.deleted', 'folder.created', 'folder.deleted',
   'entry.moved', 'trash.changed', 'history.committed', 'settings.changed', 'bookmarks.changed', 'status.changed',
-  'resync', 'searches.changed',
+  'resync', 'searches.changed', 'types.changed',
 ];
 // Extensions add their own event names at runtime with registerEventHandler (DESIGN §6.8).
 
@@ -942,3 +943,32 @@ export interface PublishResponse {
   notes: PublishedNote[];
 }
 export interface PublishRequest { path: VaultPath; slug?: string; title?: string }   // omitted: keep, or derive
+// ---------- Properties (API.md §38, ROADMAP item 13) ----------
+export type PropertyType = 'text' | 'multitext' | 'number' | 'checkbox' | 'date' | 'datetime' | 'aliases' | 'tags';
+export interface PropertyInfo {
+  name: string;                 // as most notes spell it; names compare case-insensitively
+  count: number;                // notes that have it
+  type: PropertyType | null;    // in the vault's type registry, or null
+  inferred: PropertyType;       // what its values look like
+}
+export interface PropertiesResponse { properties: PropertyInfo[] }   // sorted by name
+export interface PropertyTypesResponse {
+  types: Record<string, string>;   // name → type, in file order (an unknown type is kept as written)
+  version: Version | null;         // of .notesapp/types.json; null while it does not exist
+  source: 'notesapp' | 'obsidian' | null;   // obsidian: read from .obsidian/types.json until the first change
+}
+export interface PropertyTypeRequest { name: string; type: PropertyType | null }   // null removes the type
+export interface PropertyValue { value: string; count: number }
+export interface PropertyValuesResponse { name: string; values: PropertyValue[] }   // most used first, at most 500
+export interface PropertyRenameRequest { from: string; to: string; dryRun?: boolean }
+export interface PropertyUpdate { path: VaultPath; version: Version | null }   // version null in a dry run
+export interface PropertyRenameResult {
+  dryRun: boolean;
+  from: string;
+  to: string;
+  updates: PropertyUpdate[];
+  failed: FailedUpdate[];       // 'property-exists': the note already has the new name
+  typeMoved: boolean;           // the property's type moved to the new name
+  commitId: string | null;
+}
+export interface PropertyTypesChangedEvent { version: Version; origin: string | null }

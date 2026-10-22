@@ -1,9 +1,10 @@
 // The search query grammar of API.md §12.1, parsed exactly as the server does
 // (SearchQueryParser.java): words, "phrases", /regular expressions/, tag:/path:/file: filters,
-// -negation, OR, parentheses and the line:/section: scopes. Parsing never fails. The client uses
+// -negation, OR, parentheses, the line:/section: scopes and [property:value] clauses (ROADMAP
+// item 13). Parsing never fails. The client uses
 // it to highlight what a query matched, to describe it, and in the dev-only mock API.
 
-export type LeafKind = 'word' | 'phrase' | 'regex' | 'tag' | 'path' | 'file';
+export type LeafKind = 'word' | 'phrase' | 'regex' | 'tag' | 'path' | 'file' | 'property';
 
 export type QueryNode =
   | { type: 'leaf'; kind: LeafKind; value: string; regex: boolean; last: boolean }
@@ -120,7 +121,28 @@ export function parseSearchQuery(q: string): QueryNode | null {
     return clause();
   }
 
+  /** The `]` closing a property clause at `start`, or -1 (SearchQueryParser.propertyEnd). */
+  const propertyEnd = (start: number): number => {
+    for (let k = start + 1; k < n; k++) {
+      const ch = q[k];
+      if (ch === '[' || ch === '\n' || ch === '\r') return -1;
+      if (ch === ']') {
+        if (k === start + 1) return -1;
+        return k + 1 === n || isWs(q[k + 1]) || q[k + 1] === ')' ? k : -1;
+      }
+    }
+    return -1;
+  };
+
   function clause(): QueryNode | null {
+    if (q[i] === '[') {
+      const end = propertyEnd(i);
+      if (end > 0) {
+        const inside = q.slice(i + 1, end);
+        i = end + 1;
+        return parsePropertyClause(inside) ? { type: 'leaf', kind: 'property', value: inside, regex: false, last: false } : null;
+      }
+    }
     let filter: LeafKind | null = null;
     for (const [keyword, kind] of FILTERS) {
       if (atKeyword(keyword)) {
@@ -204,4 +226,43 @@ export function toJsRegExp(source: string): RegExp | null {
       return null;
     }
   }
+}
+
+/** A property clause (API.md §12.1): `[name]`, `[name:value]` (contains) or `[name:"value"]` (equals). */
+export interface PropertyClause {
+  name: string;
+  value: string | null;
+  exact: boolean;
+}
+
+/** What was written between the brackets; null when it names no property (PropertyClause.java). */
+export function parsePropertyClause(inside: string): PropertyClause | null {
+  const colon = inside.indexOf(':');
+  const name = (colon < 0 ? inside : inside.slice(0, colon)).trim();
+  if (name === '') return null;
+  if (colon < 0) return { name, value: null, exact: false };
+  let value = inside.slice(colon + 1).trim();
+  const exact = value.length >= 2 && value.startsWith('"') && value.endsWith('"');
+  if (exact) value = value.slice(1, -1);
+  return { name, value, exact };
+}
+
+const foldProperty = (s: string): string => s.normalize('NFKC').toLowerCase();
+
+/** Whether a note's frontmatter matches a property clause, as the server decides it. */
+export function propertyClauseMatches(clause: PropertyClause, data: Record<string, unknown> | null): boolean {
+  if (!data) return false;
+  const wanted = foldProperty(clause.name);
+  const scalar = (v: unknown): boolean => {
+    if (v === null || v === undefined || typeof v === 'object') return false;
+    const text = foldProperty(String(v));
+    const want = foldProperty(clause.value ?? '');
+    return clause.exact || typeof v !== 'string' ? text === want : text.includes(want);
+  };
+  return Object.entries(data).some(([key, v]) => {
+    if (foldProperty(key) !== wanted) return false;
+    if (clause.value === null) return true;
+    if (clause.value === '' && !clause.exact) return v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+    return Array.isArray(v) ? v.some(scalar) : scalar(v);
+  });
 }

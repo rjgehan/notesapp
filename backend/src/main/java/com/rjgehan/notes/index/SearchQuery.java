@@ -31,7 +31,13 @@ public record SearchQuery(@Nullable Node root) {
 		PATH,
 
 		/** A case-insensitive substring of the file name; with {@code regex}, a name matching it. */
-		FILE
+		FILE,
+
+		/**
+		 * A frontmatter property (ROADMAP item 13, API.md §12.1): {@code value} is what was written between the
+		 * brackets of {@code [name]}, {@code [name:value]} or {@code [name:"value"]}; see {@link PropertyClause}.
+		 */
+		PROPERTY
 
 	}
 

@@ -63,7 +63,7 @@ DESIGN.md has the details.
 | 9 | Reminders and push notifications *(built 2026-10-21, `feat/reminders`)* | H | M | 4; 8 for Web Push |
 | 11 | Tabs and split panes *(declined for v1; built 2026-10-21, `feat/tabs`)* | M | M | |
 | 12 | Bookmarks (starred) and a recent-files pane | M | S | |
-| 13 | Properties editor (typed frontmatter UI) | M | M | |
+| 13 | Properties editor (typed frontmatter UI) *(built 2026-10-21, `feat/properties`)* | M | M | |
 | 14 | Calendar view *(built 2026-10-21, `feat/calendar`)* | M | M | 4 optional |
 | 15 | Kanban boards *(built 2026-10-21, `feat/kanban`)* | M | M | 4 |
 | 16 | Graph view *(declined for v1)* | M | M | |
@@ -743,6 +743,18 @@ Stored in `.notesapp/bookmarks.json`, in a format compatible with Obsidian's `bo
 
 - Property types are vault-wide, in `.notesapp/types.json`.
 - Edits rewrite only the changed YAML nodes, using the `yaml` Document API.
+
+**Status: built (2026-10-21, branch `feat/properties`).** DESIGN §5.38 (server) and §6.41 (editor), API.md §38, and `[property]` search in API.md §12.1. Not yet tried on a real iPhone. Merged into `build/roadmap` with tabs (item 11): a note in two panes keeps both Properties editors in sync, and the `/` menu offers *Add property*.
+
+- **In place, on top of Live Preview's properties block** (item 10b): in Live Preview the block is the typed editor; a locked note keeps the read-only table; the YAML button still shows the frontmatter as text.
+- **Types:** text, list, number, checkbox, date, date & time, tags and aliases (Obsidian's set), each with its own editor: chips for lists and tags (tag chips open the tag's search), the system date and time pickers, a checkbox, a number field. `[[` in a text or list field offers the vault's notes and writes a wikilink; fields also offer the property's values across the vault, and tags the vault's tags. A value that does not fit its type shows as written, with a warning.
+- **Add, remove, rename, reorder** from each row (its type icon opens the menu; the grip drags it), plus *Add file property* (`Mod-;`), which creates the frontmatter when a note has none.
+- **Byte-stable:** a change rewrites only the lines of the property it touches (a rename only the key's characters); comments, quoting, order and CRLF stay. Each change is one undo step.
+- **Vault-wide types** in `.notesapp/types.json`, in Obsidian's format (so it copies to `.obsidian/types.json` and back); an imported vault's `.obsidian/types.json` is read until the first change. Changed one property at a time on the server, so devices never conflict; other devices update through SSE (`types.changed`).
+- **Properties panel** (left sidebar): every property with its note count and type, filter and sort; a row searches `[name]`; its menu sets the type or renames the property in every note.
+- **Rename in every note** on the server, under the vault write lock, with a dry run first: only the keys change, notes edited on disk meanwhile are read first (never reverted), open notes merge the change like any other device's edit, one commit, and the type follows.
+- **Search:** `[name]`, `[name:value]` (contains), `[name:"value"]` (equals) and `[name:]` (empty), as in Obsidian.
+- **Not covered** (edit as YAML): nested objects and lists of lists; flow-style frontmatter (`{a: 1}`); renaming keys written with a tag, an anchor or `? `.
 
 ### 14. Calendar view
 

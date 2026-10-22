@@ -46,6 +46,7 @@ export function registerAppSlashItems(): void {
   registerSlashItem(commandItem('encryption.insertSection', { label: 'Encrypted text…', keywords: 'encrypt secret password lock private', group: 'Insert', scope: 'block', order: 70 }));
   registerSlashItem(commandItem('voice.record', { label: 'Voice note', keywords: 'record audio microphone dictate transcribe', group: 'Insert', scope: 'block', order: 71 }));
   registerSlashItem(commandItem('tasks.quickAdd', { label: 'New task…', keywords: 'task todo add reminder due', group: 'Insert', scope: 'block', order: 72 }));
+  registerSlashItem(commandItem('properties.add', { label: 'Add property', keywords: 'property properties frontmatter metadata yaml field', group: 'Insert', scope: 'block', order: 73 }));
   registerEmbedSlashItems();
 }
 

@@ -165,5 +165,18 @@ class SearchQueryParserTest {
 		assertThat(SearchQueryParser.parse("a section:b").readsText()).isTrue();
 		assertThat(SearchQueryParser.parse("a \"b\" tag:c").readsText()).isFalse();
 	}
+	@Test
+	void propertyClausesAreBracketedAndNegatable() {
+		assertThat(parse("[status:in progress] -[draft] plan")).isEqualTo(and(
+				leaf(Kind.PROPERTY, "status:in progress"), new Not(leaf(Kind.PROPERTY, "draft")), lastWord("plan")));
+		assertThat(parse("([due:\"2026-10-21\"] OR [done:true])")).isEqualTo(
+				or(leaf(Kind.PROPERTY, "due:\"2026-10-21\""), leaf(Kind.PROPERTY, "done:true")));
+		// Not a property clause: something follows the bracket, or it is empty or unclosed.
+		assertThat(parse("[a]b")).isEqualTo(lastWord("[a]b"));
+		assertThat(parse("[] x")).isEqualTo(and(word("[]"), lastWord("x")));
+		assertThat(parse("[open")).isEqualTo(lastWord("[open"));
+		// A clause without a name matches nothing and is dropped.
+		assertThat(parse("[:x] y")).isEqualTo(lastWord("y"));
+	}
 
 }

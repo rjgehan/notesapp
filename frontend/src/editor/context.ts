@@ -34,10 +34,13 @@ export interface NoteContext {
    */
   renderEmbed(el: HTMLElement, embed: EmbedRequest): () => void;
   /**
-   * Live Preview (ROADMAP 10b): shows the note's properties (its frontmatter's YAML) in `el`, with an
-   * edit button when `onEdit` is given. Returns what removes them.
+   * Live Preview (ROADMAP 10b, 13): shows the note's properties (its frontmatter's YAML) in `el`,
+   * with an edit button (the YAML as text) when `onEdit` is given and a typed editor when
+   * `onChange` is given (ROADMAP 13: it applies an edit of the YAML to the note, false when it
+   * could not). Returns what removes them, or a handle that can also show new YAML in place (so a
+   * field being edited keeps its focus as the note changes).
    */
-  renderProperties(el: HTMLElement, yaml: string, onEdit: (() => void) | null): () => void;
+  renderProperties(el: HTMLElement, yaml: string, onEdit: (() => void) | null, onChange?: PropertiesChange | null): (() => void) | PropertiesHandle;
   /**
    * Live Preview's rich blocks (ROADMAP items 3 and 10): renders a block of the note's Markdown
    * (a callout, a `$$` math block, a Mermaid diagram) in `el` as the reading of the note always did.
@@ -57,6 +60,15 @@ export interface NoteContext {
     noteText(path: string): Promise<string>;
     ensureBlockId(path: string, text: string, block: NoteBlock, wanted: string): Promise<string>;
   };
+}
+
+/** Applies an edit of the frontmatter's YAML (a function of its current text) to the note; false when it could not. */
+export type PropertiesChange = (edit: (yaml: string) => string) => boolean;
+
+/** Properties drawn by the app that can show new YAML in place. */
+export interface PropertiesHandle {
+  update(yaml: string): void;
+  destroy(): void;
 }
 
 /** A block of the note to render: its Markdown, and what a tap on one of its task checkboxes does. */

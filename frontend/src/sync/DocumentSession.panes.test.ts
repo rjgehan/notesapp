@@ -5,6 +5,7 @@ import { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockVault } from '../api/mock/vault';
 import { noteExtensions } from '../editor/editorSetup';
+import { applyPropertiesEdit } from '../editor/livePreview/blocks';
 import { fakeApi, sessionDeps } from '../test/fakes';
 import { testContext } from '../test/noteEditor';
 import { DocumentSession } from './DocumentSession';
@@ -110,5 +111,18 @@ describe('a file in two panes', () => {
     undo(again);
     expect(again.state.doc.toString()).toBe('xabc');
     unmount(session, again);
+  });
+
+  it('copies a typed property edit (ROADMAP item 13) into the other pane', async () => {
+    const { session } = setup('---\ntitle: Plan\n---\nbody');
+    await session.ready;
+    const left = mount(session);
+    const right = mount(session);
+    expect(applyPropertiesEdit(left, (yaml) => yaml.replace('Plan', 'Launch'))).toBe(true);
+    expect(left.state.doc.toString()).toBe('---\ntitle: Launch\n---\nbody');
+    expect(right.state.doc.toString()).toBe(left.state.doc.toString());
+    expect(session.getSnapshot().status).toBe('dirty');
+    unmount(session, left);
+    unmount(session, right);
   });
 });

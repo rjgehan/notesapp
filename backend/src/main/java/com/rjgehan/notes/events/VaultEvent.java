@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
 public sealed interface VaultEvent permits HelloEvent, PingEvent, FileEvent, FileDeletedEvent, FolderEvent,
 		FolderDeletedEvent, MovedEvent, TrashChangedEvent, HistoryCommittedEvent, SettingsChangedEvent,
 		StatusChangedEvent, ResyncEvent, TaskEvent, TaskDeletedEvent, ListChangedEvent, BookmarksChangedEvent,
-		SavedSearchesChangedEvent, FlashcardsChangedEvent, ReminderDueEvent {
+		SavedSearchesChangedEvent, FlashcardsChangedEvent, ReminderDueEvent, PropertyTypesChangedEvent {
 
 	@JsonIgnore
 	String eventName();

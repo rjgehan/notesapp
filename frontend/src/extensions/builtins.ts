@@ -73,6 +73,7 @@ import { registerFlashcards } from '../flashcards/register';
 import { registerHabits } from '../habits/register';
 import { registerCalendar } from '../calendar/register';
 import { registerWorkspace } from '../workspace/register';
+import { registerProperties } from '../properties/register';
 import { registerCanvasView } from '../views/canvas/register';
 import { registerKanban } from '../views/kanban/register';
 import { registerEncryption } from '../views/encrypted/register';
@@ -457,6 +458,7 @@ export function registerBuiltins(): void {
   registerPublish();
   // ROADMAP item 11 (DESIGN §6.40): tabs, split panes and their commands.
   registerWorkspace();
+  registerProperties();
   registerCommand({ id: 'settings.open', name: 'Open settings', hotkey: 'Mod-,', icon: SettingsIcon, run: () => goTo('/settings') });
   registerCommand({ id: 'theme.toggle', name: 'Toggle dark/light theme', run: toggleTheme });
 

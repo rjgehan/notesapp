@@ -238,5 +238,22 @@ class SearchEvaluationTest {
 			assertThat(match.ranges()).containsExactly(new TextRange(5, 13), new TextRange(17, 25));
 		});
 	}
+	@Test
+	void propertyClausesMatchFrontmatter() {
+		note("a.md", "---\nStatus: In Progress\ntags: [x]\nrating: 4\ndone: true\n---\nplan\n", 0);
+		note("b.md", "---\nstatus: done\nrelated:\n  - \"[[Alpha]]\"\n  - Beta\nempty:\n---\nplan\n", 1);
+		note("c.md", "no frontmatter plan\n", 2);
+		assertThat(search("[status]")).containsExactlyInAnyOrder("a.md", "b.md");
+		assertThat(search("[STATUS:progress]")).containsExactly("a.md");
+		assertThat(search("[status:\"done\"]")).containsExactly("b.md");
+		assertThat(search("[status:\"do\"]")).isEmpty();
+		assertThat(search("[related:alpha]")).containsExactly("b.md");
+		assertThat(search("[rating:4] [done:true]")).containsExactly("a.md");
+		assertThat(search("[rating:40]")).isEmpty();
+		assertThat(search("[empty:]")).containsExactly("b.md");
+		assertThat(search("plan -[status]")).containsExactly("c.md");
+		assertThat(search("[status:done] OR [rating:4]")).containsExactlyInAnyOrder("a.md", "b.md");
+		assertThat(search("line:([status:done] plan)")).containsExactly("b.md");
+	}
 
 }

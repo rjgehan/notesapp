@@ -1,0 +1,431 @@
+/* The Properties editor and panel (ROADMAP item 13, DESIGN §6.41). Sizes in px (no rem: the root
+   font size belongs to Excalidraw). */
+
+/* ---------- the editor ---------- */
+
+.properties-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.property-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(130px, 32%) minmax(0, 1fr);
+  align-items: start;
+  gap: 0 8px;
+  border-radius: var(--radius-s);
+}
+
+.property-row:hover,
+.property-row:focus-within {
+  background: var(--background-modifier-hover);
+}
+
+.property-row.is-dragging {
+  opacity: 0.5;
+}
+
+.property-row.is-drop-before::before,
+.property-row.is-drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--interactive-accent);
+}
+
+.property-row.is-drop-before::before {
+  top: -1px;
+}
+
+.property-row.is-drop-after::after {
+  bottom: -1px;
+}
+
+.properties-rows {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+.properties-rows .property-row dt {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 30px;
+  color: var(--text-muted);
+}
+
+.properties-rows .property-row dd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.property-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 26px;
+  flex: none;
+  color: var(--text-faint);
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+}
+
+.property-row:hover .property-grip,
+.property-row:focus-within .property-grip {
+  opacity: 1;
+}
+
+.property-grip.is-placeholder {
+  cursor: default;
+}
+
+.property-type-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.property-type-button:hover {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  color: var(--text-normal);
+}
+
+.property-type-button.is-placeholder {
+  cursor: default;
+}
+
+.property-name {
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.property-name:hover {
+  color: var(--text-normal);
+}
+
+.property-row input:not([type='checkbox']),
+.property-name-input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: 14px;
+}
+
+.property-row input:not([type='checkbox']):focus,
+.property-name-input:focus {
+  border-color: var(--background-modifier-border-focus, var(--interactive-accent));
+  background: var(--background-primary);
+  outline: none;
+}
+
+.property-row input::placeholder {
+  color: var(--text-faint);
+}
+
+.property-row input[aria-invalid='true'] {
+  border-color: var(--text-error);
+}
+
+.property-text.is-rendered {
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 6px;
+  border-radius: var(--radius-s);
+  cursor: text;
+}
+
+.property-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 5px 6px;
+}
+
+.property-date {
+  max-width: 220px;
+  color-scheme: light dark;
+}
+
+.property-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 0;
+}
+
+.property-list .property-suggest {
+  flex: 1 1 80px;
+  min-width: 80px;
+}
+
+.property-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 1px 2px 1px 8px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+}
+
+.property-row:hover .property-chip,
+.property-row:focus-within .property-chip {
+  background: var(--background-primary);
+}
+
+.property-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.property-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.property-chip-remove:hover {
+  color: var(--text-normal);
+}
+
+.property-mismatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 6px;
+  color: var(--text-warning, var(--text-muted));
+}
+
+.property-mismatch code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.property-mismatch-edit,
+.property-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.property-add {
+  margin-top: 4px;
+  margin-left: 16px;
+}
+
+.property-mismatch-edit:hover,
+.property-add:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.property-new-hint {
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  align-self: center;
+}
+
+/* ---------- suggestions ---------- */
+
+.property-suggest {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.property-suggestions {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 200px;
+  max-width: min(360px, 90vw);
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 6px);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s, 0 4px 16px rgba(0, 0, 0, 0.25));
+  font-size: 14px;
+}
+
+.property-suggestions li {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.property-suggestions li.is-active,
+.property-suggestions li:hover {
+  background: var(--background-modifier-hover);
+}
+
+.property-suggestion-detail {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+/* ---------- the panel ---------- */
+
+.properties-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.properties-panel-toolbar {
+  justify-content: stretch;
+}
+
+.properties-filter {
+  flex: 1;
+  min-width: 0;
+}
+
+.property-panel-icon {
+  display: inline-flex;
+  color: var(--text-faint);
+}
+
+.property-panel-icon.is-registered {
+  color: var(--text-muted);
+}
+
+.property-panel-menu {
+  flex: none;
+  opacity: 0;
+}
+
+.property-panel-row:hover .property-panel-menu,
+.property-panel-menu:focus-visible {
+  opacity: 1;
+}
+
+/* ---------- the phone: bigger targets, always-visible handles ---------- */
+
+@media (pointer: coarse) {
+  .property-row {
+    grid-template-columns: minmax(110px, 38%) minmax(0, 1fr);
+  }
+
+  .property-grip {
+    width: 24px;
+    height: 44px;
+    opacity: 1;
+  }
+
+  .property-type-button,
+  .property-chip-remove {
+    width: 44px;
+    height: 44px;
+  }
+
+  .property-name {
+    min-height: 44px;
+  }
+
+  .property-row input:not([type='checkbox']),
+  .property-name-input,
+  .property-text.is-rendered {
+    min-height: 44px;
+    /* 16px keeps iOS Safari from zooming into the field. */
+    font-size: 16px;
+  }
+
+  .property-checkbox {
+    width: 24px;
+    height: 24px;
+    margin: 10px;
+  }
+
+  .property-add,
+  .property-mismatch-edit {
+    min-height: 44px;
+  }
+
+  .property-suggestions li {
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .property-panel-menu {
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Name above value: a phone's width goes to the value. */
+  .property-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: 4px;
+  }
+
+  .properties-rows .property-row dd {
+    padding-left: 24px;
+  }
+}

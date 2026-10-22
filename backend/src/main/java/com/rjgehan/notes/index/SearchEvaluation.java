@@ -80,6 +80,9 @@ final class SearchEvaluation {
 		/** Documents whose lower-cased path (or file name) contains {@code needle}. */
 		BitSet pathContains(String needle, boolean nameOnly);
 
+		/** Notes whose frontmatter matches a property clause (ROADMAP item 13). */
+		BitSet withProperty(PropertyClause clause);
+
 		/** Keeps the documents in which the phrase occurs as consecutive tokens of one field. */
 		void retainPhrase(BitSet docs, TermPattern pattern);
 
@@ -175,6 +178,10 @@ final class SearchEvaluation {
 			}
 			else if ((leaf.kind() == Kind.PATH || leaf.kind() == Kind.FILE) && !leaf.regex()) {
 				state.docs = source.pathContains(PathNames.lower(leaf.value()), leaf.kind() == Kind.FILE);
+			}
+			else if (leaf.kind() == Kind.PROPERTY) {
+				PropertyClause clause = PropertyClause.parse(leaf.value());
+				state.docs = (clause != null) ? source.withProperty(clause) : new BitSet();
 			}
 		}
 		if (this.query.root() != null && isExpensive(this.query.root())) {
@@ -415,7 +422,7 @@ final class SearchEvaluation {
 				}
 				yield false;
 			}
-			case WORD, PHRASE -> false;
+			case WORD, PHRASE, PROPERTY -> false;
 		};
 	}
 

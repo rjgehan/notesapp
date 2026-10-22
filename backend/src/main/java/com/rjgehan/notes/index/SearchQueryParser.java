@@ -20,7 +20,8 @@ import org.jspecify.annotations.Nullable;
  * primary = group | scoped | clause
  * group   = "(" ws* [ or ] ws* ( ")" | end-of-query )
  * scoped  = ( "line:" | "section:" ) ( group | clause )
- * clause  = [ "tag:" | "path:" | "file:" ] ( regex | phrase | word ) ; keywords are case-insensitive
+ * clause  = property | [ "tag:" | "path:" | "file:" ] ( regex | phrase | word ) ; keywords are case-insensitive
+ * property = "[" 1*( char - "[" - "]" - newline ) "]"            ; only before ws, ")" or the end; else a word
  * regex   = "/" 1*( "\" char | char - "/" ) "/"                     ; only before ws, ")" or the end; else a word
  * phrase  = '"' { char - '"' } ( '"' | end-of-query )              ; an unterminated phrase runs to the end
  * word    = 1*( char - ws - '"' )                                   ; inside a group, ")" also ends a word
@@ -154,6 +155,14 @@ public final class SearchQueryParser {
 	}
 
 	private @Nullable Node clause() {
+		if (this.q.charAt(this.i) == '[') {
+			int end = propertyEnd(this.i);
+			if (end > 0) {
+				String inside = this.q.substring(this.i + 1, end);
+				this.i = end + 1;
+				return (PropertyClause.parse(inside) != null) ? new Leaf(Kind.PROPERTY, inside, false, false) : null;
+			}
+		}
 		Kind filter = null;
 		for (int k = 0; k < FILTER_KEYWORDS.length; k++) {
 			if (atKeyword(FILTER_KEYWORDS[k])) {
@@ -226,6 +235,28 @@ public final class SearchQueryParser {
 		}
 		char next = this.q.charAt(end);
 		return Syntax.isWhitespace(next) || next == '(' || next == '"' || (next == ')' && this.depth > 0);
+	}
+
+	/**
+	 * The index of the {@code ]} that closes a property clause starting at {@code start}, or -1. The clause holds no
+	 * {@code [}, {@code ]} or line break, and its {@code ]} must be followed by whitespace, a {@code )} or the end of
+	 * the query; otherwise it is a word.
+	 */
+	private int propertyEnd(int start) {
+		for (int k = start + 1; k < this.n; k++) {
+			char ch = this.q.charAt(k);
+			if (ch == '[' || ch == '\n' || ch == '\r') {
+				return -1;
+			}
+			if (ch == ']') {
+				if (k == start + 1) {
+					return -1;
+				}
+				return (k + 1 == this.n || Syntax.isWhitespace(this.q.charAt(k + 1)) || this.q.charAt(k + 1) == ')') ? k
+						: -1;
+			}
+		}
+		return -1;
 	}
 
 	/**
