@@ -31,6 +31,7 @@ import com.rjgehan.notes.notify.NtfyClient;
 import com.rjgehan.notes.notify.NtfyConfig;
 import com.rjgehan.notes.notify.NtfyConfigFile;
 import com.rjgehan.notes.watch.TailscaleWatchdog;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,6 +60,7 @@ import org.springframework.stereotype.Component;
  * restarted app sends it.
  */
 @Component
+@ServerWide
 public class AppAlerts implements DisposableBean {
 
 	private static final Logger logger = LoggerFactory.getLogger(AppAlerts.class);

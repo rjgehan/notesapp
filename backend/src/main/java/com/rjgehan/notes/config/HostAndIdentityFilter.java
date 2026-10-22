@@ -14,6 +14,7 @@ import com.rjgehan.notes.api.error.NotesException;
 import com.rjgehan.notes.api.error.Problems;
 import com.rjgehan.notes.identity.Identity;
 import com.rjgehan.notes.identity.IdentityResolver;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.MDC;
 
@@ -28,6 +29,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * is stored as a request attribute, and the client id and a short request id are put in the logging MDC.
  */
 @Component
+@ServerWide
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class HostAndIdentityFilter extends OncePerRequestFilter {
 

@@ -13,6 +13,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import com.rjgehan.notes.api.error.NotesException;
 import com.rjgehan.notes.api.error.PayloadTooLargeException;
 import com.rjgehan.notes.api.error.Problems;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 
 import org.springframework.core.Ordered;
@@ -26,6 +27,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * chunked bodies at the same limit while they are read (DESIGN §5.14). Uploads have their own limit and are exempt.
  */
 @Component
+@ServerWide
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class RequestSizeFilter extends OncePerRequestFilter {
 

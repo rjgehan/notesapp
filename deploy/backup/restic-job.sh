@@ -142,6 +142,8 @@ cmd_snapshot() {
 	timeout "$max" restic -r "$LOCAL" backup --json --host "$HOST" --tag "$TAG" \
 		--exclude "$SOURCE/notes-data/vault/.notesapp/tmp" \
 		--exclude "$SOURCE/notes-data/vault/.notesapp/cache" \
+		--exclude "$SOURCE/notes-data/vaults/*/.notesapp/tmp" \
+		--exclude "$SOURCE/notes-data/vaults/*/.notesapp/cache" \
 		"$SOURCE/notes-data" "$SOURCE/tailscale-state" >"$out"
 	status=$?
 	set -e

@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import com.rjgehan.notes.vault.VaultFs;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -29,6 +30,7 @@ import org.springframework.stereotype.Component;
  * mirror. It holds counts only, never a question or note text. Losing it resets this month's count to zero.
  */
 @Component
+@ServerWide
 public class UsageLedger {
 
 	private static final Logger logger = LoggerFactory.getLogger(UsageLedger.class);

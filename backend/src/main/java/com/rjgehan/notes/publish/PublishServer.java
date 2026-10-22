@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 
 import com.rjgehan.notes.config.NotesProperties;
 import com.rjgehan.notes.vault.FileKinds;
+import com.rjgehan.notes.vaults.ServerWide;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -39,6 +40,7 @@ import org.springframework.stereotype.Component;
  * dot segment cannot reach anything, and every response forbids scripts, framing and loads from elsewhere.
  */
 @Component
+@ServerWide
 public class PublishServer implements SmartLifecycle {
 
 	private static final Logger logger = LoggerFactory.getLogger(PublishServer.class);

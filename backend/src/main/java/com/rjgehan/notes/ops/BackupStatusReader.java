@@ -14,6 +14,7 @@ import java.time.format.DateTimeParseException;
 import com.rjgehan.notes.api.dto.BackupState;
 import com.rjgehan.notes.api.dto.BackupStatus;
 import com.rjgehan.notes.config.NotesProperties;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.json.JsonReadFeature;
@@ -30,6 +31,7 @@ import org.springframework.stereotype.Component;
  * error of the app.
  */
 @Component
+@ServerWide
 public class BackupStatusReader {
 
 	private static final int MAX_SIZE = 64 * 1024;

@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.IntConsumer;
 
 import com.rjgehan.notes.config.NotesProperties;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,7 @@ import org.springframework.stereotype.Component;
  * recorded in {@code .watchdog-exits} next to the vault; after {@code maxExits} within {@code exitWindow} it only logs.
  */
 @Component
+@ServerWide
 public class TailscaleWatchdog implements SmartLifecycle {
 
 	private static final Logger logger = LoggerFactory.getLogger(TailscaleWatchdog.class);

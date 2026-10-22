@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import com.rjgehan.notes.api.error.ErrorCode;
 import com.rjgehan.notes.api.error.NotesException;
 import com.rjgehan.notes.api.error.Problems;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +27,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * {@code QueryParametersFilter} at +5). Only the separate publish server (port 8081) may ever be behind Funnel.
  */
 @Component
+@ServerWide
 @Order(Ordered.HIGHEST_PRECEDENCE + 3)
 public class FunnelRequestFilter extends OncePerRequestFilter {
 

@@ -44,7 +44,10 @@ public enum ErrorCode {
 	AI_BUDGET_EXCEEDED("ai-budget-exceeded", HttpStatus.TOO_MANY_REQUESTS, "Monthly AI budget reached"),
 	BLOCK_NOT_FOUND("block-not-found", HttpStatus.CONFLICT, "Block not found"),
 	FUNNEL_REQUEST("funnel-request", HttpStatus.FORBIDDEN, "Not available through Funnel"),
-	PUBLISHING_OFF("publishing-off", HttpStatus.CONFLICT, "Public publishing is off");
+	PUBLISHING_OFF("publishing-off", HttpStatus.CONFLICT, "Public publishing is off"),
+	VAULT_NOT_FOUND("vault-not-found", HttpStatus.NOT_FOUND, "No such vault"),
+	VAULT_UNAVAILABLE("vault-unavailable", HttpStatus.SERVICE_UNAVAILABLE, "Vault not available"),
+	VAULTS_OFF("vaults-off", HttpStatus.CONFLICT, "Creating vaults is off");
 
 	private final String code;
 

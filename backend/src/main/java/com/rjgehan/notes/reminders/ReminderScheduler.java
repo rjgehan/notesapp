@@ -41,6 +41,7 @@ import com.rjgehan.notes.settings.RemindersSettings;
 import com.rjgehan.notes.settings.Settings;
 import com.rjgehan.notes.settings.SettingsService;
 import com.rjgehan.notes.tasks.TaskService;
+import com.rjgehan.notes.vaults.VaultNames;
 import com.rjgehan.notes.vault.PathNames;
 import com.rjgehan.notes.vault.VaultFs;
 import org.jspecify.annotations.Nullable;
@@ -185,6 +186,9 @@ public class ReminderScheduler implements DisposableBean {
 
 	private @Nullable ScheduledExecutorService executor;
 
+	/** The vault's app URL prefix (DESIGN §5.38): a notification opens the vault the reminder belongs to. */
+	private String urlPrefix = "";
+
 	@Autowired
 	public ReminderScheduler(SettingsService settings, TaskService tasks, VaultFs fs, NotesProperties properties,
 			List<ReminderRoute> routes, Clock clock, JsonMapper mapper,
@@ -213,6 +217,7 @@ public class ReminderScheduler implements DisposableBean {
 
 		}, (id, request, identity, origin) -> tasks.complete(id, request, identity, origin), routes, clock, mapper,
 				properties.vaultDir().resolve(FILE), tick);
+		this.urlPrefix = VaultNames.urlPrefix(properties.vaults().currentName(), properties.vaults().isDefault());
 	}
 
 	ReminderScheduler(Sources sources, Completer completer, List<ReminderRoute> routes, Clock clock, JsonMapper mapper,
@@ -303,7 +308,8 @@ public class ReminderScheduler implements DisposableBean {
 		}
 	}
 
-	private void deliver(ReminderMessage message, RemindersSettings settings, List<ReminderRoute> active, Instant now) {
+	private void deliver(ReminderMessage due, RemindersSettings settings, List<ReminderRoute> active, Instant now) {
+		ReminderMessage message = due.withUrlPrefix(this.urlPrefix);
 		boolean accepted = false;
 		List<String> errors = new ArrayList<>();
 		for (ReminderRoute route : active) {
@@ -535,7 +541,7 @@ public class ReminderScheduler implements DisposableBean {
 		Instant now = this.clock.instant();
 		ReminderMessage message = new ReminderMessage("test:" + now.toEpochMilli(), "test", null, null,
 				"NotesApp test reminder", "Reminders reach this device. Task reminders arrive the same way.",
-				"/settings/reminders");
+				"/settings/reminders").withUrlPrefix(this.urlPrefix);
 		Settings settings = this.sources.settings();
 		try {
 			if (route instanceof WebPushRoute push && deviceId != null) {

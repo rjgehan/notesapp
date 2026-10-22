@@ -5,6 +5,7 @@ import java.util.function.BooleanSupplier;
 
 import com.rjgehan.notes.config.NotesProperties;
 import com.rjgehan.notes.settings.AiSettings;
+import com.rjgehan.notes.vaults.ServerWide;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
  * {@code /data/secrets/anthropic-key}, billed per token. With {@code notes.ai.fake} both answer with canned text.
  */
 @Component
+@ServerWide
 public class AiProviders implements DisposableBean {
 
 	private static final Logger logger = LoggerFactory.getLogger(AiProviders.class);

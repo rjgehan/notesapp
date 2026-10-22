@@ -16,6 +16,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 
+import com.rjgehan.notes.vaults.ServerWide;
+
 import org.jspecify.annotations.Nullable;
 
 import org.springframework.core.Ordered;
@@ -32,6 +34,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * ever read as a form.
  */
 @Component
+@ServerWide
 @Order(Ordered.HIGHEST_PRECEDENCE + 5)
 public class QueryParametersFilter extends OncePerRequestFilter {
 

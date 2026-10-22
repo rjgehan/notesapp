@@ -2,6 +2,8 @@ package com.rjgehan.notes.ops;
 
 import java.time.Instant;
 
+import com.rjgehan.notes.vaults.ServerWide;
+
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Component;
  * bean is created, before the vault startup runs, so a marker logged during startup is not missed.
  */
 @Component
+@ServerWide
 public class AlertLogBridge implements InitializingBean, DisposableBean {
 
 	private static final Logger logger = LoggerFactory.getLogger(AlertLogBridge.class);
