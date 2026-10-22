@@ -1,0 +1,241 @@
+/* Kanban boards (ROADMAP item 15, DESIGN §6.8.4). The board itself is the tasks' generic board
+   (tasks.css: .board, .board-column, .board-card); this adds the toolbar, the cards' contents,
+   the card editor and the archive. */
+
+.kanban-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 24px;
+}
+
+.kanban-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.kanban-toolbar .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.kanban-toolbar .button.is-active {
+  background: var(--background-modifier-active-hover);
+}
+
+.kanban-warning {
+  margin: 0;
+}
+
+.kanban-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 2px 6px 4px;
+}
+
+.kanban-card-check {
+  flex: none;
+  margin: 4px 2px 0 0;
+}
+
+.kanban-card-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 1px;
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+
+.kanban-card-text {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.kanban-card-text > :first-child {
+  margin-top: 0;
+}
+
+.kanban-card-text > :last-child {
+  margin-bottom: 0;
+}
+
+.kanban-card-text p {
+  margin: 0 0 4px;
+}
+
+.kanban-card-text ul,
+.kanban-card-text ol {
+  margin: 2px 0;
+  padding-left: 18px;
+}
+
+.kanban-card-text img {
+  max-width: 100%;
+  border-radius: var(--radius-s);
+}
+
+.kanban-card-empty {
+  font-size: var(--font-ui-small);
+}
+
+.kanban-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.kanban-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.kanban-chip.is-overdue {
+  color: var(--text-error);
+}
+
+.kanban-chip.is-done {
+  color: var(--text-success);
+}
+
+.kanban-card-more {
+  flex: none;
+  opacity: 0.6;
+}
+
+.board-card:hover .kanban-card-more,
+.kanban-card-more:focus-visible {
+  opacity: 1;
+}
+
+.kanban-limit {
+  align-self: center;
+  margin-right: 2px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.kanban-limit.is-over {
+  color: var(--text-error);
+  font-weight: 600;
+}
+
+.kanban-lane-done {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 2px;
+  color: var(--text-success);
+}
+
+/* The card editor: the canvas's small CodeMirror editor, in the card's place or under a lane. */
+.kanban-edit,
+.kanban-add-editor {
+  flex: 1;
+  min-width: 0;
+}
+
+.kanban-add-editor {
+  margin: 0 8px 8px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+}
+
+.kanban-card-editor {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  cursor: text;
+}
+
+.kanban-card-editor .cm-editor {
+  background: transparent;
+}
+
+.kanban-card-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.kanban-card-editor .cm-content {
+  min-height: 44px;
+  padding: 6px 8px;
+  font-family: var(--font-text);
+  font-size: 14px;
+}
+
+.kanban-archive {
+  padding: 8px 12px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.kanban-archive-title {
+  margin: 0 0 6px;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+}
+
+.kanban-archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.kanban-archive-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.kanban-archive-item .kanban-card-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.kanban-archive-actions {
+  display: inline-flex;
+  flex: none;
+}
+
+@media (pointer: coarse) {
+  .kanban-card-more {
+    min-width: 44px;
+    min-height: 44px;
+    opacity: 1;
+  }
+
+  .kanban-toolbar .button,
+  .kanban-archive-actions .icon-button {
+    min-height: 44px;
+  }
+
+  .kanban-archive-actions .icon-button {
+    min-width: 44px;
+  }
+
+  /* iOS zooms into inputs under 16px. */
+  .kanban-card-editor .cm-content {
+    font-size: 16px;
+  }
+}

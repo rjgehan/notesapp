@@ -134,7 +134,8 @@ class ObsidianImportIntegrationTest {
 			Map<String, JsonNode> issues = byId(report.get("issues"), "id");
 			assertThat(issues).doesNotContainKeys("callouts", "mermaid", "math");
 			assertThat(issues).containsKeys("dataview", "templater", "missing-files",
-					"missing-headings", "missing-blocks", "missing-notes", "frontmatter", "kanban", "canvas");
+					"missing-headings", "missing-blocks", "missing-notes", "frontmatter", "canvas");
+			assertThat(issues).doesNotContainKey("kanban");
 			JsonNode dataview = issues.get("dataview");
 			assertThat(dataview.get("category").asString()).isEqualTo("syntax");
 			assertThat(dataview.get("severity").asString()).isEqualTo("warning");

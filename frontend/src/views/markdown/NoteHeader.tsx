@@ -21,6 +21,8 @@ interface Props {
   mode: ViewMode;
   /** The title can be edited (renamed). */
   editable: boolean;
+  /** The source and lock toggles (false: a Kanban board shows instead of the text, DESIGN §6.8.4). */
+  controls?: boolean;
 }
 
 /**
@@ -71,7 +73,7 @@ export function SourceToggle({ mode }: { mode: ViewMode }) {
   );
 }
 
-export function NoteHeader({ path, snapshot, mode, editable }: Props) {
+export function NoteHeader({ path, snapshot, mode, editable, controls = true }: Props) {
   useHotkeyOverrides();
   const breakpoint = useBreakpoint();
   const phone = breakpoint === 'phone';
@@ -82,7 +84,7 @@ export function NoteHeader({ path, snapshot, mode, editable }: Props) {
       {!phone && (
         <div className="note-header-bar" data-covers-top>
           <span className="note-header-nav">
-            {breakpoint === 'desktop' && (
+            {breakpoint === 'desktop' && controls && (
               <>
                 <button type="button" className="icon-button" aria-label="Navigate back" title={`Navigate back${keyHint('nav.back', keyLabel)}`} onClick={() => runCommand('nav.back', { activePath: path })}>
                   <ArrowLeft size={16} />

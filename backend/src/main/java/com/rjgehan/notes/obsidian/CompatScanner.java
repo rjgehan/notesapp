@@ -59,8 +59,6 @@ public final class CompatScanner {
 		HTML_REMOVED("html-removed", Category.SYNTAX, Severity.INFO, "Embedded HTML that is removed",
 				"<iframe>, <script>, <style>, <form> and similar tags are removed by the reading view's sanitizer.",
 				null),
-		KANBAN("kanban", Category.SYNTAX, Severity.WARNING, "Kanban boards",
-				"Notes with kanban-plugin in their properties show as Markdown lists.", 15),
 
 		// ---------- links ----------
 		MISSING_FILES("missing-files", Category.LINKS, Severity.WARNING, "Embeds and file links that lead nowhere",
@@ -207,9 +205,6 @@ public final class CompatScanner {
 		var parse = note.parse();
 		if (parse.frontmatter() != null) {
 			Map<String, @Nullable Object> data = parse.frontmatter().data();
-			if (data != null && data.containsKey("kanban-plugin")) {
-				add(Rule.KANBAN, path, 0, "kanban-plugin: " + data.get("kanban-plugin"));
-			}
 			if (data != null && data.containsKey("excalidraw-plugin") && !isExcalidrawName(path)) {
 				add(Rule.EXCALIDRAW, path, 0, "excalidraw-plugin: " + data.get("excalidraw-plugin"));
 			}

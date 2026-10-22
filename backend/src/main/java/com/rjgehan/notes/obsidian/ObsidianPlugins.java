@@ -65,7 +65,7 @@ final class ObsidianPlugins {
 			Map.entry("dataview", k("Dataview", Support.PLANNED, "Queries show as code blocks; scripts and query blocks are planned.", 40)),
 			Map.entry("templater-obsidian", k("Templater", Support.UNSUPPORTED, "<% %> commands stay as text; core {{date}} and {{title}} placeholders work.")),
 			Map.entry("obsidian-excalidraw-plugin", k("Excalidraw", Support.PARTIAL, ".excalidraw and .excalidraw.md drawings open in Excalidraw and sync; embedded notes, LaTeX and PDF pages show as static images.")),
-			Map.entry("obsidian-kanban", k("Kanban", Support.PLANNED, "Boards show as Markdown lists; boards are planned.", 15)),
+			Map.entry("obsidian-kanban", k("Kanban", Support.PARTIAL, "Notes with kanban-plugin in their properties open as boards: drag cards between lanes, edit cards, add, rename and reorder lanes, archive; the file stays in the plugin's format and its settings block is kept as is. The plugin's settings, date picker and lane options are not offered.")),
 			Map.entry("obsidian-tasks-plugin", k("Tasks", Support.PARTIAL, "Checkboxes work, and Convert checkbox to task brings a line's emoji dates and priorities into a structured task; task queries are not interpreted.")),
 			Map.entry("calendar", k("Calendar", Support.PLANNED, "A calendar view is planned; daily notes work.", 14)),
 			Map.entry("obsidian-git", k("Git", Support.SUPPORTED, "Not needed: NotesApp keeps the vault's history in git itself. Turn the plugin off for this vault.")),
