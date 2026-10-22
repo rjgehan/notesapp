@@ -3279,6 +3279,16 @@ A stream that ends without `done` or `error` was cut off. Closing the connection
 
 ---
 
+## 27. Encrypted notes (ROADMAP item 27)
+
+Numbered after its ROADMAP item, like §34 and §35. Encryption is done in the browser (DESIGN §6.33) in the Obsidian Meld Encrypt formats; this API adds no endpoint and no field, and never receives a passphrase, a key or a plaintext.
+
+- **`.mdenc` files** are `kind: "text"` (`mdenc` is in the default `notes.text-extensions`, DESIGN §4.2) and use the text-file endpoints (§8) unchanged: `GET`/`PUT /api/files` with versions and conflicts, history (§14), trash (§13), moves (§10; a move from `X.md` to `X.mdenc` updates links like any rename). Their content is the plugin's JSON, `{"version":"2.0","hint":"…","encodedData":"<base64>"}`. They are not indexed documents (§1.8): search (§12) never returns them by content (a `file:` or `path:` query still finds them by name), and they have no links, tags or mentions (§11).
+- **Inline sections** in notes (`%%🔐β 💡hint💡<base64> 🔐%%`, `🔐β …🔐`, and the plugin's older `α` and unmarked commented forms; one line, at least 16 base64 characters) are stored as written. Search treats each section, hint included, as blank space: no word, phrase, regular expression or scoped query matches it and snippets show spaces there; line numbers and offsets in results are those of the note.
+- **Ask your vault** (§24): note text sent to the model, and the `text` of a `selection` request, have every section replaced by `[encrypted]`; `.mdenc` files are never sources (they are not notes), and `scope: "note"` on one is answered like any other path that is not a note.
+
+---
+
 ## 34. Flashcards (ROADMAP item 34)
 
 Sections 34 and 35 are numbered after their ROADMAP items, so branches built in parallel do not collide. Cards live in notes, in the Obsidian Spaced Repetition plugin's syntax, and are parsed and scheduled (FSRS) by the client (DESIGN §6.34). The server stores what notes do not hold: each card's answers and a cached FSRS state, plus the flashcard settings, in `.notesapp/srs.json` (DESIGN §5.34).
