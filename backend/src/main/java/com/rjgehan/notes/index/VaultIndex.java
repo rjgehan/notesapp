@@ -637,6 +637,18 @@ public class VaultIndex {
 		}
 
 		@Override
+		public BitSet withProperty(PropertyClause clause) {
+			BitSet matches = new BitSet();
+			for (NoteRecord note : VaultIndex.this.notes.values()) {
+				Frontmatter frontmatter = note.parse().frontmatter();
+				if (frontmatter != null && clause.matches(frontmatter.data())) {
+					matches.set(note.docId());
+				}
+			}
+			return matches;
+		}
+
+		@Override
 		public void retainPhrase(BitSet docs, TermPattern pattern) {
 			keepPhraseMatches(docs, pattern);
 		}
