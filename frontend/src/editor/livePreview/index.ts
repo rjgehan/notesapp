@@ -19,6 +19,7 @@ import { formatToolbar } from './formatToolbar';
 import { inputRules } from './inputRules';
 import { collectElements, INLINE_KINDS, lineLayout, type Layout, type Run } from './model';
 import { isPointerSelection, touchTracking } from './pointer';
+import { revealElementAt } from './reveal';
 import { richMarkdown } from './rich';
 import { hiddenBlockIds } from './blockIds';
 import { deleteNextToTable, tableBlocks, tables } from './table';
@@ -392,6 +393,13 @@ const linkClicks = EditorView.domEventHandlers({
     return false;
   },
   mousedown(event, view) {
+    // A click on an embed shown as a link (a missing file, a block reference) edits its source,
+    // as a click on a link's text edits that (reveal.ts); Mod-click and a tap follow it.
+    const embedLink = event.target instanceof Element ? event.target.closest<HTMLElement>('.cm-lp-embed-link') : null;
+    if (embedLink && event.button === 0 && lastPointerType !== 'touch' && !modKey(event) && !view.state.readOnly && view.contentDOM.contains(embedLink)) {
+      event.preventDefault();
+      return revealElementAt(view, embedLink, ['embed']);
+    }
     // A tap on a link while editing keeps the caret where it is (and the keyboard closed).
     if (lastPointerType !== 'touch' || !view.state.facet(EditorView.editable) || !linkElement(view, event.target)) return false;
     event.preventDefault();

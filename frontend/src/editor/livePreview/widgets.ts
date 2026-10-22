@@ -7,6 +7,7 @@ import type { NoteContext } from '../context';
 import { embedWidget } from './embeds';
 import { showFootnote, type FootnoteIndex } from './footnotes';
 import { LIST_INDENT_EM, type WidgetSpec } from './model';
+import { revealElementAt } from './reveal';
 
 /** Bullet glyphs by nesting level, as the reading view's disc, circle and square. */
 const BULLETS = ['•', '◦', '▪'];
@@ -189,6 +190,38 @@ class FenceWidget extends WidgetType {
     el.className = 'cm-lp-fence';
     el.textContent = this.language;
     return el;
+  }
+}
+
+/**
+ * A hidden `%%comment%%` while the note can be edited (hide-all): a small marker, so the comment
+ * is not lost from view, whose click puts the caret into the comment's text (reveal.ts). Its
+ * text is the marker's tooltip. A locked note hides comments entirely.
+ */
+export class CommentWidget extends WidgetType {
+  readonly text: string;
+  constructor(text: string) {
+    super();
+    this.text = text;
+  }
+  override eq(other: CommentWidget): boolean {
+    return other.text === this.text;
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const el = document.createElement('span');
+    el.className = 'cm-lp-comment-chip';
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', 'Comment (edit)');
+    el.title = this.text.trim() || 'Comment';
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      revealElementAt(view, el, ['comment']);
+    });
+    return el;
+  }
+  override ignoreEvent(): boolean {
+    return true;
   }
 }
 

@@ -802,8 +802,15 @@ th.cm-lp-cell {
   white-space: normal;
 }
 
-.cm-lp-embed.markdown-rendered {
+.cm-lp-embed.markdown-rendered,
+.cm-lp-embed-content.markdown-rendered {
   contain: none;
+}
+
+/* What the app drew (the outer element also holds the embed's edit button). */
+.cm-lp-embed-content {
+  display: block;
+  max-width: 100%;
 }
 
 .cm-lp-embed-note,
@@ -904,6 +911,102 @@ th.cm-lp-cell {
 .cm-lp-hidden-comment {
   height: 0;
   overflow: hidden;
+}
+
+/* Everything rendered is editable (DESIGN §6.6.1): a hidden comment shows a small marker whose
+   click shows its text; an embed that takes its own clicks has an edit button on hover (always
+   on touch screens); a footnote's tooltip has Edit. Locked (read-only) notes show none of them. */
+.cm-lp-hidden-comment.is-editable {
+  height: auto;
+  line-height: 1;
+}
+
+.cm-lp-comment-chip {
+  display: inline-block;
+  min-width: 22px;
+  height: 14px;
+  margin: 0 2px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+  color: var(--text-faint);
+  font-family: var(--font-interface);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  vertical-align: middle;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cm-lp-comment-chip::before {
+  content: '%%';
+}
+
+.cm-lp-comment-chip:hover {
+  color: var(--text-muted);
+}
+
+.cm-lp-embed:has(> .cm-lp-embed-edit) {
+  position: relative;
+}
+
+.cm-lp-embed-edit {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.cm-lp-embed:hover > .cm-lp-embed-edit,
+.cm-lp-embed-edit:focus-visible {
+  opacity: 1;
+}
+
+.cm-lp-embed-edit:hover {
+  color: var(--text-normal);
+}
+
+@media (pointer: coarse) {
+  .cm-lp-embed-edit {
+    opacity: 0.85;
+    width: 44px;
+    height: 44px;
+  }
+
+  .cm-lp-comment-chip {
+    min-width: 44px;
+    height: 24px;
+    line-height: 24px;
+  }
+}
+
+.cm-lp-locked .cm-lp-embed-edit {
+  display: none;
+}
+
+.cm-lp-footnote-edit {
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
 }
 
 /* Widgets are not text: a long press on the phone never selects inside them (ROADMAP 10c). */

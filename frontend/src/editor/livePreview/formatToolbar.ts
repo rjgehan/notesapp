@@ -10,7 +10,7 @@ import { noteContext } from '../context';
 import { hasFormat, inLink, setHeading, toggleBold, toggleHighlight, toggleInlineCode, toggleItalic, toggleLink, toggleStrikethrough, type InlineFormat } from '../formatting';
 import { isTableCell } from './table/facets';
 
-/** Lucide icons (ISC), drawn without React: [element, attributes] pairs on a 24×24 grid. */
+/** Lucide icons (ISC), drawn without React: [element, attributes] pairs on a 24×24 grid (also the embeds' edit button). */
 type IconNode = Array<[string, Record<string, string>]>;
 
 const ICONS: Record<string, IconNode> = {
@@ -44,7 +44,7 @@ const ICONS: Record<string, IconNode> = {
   ],
 };
 
-function icon(name: string): SVGSVGElement {
+export function icon(name: string): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   for (const [k, v] of Object.entries({ width: '16', height: '16', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(k, v);

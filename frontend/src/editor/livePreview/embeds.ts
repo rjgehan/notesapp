@@ -2,12 +2,16 @@
 // show the file as the reading of the note does (an image, audio, video, a PDF, a note one level
 // deep, a file chip), through `NoteContext.renderEmbed`; web images load unless the per-device
 // preference says to wait for a click. Everything is built with DOM calls from the note's text,
-// never from HTML strings, so nothing in a note can inject markup.
+// never from HTML strings, so nothing in a note can inject markup. While the note can be edited, a
+// click on an image (or on an embed shown as a link) puts the caret into the embed's source, and
+// every other embed has an edit button (`</>`, on hover) that does the same (reveal.ts).
 import { WidgetType, type EditorView } from '@codemirror/view';
 import type { FileEntry } from '../../api/types';
 import { resolve } from '../../features/links';
 import type { NoteContext } from '../context';
+import { icon } from './formatToolbar';
 import type { EmbedSpec } from './model';
+import { revealElementAt } from './reveal';
 
 const cleanups = new WeakMap<HTMLElement, () => void>();
 
@@ -22,6 +26,28 @@ export function remeasureOnChange(view: EditorView, el: HTMLElement): () => void
     el.removeEventListener('load', measure, true);
     observer?.disconnect();
   };
+}
+
+/** A click on `target` puts the caret into the source of the embed drawn by `dom` (not in a note that cannot be written). */
+function revealOnClick(view: EditorView, dom: HTMLElement, target: HTMLElement): void {
+  target.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || view.state.readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    revealElementAt(view, dom, ['embed']);
+  });
+}
+
+/** The edit button of an embed that takes its own clicks (media, PDFs, notes, file chips). */
+function editButton(view: EditorView, dom: HTMLElement): HTMLElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'cm-lp-embed-edit';
+  button.title = 'Edit the embed';
+  button.setAttribute('aria-label', 'Edit the embed');
+  button.appendChild(icon('code'));
+  revealOnClick(view, dom, button);
+  return button;
 }
 
 function sameSpec(a: EmbedSpec, b: EmbedSpec): boolean {
@@ -60,7 +86,13 @@ class FileEmbedWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const el = document.createElement('span');
     el.className = `cm-lp-embed cm-lp-embed-${this.entry.kind}`;
-    const unmount = this.note.renderEmbed(el, { entry: this.entry, subpath: this.spec.subpath, display: this.spec.display, size: this.spec.size });
+    const content = document.createElement('span');
+    content.className = 'cm-lp-embed-content';
+    el.appendChild(content);
+    const unmount = this.note.renderEmbed(content, { entry: this.entry, subpath: this.spec.subpath, display: this.spec.display, size: this.spec.size });
+    // An image: a click edits its source. Anything else takes its own clicks: a button does it.
+    if (this.entry.kind === 'image') revealOnClick(view, el, content);
+    else el.appendChild(editButton(view, el));
     const unmeasure = remeasureOnChange(view, el);
     cleanups.set(el, () => {
       unmeasure();
@@ -73,8 +105,8 @@ class FileEmbedWidget extends WidgetType {
     cleanups.delete(dom);
   }
   override ignoreEvent(): boolean {
-    // A click on an image places the caret by it; media, PDFs and notes take their own clicks.
-    return this.entry.kind !== 'image';
+    // Media, PDFs and notes take their own clicks; an image's click edits its source (above).
+    return true;
   }
 }
 
@@ -107,6 +139,7 @@ class WebImageWidget extends WidgetType {
     // `data:` images are part of the note: nothing to fetch.
     if (this.load || this.spec.url?.toLowerCase().startsWith('data:')) {
       el.appendChild(this.image(view));
+      revealOnClick(view, el, el);
       return el;
     }
     const placeholder = document.createElement('span');
@@ -118,13 +151,15 @@ class WebImageWidget extends WidgetType {
     placeholder.addEventListener('click', (e) => {
       e.preventDefault();
       placeholder.replaceWith(this.image(view));
+      revealOnClick(view, el, el);
       view.requestMeasure();
     });
     el.appendChild(placeholder);
     return el;
   }
-  override ignoreEvent(event: Event): boolean {
-    return event.target instanceof Element && event.target.closest('.cm-lp-remote-image') !== null;
+  override ignoreEvent(): boolean {
+    // The placeholder loads the image on a click; the image's click edits its source.
+    return true;
   }
 }
 

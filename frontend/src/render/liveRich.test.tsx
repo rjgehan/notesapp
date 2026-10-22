@@ -120,6 +120,23 @@ describe('rich blocks while editing (Live Preview)', () => {
     expect(view.contentDOM.querySelector('.cm-lp-rich-callout')).toBeNull();
   });
 
+  it('a click on a math block or a Mermaid diagram shows its text with the caret at its start (DESIGN §6.6.1)', () => {
+    const view = noteEditor('‸' + NOTE, { ctx: testContext(app) });
+    view.contentDOM.querySelector('.cm-lp-rich-math')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    expect(view.state.selection.main.head).toBe(NOTE.indexOf('$$\na^2'));
+    expect(view.contentDOM.textContent).toContain('a^2 + b^2 = c^2');
+    view.contentDOM.querySelector('.cm-lp-rich-mermaid')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    expect(view.state.selection.main.head).toBe(NOTE.indexOf('```mermaid'));
+    expect(view.contentDOM.textContent).toContain('graph TD; A-->B');
+  });
+
+  it('a click on inline math puts the caret into its TeX', () => {
+    const view = noteEditor('‸' + NOTE, { ctx: testContext(app) });
+    view.contentDOM.querySelector('.cm-lp-math')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    expect(view.state.selection.main.head).toBe(NOTE.indexOf('$E') + 1);
+    expect(view.contentDOM.textContent).toContain('$E=mc^2$');
+  });
+
   it('source mode shows the text', () => {
     const view = noteEditor(NOTE, { mode: 'source', ctx: testContext(app) });
     expect(view.contentDOM.querySelector('.cm-lp-rich, .cm-lp-math')).toBeNull();
