@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The ROADMAP item 26 decision, "built switched off; nothing is exposed until you enable it", as shipped: the
- * configuration default, both compose files and the Tailscale serve config all keep public publishing off, and the
+ * configuration default, every compose file and the Tailscale serve config all keep public publishing off, and the
  * opt-in Funnel config opens the publish server's port alone.
  */
 class PublishDeployDefaultsTest {
@@ -36,16 +36,29 @@ class PublishDeployDefaultsTest {
 		assertThat(compose).contains("NOTES_PUBLISH_ENABLED: ${NOTES_PUBLISH_ENABLED:-false}");
 		assertThat(Files.readString(DEPLOY.resolve(".env.example"))).contains("\nNOTES_PUBLISH_ENABLED=false\n");
 
-		String casaos = Files.readString(DEPLOY.resolve("casaos-compose.yml")).replace("\r\n", "\n");
-		assertThat(casaos).contains("      NOTES_PUBLISH_ENABLED: \"false\"\n")
+		// CasaOS, simple: the host's own `tailscale serve` reaches the app's port alone, and publishing keeps the
+		// application default (off). Nothing may switch it on, publish the publish server's port (8081) or mention a
+		// Funnel. (8443 is not checked here: the host may serve the app itself on that tailnet port.)
+		String simple = read("casaos-compose.yml");
+		assertThat(simple).doesNotContainPattern("NOTES_PUBLISH_ENABLED:\\s*\"?true")
+			.doesNotContainIgnoringCase("funnel")
+			.doesNotContain("8081");
+
+		// CasaOS with its own Tailscale container: both switches are written out, off.
+		String sidecar = read("casaos-compose-sidecar.yml");
+		assertThat(sidecar).contains("      NOTES_PUBLISH_ENABLED: \"false\"\n")
 			.contains("      NOTES_PUBLISH_FUNNEL: \"false\"\n")
 			// $$ so that Compose leaves the variable to the shell instead of replacing it with the host's (empty) one.
 			.contains("if [ \"$$NOTES_PUBLISH_FUNNEL\" = \"true\" ]; then");
 		// The serve.json written when the switch is off has no Funnel and no second port.
-		String off = casaos.substring(casaos.indexOf("        else\n"), casaos.indexOf("        fi\n"));
+		String off = sidecar.substring(sidecar.indexOf("        else\n"), sidecar.indexOf("        fi\n"));
 		assertThat(off).contains("\"AllowFunnel\": { \"notes.CHANGE-ME.ts.net:443\": false }")
 			.doesNotContain("8443")
 			.doesNotContain("8081");
+	}
+
+	private static String read(String name) throws Exception {
+		return Files.readString(DEPLOY.resolve(name)).replace("\r\n", "\n");
 	}
 
 	@Test
