@@ -1,20 +1,24 @@
-// Note header (DESIGN §6.5): inline title (edit = rename), save status and the mode controls. On
-// phones only the inline title is shown, because the TopBar already has the rest; tablets keep the
-// save status here and the lock toggle in the TopBar. On desktop the bar also has back and forward
-// buttons around a centred breadcrumb, as Obsidian's view header does.
-import { ArrowLeft, ArrowRight, BookOpen, CodeXml, Lock, LockOpen, Pencil } from 'lucide-react';
+// Note header (DESIGN §6.5): inline title (edit = rename), save status and, on desktop, the
+// note's ⋯ menu. There are no mode toggles: every note shows in Live Preview, rendered and
+// editable (§6.6.1); the ⋯ menu's "Show Markdown source" is the escape hatch for when something
+// has gone wrong. On phones only the inline title is shown, because the TopBar already has the
+// rest (its ⋯ has the same item); tablets keep the save status here. On desktop the bar also has
+// back and forward buttons around a centred breadcrumb, as Obsidian's view header does.
+import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react';
+import type { MouseEvent } from 'react';
 import { runCommand } from '../../features/commands';
 import { BookmarkToggle } from '../../components/BookmarkToggle';
+import { openContextMenu } from '../../components/overlays/openContextMenu';
 import { PublishButton } from '../../components/publish/PublishButton';
 import { SaveStatus } from '../../components/SaveStatus';
 import { useBreakpoint } from '../../components/layout/useBreakpoint';
-import { toggleNoteMode, toggleSourceMode } from '../../features/noteMode';
 import { displayName, folderOf } from '../../features/paths';
 import { keyHint, useHotkeyOverrides } from '../../features/hotkeyPrefs';
 import { keyLabel } from '../../features/platform';
 import type { ViewMode } from '../../state/ui';
 import type { SessionSnapshot } from '../../sync/DocumentSession';
 import { InlineTitle } from './InlineTitle';
+import { noteMenuItems } from './noteMenu';
 
 interface Props {
   path: string;
@@ -22,54 +26,18 @@ interface Props {
   mode: ViewMode;
   /** The title can be edited (renamed). */
   editable: boolean;
-  /** The source and lock toggles (false: a Kanban board shows instead of the text, DESIGN §6.8.4). */
+  /** The navigation buttons and the ⋯ menu (false: a Kanban board shows instead of the text, DESIGN §6.8.4). */
   controls?: boolean;
 }
 
-/**
- * Lock editing (DESIGN §6.6.1): a note locks and unlocks editing (Live Preview, read-only, which is
- * also the reading view). Views with `edit` and `read` switch between the two. Mod-E does the same,
- * except in a note's text, where it toggles inline code; so only unlocking names it.
- */
-export function ModeToggle({ mode }: { mode: ViewMode }) {
-  useHotkeyOverrides();
-  const shortcut = keyHint('editor.toggleMode', keyLabel);
-  if (mode === 'read' || mode === 'edit') {
-    const next = mode === 'edit' ? 'reading' : 'editing';
-    return (
-      <button type="button" className="icon-button mode-toggle" onClick={toggleNoteMode} aria-label={`Switch to ${next} view`} title={`Switch to ${next} view${shortcut}`}>
-        {mode === 'edit' ? <BookOpen size={17} /> : <Pencil size={17} />}
-      </button>
-    );
-  }
-  const locked = mode === 'locked';
+function NoteMenuButton({ path, mode }: { path: string; mode: ViewMode }) {
+  const open = (e: MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    openContextMenu({ x: r.right - 200, y: r.bottom + 2 }, 'Note actions', noteMenuItems(path, mode));
+  };
   return (
-    <button
-      type="button"
-      className="icon-button mode-toggle"
-      onClick={toggleNoteMode}
-      aria-label="Lock editing"
-      aria-pressed={locked}
-      title={locked ? `Unlock editing${shortcut}` : 'Lock editing'}
-    >
-      {locked ? <Lock size={17} /> : <LockOpen size={17} />}
-    </button>
-  );
-}
-
-/** Live Preview or the Markdown source of a note. */
-export function SourceToggle({ mode }: { mode: ViewMode }) {
-  const source = mode === 'source';
-  return (
-    <button
-      type="button"
-      className="icon-button source-toggle"
-      onClick={toggleSourceMode}
-      aria-label="Source mode"
-      aria-pressed={source}
-      title={source ? 'Show Live Preview' : 'Show the Markdown source'}
-    >
-      <CodeXml size={17} />
+    <button type="button" className="icon-button note-menu-button" aria-label="Note actions" title="More" aria-haspopup="menu" onClick={open}>
+      <Ellipsis size={17} />
     </button>
   );
 }
@@ -104,12 +72,7 @@ export function NoteHeader({ path, snapshot, mode, editable, controls = true }: 
             {snapshot && <SaveStatus snapshot={snapshot} />}
             <PublishButton path={path} />
             <BookmarkToggle path={path} />
-            {breakpoint === 'desktop' && (
-              <>
-                <SourceToggle mode={mode} />
-                <ModeToggle mode={mode} />
-              </>
-            )}
+            {breakpoint === 'desktop' && controls && <NoteMenuButton path={path} mode={mode} />}
           </span>
         </div>
       )}

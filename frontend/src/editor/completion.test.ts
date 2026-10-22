@@ -55,7 +55,7 @@ function context(settings: Settings = DEFAULT_SETTINGS, path = 'Welcome.md'): No
     vaultTags: async () => ['project', 'project/alpha', 'work'],
     recentPaths: () => [],
     save: () => {},
-    toggleMode: () => {},
+   
     insertFiles: () => {},
     linkTo: (path) => `[[${path}]]`,
     showMenu: () => {},

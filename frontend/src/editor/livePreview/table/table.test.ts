@@ -55,7 +55,7 @@ function context(menus: Menu[], overrides: Partial<NoteContext> = {}): NoteConte
     vaultTags: async () => [],
     recentPaths: () => [],
     save: () => {},
-    toggleMode: () => {},
+   
     insertFiles: () => {},
     linkTo: (p) => `[[${p}]]`,
     showMenu: (_at, label, items) => menus.push({ label, items }),

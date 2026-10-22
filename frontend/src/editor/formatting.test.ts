@@ -258,18 +258,14 @@ describe('formatting keys at the cursor (ROADMAP 10a)', () => {
 
 describe('Mod-E (ROADMAP 10a)', () => {
   it('toggles inline code while editing', () => {
-    const toggleMode = vi.fn();
-    const view = noteEditor('a wo‸rd', { ctx: { toggleMode } });
+    const view = noteEditor('a wo‸rd');
     press(view, 'e', { ctrlKey: true });
     expect(view.state.doc.toString()).toBe('a `word`');
-    expect(toggleMode).not.toHaveBeenCalled();
   });
 
-  it('unlocks a locked note', () => {
-    const toggleMode = vi.fn();
-    const view = noteEditor('a word', { mode: 'locked', ctx: { toggleMode } });
+  it('does nothing in a note that cannot be written (it switches no mode)', () => {
+    const view = noteEditor('a word', { mode: 'locked' });
     press(view, 'e', { ctrlKey: true });
-    expect(toggleMode).toHaveBeenCalledOnce();
     expect(view.state.doc.toString()).toBe('a word');
   });
 });

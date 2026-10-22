@@ -50,11 +50,10 @@ export function activePath(): string | null {
 }
 
 /**
- * Opens a file. `newNote`: this tab has just created it, so it shows the editor whatever the
- * mode of other notes (the new-note flow types its body right away, DESIGN §6.15).
+ * Opens a file. `newNote`: this tab has just created it (the new-note flow types its body right
+ * away, DESIGN §6.15); every note opens in Live Preview, which is editable, so nothing more is needed.
  */
 export function openPath(path: string, subpath?: string | null, opts?: { replace?: boolean; newNote?: boolean }): void {
-  if (opts?.newNote) useUi.getState().setEditingNew(path);
   navigateTo(noteRoute(path, subpath), opts?.replace ? { replace: true } : undefined);
   useUi.getState().setDrawerOpen(false);
 }

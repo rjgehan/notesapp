@@ -63,7 +63,6 @@ export function CardEditor({ text, canvasPath, onChange, onDone, onSave, onBlur,
       vaultTags: async () => (await fetchTags()).tags.map((t) => t.tag),
       recentPaths,
       save: () => callbacks.current.onSave(),
-      toggleMode: () => {},
       insertFiles: (files, range, pasted) => {
         void uploadForCard(canvasPath, files, pasted).then((embeds) => {
           const v = viewRef.current;

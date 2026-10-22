@@ -1,9 +1,10 @@
-// The `markdown` view (DESIGN §6.8): the note editor over one DocumentSession, in Live Preview,
-// source or locked mode (§6.6.1). Locked Live Preview is also the reading view (ROADMAP 10b).
+// The `markdown` view (DESIGN §6.8): the note editor over one DocumentSession. Every note shows in
+// Live Preview, rendered and editable (§6.6.1); "Show Markdown source" is the troubleshooting escape
+// hatch, with a bar that leads back. A note that cannot be written shows Live Preview read-only.
 // A note in the Obsidian Kanban plugin's format shows as a board instead (DESIGN §6.8.4), or as
 // Markdown with a bar that offers the board.
 import { EditorView } from '@codemirror/view';
-import { LayoutDashboard } from 'lucide-react';
+import { CodeXml, LayoutDashboard } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
 import { useVaultSettings } from '../../api/hooks';
@@ -13,7 +14,7 @@ import { blockSubpathId, findBlock, scanBlocks } from '../../features/blocks';
 import { NoteEditor } from '../../editor/NoteEditor';
 import { setSearchHighlight } from '../../editor/searchHighlight';
 import { wantsNoteFocus } from '../../features/focus';
-import { isEditingMode, setTopLineProbe, takePendingModeLine, toggleNoteMode } from '../../features/noteMode';
+import { isEditingMode, setTopLineProbe, showLivePreview, takePendingModeLine } from '../../features/noteMode';
 import { useNoteScroll } from '../../features/noteScroll';
 import { highlightTerms } from '../../features/searchTerms';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
@@ -82,6 +83,9 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
 
   // A note that never loaded has no buffer to show (its error panel offers Try again).
   const ready = snapshot.loaded;
+  // A note that cannot be written (read-only on the server, invalid UTF-8) shows Live Preview
+  // read-only (the internal `locked` rendering): links follow on a plain click, nothing reveals.
+  const readOnly = snapshot.status === 'readonly' || snapshot.lossy;
   // Renaming a heading by typing offers to update the links to it (DESIGN §6.24).
   useHeadingRenameOffers(session, ready && isEditingMode(mode));
 
@@ -151,6 +155,15 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
           </button>
         </div>
       )}
+      {mode === 'source' && !board && (
+        <div className="source-mode-bar" role="note">
+          <CodeXml size={14} aria-hidden />
+          <span>Showing the Markdown source.</span>
+          <button type="button" className="button button-small" onClick={showLivePreview}>
+            Back to normal view
+          </button>
+        </div>
+      )}
       {snapshot.status === 'loading' ? (
         <div className="view-loading" aria-busy="true">
           <div className="skeleton-line" />
@@ -174,14 +187,13 @@ export default function MarkdownView({ path, mode }: FileViewProps) {
             </div>
           }
         >
-          <KanbanBoard session={session} readOnly={snapshot.status === 'readonly' || snapshot.lossy} onShowMarkdown={() => setKanbanAsMarkdown(session.path, true)} />
+          <KanbanBoard session={session} readOnly={readOnly} onShowMarkdown={() => setKanbanAsMarkdown(session.path, true)} />
         </Suspense>
       ) : (
         <NoteEditor
           session={session}
-          readOnly={snapshot.status === 'readonly' || snapshot.lossy}
-          preview={mode === 'source' ? undefined : mode === 'live' || mode === 'edit' ? 'live' : 'locked'}
-          onToggleMode={toggleNoteMode}
+          readOnly={readOnly}
+          preview={mode === 'source' ? undefined : readOnly ? 'locked' : 'live'}
           onView={(v) => {
             editorView.current = v;
             requestAnimationFrame(scrollToTarget);

@@ -625,6 +625,46 @@ body.is-resizing {
   }
 }
 
+/* "Show Markdown source" (DESIGN §6.6.1): a bar that stays in view and leads back to Live Preview. */
+.source-mode-bar {
+  position: sticky;
+  top: 40px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.source-mode-bar span {
+  flex: 1 1 auto;
+}
+
+.source-mode-bar .button {
+  display: inline-flex;
+  align-items: center;
+}
+
+@media (pointer: coarse) {
+  .source-mode-bar .button {
+    min-height: 44px;
+  }
+}
+
+/* Phones have no note header bar above it. */
+@media (max-width: 767px) {
+  .source-mode-bar {
+    top: 0;
+  }
+}
+
 .note-header-bar {
   position: sticky;
   top: 0;

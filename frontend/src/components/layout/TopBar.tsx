@@ -1,5 +1,5 @@
 // Phone and tablet top bar (DESIGN §6.16): ☰, the note title with the connection dot,
-// switcher/search, the lock toggle and ⋯ (palette, panels, source mode, file actions, template,
+// switcher/search and ⋯ (palette, panels, "Show Markdown source", file actions, template,
 // today, reload).
 // On tablets it also toggles the right sidebar overlay.
 import { CalendarDays, CloudUpload, CodeXml, Command as CommandIcon, Ellipsis, FileSearch, FolderInput, Globe, History, LayoutTemplate, Link2, ListTree, Menu, Moon, PanelRight, Pencil, Plus, RefreshCw, Star, StarOff, Sun, Trash, TriangleAlert, Waypoints } from 'lucide-react';
@@ -19,7 +19,7 @@ import { useUi, type ViewMode } from '../../state/ui';
 import { useWorkspace } from '../../workspace/store';
 import { TAB_SWITCHER } from '../../workspace/TabSwitcher';
 import { useDocumentSession, useSessionSnapshot } from '../../sync/useTextDocument';
-import { ModeToggle } from '../../views/markdown/NoteHeader';
+import { sourceItemLabel } from '../../views/markdown/noteMenu';
 import { isMarkdownViewPath, viewFor } from '../../views/registry';
 import { ConnectionIndicator } from '../ConnectionIndicator';
 import { SaveStatus } from '../SaveStatus';
@@ -85,7 +85,7 @@ function MoreMenu({ path, mode, onClose }: { path: string | null; mode: ViewMode
       {command('app.commandPalette', 'Command palette', <CommandIcon size={16} />)}
       {hasFile && item('Backlinks', <Link2 size={16} />, () => showPanel('right', 'backlinks'))}
       {note && item('Outline', <ListTree size={16} />, () => showPanel('right', 'outline'))}
-      {note && mode !== null && item(mode === 'source' ? 'Live Preview' : 'Source mode', <CodeXml size={16} />, toggleSourceMode)}
+      {note && mode !== null && item(sourceItemLabel(mode), <CodeXml size={16} />, toggleSourceMode)}
       {hasFile && item('History', <History size={16} />, () => showPanel('right', 'history'))}
       {hasFile && item('Local graph', <Waypoints size={16} />, () => showPanel('right', 'graph'))}
       {hasFile && <div className="menu-separator" role="separator" />}
@@ -171,7 +171,6 @@ export function TopBar() {
           <FileSearch size={20} />
         </button>
       )}
-      {descriptor && descriptor.modes.length > 1 && <ModeToggle mode={viewModeFor(mode, descriptor.modes)} />}
       {!phone && path && (
         <button type="button" className="icon-button" aria-label="Toggle right sidebar" title="Toggle right sidebar" aria-expanded={sheetOpen} onClick={() => setSheetOpen(!sheetOpen)}>
           <PanelRight size={20} />

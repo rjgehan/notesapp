@@ -8,6 +8,8 @@ import { queryClient } from '../../api/queryClient';
 import { queryKeys } from '../../api/queryKeys';
 import type { MirrorStatus, StatusResponse } from '../../api/types';
 import { registerBuiltins } from '../../extensions/builtins';
+import { currentNoteMode } from '../../features/noteMode';
+import { useUi } from '../../state/ui';
 import { TopBar } from './TopBar';
 
 beforeEach(() => {
@@ -61,6 +63,23 @@ describe('TopBar (phone and tablet, DESIGN §6.16)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getByText('Mirror is off: the mirror URL is not a valid URL')).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Push to mirror now' })).not.toBeInTheDocument();
+  });
+
+  it('has no mode toggle on a note; ⋯ shows the Markdown source and leads back (DESIGN §6.6.1)', async () => {
+    window.history.replaceState(null, '', '/n/Welcome.md');
+    useUi.setState({ noteModes: {} });
+    const view = renderAt('/n/Welcome.md');
+    await screen.findByText('Welcome');
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'More' })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /lock editing|switch to/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Show Markdown source' }));
+    expect(currentNoteMode()).toBe('source');
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Back to normal view' }));
+    expect(currentNoteMode()).toBe('live');
+    view.unmount();
+    useUi.setState({ noteModes: {} });
   });
 
   it('offers a push for a failing mirror', () => {

@@ -35,35 +35,27 @@ describe('editor default keys (DESIGN §6.25)', () => {
 });
 
 describe('Mod-E in a note (DESIGN §6.6.1, §6.25)', () => {
-  function note(mode: 'live' | 'locked', toggleMode: () => void): EditorView {
-    const view = noteEditor('«word»', { mode, ctx: testContext({ toggleMode }) });
-    return view;
+  function note(readOnly = false): EditorView {
+    return noteEditor('«word»', { readOnly, ctx: testContext() });
   }
   const modE = (view: EditorView) =>
     view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', bubbles: true, cancelable: true, ...(isApple ? { metaKey: true } : { ctrlKey: true }) }));
 
   afterEach(() => destroyEditors());
 
-  it('is inline code while editing and unlocks a locked note', () => {
-    const toggle = vi.fn();
-    const editing = note('live', toggle);
+  it('is inline code, never a mode switch; a read-only note does nothing', () => {
+    const editing = note();
     modE(editing);
     expect(editing.state.doc.toString()).toBe('`word`');
-    expect(toggle).not.toHaveBeenCalled();
-    const locked = note('locked', toggle);
-    modE(locked);
-    expect(locked.state.doc.toString()).toBe('word');
-    expect(toggle).toHaveBeenCalledTimes(1);
+    const readOnly = note(true);
+    modE(readOnly);
+    expect(readOnly.state.doc.toString()).toBe('word');
   });
 
-  it('each half follows its own command’s key', () => {
-    const toggle = vi.fn();
+  it('follows the inline code command’s key', () => {
     setHotkey({ id: 'editor.inlineCode', editorHotkey: 'Mod-e' }, 'Mod-Shift-c');
-    setHotkey({ id: 'editor.toggleMode', hotkey: 'Mod-e' }, 'Mod-Shift-l');
-    const editing = note('live', toggle);
+    const editing = note();
     modE(editing);
     expect(editing.state.doc.toString()).toBe('word');
-    modE(note('locked', toggle));
-    expect(toggle).not.toHaveBeenCalled();
   });
 });
