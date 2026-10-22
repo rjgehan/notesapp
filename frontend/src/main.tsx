@@ -19,6 +19,7 @@ import { installOnlineListener } from './state/connection';
 import { applyTheme, installThemeListener, usePrefs } from './state/prefs';
 import { documents } from './sync/instance';
 import { startLiveSync } from './sync/liveSync';
+import { vaultBasename } from './state/vault';
 import './styles/tokens.css';
 import './styles/app.css';
 import './styles/editor.css';
@@ -61,7 +62,7 @@ async function boot(): Promise<void> {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter useTransitions={false}>
+        <BrowserRouter basename={vaultBasename() || undefined} useTransitions={false}>
           <App />
         </BrowserRouter>
       </QueryClientProvider>

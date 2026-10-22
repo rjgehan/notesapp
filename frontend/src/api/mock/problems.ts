@@ -38,6 +38,9 @@ const TABLE: Record<ErrorCode, [number, string]> = {
   'block-not-found': [409, 'Block not found'],
   'funnel-request': [403, 'Not available through Funnel'],
   'publishing-off': [409, 'Public publishing is off'],
+  'vault-not-found': [404, 'No such vault'],
+  'vault-unavailable': [503, 'Vault not available'],
+  'vaults-off': [409, 'Creating vaults is off'],
 };
 
 /** Builds and throws the server's problem document for `code` (API.md §3). */

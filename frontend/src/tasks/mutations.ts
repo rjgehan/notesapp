@@ -37,6 +37,7 @@ import { childrenByParent, compareOrder, descendants } from './model';
 import { invalidateTaskViews, loadLists } from './queries';
 import { taskStore, type TaskPatch, type TaskStore } from './store';
 import { acknowledgeFiles } from './sync';
+import { appPathname } from '../state/vault';
 
 // ---------- applying results ----------
 
@@ -544,7 +545,7 @@ export async function deleteList(list: TaskList, store: TaskStore = taskStore, c
   if (!result) return false;
   store.removeList(list.id);
   if (session) documents.close(session);
-  if (activePath() === null && window.location.pathname === `/x/tasks/list/${encodeURIComponent(list.id)}`) navigateTo('/x/tasks', { replace: true });
+  if (activePath() === null && appPathname() === `/x/tasks/list/${encodeURIComponent(list.id)}`) navigateTo('/x/tasks', { replace: true });
   toast(`Moved “${list.name}” to the trash`);
   return true;
 }

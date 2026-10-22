@@ -4,9 +4,11 @@
 import { create } from 'zustand';
 import { api } from '../api/endpoints';
 import type { CaptureResult } from '../api/types';
+import { OFFLINE_DB } from '../offline/db';
 import { flushQueue, IdbCaptureQueue, MemoryCaptureQueue, type CaptureQueueStore, type QueuedCapture } from '../offline/captureQueue';
 import { newIdempotencyKey } from '../state/clientId';
 import { toast } from '../state/toasts';
+import { vaultKey } from '../state/vault';
 import { useUi } from '../state/ui';
 import { applyCaptureResult } from '../sync/applyEvents';
 import { documents } from '../sync/instance';
@@ -30,7 +32,7 @@ export const useCaptureQueue = create<CaptureQueueState>()((set) => ({
   set: (state) => set(state),
 }));
 
-export const captureQueue: CaptureQueueStore = typeof indexedDB === 'undefined' ? new MemoryCaptureQueue() : new IdbCaptureQueue();
+export const captureQueue: CaptureQueueStore = typeof indexedDB === 'undefined' ? new MemoryCaptureQueue() : new IdbCaptureQueue(indexedDB, vaultKey(OFFLINE_DB));
 
 const FLUSH_SESSIONS_MS = 3000;
 
@@ -75,7 +77,7 @@ export function flushCaptures(): Promise<SentSummary> {
         }
         return { sent: report.sent, failed: report.failed, waiting: report.waiting };
       };
-      return typeof navigator !== 'undefined' && navigator.locks ? await navigator.locks.request('notesapp-capture-queue', run) : await run();
+      return typeof navigator !== 'undefined' && navigator.locks ? await navigator.locks.request(vaultKey('notesapp-capture-queue'), run) : await run();
     } catch {
       return NOTHING;
     } finally {

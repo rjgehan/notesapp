@@ -27,6 +27,7 @@ import { makeRenderContext } from '../../render/context';
 import { renderNote } from '../../render/render';
 import { newIdempotencyKey } from '../../state/clientId';
 import { usePrefs } from '../../state/prefs';
+import { appTitle } from '../../state/vault';
 import '../../styles/capture.css';
 
 /** How long to wait for the page before offering to paste it instead. */
@@ -80,7 +81,7 @@ export function ClipPage() {
   const info = fragmentInfo(window.location.hash);
 
   useEffect(() => {
-    document.title = 'Clip · Notes';
+    document.title = appTitle('Clip');
     let cancelled = false;
     loadClipper().then(
       (c) => !cancelled && setClipper(c),

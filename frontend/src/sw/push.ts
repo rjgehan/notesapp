@@ -3,6 +3,8 @@
 // an API call (Snooze, Done) or a page to open. `sw.ts` wires them to the `push` and
 // `notificationclick` events. Nothing here touches a browser global.
 
+import { vaultFromPathname } from './vaultPath';
+
 /** What the server encrypts into each push message. */
 export interface ReminderPush {
   title: string;
@@ -78,8 +80,11 @@ export function reminderNotification(json: unknown): NotificationSpec {
 /** The request a notification button makes, or null when the click opens the app. */
 export function actionRequest(action: string, data: Partial<ReminderNotificationData> | null | undefined): { url: string; body: { taskId: string; at: string; minutes?: number } } | null {
   if (!data?.taskId || !data.at) return null;
-  if (action === 'snooze') return { url: '/api/reminders/snooze', body: { taskId: data.taskId, at: data.at, minutes: SNOOZE_MINUTES } };
-  if (action === 'done') return { url: '/api/reminders/done', body: { taskId: data.taskId, at: data.at } };
+  // The reminder's vault (DESIGN §6.41): its app URL starts with /v/<name>/ unless it is the default vault.
+  const vault = vaultFromPathname(safeAppPath(data.url));
+  const api = vault === null ? '/api' : `/api/v/${vault}`;
+  if (action === 'snooze') return { url: api + '/reminders/snooze', body: { taskId: data.taskId, at: data.at, minutes: SNOOZE_MINUTES } };
+  if (action === 'done') return { url: api + '/reminders/done', body: { taskId: data.taskId, at: data.at } };
   return null;
 }
 

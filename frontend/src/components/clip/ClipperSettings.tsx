@@ -5,6 +5,7 @@ import { Copy, Scissors } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { bookmarkletFor } from '../../features/clip';
 import { toast } from '../../state/toasts';
+import { apiUrl } from '../../state/vault';
 import '../../styles/capture.css';
 
 /** The fixed client id the clipping Shortcut sends (every mutation needs one, API.md §2). */
@@ -124,7 +125,7 @@ export function ClipperSettings() {
         </li>
         <li>
           Add <em>Get Contents of URL</em> with this URL, method <strong>POST</strong>:
-          <CopyValue value={`${origin}/api/files`} label="the URL" />
+          <CopyValue value={`${origin}${apiUrl('/api/files')}`} label="the URL" />
         </li>
         <li>
           Headers: <code>X-Client-Id</code> with the value below, and <code>Content-Type</code> set to <code>application/json</code>:

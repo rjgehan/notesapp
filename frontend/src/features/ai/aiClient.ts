@@ -5,6 +5,7 @@ import { ApiError, TransientError, apiFetch } from '../../api/client';
 import type { AiAskRequest, AiStatus, AiStreamEventMap, AiSummarizeRequest, Problem } from '../../api/types';
 import { reportServerBuild } from '../../state/buildCheck';
 import { clientId } from '../../state/clientId';
+import { apiUrl } from '../../state/vault';
 import { createSseParser } from './sse';
 
 export function fetchAiStatus(): Promise<AiStatus> {
@@ -24,7 +25,7 @@ export type AiRequest = { url: '/api/ai/ask'; body: AiAskRequest } | { url: '/ap
 export async function streamAi(request: AiRequest, handlers: AiStreamHandlers, signal?: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<void> {
   let res: Response;
   try {
-    res = await fetchImpl(request.url, {
+    res = await fetchImpl(apiUrl(request.url), {
       method: 'POST',
       headers: {
         'X-Client-Id': clientId,

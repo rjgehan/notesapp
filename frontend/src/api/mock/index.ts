@@ -103,6 +103,12 @@ export function createMockEndpoints(vault: MockVault, controls: { latency: numbe
     getPublish: () => call(() => vault.getPublish()),
     publishNote: (req) => call(() => vault.publishNote(req)),
     unpublishNote: (path) => call(() => vault.unpublishNote(path)),
+    // One vault in the mock (DESIGN §6.41): nothing to switch to.
+    listVaults: () => call(() => ({ vaults: [{ name: 'main', isDefault: true, state: 'ready' as const, url: '/' }], canCreate: false })),
+    createVault: () =>
+      call(() => {
+        throw new ApiError({ type: 'urn:notesapp:problem:vaults-off', title: 'Creating vaults is off', status: 409, detail: 'The mock has one vault', code: 'vaults-off' });
+      }),
     getTranscriptionStatus: () => call(() => vault.getTranscriptionStatus()),
     transcribe: (path) => call(() => vault.transcribe(path)),
     rawUrl: (entry: Pick<FileEntry, 'path' | 'size' | 'mtime'>) =>

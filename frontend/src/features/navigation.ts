@@ -6,6 +6,7 @@ import { currentSettings, currentTree } from '../api/hooks';
 import { queryClient } from '../api/queryClient';
 import { newIdempotencyKey } from '../state/clientId';
 import { toast } from '../state/toasts';
+import { appPathname, appUrl } from '../state/vault';
 import { useUi } from '../state/ui';
 import { applyWriteResult } from '../sync/treePatch';
 import { folderTemplateOutput, placeTemplateCursor } from './folderTemplates';
@@ -17,8 +18,8 @@ import { takeNewTabGesture } from '../workspace/gesture';
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
 let navigateFn: Navigate = (to, opts) => {
-  if (opts?.replace) window.history.replaceState(null, '', to);
-  else window.history.pushState(null, '', to);
+  if (opts?.replace) window.history.replaceState(null, '', appUrl(to));
+  else window.history.pushState(null, '', appUrl(to));
 };
 
 export function setNavigator(fn: Navigate): void {
@@ -46,7 +47,7 @@ export function navigateTo(to: string, opts?: { replace?: boolean }): void {
 
 /** The vault path of the open note, from the current location. */
 export function activePath(): string | null {
-  return pathFromLocation(window.location.pathname);
+  return pathFromLocation(appPathname());
 }
 
 /**

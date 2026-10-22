@@ -17,6 +17,7 @@ import { useDocumentSession } from '../sync/useTextDocument';
 import { useExclusiveOwner, usePane } from '../workspace/PaneContext';
 import { focusPaneById } from '../workspace/store';
 import { viewFor, type FileViewDescriptor, type FileViewProps } from './registry';
+import { appTitle } from '../state/vault';
 
 const lazyViews = new Map<string, ComponentType<FileViewProps>>();
 
@@ -86,7 +87,7 @@ export function FileView() {
   useEffect(() => {
     if (treeEntry && active) {
       recordOpened(treeEntry.path);
-      document.title = `${treeEntry.kind === 'note' ? treeEntry.basename : treeEntry.name} · Notes`;
+      document.title = appTitle(treeEntry.kind === 'note' ? treeEntry.basename : treeEntry.name);
     }
   }, [treeEntry, active]);
   const owner = useExclusiveOwner(entry?.path ?? '');

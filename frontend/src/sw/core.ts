@@ -2,6 +2,12 @@
 // how, and which caches it keeps. `sw.ts` wires them to the worker's events; the build plugin
 // (vite-plugin-sw.ts) uses `precacheUrls`. Nothing here touches a browser global.
 
+/** `/v/<name>` at the start of an extra vault's address (the rule of `vaultPath.ts`, DESIGN §6.41). */
+const VAULT_PREFIX = /^\/v\/[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?(?=\/|$)/;
+
+/** The raw-file endpoint of the default vault or of an extra one (`/api/v/<name>/files/raw`). */
+const RAW_FILE = /^\/api(?:\/v\/[a-z0-9-]+)?\/files\/raw$/;
+
 /** One cache per precache version; older ones are deleted when a new worker activates. */
 export const SHELL_PREFIX = 'notesapp-shell-';
 /** Content-addressed note images (`/api/files/raw?…&v=`), kept for offline reading. */
@@ -42,6 +48,8 @@ export function staleShellCaches(names: readonly string[], current: string): str
  * carries the app's `same-origin` policy, which would cut that window off.
  */
 export function isSpaRoute(pathname: string): boolean {
+  // An extra vault's app (DESIGN §6.41) has the same routes under /v/<name>.
+  pathname = pathname.replace(VAULT_PREFIX, '') || '/';
   if (pathname === '/' || pathname === '/search' || pathname === '/trash' || pathname === '/settings' || pathname === '/capture') return true;
   return pathname.startsWith('/n/') || pathname.startsWith('/settings/') || pathname.startsWith('/x/');
 }
@@ -53,7 +61,7 @@ export function isHashedAsset(pathname: string): boolean {
 
 /** Note images the reading view loads by a content-addressed URL (API.md §9.1). */
 export function isContentAddressedImage(url: URL): boolean {
-  return url.pathname === '/api/files/raw' && url.searchParams.has('path') && url.searchParams.has('v') && !url.searchParams.has('download');
+  return RAW_FILE.test(url.pathname) && url.searchParams.has('path') && url.searchParams.has('v') && !url.searchParams.has('download');
 }
 
 export interface RequestFacts {

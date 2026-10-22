@@ -5,10 +5,17 @@ import { openTodaysDailyNote } from '../daily';
 import { navigateTo } from '../navigation';
 import { openTaskDetail } from '../../tasks/ui/state';
 import { OPEN_MESSAGE, safeAppPath } from '../../sw/push';
+import { routeOfAppUrl } from '../../state/vault';
 
 /** Opens a reminder's app path in this tab. */
 export function openReminderUrl(url: string): void {
-  const target = new URL(safeAppPath(url), 'https://app.invalid');
+  // A reminder of another vault (DESIGN §6.41) opens that vault's app.
+  const route = routeOfAppUrl(safeAppPath(url));
+  if (route === null) {
+    window.location.assign(safeAppPath(url));
+    return;
+  }
+  const target = new URL(route, 'https://app.invalid');
   const task = target.searchParams.get('task');
   if (target.searchParams.get('open') === 'daily') {
     void openTodaysDailyNote();

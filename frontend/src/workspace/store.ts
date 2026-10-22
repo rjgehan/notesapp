@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { useFocusRequests } from '../features/focus';
 import { navigateTo } from '../features/navigation';
 import { takeNewTabGesture } from './gesture';
+import { appPathname, vaultKey } from '../state/vault';
 import {
   activeTab,
   adoptUrl,
@@ -45,18 +46,18 @@ function outsideWorkspace(pathname: string): boolean {
 }
 
 function currentRoute(): string {
-  return routeOf(window.location);
+  return routeOf({ pathname: appPathname(), search: window.location.search, hash: window.location.hash });
 }
 
 export function loadWorkspace(): Workspace {
   let saved: Workspace | null;
   try {
-    const raw = localStorage.getItem(WORKSPACE_KEY);
+    const raw = localStorage.getItem(vaultKey(WORKSPACE_KEY));
     saved = raw ? sanitize(JSON.parse(raw)) : null;
   } catch {
     saved = null;
   }
-  if (outsideWorkspace(window.location.pathname)) return saved ?? createWorkspace('/');
+  if (outsideWorkspace(appPathname())) return saved ?? createWorkspace('/');
   // A deep link, a bookmark or a reload shows its route in the active pane.
   return saved ? adoptUrl(saved, currentRoute()) : createWorkspace(currentRoute());
 }
@@ -87,7 +88,7 @@ export function saveWorkspaceNow(): void {
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = null;
   try {
-    localStorage.setItem(WORKSPACE_KEY, JSON.stringify(trimmed(workspace())));
+    localStorage.setItem(vaultKey(WORKSPACE_KEY), JSON.stringify(trimmed(workspace())));
   } catch {
     // Storage full or blocked: the layout is simply not remembered.
   }

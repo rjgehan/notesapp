@@ -3,6 +3,7 @@
 // answer and the notes that went with it; a follow-up sends the earlier turns as `history`.
 import { create } from 'zustand';
 import type { AiPrompt, AiSource, AiTurn } from '../../api/types';
+import { vaultKey } from '../../state/vault';
 
 export const CONVERSATIONS_KEY = 'notesapp:ai:conversations';
 
@@ -75,7 +76,7 @@ function isTurn(t: unknown): t is StoredTurn {
 export function loadStored(): Stored {
   const empty: Stored = { version: 1, currentId: null, conversations: [] };
   try {
-    const raw = localStorage.getItem(CONVERSATIONS_KEY);
+    const raw = localStorage.getItem(vaultKey(CONVERSATIONS_KEY));
     if (!raw) return empty;
     const parsed = JSON.parse(raw) as Partial<Stored>;
     if (parsed.version !== 1 || !Array.isArray(parsed.conversations)) return empty;
@@ -105,7 +106,7 @@ function save(state: { conversations: Conversation[]; currentId: string | null }
   const conversations = trimForStorage(state.conversations);
   try {
     const stored: Stored = { version: 1, currentId: state.currentId, conversations };
-    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(stored));
+    localStorage.setItem(vaultKey(CONVERSATIONS_KEY), JSON.stringify(stored));
   } catch {
     // Private mode or quota: the conversation still works for this page load.
   }

@@ -6,6 +6,8 @@ import { isTransient } from '../api/client';
 import { api } from '../api/endpoints';
 import type { TextFile, TreeResponse, WriteResult } from '../api/types';
 import { usePrefs } from '../state/prefs';
+import { vaultKey } from '../state/vault';
+import { OFFLINE_DB } from './db';
 import { IdbNoteCache, NoNoteCache, type CachedTree, type NoteCacheStore } from './noteCache';
 
 export interface OfflineState {
@@ -33,7 +35,7 @@ export const useOffline = create<OfflineState>()((set) => ({
   dismissReview: (path) => set((s) => ({ review: s.review.filter((p) => p !== path) })),
 }));
 
-export const noteCache: NoteCacheStore = typeof indexedDB === 'undefined' ? new NoNoteCache() : new IdbNoteCache();
+export const noteCache: NoteCacheStore = typeof indexedDB === 'undefined' ? new NoNoteCache() : new IdbNoteCache(indexedDB, vaultKey(OFFLINE_DB));
 
 /** The device keeps copies for offline reading (Settings › This device; on by default). */
 export function offlineCopiesEnabled(): boolean {

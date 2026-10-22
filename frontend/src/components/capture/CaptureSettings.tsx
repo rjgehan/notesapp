@@ -6,6 +6,7 @@ import { useCaptureQueue, discardFailedCapture, retryFailedCapture } from '../..
 import { formatRelative } from '../../features/format';
 import { keyLabel } from '../../features/platform';
 import { toast } from '../../state/toasts';
+import { apiUrl } from '../../state/vault';
 import '../../styles/capture.css';
 
 /** The fixed client id the Shortcut sends (the CSRF rule: every mutation needs one, API.md §2). */
@@ -110,7 +111,7 @@ export function CaptureSettings() {
         </li>
         <li>
           Add <em>Get Contents of URL</em> with this URL, method <strong>POST</strong>:
-          <CopyValue value={`${origin}/api/capture`} label="the URL" />
+          <CopyValue value={`${origin}${apiUrl('/api/capture')}`} label="the URL" />
         </li>
         <li>
           Headers: <code>X-Client-Id</code> with the value below (every change needs one), and <code>Content-Type</code> set to{' '}
@@ -127,7 +128,7 @@ export function CaptureSettings() {
       <p className="setting-note setting-prose">
         For photos, make a second shortcut that receives <em>Images</em> and posts the <em>File</em> (request body: File, Shortcut Input) to:
       </p>
-      <CopyValue value={`${origin}/api/capture/file?name=photo.jpg&target=inbox&date=<yyyy-MM-dd>&time=<HH:mm>&text=<caption>`} label="the photo URL" />
+      <CopyValue value={`${origin}${apiUrl('/api/capture/file')}?name=photo.jpg&target=inbox&date=<yyyy-MM-dd>&time=<HH:mm>&text=<caption>`} label="the photo URL" />
       <FailedCaptures />
     </>
   );
