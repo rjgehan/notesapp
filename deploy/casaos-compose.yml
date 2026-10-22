@@ -150,7 +150,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  main: notes
+  main: tailscale
   author: rjgehan
   category: Productivity
   title:
@@ -160,7 +160,3 @@ x-casaos:
   description:
     en_us: Markdown vault with wikilinks, backlinks, search, history and live sync. Open it at https://notes.<tailnet>.ts.net from any Tailscale device.
   icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/obsidian.png
-  scheme: https
-  hostname: notes.CHANGE-ME.ts.net
-  port_map: "443"
-  index: /
