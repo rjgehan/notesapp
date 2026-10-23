@@ -13,6 +13,7 @@ import type { NoteResults } from '../../formulas/engine';
 import { cancelFormulaWait, loadedFormulaEngine, loadFormulaEngine } from '../../formulas/load';
 import { formulasOff, isFormula, sheetNames, tableAnnotations, tableNeedsEngine, type FormulaDisplay, type FormulaModel } from '../../formulas/model';
 import { redrawTableDisplays, refreshTables, tableCellFormatters } from './table';
+import { tableSheetName } from './table/facets';
 import { gridRows, parseTable } from './table/model';
 import { topLevel, wholeLines } from './topLevel';
 
@@ -143,6 +144,13 @@ const formatter = tableCellFormatters.of((table) => {
   return results ? (row, column) => results.cell(index, row, column) : null;
 });
 
+const sheetName = tableSheetName.of((state, from) => {
+  const value = state.field(formulaField, false);
+  if (!value || value.off) return null;
+  const index = value.entries.findIndex((e) => e.from === from);
+  return index < 0 ? null : (value.model.tables[index]?.name ?? null);
+});
+
 // ---------- inline formulas ----------
 
 class InlineFormulaWidget extends WidgetType {
@@ -253,5 +261,5 @@ function formulaPlugin(locked: boolean) {
 /** Formulas in tables and inline code (ROADMAP item 39); `locked` never shows them as typed. */
 export function noteFormulas(locked: boolean): Extension {
   // Above Live Preview's inline decorations, so the result replaces the code with its hidden marks.
-  return [formulaField, formatter, Prec.highest(formulaPlugin(locked))];
+  return [formulaField, formatter, sheetName, Prec.highest(formulaPlugin(locked))];
 }

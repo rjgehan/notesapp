@@ -48,6 +48,7 @@ import {
   type SheetCell,
   type SheetFile,
 } from './format';
+import { friendlyError } from './functions';
 import { formatKind, isGeneral } from './numfmt';
 import {
   mapReferences,
@@ -61,6 +62,8 @@ import {
   type FormulaRef,
   type LineChange,
 } from './refs';
+
+export { functionCatalog } from './functions';
 
 /** The engine identity written to `engine`. A config change that alters results must change it too. */
 export const ENGINE_ID = `hyperformula@${HyperFormula.version}`;
@@ -380,7 +383,8 @@ export class Workbook {
   errorMessage(sheetId: string, ref: string): string | null {
     const at = this.address(sheetId, ref);
     const value = at && this.engine.getCellValue(at);
-    return value instanceof DetailedCellError ? value.message || value.value : null;
+    if (!(value instanceof DetailedCellError)) return null;
+    return friendlyError(value.value, at ? this.engine.getCellFormula(at) : null, value.message || value.value);
   }
 
   subscribe(listener: (change: WorkbookChange) => void): () => void {

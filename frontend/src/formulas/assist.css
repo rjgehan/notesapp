@@ -1,0 +1,69 @@
+/* Function help while a formula is typed (DESIGN §6.21.5, §6.42): suggestions and the signature hint. */
+.formula-assist {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 16px));
+  box-sizing: border-box;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.2));
+  color: var(--text-normal);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.formula-assist[hidden],
+.formula-assist [hidden] {
+  display: none;
+}
+
+.formula-assist-list {
+  max-height: 176px;
+  margin: 0;
+  padding: 2px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.formula-assist-item {
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.formula-assist-item[aria-selected='true'] {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  color: var(--text-normal);
+}
+
+.formula-assist-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* One line: on a phone a long signature ends in an ellipsis rather than covering the cells. */
+.formula-assist-hint {
+  padding: 4px 10px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.formula-assist-list:not([hidden]) + .formula-assist-hint {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.formula-assist-hint b {
+  color: var(--text-normal);
+  font-weight: 700;
+}
+
+@media (pointer: coarse) {
+  .formula-assist-item {
+    padding: 8px 12px;
+    font-size: 15px;
+  }
+}

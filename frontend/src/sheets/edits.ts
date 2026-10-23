@@ -10,6 +10,7 @@ import { isCellError, type Sheet, type SheetCell } from './format';
 import { typedInput } from './input';
 import { isGeneral } from './numfmt';
 import { shiftFormula, type CellRange } from './refs';
+import { numberSeries, seriesValue } from './series';
 import { parseTsv, toTsv } from './tsv';
 
 type Content = CellEdit['content'];
@@ -91,18 +92,36 @@ export function typedEdit(sheet: Sheet, col: number, row: number, text: string):
 
 /**
  * Fills `dest` (which contains `source`) by repeating `source` across it, as the fill handle,
- * Fill down and Fill right do: formulas shift their relative references, values are copied, and
- * empty source cells clear their targets.
+ * Fill down and Fill right do: formulas shift their relative references, values are copied (numbers that step evenly continue
+ * as a series), and empty source cells clear their targets.
  */
 export function fillEdits(sheet: Sheet, source: CellRange, dest: CellRange): CellEdit[] {
   const edits: CellEdit[] = [];
+  // Numbers that step evenly along the fill continue as a series (1, 2 → 3, 4), as in Google Sheets.
+  const down = dest.height > source.height;
+  const across = !down && dest.width > source.width;
+  const seriesOf = new Map<number, ReturnType<typeof numberSeries>>();
+  const series = (line: number) => {
+    if (!seriesOf.has(line)) {
+      const values: Array<number | null> = [];
+      const length = down ? source.height : source.width;
+      for (let i = 0; i < length; i++) {
+        const cell = sheet.cells[down ? toA1(line, source.row + i) : toA1(source.col + i, line)];
+        values.push(cell?.f === undefined && typeof cell?.v === 'number' ? cell.v : null);
+      }
+      seriesOf.set(line, down || across ? numberSeries(values) : null);
+    }
+    return seriesOf.get(line)!;
+  };
   for (let row = dest.row; row < dest.row + dest.height; row++) {
     for (let col = dest.col; col < dest.col + dest.width; col++) {
       if (inRange(col, row, source) || !within(col, row)) continue;
       const srcRow = source.row + mod(row - source.row, source.height);
       const srcCol = source.col + mod(col - source.col, source.width);
       const from = sheet.cells[toA1(srcCol, srcRow)];
-      const edit = { sheet: sheet.id, ref: toA1(col, row), content: moved(copiedContent(from), row - srcRow, col - srcCol) };
+      const run = series(down ? col : row);
+      const content = run ? { v: seriesValue(run, down ? row - source.row : col - source.col) } : moved(copiedContent(from), row - srcRow, col - srcCol);
+      const edit = { sheet: sheet.id, ref: toA1(col, row), content };
       edits.push(withFormat(sheet, edit, from?.fmt));
     }
   }

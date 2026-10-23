@@ -27,6 +27,15 @@ export type TableCellFormatter = (table: TableGridData) => ((row: number, column
 
 export const tableCellFormatters = Facet.define<TableCellFormatter>();
 
+/**
+ * The name a table's formulas know it by (ROADMAP 39b: its block id, or `Table2`), for the table
+ * starting at `from`; null when formulas do not name it. Pointing at a cell of another table while
+ * a formula is typed inserts `name!B5`.
+ */
+export const tableSheetName = Facet.define<(state: EditorState, from: number) => string | null, ((state: EditorState, from: number) => string | null) | null>({
+  combine: (values) => values[0] ?? null,
+});
+
 /** Redraws every table: a cell formatter's results changed (its engine finished loading, say). */
 export const refreshTables = StateEffect.define<null>();
 

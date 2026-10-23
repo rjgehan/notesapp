@@ -4,6 +4,7 @@
 // written into the note: they are computed from its text each time it changes.
 import { CellValueDetailedType, DetailedCellError, HyperFormula, type CellValue, type RawCellContent } from 'hyperformula';
 import { engineConfig } from '../sheets/engine';
+import { friendlyError } from '../sheets/functions';
 import { formatNumberWith, isGeneral } from '../sheets/numfmt';
 import { engineInput, ERROR_HELP, formatAuto, isFormula, type FormulaDisplay, type FormulaModel } from './model';
 
@@ -20,8 +21,8 @@ const TYPE_FORMATS: Partial<Record<string, string>> = {
 };
 
 function errorDisplay(e: DetailedCellError, formula: string): FormulaDisplay {
-  const help = e.message || ERROR_HELP[e.value] || 'Error';
-  return { text: e.value, className: 'cm-formula-error', title: `${help}\n${formula}` };
+  const help = friendlyError(e.value, formula, e.message || ERROR_HELP[e.value] || 'Error');
+  return { text: e.value, className: 'cm-formula-error', title: `${help}\n${formula}`, hint: help };
 }
 
 /** A value as it shows: in the column's format, else the format of its type, else the Automatic one. */
@@ -125,3 +126,5 @@ export function computeNote(model: FormulaModel): NoteResults {
 }
 
 export const engineVersion = HyperFormula.version;
+
+export { functionCatalog } from '../sheets/functions';

@@ -29,6 +29,21 @@ describe('fill', () => {
     ]);
   });
 
+  it('continues numbers that step evenly as a series, down, up and across, as in Google Sheets', () => {
+    const s = sheet({ A1: { v: 1 }, A2: { v: 2 }, B1: { v: 10 }, B2: { v: 7 }, C1: { v: 'x' }, C2: { v: 3 } });
+    expect(fillEdits(s, { col: 0, row: 0, width: 3, height: 2 }, { col: 0, row: 0, width: 3, height: 4 })).toEqual([
+      edit('A3', { v: 3 }),
+      edit('B3', { v: 4 }),
+      edit('C3', { v: 'x' }),
+      edit('A4', { v: 4 }),
+      edit('B4', { v: 1 }),
+      edit('C4', { v: 3 }),
+    ]);
+    const t = sheet({ A3: { v: 0.5 }, A4: { v: 1 }, C1: { v: 5 }, D1: { v: 10 } });
+    expect(fillEdits(t, { col: 0, row: 2, width: 1, height: 2 }, { col: 0, row: 1, width: 1, height: 4 })).toEqual([edit('A2', { v: 0 }), edit('A5', { v: 1.5 })]);
+    expect(fillEdits(t, { col: 2, row: 0, width: 2, height: 1 }, { col: 2, row: 0, width: 4, height: 1 })).toEqual([edit('E1', { v: 15 }), edit('F1', { v: 20 })]);
+  });
+
   it('clears targets of empty source cells and skips cells that already match', () => {
     const s = sheet({ A1: { v: 5 }, A2: { v: 'old' }, A3: { v: 5 } });
     expect(fillEdits(s, { col: 0, row: 0, width: 1, height: 1 }, { col: 0, row: 0, width: 1, height: 3 })).toEqual([edit('A2', { v: 5 })]);

@@ -446,7 +446,45 @@ describe('the spreadsheet view', () => {
     expect(fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 52, clientY: 6 }] })).toBe(false);
     expect(input.value).toBe('=A2');
     expect(document.activeElement).toBe(input);
+    // A second tap makes a range (a phone has no drag for it); a third starts again.
+    fireEvent.pointerDown(grid, { clientX: 50, clientY: 45, pointerType: 'touch' });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 50, clientY: 45 }] });
+    expect(input.value).toBe('=A2:A4');
+    fireEvent.pointerDown(grid, { clientX: 150, clientY: 5, pointerType: 'touch' });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 150, clientY: 5 }] });
+    expect(input.value).toBe('=B2');
     fakeGrid.mouseArgs = undefined;
+  });
+
+  it('suggests functions while a formula is typed, and shows the signature of the call the caret is in', async () => {
+    const path = await openGrid();
+    select(3, 3); // D5
+    const input = formulaInput();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: '=SU' } });
+    await waitFor(() => expect(document.querySelector('.formula-assist-item')?.textContent).toBe('SUM'));
+    // Enter takes the suggestion (the edit goes on), not the commit.
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(input.value).toBe('=SUM(');
+    expect(document.activeElement).toBe(input);
+    await waitFor(() => expect(document.querySelector('.formula-assist-hint')?.textContent).toBe('SUM(value1, [value2, …])'));
+    expect(document.querySelector('.formula-assist-hint b')?.textContent).toBe('value1');
+    fireEvent.change(input, { target: { value: '=SUM(B2:B3)' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect((await saved(path)).sheets[0].cells.D5).toEqual({ f: '=SUM(B2:B3)', c: 1937.5 });
+    act(() => input.blur());
+    await waitFor(() => expect(document.querySelector('.formula-assist')).toBeNull());
+  });
+
+  it('explains a function written without its brackets', async () => {
+    await openGrid();
+    select(3, 3);
+    const input = formulaInput();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: '=SUM' } });
+    // Leaving the field commits (Enter would take the suggestion SUMIF).
+    act(() => input.blur());
+    await waitFor(() => expect(screen.getByText('Did you mean SUM(…)?')).toBeTruthy());
   });
 
   it('moves on from the title to the grid with Enter, renamed or not', async () => {

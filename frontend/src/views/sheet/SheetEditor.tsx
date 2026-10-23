@@ -63,6 +63,7 @@ import {
   type ImportKind,
 } from './importExport';
 import { ChartDialog, ColumnWidthDialog, ImportDialog, NamedRangesDialog, NumberFormatDialog, type ImportChoice } from './SheetDialogs';
+import { useFormulaAssist } from './formulaAssist';
 import { useReferencePicking } from './referencePicking';
 import { SheetGrid, type SheetGridHandlers } from './SheetGrid';
 import { SheetTabs } from './SheetTabs';
@@ -202,6 +203,8 @@ export function SheetEditor({ path, snapshot, workbook, version }: Props) {
 
   // A click or drag on cells while a formula is typed inserts references into it.
   useReferencePicking({ gridBox, gridRef, portalRef, barInput: () => bar.current?.editingInput() ?? null, layout: () => layout, onPick: setPicked });
+  // Typing `=SU` suggests functions; inside a call, its signature shows.
+  useFormulaAssist({ portalRef, barInput: () => bar.current?.editingInput() ?? null });
 
   useEffect(() => {
     remembered.set(path, { sheetId: sheet.id, selections, chartsOpen });

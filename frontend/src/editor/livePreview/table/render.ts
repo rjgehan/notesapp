@@ -33,6 +33,8 @@ export interface CellDisplay {
   className?: string;
   /** Shown on hover (an error's message). */
   title?: string;
+  /** Shown after the value in the formula bar (an error's explanation). */
+  hint?: string;
 }
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', copy: '©', reg: '®', hellip: '…', mdash: '—', ndash: '–' };

@@ -2,47 +2,17 @@
 // the caret where a reference can go (after `=`, `(`, `,`, an operator or `:`), a click on a cell
 // inserts its reference instead of ending the edit, a drag inserts a range, and another click
 // replaces the reference just inserted. It works in Glide's cell editor and in the formula bar,
-// and on touch devices a tap (not a scroll) does the same while the keyboard stays up.
+// and on touch devices a tap (not a scroll) does the same while the keyboard stays up; a second tap
+// makes the reference a range (`B2` then `B4`: `B2:B4`), and Shift-click does so with a mouse.
 import type { DataEditorRef } from '@glideapps/glide-data-grid';
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
-import { toA1 } from '../../sheets/a1';
-import { rangeText, type CellRange } from '../../sheets/refs';
+import { setInputValue } from '../../formulas/assist';
+import { pickSlot, placeReference, referenceSlot, spanOf, type PickedSlot, type RefAt } from '../../sheets/formulaText';
+import type { CellRange } from '../../sheets/refs';
 import { frozenRowAt, type CellAt, type GridLayout } from './gridModel';
 
-/** A reference inserted by pointing: where it is in the text, so the next point replaces it. */
-export interface PickedSlot {
-  start: number;
-  end: number;
-  text: string;
-}
-
-/**
- * Where a reference pointed at now goes in formula `value` with the caret at `caret`: the span to
- * replace (empty to insert), or null when the caret is not where a reference can go (the click then
- * ends the edit, as in Google Sheets). `last` is the reference pointing inserted last.
- */
-export function referenceSlot(value: string, caret: number, last: PickedSlot | null): { start: number; end: number } | null {
-  if (!value.startsWith('=')) return null;
-  if (last && last.end === caret && value.slice(last.start, last.end) === last.text) return { start: last.start, end: last.end };
-  const before = value.slice(0, caret);
-  // Not inside a string.
-  if ((before.match(/"/g)?.length ?? 0) % 2 === 1) return null;
-  return /[=(,+\-*/^&<>:;{]\s*$/.test(before) ? { start: caret, end: caret } : null;
-}
-
-/** The range from `a` to `b`, either way round. */
-export function spanOf(a: CellAt, b: CellAt): CellRange {
-  const col = Math.min(a.col, b.col);
-  const row = Math.min(a.row, b.row);
-  return { col, row, width: Math.abs(a.col - b.col) + 1, height: Math.abs(a.row - b.row) + 1 };
-}
-
-/** Sets an input's value the way typing does, so React (Glide's editor, the formula bar) takes it. */
-function setValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, value);
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-}
+// Shared with the tables of notes (sheets/formulaText.ts).
+export { referenceSlot, spanOf, type PickedSlot };
 
 interface Options {
   gridBox: RefObject<HTMLDivElement | null>;
@@ -65,7 +35,7 @@ export function useReferencePicking({ gridBox, gridRef, portalRef, barInput, lay
   useEffect(() => {
     let last: PickedSlot | null = null;
     /** A mouse drag from `anchor`, rewriting the reference that starts at `start`. */
-    let drag: { el: HTMLInputElement | HTMLTextAreaElement; anchor: CellAt; start: number } | null = null;
+    let drag: { el: HTMLInputElement | HTMLTextAreaElement; anchor: RefAt; start: number } | null = null;
     /** A touch on a cell, picked on its touchend unless it turned into a scroll. */
     let tap: { el: HTMLInputElement | HTMLTextAreaElement; at: CellAt; x: number; y: number } | null = null;
     /** The pointer went down on a cell for pointing: its mouse and click events are the picker's too. */
@@ -91,14 +61,14 @@ export function useReferencePicking({ gridBox, gridRef, portalRef, barInput, lay
       return null;
     };
 
-    const place = (el: HTMLInputElement | HTMLTextAreaElement, start: number, end: number, range: CellRange) => {
-      const text = range.width === 1 && range.height === 1 ? toA1(range.col, range.row) : rangeText(range);
-      setValue(el, el.value.slice(0, start) + text + el.value.slice(end));
-      const caret = start + text.length;
-      el.setSelectionRange(caret, caret);
-      last = { start, end: caret, text };
-      opts.current.onPick(range);
+    const place = (el: HTMLInputElement | HTMLTextAreaElement, start: number, end: number, anchor: RefAt, at: RefAt) => {
+      const next = placeReference(el.value, start, end, anchor, at);
+      setInputValue(el, next.value);
+      el.setSelectionRange(next.caret, next.caret);
+      last = next.pick;
+      opts.current.onPick(next.range);
     };
+    const ref = (at: CellAt): RefAt => ({ sheet: null, ...at });
 
     const swallow = (e: Event) => {
       e.preventDefault();
@@ -111,14 +81,15 @@ export function useReferencePicking({ gridBox, gridRef, portalRef, barInput, lay
       const el = editing();
       if (!el || !(e.target instanceof Node) || !gridBox.current?.contains(e.target)) return;
       const at = cellAt(e.clientX, e.clientY);
-      const slot = at && referenceSlot(el.value, el.selectionStart ?? el.value.length, last);
+      const touch = e.pointerType !== 'mouse' && e.pointerType !== 'pen';
+      const slot = at && pickSlot(el.value, el.selectionStart ?? el.value.length, last, ref(at), touch ? 'tap' : e.shiftKey ? 'extend' : 'click');
       if (!at || !slot) return;
       // Neither Glide (which would end the edit and select the cell) nor the focus moves.
       swallow(e);
       swallowing = true;
-      if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
-        place(el, slot.start, slot.end, spanOf(at, at));
-        drag = { el, anchor: at, start: slot.start };
+      if (!touch) {
+        place(el, slot.start, slot.end, slot.anchor, ref(at));
+        drag = { el, anchor: slot.anchor, start: slot.start };
       } else tap = { el, at, x: e.clientX, y: e.clientY };
     };
 
@@ -131,7 +102,7 @@ export function useReferencePicking({ gridBox, gridRef, portalRef, barInput, lay
       }
       swallow(e);
       const at = cellAt(e.clientX, e.clientY);
-      if (at && last) place(drag.el, drag.start, last.end, spanOf(drag.anchor, at));
+      if (at && last) place(drag.el, drag.start, last.end, drag.anchor, ref(at));
     };
 
     const onPointerEnd = (e: Event) => {
@@ -148,11 +119,11 @@ export function useReferencePicking({ gridBox, gridRef, portalRef, barInput, lay
       swallowing = false;
       // A scroll is not a tap.
       if (!t || Math.hypot(t.clientX - x, t.clientY - y) > 10 || document.activeElement !== el) return;
-      const slot = referenceSlot(el.value, el.selectionStart ?? el.value.length, last);
+      const slot = pickSlot(el.value, el.selectionStart ?? el.value.length, last, ref(at), 'tap');
       if (!slot) return;
       // No emulated mouse events follow, so the field keeps the focus and the keyboard stays up.
       swallow(e);
-      place(el, slot.start, slot.end, spanOf(at, at));
+      place(el, slot.start, slot.end, slot.anchor, ref(at));
     };
 
     const onFocusOut = (e: FocusEvent) => {

@@ -178,6 +178,8 @@ export interface FormulaDisplay {
   className?: string;
   /** Shown on hover: an error's message, or the formula. */
   title?: string;
+  /** For an error, its explanation, shown in the formula bar ("Did you mean SUM(…)?"). */
+  hint?: string;
 }
 
 /**

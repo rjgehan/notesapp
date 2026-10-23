@@ -15,9 +15,13 @@ import { activeEditor, setActiveEditor } from '../../activeEditor';
 import { noteContext, type EditorMenuEntry } from '../../context';
 import { followLink } from '../../editorCommands';
 import { linkAt } from '../../linkAt';
+import type { FormulaAssist } from '../../../formulas/assist';
+import { loadedFormulaEngine, loadFormulaEngine } from '../../../formulas/load';
+import { formulaRanges, pickSlot, placeReference, sheetPrefix, type PickedSlot, type RefAt } from '../../../sheets/formulaText';
 import { addNestedEditor, removeNestedEditor } from '../../remote';
 import { cellImage } from '../embeds';
-import { tableCellFormatters, tableCellHost, tableCellSetup, tableEdit, tablesConfig } from './facets';
+import { tableCellFormatters, tableCellHost, tableCellSetup, tableEdit, tablesConfig, tableSheetName } from './facets';
+import { fillCells, fillTarget, type CellRect } from './fill';
 import {
   cellContent,
   cellSpans,
@@ -54,6 +58,11 @@ export interface TableBlock {
 export type Place = 'start' | 'end' | 'all' | { x: number; y: number };
 
 const LONG_PRESS_MS = 500;
+/** Further than this, a touch is a scroll, not a tap. */
+const TAP_SLOP = 10;
+/** How many colours the outlines of a formula's references cycle through (`--formula-ref-0`…). */
+const REF_COLORS = 6;
+const ASSIST_KEYS = ['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'] as const;
 const LONG_PRESS_SLOP = 8;
 const DRAG_THRESHOLD = 4;
 
@@ -202,6 +211,23 @@ export class TableGrid {
   private suppressClick = false;
   private lastPointer = 'mouse';
   private hoverColumn = -1;
+  /** A range selected with Shift-click from the edited cell (its corner), for fill; null for the cell alone. */
+  private range: CellRect | null = null;
+  /** Where a fill-handle drag would fill. */
+  private fillDest: CellRect | null = null;
+  private fillDrag: { source: CellRect } | null = null;
+  private readonly fillHandle: HTMLElement;
+  /** Ranges of this table a formula being typed (here or in another table) refers to, with their colours. */
+  private refMarks: Array<{ rect: CellRect; color: number }> = [];
+  /** The reference pointing put in last, so the next point replaces or extends it. */
+  private lastPick: PickedSlot | null = null;
+  /** A mouse drag pointing at a range, from the cell it started on. */
+  private pickDrag: { source: TableGrid; anchor: RefAt; start: number } | null = null;
+  /** A touch on a cell of this table while a formula is typed, picked on its touchend unless it scrolled. */
+  private tap: { editing: TableGrid; at: RefAt; x: number; y: number } | null = null;
+  /** Function suggestions and the signature hint (a lazy chunk, loaded when a formula is first edited). */
+  private assist: FormulaAssist | null = null;
+  private assistLoading = false;
 
   constructor(view: EditorView, widget: TableWidget) {
     this.view = view;
@@ -218,7 +244,15 @@ export class TableGrid {
     this.bar = document.createElement('div');
     this.bar.className = 'cm-lp-formula-bar';
     this.bar.hidden = true;
-    this.dom.append(this.bar, this.scroller, this.indicator);
+    this.fillHandle = document.createElement('div');
+    this.fillHandle.className = 'cm-lp-fill-handle';
+    this.fillHandle.hidden = true;
+    this.fillHandle.title = 'Drag to fill';
+    this.fillHandle.addEventListener('pointerdown', this.onFillDown);
+    this.fillHandle.addEventListener('pointermove', this.onFillMove);
+    this.fillHandle.addEventListener('pointerup', this.onFillUp);
+    this.fillHandle.addEventListener('pointercancel', this.onFillCancel);
+    this.dom.append(this.bar, this.scroller, this.indicator, this.fillHandle);
     byDom.set(this.dom, this);
     let set = byView.get(view);
     if (!set) byView.set(view, (set = new Set()));
@@ -234,6 +268,8 @@ export class TableGrid {
     this.dom.addEventListener('pointerleave', this.onPointerLeave);
     this.dom.addEventListener('dragover', this.onDragOver);
     this.dom.addEventListener('drop', this.onDrop);
+    this.dom.addEventListener('touchend', this.onTouchEnd, { passive: false });
+    this.scroller.addEventListener('scroll', () => this.placeFillHandle(), { passive: true });
     this.render();
   }
 
@@ -438,8 +474,85 @@ export class TableGrid {
     }
     for (let c = 0; c < m.columns; c++) this.cells[0][c].classList.toggle('is-column-active', a?.column === c);
     if (!a) this.showBar(0, 0, null);
+    this.paintMarks();
     // Moving an editor's element (a remote change moved its cell) loses the focus; give it back.
     if (a && focused && !a.editor.hasFocus) a.editor.focus();
+  }
+
+  // ---------- selection, references and fill marks ----------
+
+  /** The cells a fill starts from: the Shift-selected range, or the edited cell. */
+  private fillSource(): CellRect | null {
+    const a = this.active;
+    if (!a) return null;
+    return this.range ?? { row: a.row, column: a.column, height: 1, width: 1 };
+  }
+
+  /** Marks the selected range, a fill's destination and the cells a formula refers to; places the fill handle. */
+  private paintMarks(): void {
+    const inside = (r: CellRect | null, row: number, column: number) => r !== null && row >= r.row && row < r.row + r.height && column >= r.column && column < r.column + r.width;
+    const selected = this.range && (this.range.height > 1 || this.range.width > 1) ? this.range : null;
+    const source = this.fillSource();
+    for (let r = 0; r < this.cells.length; r++) {
+      for (let c = 0; c < this.cells[r].length; c++) {
+        const cell = this.cells[r][c];
+        cell.classList.toggle('is-selected', inside(selected, r, c));
+        cell.classList.toggle('is-fill-target', inside(this.fillDest, r, c) && !inside(source, r, c));
+        const mark = this.refMarks.find((m) => inside(m.rect, r, c));
+        cell.classList.toggle('is-referenced', mark !== undefined);
+        if (mark) cell.style.setProperty('--ref-color', `var(--formula-ref-${mark.color})`);
+        else cell.style.removeProperty('--ref-color');
+      }
+    }
+    this.placeFillHandle();
+  }
+
+  /** The fill handle sits on the bottom right corner of the edited cell or the selected range. */
+  private placeFillHandle(): void {
+    const source = this.editable() ? this.fillSource() : null;
+    const corner = source ? this.cells[source.row + source.height - 1]?.[source.column + source.width - 1] : undefined;
+    if (!corner || !this.dom.isConnected) {
+      this.fillHandle.hidden = true;
+      return;
+    }
+    const box = this.dom.getBoundingClientRect();
+    const rect = corner.getBoundingClientRect();
+    const view = this.scroller.getBoundingClientRect();
+    // Scrolled out of the table's view sideways: no handle.
+    if (rect.right < view.left || rect.right > view.right + 1) {
+      this.fillHandle.hidden = true;
+      return;
+    }
+    this.fillHandle.hidden = false;
+    this.fillHandle.style.left = `${rect.right - box.left}px`;
+    this.fillHandle.style.top = `${rect.bottom - box.top}px`;
+  }
+
+  /** The table's name in formulas (null when formulas do not name it). */
+  sheetName(): string | null {
+    const from = this.from();
+    const read = this.view.state.facet(tableSheetName);
+    return from === null || !read ? null : read(this.view.state, from);
+  }
+
+  /** Outlines the cells the edited formula refers to, in this table and the note's others. */
+  private outlineReferences(): void {
+    const a = this.active;
+    const text = a ? a.editor.state.doc.toString() : '';
+    const refs = a && text.startsWith('=') ? formulaRanges(text) : [];
+    const named = refs.some((r) => r.sheet !== null);
+    const own = named ? this.sheetName() : null;
+    for (const grid of gridsOf(this.view)) {
+      const name = grid === this ? own : named ? grid.sheetName() : null;
+      const marks: Array<{ rect: CellRect; color: number }> = [];
+      refs.forEach((ref, i) => {
+        const mine = ref.sheet === null ? grid === this : name !== null && ref.sheet.toLowerCase() === name.toLowerCase();
+        if (mine) marks.push({ rect: { row: ref.range.row, column: ref.range.col, height: ref.range.height, width: ref.range.width }, color: i % REF_COLORS });
+      });
+      if (marks.length === 0 && grid.refMarks.length === 0) continue;
+      grid.refMarks = marks;
+      grid.paintMarks();
+    }
   }
 
   /** The formula bar for the edited cell: its name (`B5`) and what it shows; hidden for a cell no formatter shows. */
@@ -456,6 +569,14 @@ export class TableGrid {
     name.textContent = `${columnName(column)}${row + 1}`;
     const value = renderDisplay(shown);
     this.bar.replaceChildren(name, value);
+    // An error's explanation: "Did you mean SUM(…)?" for `=SUM`.
+    if (shown.hint) {
+      const hint = document.createElement('span');
+      hint.className = 'cm-lp-formula-bar-hint';
+      hint.textContent = shown.hint;
+      hint.title = shown.hint;
+      this.bar.appendChild(hint);
+    }
     this.bar.hidden = false;
   }
 
@@ -497,6 +618,8 @@ export class TableGrid {
 
   destroy(): void {
     if (this.active) this.deactivate();
+    this.assist?.destroy();
+    this.assist = null;
     this.cancelLongPress();
     byView.get(this.view)?.delete(this);
     byDom.delete(this.dom);
@@ -516,6 +639,8 @@ export class TableGrid {
       this.place(old.editor, place);
       return true;
     }
+    this.range = null;
+    this.lastPick = null;
     const setup = this.view.state.facet(tableCellSetup);
     const editor = new EditorView({
       state: EditorState.create({ doc: cellContent(m, row, column), extensions: [setup ? setup() : cellLanguage, this.cellExtensions(row, column)] }),
@@ -544,6 +669,8 @@ export class TableGrid {
     // The note's selection rests on the cell, so undo and its scrolling come back to the table.
     const span = this.active.span;
     if (span) this.view.dispatch({ selection: EditorSelection.cursor(span.from), annotations: tableEdit.of(this.id) });
+    this.outlineReferences();
+    this.updateAssist();
     return true;
   }
 
@@ -552,9 +679,13 @@ export class TableGrid {
     const a = this.active;
     if (!a) return;
     this.active = null;
+    this.range = null;
+    this.lastPick = null;
+    this.assist?.hide();
     this.closeEditor(a);
     if (this.shown[a.row]?.[a.column] !== undefined) this.shown[a.row][a.column] = '\u0000';
     this.render();
+    this.outlineReferences();
   }
 
   private closeEditor(a: ActiveCell): void {
@@ -587,6 +718,8 @@ export class TableGrid {
       tableCellHost.of(this.view),
       EditorView.contentAttributes.of({ 'aria-label': cellLabel(row, column) }),
       singleLine,
+      // The function suggestions take these keys while their list is open.
+      Prec.highest(keymap.of(ASSIST_KEYS.map((key) => ({ key, run: () => this.assist?.key(key) ?? false })))),
       Prec.high(
         keymap.of([
           { key: 'Tab', run: () => this.step(1) },
@@ -601,6 +734,8 @@ export class TableGrid {
           { key: 'Mod-z', run: () => undo(this.view), preventDefault: true },
           { key: 'Mod-y', mac: 'Mod-Shift-z', run: () => redo(this.view), preventDefault: true },
           { key: 'Mod-f', run: () => openSearchPanel(this.view), preventDefault: true },
+          { key: 'Mod-d', run: () => this.fillCommand('down'), preventDefault: true },
+          { key: 'Mod-r', run: () => this.fillCommand('right'), preventDefault: true },
           { key: 'Shift-F10', run: () => this.menuForActive() },
           { key: 'ContextMenu', run: () => this.menuForActive() },
         ]),
@@ -616,6 +751,8 @@ export class TableGrid {
       const tr = [...update.transactions].reverse().find((t) => t.docChanged);
       this.write(tr?.annotation(Transaction.userEvent) ?? 'input');
     }
+    if (update.docChanged) this.outlineReferences();
+    if (update.docChanged || update.selectionSet || update.focusChanged) this.updateAssist();
     if (update.focusChanged) {
       if (update.view.hasFocus) setActiveEditor(update.view);
       else
@@ -747,6 +884,211 @@ export class TableGrid {
     }
     return true;
   }
+
+  // ---------- formulas: suggestions, pointing at cells ----------
+
+  /** The edited cell as a field for the function suggestions. */
+  private cellField() {
+    return {
+      text: () => this.active?.editor.state.doc.toString() ?? '',
+      caret: () => this.active?.editor.state.selection.main.head ?? 0,
+      replace: (from: number, to: number, insert: string, caret: number) => {
+        this.active?.editor.dispatch({ changes: { from, to, insert }, selection: EditorSelection.cursor(caret), userEvent: 'input.complete', scrollIntoView: true });
+      },
+      caretRect: () => {
+        const editor = this.active?.editor;
+        if (!editor) return null;
+        const at = editor.coordsAtPos(editor.state.selection.main.head);
+        const rect = at ?? editor.dom.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, bottom: rect.bottom };
+      },
+    };
+  }
+
+  /** Shows the function suggestions and the signature hint while the edited cell holds a formula (loading them the first time). */
+  private updateAssist(): void {
+    const a = this.active;
+    if (!a || !a.editor.hasFocus || !a.editor.state.doc.toString().startsWith('=')) {
+      this.assist?.hide();
+      return;
+    }
+    if (this.assist) {
+      this.assist.update();
+      return;
+    }
+    if (this.assistLoading) return;
+    this.assistLoading = true;
+    import('../../../formulas/assist').then(
+      ({ FormulaAssist }) => {
+        this.assistLoading = false;
+        if (!this.dom.isConnected) return;
+        this.assist ??= new FormulaAssist(this.cellField(), () => loadedFormulaEngine()?.functionCatalog() ?? null);
+        if (!loadedFormulaEngine()) loadFormulaEngine(() => this.assist?.update());
+        this.updateAssist();
+      },
+      () => {
+        this.assistLoading = false;
+      },
+    );
+  }
+
+  /** The grid whose cell is being edited with the focus, if any, in this note. */
+  private editingGrid(): TableGrid | null {
+    return gridsOf(this.view).find((g) => g.active !== null && g.active.editor.hasFocus) ?? null;
+  }
+
+  /** A cell of table `source` as a reference from this table's formula: no prefix for its own cells; null for a table formulas do not name. */
+  private refAt(source: TableGrid, row: number, column: number): RefAt | null {
+    if (source === this) return { sheet: null, col: column, row };
+    const sheet = source.sheetName();
+    return sheet === null ? null : { sheet, col: column, row };
+  }
+
+  /** Where a reference to `at` would go in the edited formula (see pickSlot), or null. */
+  private slotFor(at: RefAt, gesture: 'click' | 'tap' | 'extend') {
+    const a = this.active;
+    if (!a) return null;
+    return pickSlot(a.editor.state.doc.toString(), a.editor.state.selection.main.head, this.lastPick, at, gesture);
+  }
+
+  /** Puts the reference from `anchor` to `at` in place of `start`…`end` of the edited formula. */
+  private placePick(start: number, end: number, anchor: RefAt, at: RefAt): void {
+    const a = this.active;
+    if (!a) return;
+    const next = placeReference(a.editor.state.doc.toString(), start, end, anchor, at, sheetPrefix(at.sheet, null));
+    a.editor.dispatch({ changes: { from: start, to: end, insert: next.pick.text }, selection: EditorSelection.cursor(next.caret), userEvent: 'input.pick', scrollIntoView: true });
+    this.lastPick = next.pick;
+  }
+
+  /**
+   * A press on a cell while a formula is typed with the caret where a reference can go (in this
+   * table or another): the cell's reference goes into the formula, and the focus stays. A mouse
+   * puts it in at once (a drag makes a range); a touch waits for its touchend, so a scroll is not
+   * a pick. True when the press was taken.
+   */
+  private pickPointerDown(e: PointerEvent): boolean {
+    if (e.button !== 0 || this.inEditor(e.target)) return false;
+    const cell = this.cellAt(e.target);
+    const editing = cell && this.editingGrid();
+    if (!cell || !editing) return false;
+    if (editing === this && editing.active!.row === cell.row && editing.active!.column === cell.column) return false;
+    const at = editing.refAt(this, cell.row, cell.column);
+    const touch = e.pointerType === 'touch';
+    const slot = at && editing.slotFor(at, touch ? 'tap' : e.shiftKey ? 'extend' : 'click');
+    if (!at || !slot) return false;
+    if (touch) {
+      this.tap = { editing, at, x: e.clientX, y: e.clientY };
+      return true;
+    }
+    e.preventDefault();
+    this.suppressClick = true;
+    editing.placePick(slot.start, slot.end, slot.anchor, at);
+    editing.pickDrag = { source: this, anchor: slot.anchor, start: slot.start };
+    const move = (ev: PointerEvent) => {
+      const drag = editing.pickDrag;
+      if (!drag || ev.buttons === 0) return end();
+      const hit = drag.source.cellAt(document.elementFromPoint(ev.clientX, ev.clientY));
+      const to = hit && editing.refAt(drag.source, hit.row, hit.column);
+      if (to && editing.lastPick) editing.placePick(drag.start, editing.lastPick.end, drag.anchor, to);
+    };
+    const end = () => {
+      editing.pickDrag = null;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', end, true);
+    };
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', end, true);
+    return true;
+  }
+
+  private onTouchEnd = (e: TouchEvent) => {
+    const tap = this.tap;
+    if (!tap) return;
+    this.tap = null;
+    const t = e.changedTouches[0];
+    if (!t || Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > TAP_SLOP || !tap.editing.active?.editor.hasFocus) return;
+    const slot = tap.editing.slotFor(tap.at, 'tap');
+    if (!slot) return;
+    // No emulated mouse events (nor the click that would open the tapped cell) follow: the
+    // formula's cell keeps the focus, and the keyboard stays up.
+    e.preventDefault();
+    this.cancelLongPress();
+    tap.editing.placePick(slot.start, slot.end, slot.anchor, tap.at);
+  };
+
+  // ---------- fill ----------
+
+  /** Fills `dest` from `source` (one undo step); `select` makes `dest` the selection, as the fill handle does. */
+  private fill(source: CellRect, dest: CellRect, select: boolean): boolean {
+    const edits = fillCells(gridRows(this.model()), source, dest);
+    const from = this.from();
+    if (edits.length > 0 && from !== null) this.apply((m) => edits.reduce((t, e) => setCell(t, e.row, e.column, e.text), m), 'input.fill', false);
+    const grid = (from !== null ? gridAt(this.view, from) : null) ?? this;
+    if (select && grid.active) grid.range = dest;
+    // A fill into the edited cell (Mod-D from the cell above) shows in its editor.
+    if (grid.active) grid.syncActive(cellContent(grid.model(), grid.active.row, grid.active.column));
+    grid.paintMarks();
+    return true;
+  }
+
+  /**
+   * Mod-D and Mod-R: fill down (right) through the selected range from its first row (column); with
+   * only the edited cell, from the cell above (left) into it, as in Google Sheets.
+   */
+  private fillCommand(direction: 'down' | 'right'): boolean {
+    const a = this.active;
+    if (!a || !this.editable()) return false;
+    const r = this.range ?? { row: a.row, column: a.column, height: 1, width: 1 };
+    if (direction === 'down') {
+      if (r.height > 1) return this.fill({ ...r, height: 1 }, r, false);
+      // Never from the header into the first row.
+      if (r.row <= 1) return true;
+      return this.fill({ ...r, row: r.row - 1 }, { ...r, row: r.row - 1, height: 2 }, false);
+    }
+    if (r.width > 1) return this.fill({ ...r, width: 1 }, r, false);
+    if (r.column <= 0) return true;
+    return this.fill({ ...r, column: r.column - 1 }, { ...r, column: r.column - 1, width: 2 }, false);
+  }
+
+  private onFillDown = (e: PointerEvent) => {
+    const source = this.fillSource();
+    if (!source || !this.editable() || e.button !== 0) return;
+    // The edited cell keeps the focus (and a phone its keyboard).
+    e.preventDefault();
+    e.stopPropagation();
+    this.cancelLongPress();
+    this.fillHandle.setPointerCapture?.(e.pointerId);
+    this.fillDrag = { source };
+  };
+
+  private onFillMove = (e: PointerEvent) => {
+    const drag = this.fillDrag;
+    if (!drag) return;
+    e.preventDefault();
+    const cell = this.cellAt(document.elementFromPoint(e.clientX, e.clientY));
+    if (!cell) return;
+    const m = this.model();
+    this.fillDest = fillTarget(drag.source, cell.row, cell.column, rowCount(m), m.columns);
+    this.paintMarks();
+  };
+
+  private onFillUp = (e: PointerEvent) => {
+    const drag = this.fillDrag;
+    if (!drag) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dest = this.fillDest;
+    this.fillDrag = null;
+    this.fillDest = null;
+    if (dest) this.fill(drag.source, dest, true);
+    else this.paintMarks();
+  };
+
+  private onFillCancel = () => {
+    this.fillDrag = null;
+    this.fillDest = null;
+    this.paintMarks();
+  };
 
   // ---------- menus ----------
 
@@ -901,6 +1243,18 @@ export class TableGrid {
     }
     if (!editable) return;
     e.preventDefault();
+    // Shift-click selects the range from the edited cell, for fill (Mod-D, Mod-R, the handle).
+    const a = this.active;
+    if (e.shiftKey && a && (a.row !== cell.row || a.column !== cell.column)) {
+      this.range = {
+        row: Math.min(a.row, cell.row),
+        column: Math.min(a.column, cell.column),
+        height: Math.abs(a.row - cell.row) + 1,
+        width: Math.abs(a.column - cell.column) + 1,
+      };
+      this.paintMarks();
+      return;
+    }
     this.activate(cell.row, cell.column, { x: e.clientX, y: e.clientY });
   };
 
@@ -933,6 +1287,7 @@ export class TableGrid {
       this.drag = { kind, index, x: e.clientX, y: e.clientY, moved: false, target: index, grip };
       return;
     }
+    if (this.pickPointerDown(e)) return;
     if (e.pointerType !== 'touch' || !this.editable() || this.inEditor(e.target)) return;
     const cell = this.cellAt(e.target);
     if (!cell) return;
