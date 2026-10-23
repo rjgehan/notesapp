@@ -26,6 +26,7 @@ describe('the engine’s functions for the formula help', () => {
   it('explains #NAME? for a function written without its brackets', () => {
     expect(friendlyError('#NAME?', '=SUM', 'Named expression SUM not recognized.')).toBe('Did you mean SUM(…)?');
     expect(friendlyError('#NAME?', '=SUMM(1)', 'Function name SUMM not recognized.')).toBe('Unknown function SUMM. Did you mean SUM?');
+    expect(friendlyError('#ERROR!', '=SUM(B2:B4', 'Parsing error.')).toBe('Missing a closing bracket )');
     expect(friendlyError('#DIV/0!', '=1/0', 'Division by zero.')).toBe('Division by zero.');
   });
 });

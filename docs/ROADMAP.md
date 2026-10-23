@@ -186,6 +186,8 @@ Known leftovers, low severity, left for later:
 
 **Built** (39a and 39b, DESIGN §6.42): formulas in table cells with a formula bar, inline formulas, named tables (`^budget`), per-column formats in a `%% formats: B=currency C=percent %%` line, and `formulas: false`. Tables without an id are `Table1`, `Table2`, … Numbers show in the sheets' Automatic format, with thousands separators from five digits on. Formulas compute in the note's own Live Preview and locked view; embedded notes show them as typed.
 
+**Typing help** (2026-10-23, `feat/table-formula-ux`, DESIGN §6.42): while a cell's formula is typed, a tap or click on another cell (of this table or a named one) puts its reference in with the keyboard kept up, a second tap makes a range, and the referenced cells are outlined; `=SU` suggests functions and a hint shows the signature; a fill handle, Mod-D and Mod-R fill with references shifted and number series continued; `=SUM`'s `#NAME?` says "Did you mean SUM(…)?". The spreadsheet view (item 6) got the same suggestions, hint, second-tap ranges, series and error hints.
+
 **One line:** Excel- and Google-Sheets-style formulas inside ordinary notes. A table cell containing `=SUM(B2:B5)` shows its result, and inline `` `=1450*12` `` shows `17,400`. The file keeps the formula you typed.
 
 | Value | Effort | Depends on |

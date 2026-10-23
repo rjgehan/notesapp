@@ -208,7 +208,28 @@ export function formulaRanges(value: string, extent: { rows: number; cols: numbe
   return out;
 }
 
-// ---------- a friendlier #NAME? ----------
+// ---------- friendlier errors ----------
+
+/**
+ * What to say about a formula the engine cannot read (`#ERROR!`) that is only unfinished, as it is
+ * while being typed: a bracket left open, or an operator or comma with nothing after it. Null otherwise.
+ */
+export function unfinishedHint(formula: string): string | null {
+  if (!formula.startsWith('=')) return null;
+  let depth = 0;
+  let quote: string | null = null;
+  for (const ch of formula.slice(1)) {
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"') quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+  }
+  if (quote) return 'A text in quotes is not closed';
+  if (/[=(,+\-*/^&<>:;]\s*$/.test(formula)) return 'The formula is not finished';
+  if (depth > 0) return depth === 1 ? 'Missing a closing bracket )' : `Missing ${depth} closing brackets )`;
+  return null;
+}
 
 function distance(a: string, b: string): number {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i);

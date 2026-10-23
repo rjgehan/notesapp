@@ -334,6 +334,8 @@ const BUDGET = `# Budget
 
 A year of rent: \`=budget!B2*12\`; everything: \`=budget!B5*12\`; an error: \`=1/0\`.
 
+Edit the total: type \`=SU\` for suggestions, then tap or click the costs to put their references in (a second tap makes a range). Drag the small square on a cell's corner to fill, or press Mod-D.
+
 | Share | Of total |
 |---|---|
 | Rent | =budget!B2/budget!B5 |

@@ -899,8 +899,9 @@ export class TableGrid {
         const editor = this.active?.editor;
         if (!editor) return null;
         const at = editor.coordsAtPos(editor.state.selection.main.head);
-        const rect = at ?? editor.dom.getBoundingClientRect();
-        return { left: rect.left, top: rect.top, bottom: rect.bottom };
+        const cell = editor.dom.closest('.cm-lp-cell')?.getBoundingClientRect() ?? editor.dom.getBoundingClientRect();
+        // Under the cell, clear of its fill handle.
+        return { left: at?.left ?? cell.left, top: cell.top, bottom: cell.bottom + 8 };
       },
     };
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { callAt, completionAt, formulaRanges, nameHint, pickSlot, placeReference, referenceText, sheetPrefix, signatureParts, suggestFunctions, type FunctionInfo, type PickedSlot } from './formulaText';
+import { callAt, completionAt, formulaRanges, nameHint, unfinishedHint, pickSlot, placeReference, referenceText, sheetPrefix, signatureParts, suggestFunctions, type FunctionInfo, type PickedSlot } from './formulaText';
 
 const at = (col: number, row: number, sheet: string | null = null) => ({ sheet, col, row });
 
@@ -125,5 +125,15 @@ describe('a friendlier #NAME?', () => {
     expect(nameHint('="SUM"&A1', names)).toBeNull();
     expect(nameHint('=SUM!A1', names)).toBeNull();
     expect(nameHint('=IF(TRUE, B2)', names)).toBeNull();
+  });
+});
+
+describe('a friendlier #ERROR! while a formula is typed', () => {
+  it('says what an unfinished formula lacks', () => {
+    expect(unfinishedHint('=SUM(B2:B4')).toBe('Missing a closing bracket )');
+    expect(unfinishedHint('=ROUND(SUM(B2')).toBe('Missing 2 closing brackets )');
+    expect(unfinishedHint('=B2*')).toBe('The formula is not finished');
+    expect(unfinishedHint('="abc')).toBe('A text in quotes is not closed');
+    expect(unfinishedHint('=SUM("(", B2)')).toBeNull();
   });
 });

@@ -4,7 +4,7 @@
 // names Google Sheets uses and the rest a name from the type (`number`, `range`, `value`).
 // Part of the engines' lazy chunks: only engine.ts (sheets) and formulas/engine.ts import it.
 import { HyperFormula } from 'hyperformula';
-import { nameHint, type FunctionInfo } from './formulaText';
+import { nameHint, unfinishedHint, type FunctionInfo } from './formulaText';
 
 /** Parameter names of the common functions; the first ones listed also come first among suggestions. */
 const NAMED: Record<string, string> = {
@@ -147,8 +147,12 @@ function functionNames(): ReadonlySet<string> {
   return names;
 }
 
-/** The explanation of an error result: for `#NAME?`, what was probably meant (`=SUM`: "Did you mean SUM(…)?"), else `message`. */
+/**
+ * The explanation of an error result: for `#NAME?`, what was probably meant (`=SUM`: "Did you mean
+ * SUM(…)?"); for `#ERROR!`, what an unfinished formula lacks (`=SUM(B2`: a closing bracket); else `message`.
+ */
 export function friendlyError(code: string, formula: string | null | undefined, message: string): string {
   if (code === '#NAME?' && formula) return nameHint(formula, functionNames()) ?? message;
+  if (code === '#ERROR!' && formula) return unfinishedHint(formula) ?? message;
   return message;
 }
