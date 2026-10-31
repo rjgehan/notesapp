@@ -61,7 +61,7 @@ services:
     restart: unless-stopped
 
   backup-scheduler:                             # runs nightly.sh daily: stops notesapp around the snapshot
-    image: docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32
+    image: docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb
     container_name: notesapp-backup-scheduler
     depends_on: [backup]
     entrypoint: ["/bin/sh", "/backup/scheduler.sh"]
